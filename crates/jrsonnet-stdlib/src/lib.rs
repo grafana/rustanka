@@ -249,24 +249,24 @@ pub fn stdlib_uncached(settings: Rc<RefCell<Settings>>) -> ObjValue {
 
 	// Regex
 	let regex_cache = RegexCache::default();
-		builder.method(
-			"regexFullMatch",
-			builtin_regex_full_match {
-				cache: regex_cache.clone(),
-			},
-		);
-		builder.method(
-			"regexPartialMatch",
-			builtin_regex_partial_match {
-				cache: regex_cache.clone(),
-			},
-		);
-		builder.method(
-			"regexReplace",
-			builtin_regex_replace {
-				cache: regex_cache.clone(),
-			},
-		);
+	builder.method(
+		"regexFullMatch",
+		builtin_regex_full_match {
+			cache: regex_cache.clone(),
+		},
+	);
+	builder.method(
+		"regexPartialMatch",
+		builtin_regex_partial_match {
+			cache: regex_cache.clone(),
+		},
+	);
+	builder.method(
+		"regexReplace",
+		builtin_regex_replace {
+			cache: regex_cache.clone(),
+		},
+	);
 	builder.method(
 		"regexGlobalReplace",
 		builtin_regex_global_replace { cache: regex_cache },

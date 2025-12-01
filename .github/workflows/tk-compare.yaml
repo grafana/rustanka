@@ -49,7 +49,7 @@ jobs:
         id: run_comparison
         working-directory: rustanka
         run: |
-          make tk-compare-grafana DEPLOYMENT_TOOLS_PATH=$(pwd)/../deployment_tools TK_PATH=/usr/local/bin/tk 2>&1 | tee ../comparison-output.txt
+          make tk-compare-grafana DEPLOYMENT_TOOLS_PATH=$(pwd)/../deployment_tools TK_PATH=/usr/local/bin/tk | tee ../comparison-output.txt
 
       - name: Prepare comment body
         id: prepare_comment

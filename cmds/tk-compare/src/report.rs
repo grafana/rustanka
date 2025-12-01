@@ -118,8 +118,18 @@ impl CommandReport {
 			println!("Result Dir: {}", "N/A".yellow());
 		}
 
-		// Runtime comparison
-		if self.runs > 1 {
+		// Only show runtime comparison if results match
+		let results_match = self.exit_code_matched
+			&& self.stdout_matched
+			&& self.result_dir_matched.unwrap_or(true);
+
+		if !results_match {
+			println!(
+				"\n{}",
+				"⚠ Skipping runtime comparison due to result mismatch".yellow()
+			);
+			// Still show stderr if present
+		} else if self.runs > 1 {
 			println!("Runtime (across {} runs):", self.runs);
 			println!("  {}:", self.exec1_name);
 			println!("    min:     {}", format_duration(self.exec1_stats.min));
@@ -176,6 +186,7 @@ impl CommandReport {
 				println!("  {} is {:.2}x faster", self.exec1_name, 1.0 / ratio);
 			}
 		}
+		// End of runtime comparison (only shown when results match)
 
 		// Stderr output
 		if !self.exec1_stderr.is_empty() {

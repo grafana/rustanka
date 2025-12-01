@@ -44,13 +44,13 @@ fn main() -> Result<()> {
 	let exec1_str = exec1_absolute.to_string_lossy().to_string();
 	let exec2_str = exec2_absolute.to_string_lossy().to_string();
 
-	println!("Comparing executables:");
-	println!("  {}: {}", config.tk_exec_1_name, exec1_str);
-	println!("  {}: {}", config.tk_exec_2_name, exec2_str);
+	eprintln!("Comparing executables:");
+	eprintln!("  {}: {}", config.tk_exec_1_name, exec1_str);
+	eprintln!("  {}: {}", config.tk_exec_2_name, exec2_str);
 	if let Some(ref wd) = config.working_dir {
-		println!("  working_dir: {}", wd);
+		eprintln!("  working_dir: {}", wd);
 	}
-	println!("  commands: {}\n", config.commands.len());
+	eprintln!("  commands: {}\n", config.commands.len());
 
 	let mut reports = Vec::new();
 
@@ -74,7 +74,7 @@ fn main() -> Result<()> {
 		let runs = if command.runs == 0 { 1 } else { command.runs };
 
 		if runs > 1 {
-			println!(
+			eprintln!(
 				"Running command {}/{}: {} ({} runs)",
 				index + 1,
 				config.commands.len(),
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
 				runs
 			);
 		} else {
-			println!(
+			eprintln!(
 				"Running command {}/{}: {}",
 				index + 1,
 				config.commands.len(),
@@ -103,9 +103,9 @@ fn main() -> Result<()> {
 		// Run the command multiple times
 		for run in 0..runs {
 			if runs > 1 {
-				print!("  Run {}/{}...\r", run + 1, runs);
+				eprint!("  Run {}/{}...\r", run + 1, runs);
 				use std::io::Write;
-				std::io::stdout().flush().ok();
+				std::io::stderr().flush().ok();
 			}
 
 			// Run with exec1 in its workspace
@@ -154,7 +154,7 @@ fn main() -> Result<()> {
 			} else {
 				// Verify consistency
 				if result1.exit_code != exec1_exit_code || result2.exit_code != exec2_exit_code {
-					println!("\nWarning: Exit codes changed across runs!");
+					eprintln!("\nWarning: Exit codes changed across runs!");
 				}
 				if result1.stdout != exec1_stderr.replace(&exec1_stderr, &result1.stdout)
 					|| result2.stdout != exec2_stderr.replace(&exec2_stderr, &result2.stdout)
@@ -165,7 +165,7 @@ fn main() -> Result<()> {
 		}
 
 		if runs > 1 {
-			println!("  Completed {} runs    ", runs);
+			eprintln!("  Completed {} runs    ", runs);
 		}
 
 		let exec1_stats = report::RuntimeStats::from_durations(exec1_durations);
@@ -204,7 +204,7 @@ fn main() -> Result<()> {
 			std::fs::remove_dir_all(".tk-compare-workspace")?;
 		}
 	} else {
-		println!("\nWorkspace preserved at: .tk-compare-workspace/");
+		eprintln!("\nWorkspace preserved at: .tk-compare-workspace/");
 	}
 
 	Ok(())
