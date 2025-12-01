@@ -1,0 +1,140 @@
+name: Compare with Tanka
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  compare:
+    name: Compare with Grafana Tanka
+    runs-on: ubuntu-x64-2xlarge
+    steps:
+      - name: Checkout rustanka
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+        with:
+          path: rustanka
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+
+      - name: Install Grafana Tanka
+        run: |
+          TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
+          chmod +x /usr/local/bin/tk
+          tk --version
+
+      - id: get-secrets
+        uses: grafana/shared-workflows/actions/get-vault-secrets@get-vault-secrets/v1.3.0
+        with:
+          repo_secrets: |
+            DEPLOYMENT_TOOLS_TOKEN=secrets:DEPLOYMENT_TOOLS_TOKEN
+
+      - name: Clone deployment_tools
+        # Note: deployment_tools is a Grafana internal repository
+        # Requires DEPLOYMENT_TOOLS_TOKEN secret with read access to the repository
+        run: |
+          git clone --depth=1 https://x-access-token:${{ env.DEPLOYMENT_TOOLS_TOKEN }}@github.com/grafana/deployment_tools.git
+
+      - name: Run comparison
+        id: run_comparison
+        working-directory: rustanka
+        run: |
+          make tk-compare-grafana DEPLOYMENT_TOOLS_PATH=$(pwd)/../deployment_tools TK_PATH=/usr/local/bin/tk 2>&1 | tee ../comparison-output.txt
+
+      - name: Prepare comment body
+        id: prepare_comment
+        run: |
+          if [ -f comparison-output.txt ]; then
+            echo "comment<<EOF" >> $GITHUB_OUTPUT
+            echo "## 🔬 Tanka Comparison Results" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "Comparing [Grafana Tanka](https://github.com/grafana/tanka) with rustanka:" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo '```' >> $GITHUB_OUTPUT
+            cat comparison-output.txt >> $GITHUB_OUTPUT
+            echo '```' >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "comment=No comparison output available" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          COMMENT_BODY: ${{ steps.prepare_comment.outputs.comment }}
+        with:
+          script: |
+            const comment = process.env.COMMENT_BODY;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('🔬 Tanka Comparison Results')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      - name: Post commit comment
+        if: github.event_name == 'push'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          COMMENT_BODY: ${{ steps.prepare_comment.outputs.comment }}
+        with:
+          script: |
+            const comment = process.env.COMMENT_BODY;
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: comment
+            });
+
+      - name: Upload comparison output
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4
+        with:
+          name: tk-compare-output
+          path: comparison-output.txt
+          if-no-files-found: ignore
+
+      - name: Upload workspace on failure
+        if: failure()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4
+        with:
+          name: tk-compare-workspace
+          path: rustanka/.tk-compare-workspace/
+          if-no-files-found: ignore
+

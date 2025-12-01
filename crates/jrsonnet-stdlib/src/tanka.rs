@@ -2,7 +2,6 @@
 // These are wrappers around the existing stdlib functions to provide
 // Tanka-compatible API accessible via std.native()
 
-#[cfg(feature = "exp-regex")]
 use jrsonnet_evaluator::IStr;
 use jrsonnet_evaluator::{
 	error::{ErrorKind::*, Result},
@@ -40,9 +39,7 @@ fn to_snake_case(s: &str) -> String {
 	result
 }
 
-#[cfg(feature = "exp-regex")]
 use crate::regex::RegexCacheInner;
-#[cfg(feature = "exp-regex")]
 use std::rc::Rc;
 
 /// Tanka-compatible parseJson
@@ -113,19 +110,11 @@ pub fn builtin_tanka_sha256(str: String) -> String {
 /// Escapes regex special characters
 #[builtin]
 pub fn builtin_escape_string_regex(pattern: String) -> String {
-	#[cfg(feature = "exp-regex")]
-	{
-		regex::escape(&pattern)
-	}
-	#[cfg(not(feature = "exp-regex"))]
-	{
-		panic!("exp-regex feature is not enabled")
-	}
+	regex::escape(&pattern)
 }
 
 /// Tanka-compatible regexMatch
 /// Returns true if the string matches the regex pattern
-#[cfg(feature = "exp-regex")]
 #[builtin(fields(
     cache: Rc<RegexCacheInner>,
 ))]
@@ -140,7 +129,6 @@ pub fn builtin_tanka_regex_match(
 
 /// Tanka-compatible regexSubst
 /// Replaces all matches of regex with replacement string
-#[cfg(feature = "exp-regex")]
 #[builtin(fields(
     cache: Rc<RegexCacheInner>,
 ))]

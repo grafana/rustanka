@@ -11,9 +11,9 @@ jobs:
     needs: [ tests ]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
       - name: Install stable toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
         with:
           toolchain: stable
       - run: cargo install cargo-release
@@ -81,12 +81,12 @@ jobs:
         run: sudo apt update
 
       - name: Install stable toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
         with:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - uses: actions/checkout@v4.1.4
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
 
       - name: Add experimental flags
         if: ${{ endsWith(github.ref, '-test' )}}
@@ -98,7 +98,7 @@ jobs:
 
       - name: ARM cross compiler
         if: ${{ startsWith(matrix.target, 'aarch64-unknown-linux-') }}
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1
         with:
           command: install
           args: cross
@@ -132,7 +132,7 @@ jobs:
         run: shasum -a 256 ${{ matrix.name }} > ${{ matrix.name }}.sha256
 
       - name: Publish
-        uses: softprops/action-gh-release@v2.0.4
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b7 # v2.0.4
         with:
           draft: true
           files: "jrsonnet*"

@@ -147,31 +147,28 @@ impl StdOpts {
 			// Hash functions
 			ctx.add_native("sha256", builtin_tanka_sha256::INST);
 
-			// Helm and Kustomize
-			ctx.add_native("helmTemplate", builtin_tanka_helm_template::INST);
-			ctx.add_native("kustomizeBuild", builtin_tanka_kustomize_build::INST);
-		}
+		// Helm and Kustomize
+		ctx.add_native("helmTemplate", builtin_tanka_helm_template::INST);
+		ctx.add_native("kustomizeBuild", builtin_tanka_kustomize_build::INST);
+	}
 
-		// Add Tanka-compatible regex functions (require exp-regex feature)
-		#[cfg(feature = "exp-regex")]
-		{
-			use jrsonnet_stdlib::{
-				builtin_escape_string_regex, builtin_tanka_regex_match, builtin_tanka_regex_subst,
-			};
-			ctx.add_native("escapeStringRegex", builtin_escape_string_regex::INST);
-			ctx.add_native(
-				"regexMatch",
-				builtin_tanka_regex_match {
-					cache: jrsonnet_stdlib::RegexCache::default(),
-				},
-			);
-			ctx.add_native(
-				"regexSubst",
-				builtin_tanka_regex_subst {
-					cache: jrsonnet_stdlib::RegexCache::default(),
-				},
-			);
-		}
+	// Add Tanka-compatible regex functions
+	use jrsonnet_stdlib::{
+		builtin_escape_string_regex, builtin_tanka_regex_match, builtin_tanka_regex_subst,
+	};
+	ctx.add_native("escapeStringRegex", builtin_escape_string_regex::INST);
+	ctx.add_native(
+		"regexMatch",
+		builtin_tanka_regex_match {
+			cache: jrsonnet_stdlib::RegexCache::default(),
+		},
+	);
+	ctx.add_native(
+		"regexSubst",
+		builtin_tanka_regex_subst {
+			cache: jrsonnet_stdlib::RegexCache::default(),
+		},
+	);
 
 		Ok(Some(ctx))
 	}
