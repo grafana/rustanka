@@ -67,6 +67,7 @@ pub struct CommandReport {
 	pub runs: usize,
 	pub exit_code_matched: bool,
 	pub stdout_matched: bool,
+	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total)
 	pub result_dir_matched: Option<bool>,
 	pub exec1_name: String,
 	pub exec1_stats: RuntimeStats,
@@ -104,7 +105,14 @@ impl CommandReport {
 		} else {
 			"✗ MISMATCH".red()
 		};
-		println!("Stdout: {}", stdout_status);
+		if let Some((similarity, matched, total)) = self.stdout_similarity {
+			println!(
+				"Stdout: {} ({:.1}% similar: {}/{} matching)",
+				stdout_status, similarity, matched, total
+			);
+		} else {
+			println!("Stdout: {}", stdout_status);
+		}
 
 		// Result dir
 		if let Some(result_dir_matched) = self.result_dir_matched {
@@ -118,18 +126,8 @@ impl CommandReport {
 			println!("Result Dir: {}", "N/A".yellow());
 		}
 
-		// Only show runtime comparison if results match
-		let results_match = self.exit_code_matched
-			&& self.stdout_matched
-			&& self.result_dir_matched.unwrap_or(true);
-
-		if !results_match {
-			println!(
-				"\n{}",
-				"⚠ Skipping runtime comparison due to result mismatch".yellow()
-			);
-			// Still show stderr if present
-		} else if self.runs > 1 {
+		// Show runtime comparison regardless of result match
+		if self.runs > 1 {
 			println!("Runtime (across {} runs):", self.runs);
 			println!("  {}:", self.exec1_name);
 			println!("    min:     {}", format_duration(self.exec1_stats.min));
@@ -186,7 +184,7 @@ impl CommandReport {
 				println!("  {} is {:.2}x faster", self.exec2_name, 1.0 / ratio);
 			}
 		}
-		// End of runtime comparison (only shown when results match)
+		// End of runtime comparison
 
 		// Stderr output
 		if !self.exec1_stderr.is_empty() {

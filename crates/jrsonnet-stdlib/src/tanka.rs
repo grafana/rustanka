@@ -90,11 +90,25 @@ pub fn builtin_tanka_manifest_json_from_json(json: String, indent: usize) -> Res
 /// Converts JSON string to YAML
 #[builtin]
 pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
-	let parsed: serde_json::Value = serde_json::from_str(&json)
+	let parsed: Val = serde_json::from_str(&json)
 		.map_err(|e| RuntimeError(format!("failed to parse json: {e}").into()))?;
 
-	serde_yaml::to_string(&parsed)
-		.map_err(|e| RuntimeError(format!("failed to serialize yaml: {e}").into()).into())
+	// Use jrsonnet's custom YAML formatter with Go-compatible settings:
+	// - 4 space indentation (matching Go's default)
+	// - No quotes on keys when possible
+	use crate::manifest::YamlFormat;
+	use jrsonnet_evaluator::manifest::ManifestFormat;
+
+	let formatter = YamlFormat::cli(
+		4, // 4-space indentation like Go
+		#[cfg(feature = "exp-preserve-order")]
+		false,
+	);
+
+	let mut output = String::new();
+	formatter.manifest_buf(parsed, &mut output)?;
+
+	Ok(output + "\n")
 }
 
 /// Tanka-compatible sha256
@@ -173,8 +187,14 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 				)
 				.into());
 			}
+			// Prevent absolute paths by prefixing with '.' if chart starts with '/'
+			let chart_relative = if chart.starts_with('/') {
+				format!(".{}", chart)
+			} else {
+				chart.clone()
+			};
 			// Join the chart path with the directory
-			let chart_full = dir.join(&chart);
+			let chart_full = dir.join(&chart_relative);
 
 			// Check if the chart path exists
 			if !chart_full.exists() {

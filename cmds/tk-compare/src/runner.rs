@@ -130,16 +130,114 @@ fn collect_files(dir: &str) -> Result<HashMap<String, Vec<u8>>> {
 }
 
 /// Compare two strings as JSON, performing deep structural comparison
-/// Returns true if both are valid JSON and structurally identical
-pub fn compare_json(json1: &str, json2: &str) -> Result<bool> {
+/// Returns (matched, similarity_percentage, matched_count, total_count)
+pub fn compare_json(json1: &str, json2: &str) -> Result<(bool, f64, usize, usize)> {
 	// Parse both strings as JSON
 	let value1: serde_json::Value =
 		serde_json::from_str(json1).with_context(|| "Failed to parse first output as JSON")?;
 	let value2: serde_json::Value =
 		serde_json::from_str(json2).with_context(|| "Failed to parse second output as JSON")?;
 
+	// Calculate similarity
+	let (matched, total) = calculate_json_similarity(&value1, &value2);
+	let similarity = if total > 0 {
+		(matched as f64 / total as f64) * 100.0
+	} else {
+		100.0
+	};
+
 	// Deep comparison of JSON structures
-	Ok(value1 == value2)
+	Ok((value1 == value2, similarity, matched, total))
+}
+
+/// Calculate similarity between two JSON values
+/// Returns (matched_count, total_count) of JSON paths
+fn calculate_json_similarity(val1: &serde_json::Value, val2: &serde_json::Value) -> (usize, usize) {
+	use serde_json::Value;
+
+	match (val1, val2) {
+		(Value::Object(obj1), Value::Object(obj2)) => {
+			let mut matched = 0;
+			let mut total = 0;
+
+			// Get all unique keys
+			let all_keys: std::collections::HashSet<_> = obj1.keys().chain(obj2.keys()).collect();
+
+			for key in all_keys {
+				total += 1;
+				match (obj1.get(key), obj2.get(key)) {
+					(Some(v1), Some(v2)) => {
+						let (sub_matched, sub_total) = calculate_json_similarity(v1, v2);
+						if sub_total == 0 {
+							// Leaf node
+							if v1 == v2 {
+								matched += 1;
+							}
+						} else {
+							// Add sub-tree stats
+							matched += sub_matched;
+							total += sub_total - 1; // -1 because we already counted this key
+						}
+					}
+					_ => {} // Key only in one object, already counted in total
+				}
+			}
+
+			(matched, total)
+		}
+		(Value::Array(arr1), Value::Array(arr2)) => {
+			let max_len = arr1.len().max(arr2.len());
+			let mut matched = 0;
+			let mut total = max_len;
+
+			for i in 0..max_len {
+				match (arr1.get(i), arr2.get(i)) {
+					(Some(v1), Some(v2)) => {
+						let (sub_matched, sub_total) = calculate_json_similarity(v1, v2);
+						if sub_total == 0 {
+							// Leaf node
+							if v1 == v2 {
+								matched += 1;
+							}
+						} else {
+							// Add sub-tree stats
+							matched += sub_matched;
+							total += sub_total - 1; // -1 because we already counted this index
+						}
+					}
+					_ => {} // Index only in one array
+				}
+			}
+
+			(matched, total)
+		}
+		(_v1, _v2) => {
+			// Leaf values - return 0 total to indicate this is a leaf
+			(0, 0)
+		}
+	}
+}
+
+/// Calculate similarity between two strings (line-based)
+/// Returns (similarity_percentage, matched_lines, total_lines)
+pub fn calculate_string_similarity(str1: &str, str2: &str) -> (f64, usize, usize) {
+	let lines1: Vec<&str> = str1.lines().collect();
+	let lines2: Vec<&str> = str2.lines().collect();
+
+	let max_lines = lines1.len().max(lines2.len());
+	if max_lines == 0 {
+		return (100.0, 0, 0);
+	}
+
+	let mut matching_lines = 0;
+	for i in 0..max_lines {
+		if lines1.get(i) == lines2.get(i) {
+			matching_lines += 1;
+		}
+	}
+
+	let similarity = (matching_lines as f64 / max_lines as f64) * 100.0;
+	(similarity, matching_lines, max_lines)
 }
 
 /// Print JSON diff showing differences between two JSON values

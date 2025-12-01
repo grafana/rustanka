@@ -76,8 +76,10 @@ fn yaml_needs_quotes(string: &str) -> bool {
 
 	string.is_empty()
 		|| need_quotes_spaces(string)
-		|| string.starts_with(['&' , '*' , '?' , '|' , '-' , '<' , '>' , '=' , '!' , '%' , '@'])
-		|| string.contains(|c| matches!(c, ':' | '{' | '}' | '[' | ']' | ',' | '#' | '`' | '\"' | '\'' | '\\' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
+		|| string.starts_with(['&' , '*' , '?' , '|' , '-' , '!' , '%' , '@'])
+		// Go's YAML library only quotes colons when followed by space (creates ambiguity)
+		|| string.contains(": ")
+		|| string.contains(|c| matches!(c, '{' | '}' | '[' | ']' | '#' | '`' | '\"' | '\'' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
 		|| [
 			// http://yaml.org/type/bool.html
 			"yes", "Yes", "YES", "no", "No", "NO", "True", "TRUE", "true", "False", "FALSE", "false",

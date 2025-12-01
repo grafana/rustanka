@@ -175,6 +175,7 @@ fn main() -> Result<()> {
 		let mut exec2_durations = Vec::new();
 		let mut exit_code_matched = true;
 		let mut stdout_matched = true;
+		let mut stdout_similarity = None;
 		let mut result_dir_matched = None;
 		let mut exec1_exit_code = 0;
 		let mut exec2_exit_code = 0;
@@ -215,7 +216,8 @@ fn main() -> Result<()> {
 				// Use JSON comparison if enabled, otherwise use string comparison
 				stdout_matched = if command.json_compare {
 					match runner::compare_json(&result1.stdout, &result2.stdout) {
-						Ok(matched) => {
+						Ok((matched, similarity, matched_count, total_count)) => {
+							stdout_similarity = Some((similarity, matched_count, total_count));
 							if !matched && debug_mode {
 								runner::print_json_diff(
 									&result1.stdout,
@@ -231,6 +233,12 @@ fn main() -> Result<()> {
 							eprintln!("\nWarning: JSON comparison failed: {}", e);
 							eprintln!("Falling back to string comparison");
 							let matched = result1.stdout == result2.stdout;
+							let (similarity, matched_lines, total_lines) =
+								runner::calculate_string_similarity(
+									&result1.stdout,
+									&result2.stdout,
+								);
+							stdout_similarity = Some((similarity, matched_lines, total_lines));
 							if !matched && debug_mode {
 								runner::print_string_diff(
 									&result1.stdout,
@@ -245,6 +253,9 @@ fn main() -> Result<()> {
 					}
 				} else {
 					let matched = result1.stdout == result2.stdout;
+					let (similarity, matched_lines, total_lines) =
+						runner::calculate_string_similarity(&result1.stdout, &result2.stdout);
+					stdout_similarity = Some((similarity, matched_lines, total_lines));
 					if !matched && debug_mode {
 						runner::print_string_diff(
 							&result1.stdout,
@@ -302,6 +313,7 @@ fn main() -> Result<()> {
 			runs,
 			exit_code_matched,
 			stdout_matched,
+			stdout_similarity,
 			result_dir_matched,
 			exec1_name: config.tk_exec_1_name.clone(),
 			exec1_stats,
