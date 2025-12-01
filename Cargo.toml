@@ -149,8 +149,8 @@ manual_let_else = "allow"
 # codegenerated-stdlib block
 similar_names = "allow"
 
-#[profile.test]
-#opt-level = 1
+[profile.test]
+opt-level = 3
 
 [profile.release]
 opt-level = 3
