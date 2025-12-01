@@ -1226,6 +1226,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "regex",
  "serde",
  "serde_json",
  "similar",

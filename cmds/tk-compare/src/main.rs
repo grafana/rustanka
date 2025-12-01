@@ -37,6 +37,26 @@ fn main() -> Result<()> {
 		100 // Default even when debug is off
 	};
 
+	// Check for command filter
+	let filter_regex = if let Ok(pattern) = std::env::var("COMPARE_REGEXP") {
+		match regex::Regex::new(&pattern) {
+			Ok(re) => {
+				eprintln!("Filtering commands with pattern: {}\n", pattern);
+				Some(re)
+			}
+			Err(e) => {
+				eprintln!(
+					"Warning: Invalid COMPARE_REGEXP pattern '{}': {}",
+					pattern, e
+				);
+				eprintln!("Running all commands\n");
+				None
+			}
+		}
+	} else {
+		None
+	};
+
 	// Load config
 	let config = Config::from_file(&cli.config)?;
 
@@ -63,7 +83,39 @@ fn main() -> Result<()> {
 	if let Some(ref wd) = config.working_dir {
 		eprintln!("  working_dir: {}", wd);
 	}
-	eprintln!("  commands: {}\n", config.commands.len());
+
+	// Filter commands if regex is provided
+	let commands_to_run: Vec<_> = if let Some(ref re) = filter_regex {
+		let filtered: Vec<_> = config
+			.commands
+			.iter()
+			.enumerate()
+			.filter(|(_, cmd)| re.is_match(&cmd.as_string()))
+			.collect();
+
+		eprintln!("  total commands: {}", config.commands.len());
+		eprintln!("  filtered commands: {}", filtered.len());
+
+		if filtered.is_empty() {
+			eprintln!("\nWarning: No commands matched the filter pattern!");
+			eprintln!("All commands:");
+			for (i, cmd) in config.commands.iter().enumerate() {
+				eprintln!("  {}: {}", i + 1, cmd.as_string());
+			}
+			eprintln!();
+		} else {
+			eprintln!("  running commands:");
+			for (i, cmd) in &filtered {
+				eprintln!("    {}: {}", i + 1, cmd.as_string());
+			}
+			eprintln!();
+		}
+
+		filtered
+	} else {
+		eprintln!("  commands: {}\n", config.commands.len());
+		config.commands.iter().enumerate().collect()
+	};
 
 	let mut reports = Vec::new();
 
@@ -82,23 +134,39 @@ fn main() -> Result<()> {
 		(None, None)
 	};
 
-	// Run each command
-	for (index, command) in config.commands.iter().enumerate() {
+	// Run each filtered command
+	for (orig_index, command) in commands_to_run.iter() {
+		let index = *orig_index;
 		let runs = if command.runs == 0 { 1 } else { command.runs };
+
+		let total_commands = if filter_regex.is_some() {
+			commands_to_run.len()
+		} else {
+			config.commands.len()
+		};
+
+		let display_index = if filter_regex.is_some() {
+			commands_to_run
+				.iter()
+				.position(|(i, _)| *i == index)
+				.unwrap() + 1
+		} else {
+			index + 1
+		};
 
 		if runs > 1 {
 			eprintln!(
 				"Running command {}/{}: {} ({} runs)",
-				index + 1,
-				config.commands.len(),
+				display_index,
+				total_commands,
 				command.as_string(),
 				runs
 			);
 		} else {
 			eprintln!(
 				"Running command {}/{}: {}",
-				index + 1,
-				config.commands.len(),
+				display_index,
+				total_commands,
 				command.as_string()
 			);
 		}

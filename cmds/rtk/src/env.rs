@@ -73,14 +73,23 @@ fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environmen
 				Ok(mut envs) => {
 					for env in &mut envs {
 						// Inline envs may already have full paths from Jsonnet
-						// Only update if name doesn't start with "environments/"
-						if let Some(name) = &env.metadata.name {
-							if !name.starts_with("environments/") {
-								set_env_metadata(env, dir, original_path)?;
-							}
+						// Only update name if it doesn't start with "environments/"
+						let should_update_name = if let Some(name) = &env.metadata.name {
+							!name.starts_with("environments/")
 						} else {
+							true
+						};
+
+						if should_update_name {
 							set_env_metadata(env, dir, original_path)?;
+						} else {
+							// Still set namespace even if name is preserved
+							set_env_namespace(env, dir)?;
 						}
+
+						// Set exportJsonnetImplementation for inline environments
+						env.spec.export_jsonnet_implementation =
+							Some("binary:/usr/local/bin/jrsonnet".to_string());
 					}
 					environments.extend(envs);
 				}
@@ -104,6 +113,22 @@ fn set_env_metadata(env: &mut Environment, dir: &Path, _original_path: &Path) ->
 		.unwrap_or(&dir_str);
 
 	env.metadata.name = Some(env_path.to_string());
+	env.metadata.namespace = Some(format!("{}/main.jsonnet", env_path));
+
+	Ok(())
+}
+
+/// Set only the namespace without changing the name
+fn set_env_namespace(env: &mut Environment, dir: &Path) -> Result<()> {
+	let dir_str = dir.to_string_lossy();
+
+	// Extract path starting from "environments/"
+	let env_path = dir_str
+		.find("environments/")
+		.map(|pos| &dir_str[pos..])
+		.or_else(|| dir_str.strip_prefix("ksonnet/"))
+		.unwrap_or(&dir_str);
+
 	env.metadata.namespace = Some(format!("{}/main.jsonnet", env_path));
 
 	Ok(())

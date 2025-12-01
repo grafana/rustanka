@@ -43,6 +43,8 @@ pub struct Spec {
 	pub resource_defaults: Option<serde_json::Value>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub expect_versions: Option<serde_json::Value>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub export_jsonnet_implementation: Option<String>,
 }
 
 fn default_namespace() -> String {
@@ -69,6 +71,7 @@ impl Environment {
 				inject_labels: None,
 				resource_defaults: None,
 				expect_versions: None,
+				export_jsonnet_implementation: None,
 			},
 			data: None,
 		}
