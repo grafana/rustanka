@@ -145,17 +145,17 @@ impl CommandReport {
 			// Compare based on median
 			let exec1_ms = self.exec1_stats.median.as_millis();
 			let exec2_ms = self.exec2_stats.median.as_millis();
-			let ratio = if exec2_ms > 0 {
-				exec1_ms as f64 / exec2_ms as f64
+			let ratio = if exec1_ms > 0 {
+				exec2_ms as f64 / exec1_ms as f64
 			} else {
 				0.0
 			};
 
 			print!("  Comparison (median): ");
 			if ratio > 1.0 {
-				println!("{} is {:.2}x slower", self.exec1_name, ratio);
+				println!("{} is {:.2}x slower", self.exec2_name, ratio);
 			} else if ratio < 1.0 && ratio > 0.0 {
-				println!("{} is {:.2}x faster", self.exec1_name, 1.0 / ratio);
+				println!("{} is {:.2}x faster", self.exec2_name, 1.0 / ratio);
 			} else {
 				println!("same");
 			}
@@ -174,16 +174,16 @@ impl CommandReport {
 
 			let exec1_ms = self.exec1_stats.average.as_millis();
 			let exec2_ms = self.exec2_stats.average.as_millis();
-			let ratio = if exec2_ms > 0 {
-				exec1_ms as f64 / exec2_ms as f64
+			let ratio = if exec1_ms > 0 {
+				exec2_ms as f64 / exec1_ms as f64
 			} else {
 				0.0
 			};
 
 			if ratio > 1.0 {
-				println!("  {} is {:.2}x slower", self.exec1_name, ratio);
+				println!("  {} is {:.2}x slower", self.exec2_name, ratio);
 			} else if ratio < 1.0 && ratio > 0.0 {
-				println!("  {} is {:.2}x faster", self.exec1_name, 1.0 / ratio);
+				println!("  {} is {:.2}x faster", self.exec2_name, 1.0 / ratio);
 			}
 		}
 		// End of runtime comparison (only shown when results match)
