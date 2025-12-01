@@ -978,10 +978,13 @@ dependencies = [
  "anyhow",
  "clap",
  "jrsonnet-evaluator",
+ "jrsonnet-gcmodule",
+ "jrsonnet-parser",
  "jrsonnet-stdlib",
  "serde",
  "serde_json",
  "tabwriter",
+ "tempfile",
 ]
 
 [[package]]

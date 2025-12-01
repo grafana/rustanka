@@ -127,6 +127,7 @@ enum Optionality {
 	Default(Expr),
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ArgInfo {
 	Normal {
 		ty: Box<Type>,

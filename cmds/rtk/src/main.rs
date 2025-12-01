@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod env;
+mod eval;
+mod jpath;
 mod spec;
 
 #[derive(Parser)]
@@ -632,8 +634,64 @@ fn main() -> Result<()> {
 		Commands::Lint { .. } => {
 			anyhow::bail!("not implemented");
 		}
-		Commands::Eval { .. } => {
-			anyhow::bail!("not implemented");
+		Commands::Eval {
+			path,
+			eval: eval_expr,
+			ext_code,
+			ext_str,
+			tla_code,
+			tla_str,
+			max_stack,
+			..
+		} => {
+			// Parse ext_code flags (format: key=value)
+			let mut ext_code_map = std::collections::HashMap::new();
+			for item in ext_code {
+				if let Some((key, value)) = item.split_once('=') {
+					ext_code_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse ext_str flags
+			let mut ext_str_map = std::collections::HashMap::new();
+			for item in ext_str {
+				if let Some((key, value)) = item.split_once('=') {
+					ext_str_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse tla_code flags
+			let mut tla_code_map = std::collections::HashMap::new();
+			for item in tla_code {
+				if let Some((key, value)) = item.split_once('=') {
+					tla_code_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse tla_str flags
+			let mut tla_str_map = std::collections::HashMap::new();
+			for item in tla_str {
+				if let Some((key, value)) = item.split_once('=') {
+					tla_str_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			let opts = eval::EvalOpts {
+				ext_str: ext_str_map,
+				ext_code: ext_code_map,
+				tla_str: tla_str_map,
+				tla_code: tla_code_map,
+				max_stack: max_stack.map(|s| s as usize),
+				eval_expr,
+			};
+
+			let result = eval::eval(&path, opts)?;
+
+			// Pretty print the result
+			let output = serde_json::to_string_pretty(&result.value)?;
+			println!("{}", output);
+
+			Ok(())
 		}
 		Commands::Init { .. } => {
 			anyhow::bail!("not implemented");
