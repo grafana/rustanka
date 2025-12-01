@@ -103,6 +103,7 @@ mod kw {
 	syn::custom_keyword!(ok);
 }
 
+#[allow(dead_code)]
 struct EmptyAttr;
 impl Parse for EmptyAttr {
 	fn parse(_input: ParseStream) -> Result<Self> {
