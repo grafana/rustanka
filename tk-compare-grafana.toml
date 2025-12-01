@@ -26,22 +26,26 @@ working_dir = "${DEPLOYMENT_TOOLS_PATH}"
 [[commands]]
 args = ["env", "list", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03", "--json"]
 runs = 5
+json_compare = true
 
 [[commands]]
 args = ["env", "list", "ksonnet/environments/grafana-o11y", "--json"]
 runs = 5
+json_compare = true
 
 # This one is slow, so we only run it once
 [[commands]]
 args = ["env", "list", "ksonnet/environments", "--json"]
 runs = 1
+json_compare = true
 
 [[commands]]
 args = ["eval", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03"]
 runs = 3
+json_compare = true
 
 # This one is slow, so we only run it once
 [[commands]]
 args = ["eval", "ksonnet/environments/flux-system"]
 runs = 1
-
+json_compare = true

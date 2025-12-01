@@ -1227,6 +1227,8 @@ dependencies = [
  "clap",
  "colored",
  "serde",
+ "serde_json",
+ "similar",
  "toml",
 ]
 

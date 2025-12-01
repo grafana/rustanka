@@ -29,6 +29,8 @@ pub struct Command {
 	pub result_dir: Option<String>,
 	#[serde(default = "default_runs")]
 	pub runs: usize,
+	#[serde(default)]
+	pub json_compare: bool,
 }
 
 fn default_runs() -> usize {

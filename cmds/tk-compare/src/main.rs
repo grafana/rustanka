@@ -24,6 +24,19 @@ struct Cli {
 fn main() -> Result<()> {
 	let cli = Cli::parse();
 
+	// Check for debug mode
+	let debug_mode = std::env::var("DEBUG").unwrap_or_default() == "true";
+	let debug_max_lines = if debug_mode {
+		let max_lines = std::env::var("DEBUG_MAX_LINES")
+			.ok()
+			.and_then(|v| v.parse::<usize>().ok())
+			.unwrap_or(100);
+		eprintln!("DEBUG mode enabled (max {} diff lines)\n", max_lines);
+		max_lines
+	} else {
+		100 // Default even when debug is off
+	};
+
 	// Load config
 	let config = Config::from_file(&cli.config)?;
 
@@ -130,7 +143,52 @@ fn main() -> Result<()> {
 			// Check consistency across runs (use first run as baseline)
 			if run == 0 {
 				exit_code_matched = result1.exit_code == result2.exit_code;
-				stdout_matched = result1.stdout == result2.stdout;
+
+				// Use JSON comparison if enabled, otherwise use string comparison
+				stdout_matched = if command.json_compare {
+					match runner::compare_json(&result1.stdout, &result2.stdout) {
+						Ok(matched) => {
+							if !matched && debug_mode {
+								runner::print_json_diff(
+									&result1.stdout,
+									&result2.stdout,
+									&config.tk_exec_1_name,
+									&config.tk_exec_2_name,
+									debug_max_lines,
+								);
+							}
+							matched
+						}
+						Err(e) => {
+							eprintln!("\nWarning: JSON comparison failed: {}", e);
+							eprintln!("Falling back to string comparison");
+							let matched = result1.stdout == result2.stdout;
+							if !matched && debug_mode {
+								runner::print_string_diff(
+									&result1.stdout,
+									&result2.stdout,
+									&config.tk_exec_1_name,
+									&config.tk_exec_2_name,
+									debug_max_lines,
+								);
+							}
+							matched
+						}
+					}
+				} else {
+					let matched = result1.stdout == result2.stdout;
+					if !matched && debug_mode {
+						runner::print_string_diff(
+							&result1.stdout,
+							&result2.stdout,
+							&config.tk_exec_1_name,
+							&config.tk_exec_2_name,
+							debug_max_lines,
+						);
+					}
+					matched
+				};
+
 				exec1_exit_code = result1.exit_code;
 				exec2_exit_code = result2.exit_code;
 				exec1_stderr = result1.stderr;
