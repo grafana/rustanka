@@ -348,10 +348,10 @@ impl ContextInitializer {
 			settings,
 		}
 	}
-	pub fn settings(&self) -> Ref<Settings> {
+	pub fn settings(&self) -> Ref<'_, Settings> {
 		self.settings.borrow()
 	}
-	pub fn settings_mut(&self) -> RefMut<Settings> {
+	pub fn settings_mut(&self) -> RefMut<'_, Settings> {
 		self.settings.borrow_mut()
 	}
 	pub fn add_ext_var(&self, name: IStr, value: Val) {
