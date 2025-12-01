@@ -444,63 +444,6 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum EnvCommands {
-    /// Create a new environment
-    Add {
-        /// Path for the new environment
-        path: String,
-        
-        #[arg(long)]
-        context_name: Vec<String>,
-        
-        #[arg(long)]
-        diff_strategy: Option<String>,
-        
-        #[arg(long)]
-        inject_labels: bool,
-        
-        #[arg(short = 'i', long)]
-        inline: bool,
-        
-        #[arg(long, default_value = "info")]
-        log_level: String,
-        
-        #[arg(long, default_value = "default")]
-        namespace: String,
-        
-        #[arg(long)]
-        server: Option<String>,
-        
-        #[arg(long)]
-        server_from_context: Option<String>,
-    },
-    
-    /// Update properties of an environment
-    Set {
-        /// Path to the environment
-        path: String,
-        
-        #[arg(long)]
-        context_name: Vec<String>,
-        
-        #[arg(long)]
-        diff_strategy: Option<String>,
-        
-        #[arg(long)]
-        inject_labels: bool,
-        
-        #[arg(long, default_value = "info")]
-        log_level: String,
-        
-        #[arg(long)]
-        namespace: Option<String>,
-        
-        #[arg(long)]
-        server: Option<String>,
-        
-        #[arg(long)]
-        server_from_context: Option<String>,
-    },
-    
     /// List environments relative to current dir or <path>
     List {
         /// Path to search for environments
@@ -535,15 +478,6 @@ enum EnvCommands {
         
         #[arg(short = 'A', long)]
         tla_str: Vec<String>,
-    },
-    
-    /// Delete an environment
-    Remove {
-        /// Path to the environment to remove
-        path: String,
-        
-        #[arg(long, default_value = "info")]
-        log_level: String,
     },
 }
 
@@ -678,56 +612,8 @@ fn main() -> Result<()> {
             anyhow::bail!("not implemented");
         }
         Commands::Env { command, .. } => match command {
-            EnvCommands::Add {
-                path,
-                server,
-                server_from_context,
-                context_name,
-                namespace,
-                diff_strategy,
-                inject_labels,
-                inline,
-                ..
-            } => {
-                let final_server = server.or(server_from_context);
-                env::add_env(
-                    &path,
-                    final_server,
-                    context_name,
-                    namespace,
-                    diff_strategy,
-                    inject_labels,
-                    inline,
-                )?;
-                Ok(())
-            }
-            EnvCommands::Set {
-                path,
-                server,
-                server_from_context,
-                context_name,
-                namespace,
-                diff_strategy,
-                inject_labels,
-                ..
-            } => {
-                let final_server = server.or(server_from_context);
-                env::set_env(
-                    &path,
-                    final_server,
-                    context_name,
-                    namespace,
-                    diff_strategy,
-                    inject_labels,
-                )?;
-                Ok(())
-            }
-            EnvCommands::List { path, .. } => {
-                env::list_envs(path)?;
-                Ok(())
-            }
-            EnvCommands::Remove { path, .. } => {
-                env::remove_env(&path)?;
+            EnvCommands::List { path, json, .. } => {
+                env::list_envs(path, json)?;
                 Ok(())
             }
         },

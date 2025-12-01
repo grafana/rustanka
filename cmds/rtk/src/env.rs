@@ -1,263 +1,254 @@
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use tabwriter::TabWriter;
 
 use crate::spec::Environment;
 
-/// Add a new environment at the given path
-pub fn add_env(
-    path: &str,
-    server: Option<String>,
-    context_names: Vec<String>,
-    namespace: String,
-    diff_strategy: Option<String>,
-    inject_labels: bool,
-    inline: bool,
-) -> Result<()> {
-    let path = PathBuf::from(path);
-    let abs_path = if path.is_absolute() {
-        path.clone()
-    } else {
-        std::env::current_dir()?.join(&path)
-    };
-
-    // Create directory if it doesn't exist
-    if !abs_path.exists() {
-        fs::create_dir_all(&abs_path)
-            .with_context(|| format!("Failed to create directory: {}", abs_path.display()))?;
-    } else {
-        anyhow::bail!("Directory {} already exists", abs_path.display());
-    }
-
-    // Create environment config
-    let mut env = Environment::new();
-    env.spec.api_server = server;
-    if !context_names.is_empty() {
-        env.spec.context_names = Some(context_names);
-    }
-    env.spec.namespace = namespace;
-    env.spec.diff_strategy = diff_strategy;
-    if inject_labels {
-        env.spec.inject_labels = Some(true);
-    }
-
-    // Set metadata name from path
-    if let Some(name) = abs_path.file_name().and_then(|n| n.to_str()) {
-        env.metadata.name = Some(name.to_string());
-        env.metadata.namespace = Some(abs_path.to_string_lossy().to_string());
-    }
-
-    if inline {
-        // Create inline environment (main.jsonnet with embedded environment)
-        env.data = Some(serde_json::json!({}));
-        let jsonnet_content = serde_json::to_string_pretty(&env)?;
-        let main_path = abs_path.join("main.jsonnet");
-        fs::write(&main_path, jsonnet_content)
-            .with_context(|| format!("Failed to write {}", main_path.display()))?;
-
-        println!("Environment created at: {}", abs_path.display());
-        println!("Type: inline");
-    } else {
-        // Create static environment (spec.json + main.jsonnet)
-        let spec_path = abs_path.join("spec.json");
-        let spec_content = serde_json::to_string_pretty(&env)?;
-        fs::write(&spec_path, spec_content)
-            .with_context(|| format!("Failed to write {}", spec_path.display()))?;
-
-        // Create empty main.jsonnet
-        let main_path = abs_path.join("main.jsonnet");
-        fs::write(&main_path, "{}\n")
-            .with_context(|| format!("Failed to write {}", main_path.display()))?;
-
-        println!("Environment created at: {}", abs_path.display());
-        println!("Type: static");
-        println!("\nFiles created:");
-        println!("  - spec.json");
-        println!("  - main.jsonnet");
-    }
-
-    Ok(())
-}
-
-/// Update an existing environment
-pub fn set_env(
-    path: &str,
-    server: Option<String>,
-    context_names: Vec<String>,
-    namespace: Option<String>,
-    diff_strategy: Option<String>,
-    inject_labels: bool,
-) -> Result<()> {
-    let path = PathBuf::from(path);
-    let abs_path = if path.is_absolute() {
-        path.clone()
-    } else {
-        std::env::current_dir()?.join(&path)
-    };
-
-    if !abs_path.exists() {
-        anyhow::bail!("Environment directory does not exist: {}", abs_path.display());
-    }
-
-    let spec_path = abs_path.join("spec.json");
-    if !spec_path.exists() {
-        anyhow::bail!(
-            "spec.json not found in {}. Only static environments can be updated with 'set'",
-            abs_path.display()
-        );
-    }
-
-    // Read existing spec
-    let spec_content = fs::read_to_string(&spec_path)
-        .with_context(|| format!("Failed to read {}", spec_path.display()))?;
-    let mut env: Environment = serde_json::from_str(&spec_content)
-        .with_context(|| format!("Failed to parse {}", spec_path.display()))?;
-
-    // Update fields
-    let mut updated = false;
-
-    if let Some(new_server) = server {
-        if env.spec.api_server.as_ref() != Some(&new_server) {
-            println!(
-                "Updated spec.apiServer: {:?} -> {}",
-                env.spec.api_server, new_server
-            );
-            env.spec.api_server = Some(new_server);
-            updated = true;
-        }
-    }
-
-    if !context_names.is_empty() {
-        let new_contexts = Some(context_names.clone());
-        if env.spec.context_names != new_contexts {
-            println!(
-                "Updated spec.contextNames: {:?} -> {:?}",
-                env.spec.context_names, context_names
-            );
-            env.spec.context_names = new_contexts;
-            updated = true;
-        }
-    }
-
-    if let Some(new_namespace) = namespace {
-        if env.spec.namespace != new_namespace {
-            println!(
-                "Updated spec.namespace: {} -> {}",
-                env.spec.namespace, new_namespace
-            );
-            env.spec.namespace = new_namespace;
-            updated = true;
-        }
-    }
-
-    if let Some(new_diff_strategy) = diff_strategy {
-        if env.spec.diff_strategy.as_ref() != Some(&new_diff_strategy) {
-            println!(
-                "Updated spec.diffStrategy: {:?} -> {}",
-                env.spec.diff_strategy, new_diff_strategy
-            );
-            env.spec.diff_strategy = Some(new_diff_strategy);
-            updated = true;
-        }
-    }
-
-    if inject_labels {
-        if env.spec.inject_labels != Some(true) {
-            println!("Updated spec.injectLabels: {:?} -> true", env.spec.inject_labels);
-            env.spec.inject_labels = Some(true);
-            updated = true;
-        }
-    }
-
-    if updated {
-        // Write back the updated spec
-        let spec_content = serde_json::to_string_pretty(&env)?;
-        fs::write(&spec_path, spec_content)
-            .with_context(|| format!("Failed to write {}", spec_path.display()))?;
-        println!("\nEnvironment updated successfully");
-    } else {
-        println!("No changes made");
-    }
-
-    Ok(())
-}
-
 /// List environments in the given path
-pub fn list_envs(path: Option<String>) -> Result<()> {
-    let search_path = if let Some(p) = path {
-        PathBuf::from(p)
-    } else {
-        std::env::current_dir()?
-    };
+pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
+    let search_path = path.map(PathBuf::from).unwrap_or_else(|| std::env::current_dir().unwrap());
+    let mut envs = find_environments(&search_path, &search_path)?;
 
-    println!("NAME                    NAMESPACE          SERVER");
-    println!("────────────────────────────────────────────────────────────────");
-
-    // For now, just check if current directory is an environment
-    // In a full implementation, this would recursively search for environments
-    if let Ok(env) = load_env(&search_path) {
-        let name = env.metadata.name.unwrap_or_else(|| "unnamed".to_string());
-        let namespace = env.spec.namespace;
-        let server = env.spec.api_server.unwrap_or_else(|| "-".to_string());
-        println!("{:<24}{:<19}{}", name, namespace, server);
+    if json {
+        // Normalize: convert null resourceDefaults and expectVersions to empty objects
+        for env in &mut envs {
+            env.spec.resource_defaults.get_or_insert_with(|| serde_json::json!({}));
+            env.spec.expect_versions.get_or_insert_with(|| serde_json::json!({}));
+        }
+        println!("{}", serde_json::to_string(&envs)?);
     } else {
-        println!("No environments found in {}", search_path.display());
+        print_table(&envs, &search_path)?;
     }
 
     Ok(())
 }
 
-/// Remove an environment
-pub fn remove_env(path: &str) -> Result<()> {
-    let path = PathBuf::from(path);
-    let abs_path = if path.is_absolute() {
-        path.clone()
-    } else {
-        std::env::current_dir()?.join(&path)
-    };
+fn print_table(envs: &[Environment], search_path: &Path) -> Result<()> {
+    let mut tw = TabWriter::new(std::io::stdout()).padding(4);
+    writeln!(tw, "NAME\tNAMESPACE\tSERVER")?;
 
-    if !abs_path.exists() {
-        anyhow::bail!("Environment directory does not exist: {}", abs_path.display());
+    if envs.is_empty() {
+        writeln!(tw, "No environments found in {}", search_path.display())?;
+    } else {
+        for env in envs {
+            writeln!(tw, "{}\t{}\t{}",
+                env.metadata.name.as_deref().unwrap_or("unnamed"),
+                &env.spec.namespace,
+                env.spec.api_server.as_deref().unwrap_or("-")
+            )?;
+        }
+    }
+    tw.flush()?;
+    Ok(())
+}
+
+/// Find all environments recursively
+fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environment>> {
+    let main_files = find_main_jsonnet_files(root)?;
+    let mut environments = Vec::new();
+
+    for main_file in main_files {
+        let dir = main_file.parent().context("No parent directory")?;
+        let spec_file = dir.join("spec.json");
+
+        if spec_file.exists() {
+            // Static environment
+            if let Ok(mut env) = load_static_env(dir) {
+                set_env_metadata(&mut env, dir, original_path)?;
+                environments.push(env);
+            }
+        } else {
+            // Inline environment
+            match load_inline_envs(dir) {
+                Ok(mut envs) => {
+                    for env in &mut envs {
+                        // Inline envs may already have full paths from Jsonnet
+                        // Only update if name doesn't start with "environments/"
+                        if let Some(name) = &env.metadata.name {
+                            if !name.starts_with("environments/") {
+                                set_env_metadata(env, dir, original_path)?;
+                            }
+                        } else {
+                            set_env_metadata(env, dir, original_path)?;
+                        }
+                    }
+                    environments.extend(envs);
+                }
+                Err(_) => continue,
+            }
+        }
     }
 
-    // Confirm deletion
-    print!("Permanently removing the environment located at '{}'. Type 'yes' to confirm: ", abs_path.display());
-    use std::io::{self, Write};
-    io::stdout().flush()?;
+    Ok(environments)
+}
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+/// Set environment metadata (name and namespace)
+fn set_env_metadata(env: &mut Environment, dir: &Path, _original_path: &Path) -> Result<()> {
+    let dir_str = dir.to_string_lossy();
 
-    if input.trim() != "yes" {
-        println!("Aborted");
+    // Extract path starting from "environments/"
+    let env_path = dir_str
+        .find("environments/")
+        .map(|pos| &dir_str[pos..])
+        .or_else(|| dir_str.strip_prefix("ksonnet/"))
+        .unwrap_or(&dir_str);
+
+    env.metadata.name = Some(env_path.to_string());
+    env.metadata.namespace = Some(format!("{}/main.jsonnet", env_path));
+
+    Ok(())
+}
+
+/// Recursively find all main.jsonnet files
+fn find_main_jsonnet_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut results = Vec::new();
+    find_main_jsonnet_impl(dir, &mut results)?;
+    Ok(results)
+}
+
+fn find_main_jsonnet_impl(dir: &Path, results: &mut Vec<PathBuf>) -> Result<()> {
+    if !dir.is_dir() {
         return Ok(());
     }
 
-    fs::remove_dir_all(&abs_path)
-        .with_context(|| format!("Failed to remove directory: {}", abs_path.display()))?;
+    let main_file = dir.join("main.jsonnet");
+    if main_file.exists() {
+        results.push(main_file);
+        return Ok(()); // Don't recurse into subdirectories
+    }
 
-    println!("Removed {}", abs_path.display());
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            find_main_jsonnet_impl(&path, results)?;
+        }
+    }
 
     Ok(())
 }
 
-/// Load an environment from a directory
-fn load_env(path: &Path) -> Result<Environment> {
-    let spec_path = path.join("spec.json");
+/// Load inline environments by evaluating Jsonnet
+fn load_inline_envs(dir: &Path) -> Result<Vec<Environment>> {
+    use jrsonnet_evaluator::{State, manifest::JsonFormat};
 
-    if spec_path.exists() {
-        // Static environment
-        let content = fs::read_to_string(&spec_path)?;
-        let env: Environment = serde_json::from_str(&content)?;
-        Ok(env)
-    } else {
-        // Try inline environment
-        let main_path = path.join("main.jsonnet");
-        if main_path.exists() {
-            // For now, just return an error - full implementation would parse jsonnet
-            anyhow::bail!("Inline environments not yet fully supported")
-        } else {
-            anyhow::bail!("Not a valid environment directory")
+    let main_path = dir.join("main.jsonnet");
+    if !main_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut import_paths = vec![dir.to_path_buf()];
+
+    // Add lib and vendor directories if they exist
+    if let Some(root) = find_project_root(dir) {
+        for subdir in &["lib", "vendor"] {
+            let path = root.join(subdir);
+            if path.is_dir() {
+                import_paths.push(path);
+            }
         }
     }
+
+    let import_resolver = jrsonnet_evaluator::FileImportResolver::new(import_paths);
+    let mut builder = State::builder();
+    builder.import_resolver(import_resolver);
+
+    use jrsonnet_evaluator::trace::PathResolver;
+    let ctx_init = jrsonnet_stdlib::ContextInitializer::new(PathResolver::new_cwd_fallback());
+    builder.context_initializer(ctx_init);
+
+    let state = builder.build();
+
+    // Evaluate with noDataEnv wrapper to strip out .data field
+    let eval_script = format!(r#"
+local noDataEnv(object) =
+  std.prune(
+    if std.isObject(object)
+    then
+      if std.objectHas(object, 'apiVersion') && std.objectHas(object, 'kind')
+      then
+        if object.kind == 'Environment'
+        then object {{ data+:: {{}} }}
+        else {{}}
+      else
+        std.mapWithKey(function(key, obj) noDataEnv(obj), object)
+    else if std.isArray(object)
+    then
+      std.map(function(obj) noDataEnv(obj), object)
+    else {{}}
+  );
+
+local main = (import '{}');
+noDataEnv(main)
+"#, main_path.file_name().unwrap().to_string_lossy());
+
+    let result = state.evaluate_snippet("<metadata-eval>", &eval_script)
+        .map_err(|e| anyhow::anyhow!("Failed to evaluate Jsonnet at {}: {}", main_path.display(), e))?;
+
+    let json_str = result.manifest(&JsonFormat::cli(2))
+        .map_err(|e| anyhow::anyhow!("Failed to manifest Jsonnet: {}", e))?;
+
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
+        .context("Failed to parse manifested JSON")?;
+
+    extract_environments(&json_value)
+}
+
+/// Extract Environment objects from Jsonnet output
+fn extract_environments(value: &serde_json::Value) -> Result<Vec<Environment>> {
+    let mut environments = Vec::new();
+
+    match value {
+        serde_json::Value::Object(obj) => {
+            // Check if this is a single Environment object
+            if obj.contains_key("apiVersion") && obj.contains_key("kind") {
+                if let Some("Environment") = obj.get("kind").and_then(|v| v.as_str()) {
+                    if let Ok(env) = serde_json::from_value::<Environment>(value.clone()) {
+                        environments.push(env);
+                        return Ok(environments);
+                    }
+                }
+            }
+
+            // Otherwise, recursively extract from each field
+            for (key, val) in obj {
+                let mut extracted = extract_environments(val)?;
+                for env in &mut extracted {
+                    if env.metadata.name.is_none() {
+                        env.metadata.name = Some(key.clone());
+                    }
+                }
+                environments.extend(extracted);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                environments.extend(extract_environments(val)?);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(environments)
+}
+
+/// Find the project root by looking for jsonnetfile.json or tkrc.yaml
+fn find_project_root(start_path: &Path) -> Option<PathBuf> {
+    let mut current = start_path;
+    loop {
+        if current.join("jsonnetfile.json").exists() || current.join("tkrc.yaml").exists() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
+
+/// Load a static environment from spec.json
+fn load_static_env(path: &Path) -> Result<Environment> {
+    let spec_path = path.join("spec.json");
+    let content = fs::read_to_string(&spec_path)
+        .with_context(|| format!("Failed to read {}", spec_path.display()))?;
+    serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse {}", spec_path.display()))
 }

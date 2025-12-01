@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Environment represents a Tanka environment (tanka.dev/v1alpha1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct Metadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub labels: Option<HashMap<String, String>>,
+    pub labels: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +31,7 @@ pub struct Spec {
     pub api_server: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_names: Option<Vec<String>>,
+    #[serde(default = "default_namespace")]
     pub namespace: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff_strategy: Option<String>,
@@ -38,6 +39,14 @@ pub struct Spec {
     pub apply_strategy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inject_labels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_defaults: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_versions: Option<serde_json::Value>,
+}
+
+fn default_namespace() -> String {
+    "default".to_string()
 }
 
 impl Environment {
@@ -49,7 +58,7 @@ impl Environment {
             metadata: Metadata {
                 name: None,
                 namespace: None,
-                labels: Some(HashMap::new()),
+                labels: Some(BTreeMap::new()),
             },
             spec: Spec {
                 api_server: None,
@@ -58,6 +67,8 @@ impl Environment {
                 diff_strategy: None,
                 apply_strategy: None,
                 inject_labels: None,
+                resource_defaults: None,
+                expect_versions: None,
             },
             data: None,
         }
