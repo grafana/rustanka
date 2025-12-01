@@ -1,10 +1,36 @@
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tabwriter::TabWriter;
 
 use crate::spec::Environment;
+
+/// Recursively prune empty objects from a JSON value (mutates in place)
+fn prune_empty_objects(value: &mut serde_json::Value) {
+	match value {
+		serde_json::Value::Object(map) => {
+			// First, recursively prune nested objects
+			for (_key, val) in map.iter_mut() {
+				prune_empty_objects(val);
+			}
+
+			// Then remove keys with empty object values
+			map.retain(
+				|_key, val| !matches!(val, serde_json::Value::Object(obj) if obj.is_empty()),
+			);
+		}
+		serde_json::Value::Array(arr) => {
+			// Recursively prune objects in arrays
+			for val in arr.iter_mut() {
+				prune_empty_objects(val);
+			}
+		}
+		_ => {}
+	}
+}
 
 /// List environments in the given path
 pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
@@ -14,7 +40,8 @@ pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
 	let mut envs = find_environments(&search_path, &search_path)?;
 
 	if json {
-		// Normalize: convert null resourceDefaults and expectVersions to empty objects
+		// Normalize: convert null resourceDefaults and expectVersions to empty objects,
+		// and prune empty nested objects to match Tanka's behavior
 		for env in &mut envs {
 			env.spec
 				.resource_defaults
@@ -22,6 +49,14 @@ pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
 			env.spec
 				.expect_versions
 				.get_or_insert_with(|| serde_json::json!({}));
+
+			// Prune empty objects from resourceDefaults and expectVersions
+			if let Some(ref mut rd) = env.spec.resource_defaults {
+				prune_empty_objects(rd);
+			}
+			if let Some(ref mut ev) = env.spec.expect_versions {
+				prune_empty_objects(ev);
+			}
 		}
 		println!("{}", serde_json::to_string(&envs)?);
 	} else {
@@ -55,50 +90,66 @@ fn print_table(envs: &[Environment], search_path: &Path) -> Result<()> {
 /// Find all environments recursively
 fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environment>> {
 	let main_files = find_main_jsonnet_files(root)?;
-	let mut environments = Vec::new();
+	let environments = Arc::new(Mutex::new(Vec::new()));
 
-	for main_file in main_files {
-		let dir = main_file.parent().context("No parent directory")?;
-		let spec_file = dir.join("spec.json");
+	// Process files in chunks - use min of CPU count and file count to avoid unnecessary threads
+	let chunk_size = num_cpus::get().min(main_files.len().max(1));
+	for chunk in main_files.chunks(chunk_size) {
+		let chunk_envs: Vec<Vec<Environment>> = chunk
+			.par_iter()
+			.filter_map(|main_file| {
+				let dir = main_file.parent()?;
+				let spec_file = dir.join("spec.json");
 
-		if spec_file.exists() {
-			// Static environment
-			if let Ok(mut env) = load_static_env(dir) {
-				set_env_metadata(&mut env, dir, original_path)?;
-				environments.push(env);
-			}
-		} else {
-			// Inline environment
-			match load_inline_envs(dir) {
-				Ok(mut envs) => {
-					for env in &mut envs {
-						// Inline envs may already have full paths from Jsonnet
-						// Only update name if it doesn't start with "environments/"
-						let should_update_name = if let Some(name) = &env.metadata.name {
-							!name.starts_with("environments/")
-						} else {
-							true
-						};
-
-						if should_update_name {
-							set_env_metadata(env, dir, original_path)?;
-						} else {
-							// Still set namespace even if name is preserved
-							set_env_namespace(env, dir)?;
+				if spec_file.exists() {
+					// Static environment
+					if let Ok(mut env) = load_static_env(dir) {
+						if set_env_metadata(&mut env, dir, original_path).is_ok() {
+							return Some(vec![env]);
 						}
-
-						// Set exportJsonnetImplementation for inline environments
-						env.spec.export_jsonnet_implementation =
-							Some("binary:/usr/local/bin/jrsonnet".to_string());
 					}
-					environments.extend(envs);
+					None
+				} else {
+					// Inline environment
+					match load_inline_envs(dir) {
+						Ok(mut envs) => {
+							for env in &mut envs {
+								// Inline envs may already have full paths from Jsonnet
+								// Only update name if it doesn't start with "environments/"
+								let should_update_name = if let Some(name) = &env.metadata.name {
+									!name.starts_with("environments/")
+								} else {
+									true
+								};
+
+								if should_update_name {
+									let _ = set_env_metadata(env, dir, original_path);
+								} else {
+									// Still set namespace even if name is preserved
+									let _ = set_env_namespace(env, dir);
+								}
+							}
+							Some(envs)
+						}
+						Err(_) => None,
+					}
 				}
-				Err(_) => continue,
-			}
+			})
+			.collect();
+
+		// Collect results from this chunk
+		let mut envs = environments.lock().unwrap();
+		for env_vec in chunk_envs {
+			envs.extend(env_vec);
 		}
 	}
 
-	Ok(environments)
+	let mut final_envs = Arc::try_unwrap(environments).unwrap().into_inner().unwrap();
+
+	// Sort by name
+	final_envs.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
+
+	Ok(final_envs)
 }
 
 /// Set environment metadata (name and namespace)

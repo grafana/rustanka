@@ -247,6 +247,14 @@ pub fn print_json_diff(json1: &str, json2: &str, name1: &str, name2: &str, max_l
 		serde_json::from_str::<serde_json::Value>(json2),
 	) {
 		(Ok(value1), Ok(value2)) => {
+			let full_object_levels = std::env::var("PRINT_FULL_OBJECTS").ok().and_then(|v| {
+				if v == "true" {
+					Some(0)
+				} else {
+					v.parse::<usize>().ok()
+				}
+			});
+
 			eprintln!("\n=== JSON DIFF ===");
 			let mut line_count = 0;
 			print_json_diff_recursive(
@@ -257,6 +265,8 @@ pub fn print_json_diff(json1: &str, json2: &str, name1: &str, name2: &str, max_l
 				name2,
 				&mut line_count,
 				max_lines,
+				full_object_levels,
+				&[],
 			);
 			if line_count >= max_lines {
 				eprintln!("... (truncated, {} lines shown)", max_lines);
@@ -276,6 +286,8 @@ fn print_json_diff_recursive(
 	name2: &str,
 	line_count: &mut usize,
 	max_lines: usize,
+	full_object_levels: Option<usize>,
+	parent_stack: &[(&serde_json::Value, &serde_json::Value)],
 ) {
 	use serde_json::Value;
 
@@ -283,8 +295,53 @@ fn print_json_diff_recursive(
 		return;
 	}
 
+	// Helper to print with context
+	let print_with_context = |path: &str, name: &str, val: &Value, line_count: &mut usize| {
+		if let Some(levels) = full_object_levels {
+			eprintln!("  {} - only in {}", path, name);
+
+			// Go up 'levels' in the parent stack
+			let context_val = if levels == 0 {
+				val
+			} else if levels > parent_stack.len() {
+				// If requesting more levels than available, use the root
+				if name == name1 {
+					parent_stack.first().map(|(v1, _)| v1).unwrap_or(&val)
+				} else {
+					parent_stack.first().map(|(_, v2)| v2).unwrap_or(&val)
+				}
+			} else {
+				// Go up the specified number of levels
+				let idx = parent_stack.len() - levels;
+				if name == name1 {
+					&parent_stack[idx].0
+				} else {
+					&parent_stack[idx].1
+				}
+			};
+
+			eprintln!("    Context ({} levels up) from {}:", levels, name);
+			eprintln!(
+				"{}",
+				serde_json::to_string_pretty(context_val).unwrap_or_default()
+			);
+		} else {
+			eprintln!(
+				"  {} - only in {}: {}",
+				path,
+				name,
+				serde_json::to_string(val).unwrap_or_default()
+			);
+		}
+		*line_count += 1;
+	};
+
 	match (val1, val2) {
 		(Value::Object(obj1), Value::Object(obj2)) => {
+			// Build new parent stack with current values
+			let mut new_stack = parent_stack.to_vec();
+			new_stack.push((val1, val2));
+
 			// Check for keys only in obj1
 			for (key, value1) in obj1.iter() {
 				if *line_count >= max_lines {
@@ -293,16 +350,18 @@ fn print_json_diff_recursive(
 				let new_path = format!("{}.{}", path, key);
 				if let Some(value2) = obj2.get(key) {
 					print_json_diff_recursive(
-						value1, value2, &new_path, name1, name2, line_count, max_lines,
+						value1,
+						value2,
+						&new_path,
+						name1,
+						name2,
+						line_count,
+						max_lines,
+						full_object_levels,
+						&new_stack,
 					);
 				} else {
-					eprintln!(
-						"  {} - only in {}: {}",
-						new_path,
-						name1,
-						serde_json::to_string(value1).unwrap_or_default()
-					);
-					*line_count += 1;
+					print_with_context(&new_path, name1, value1, line_count);
 				}
 			}
 			// Check for keys only in obj2
@@ -312,17 +371,15 @@ fn print_json_diff_recursive(
 				}
 				if !obj1.contains_key(key) {
 					let new_path = format!("{}.{}", path, key);
-					eprintln!(
-						"  {} - only in {}: {}",
-						new_path,
-						name2,
-						serde_json::to_string(value2).unwrap_or_default()
-					);
-					*line_count += 1;
+					print_with_context(&new_path, name2, value2, line_count);
 				}
 			}
 		}
 		(Value::Array(arr1), Value::Array(arr2)) => {
+			// Build new parent stack with current values
+			let mut new_stack = parent_stack.to_vec();
+			new_stack.push((val1, val2));
+
 			let max_len = arr1.len().max(arr2.len());
 			for i in 0..max_len {
 				if *line_count >= max_lines {
@@ -332,54 +389,86 @@ fn print_json_diff_recursive(
 				match (arr1.get(i), arr2.get(i)) {
 					(Some(v1), Some(v2)) => {
 						print_json_diff_recursive(
-							v1, v2, &new_path, name1, name2, line_count, max_lines,
+							v1,
+							v2,
+							&new_path,
+							name1,
+							name2,
+							line_count,
+							max_lines,
+							full_object_levels,
+							&new_stack,
 						);
 					}
 					(Some(v1), None) => {
-						eprintln!(
-							"  {} - only in {}: {}",
-							new_path,
-							name1,
-							serde_json::to_string(v1).unwrap_or_default()
-						);
-						*line_count += 1;
+						print_with_context(&new_path, name1, v1, line_count);
 					}
 					(None, Some(v2)) => {
-						eprintln!(
-							"  {} - only in {}: {}",
-							new_path,
-							name2,
-							serde_json::to_string(v2).unwrap_or_default()
-						);
-						*line_count += 1;
+						print_with_context(&new_path, name2, v2, line_count);
 					}
 					(None, None) => {}
 				}
 			}
 		}
 		(v1, v2) if v1 != v2 => {
-			if *line_count + 2 <= max_lines {
+			if let Some(levels) = full_object_levels {
+				eprintln!("  {} - values differ", path);
+
+				// Get context for val1
+				let context_val1 = if levels == 0 {
+					v1
+				} else if levels > parent_stack.len() {
+					parent_stack.first().map(|(v1, _)| v1).unwrap_or(&v1)
+				} else {
+					let idx = parent_stack.len() - levels;
+					&parent_stack[idx].0
+				};
+
+				// Get context for val2
+				let context_val2 = if levels == 0 {
+					v2
+				} else if levels > parent_stack.len() {
+					parent_stack.first().map(|(_, v2)| v2).unwrap_or(&v2)
+				} else {
+					let idx = parent_stack.len() - levels;
+					&parent_stack[idx].1
+				};
+
+				eprintln!("    Context ({} levels up) from {}:", levels, name1);
 				eprintln!(
-					"  {} - {}: {}",
-					path,
-					name1,
-					serde_json::to_string(v1).unwrap_or_default()
+					"{}",
+					serde_json::to_string_pretty(context_val1).unwrap_or_default()
 				);
+				eprintln!("    Context ({} levels up) from {}:", levels, name2);
 				eprintln!(
-					"  {} - {}: {}",
-					path,
-					name2,
-					serde_json::to_string(v2).unwrap_or_default()
-				);
-				*line_count += 2;
-			} else if *line_count + 1 <= max_lines {
-				eprintln!(
-					"  {} - {}: {}",
-					path,
-					name1,
-					serde_json::to_string(v1).unwrap_or_default()
+					"{}",
+					serde_json::to_string_pretty(context_val2).unwrap_or_default()
 				);
 				*line_count += 1;
+			} else {
+				if *line_count + 2 <= max_lines {
+					eprintln!(
+						"  {} - {}: {}",
+						path,
+						name1,
+						serde_json::to_string(v1).unwrap_or_default()
+					);
+					eprintln!(
+						"  {} - {}: {}",
+						path,
+						name2,
+						serde_json::to_string(v2).unwrap_or_default()
+					);
+					*line_count += 2;
+				} else if *line_count + 1 <= max_lines {
+					eprintln!(
+						"  {} - {}: {}",
+						path,
+						name1,
+						serde_json::to_string(v1).unwrap_or_default()
+					);
+					*line_count += 1;
+				}
 			}
 		}
 		_ => {}

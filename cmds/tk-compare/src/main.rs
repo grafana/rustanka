@@ -31,7 +31,17 @@ fn main() -> Result<()> {
 			.ok()
 			.and_then(|v| v.parse::<usize>().ok())
 			.unwrap_or(100);
-		eprintln!("DEBUG mode enabled (max {} diff lines)\n", max_lines);
+		let full_object_config = std::env::var("PRINT_FULL_OBJECTS").ok();
+		eprintln!("DEBUG mode enabled (max {} diff lines)", max_lines);
+		if let Some(config) = full_object_config {
+			if config == "true" {
+				eprintln!("PRINT_FULL_OBJECTS: enabled (0 levels - current object)\n");
+			} else if let Ok(levels) = config.parse::<usize>() {
+				eprintln!("PRINT_FULL_OBJECTS: enabled ({} levels up)\n", levels);
+			}
+		} else {
+			eprintln!();
+		}
 		max_lines
 	} else {
 		100 // Default even when debug is off
