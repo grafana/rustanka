@@ -600,6 +600,9 @@ pub fn print_string_diff(str1: &str, str2: &str, name1: &str, name2: &str, max_l
 	eprintln!("\n=== TEXT DIFF ===");
 	let diff = TextDiff::from_lines(str1, str2);
 
+	// Calculate padding for name alignment
+	let max_name_len = name1.len().max(name2.len());
+
 	let mut line_count = 0;
 	for change in diff.iter_all_changes() {
 		if line_count >= max_lines {
@@ -615,8 +618,8 @@ pub fn print_string_diff(str1: &str, str2: &str, name1: &str, name2: &str, max_l
 
 		if change.tag() != ChangeTag::Equal {
 			let prefix = match change.tag() {
-				ChangeTag::Delete => format!("({}) ", name1),
-				ChangeTag::Insert => format!("({}) ", name2),
+				ChangeTag::Delete => format!("({:width$}) ", name1, width = max_name_len),
+				ChangeTag::Insert => format!("({:width$}) ", name2, width = max_name_len),
 				ChangeTag::Equal => String::new(),
 			};
 			eprint!("{}{}{}", sign, prefix, change);
@@ -635,6 +638,9 @@ pub fn print_directory_file_diffs(
 	use similar::{ChangeTag, TextDiff};
 
 	eprintln!("\n=== DIRECTORY FILE DIFFS ===");
+
+	// Calculate padding for name alignment
+	let max_name_len = name1.len().max(name2.len());
 
 	let mut total_line_count = 0;
 	for file_diff in file_diffs {
@@ -671,8 +677,12 @@ pub fn print_directory_file_diffs(
 
 					if change.tag() != ChangeTag::Equal {
 						let prefix = match change.tag() {
-							ChangeTag::Delete => format!("({}) ", name1),
-							ChangeTag::Insert => format!("({}) ", name2),
+							ChangeTag::Delete => {
+								format!("({:width$}) ", name1, width = max_name_len)
+							}
+							ChangeTag::Insert => {
+								format!("({:width$}) ", name2, width = max_name_len)
+							}
 							ChangeTag::Equal => String::new(),
 						};
 						eprint!("  {}{}{}", sign, prefix, change);

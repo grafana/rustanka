@@ -363,6 +363,9 @@ fn export_single_env(
 		// Inject namespace if needed (matching Tanka's behavior in pkg/process/namespace.go)
 		inject_namespace(&mut manifest, &result.spec);
 
+		// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
+		inject_environment_label(&mut manifest, &result.spec);
+
 		let filename =
 			format_filename_gtmpl(&manifest, &result.spec, &opts.format).map_err(|e| {
 				// Template errors after validation are fatal (something very wrong)
@@ -411,8 +414,16 @@ fn export_single_env(
 			serde_json::to_string_pretty(&manifest)
 				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
 		} else {
-			serde_yaml::to_string(&manifest)
-				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
+			// Use 4-space indentation and 2-space array indentation to match Go's yaml.v3 output
+			let options = serde_saphyr::SerializerOptions {
+				indent_step: 2,
+				indent_array: Some(0),
+				..Default::default()
+			};
+			let mut output = String::new();
+			serde_saphyr::to_fmt_writer_with_options(&mut output, &manifest, options)
+				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+			output
 		};
 
 		fs::write(&filepath, content)
@@ -598,6 +609,71 @@ fn inject_namespace(manifest: &mut JsonValue, env_spec: &Option<crate::spec::Env
 			}
 		}
 	}
+}
+
+/// Inject tanka.dev/environment label into manifest metadata
+/// This replicates the behavior from Tanka's pkg/process/process.go
+fn inject_environment_label(manifest: &mut JsonValue, env_spec: &Option<crate::spec::Environment>) {
+	// Only inject if env_spec exists and injectLabels is true
+	let Some(env) = env_spec else { return };
+	if !env.spec.inject_labels.unwrap_or(false) {
+		return;
+	}
+
+	// Generate the label value using SHA256 hash of "name:namespace"
+	// This matches Tanka's NameLabel() implementation
+	let label_value = generate_environment_label(env);
+
+	// Inject the label
+	if let JsonValue::Object(ref mut obj) = manifest {
+		// Ensure metadata exists
+		if !obj.contains_key("metadata") {
+			obj.insert(
+				"metadata".to_string(),
+				JsonValue::Object(serde_json::Map::new()),
+			);
+		}
+
+		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
+			// Ensure labels exists
+			if !metadata.contains_key("labels") {
+				metadata.insert(
+					"labels".to_string(),
+					JsonValue::Object(serde_json::Map::new()),
+				);
+			}
+
+			// Add the tanka.dev/environment label
+			if let Some(JsonValue::Object(ref mut labels)) = metadata.get_mut("labels") {
+				labels.insert(
+					"tanka.dev/environment".to_string(),
+					JsonValue::String(label_value),
+				);
+			}
+		}
+	}
+}
+
+/// Generate the tanka.dev/environment label value
+/// This replicates Tanka's NameLabel() function which creates a SHA256 hash
+/// of the environment's metadata.name and metadata.namespace
+fn generate_environment_label(env: &crate::spec::Environment) -> String {
+	use sha2::{Digest, Sha256};
+
+	// By default, use metadata.name and metadata.namespace
+	// Format: "name:namespace"
+	let name = env.metadata.name.as_deref().unwrap_or("");
+	let namespace = env.metadata.namespace.as_deref().unwrap_or("");
+	let label_parts = format!("{}:{}", name, namespace);
+
+	// Compute SHA256 hash
+	let mut hasher = Sha256::new();
+	hasher.update(label_parts.as_bytes());
+	let result = hasher.finalize();
+
+	// Convert to hex and take first 48 characters
+	let hex = format!("{:x}", result);
+	hex.chars().take(48).collect()
 }
 
 /// Sanitize a string for use as a path component
