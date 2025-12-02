@@ -82,7 +82,8 @@ pub struct CommandReport {
 
 impl CommandReport {
 	pub fn print(&self, index: usize) {
-		println!("\n{}", format!("=== Command {} ===", index + 1).bold());
+		let _ = index; // Suppress unused variable warning
+		println!("\n{}", "=== Command ===".bold());
 		println!("Command: {}", self.command.cyan());
 
 		// Exit code
@@ -251,28 +252,28 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 	println!("|---------|-----------|--------|");
 
 	for report in reports {
-		// Exit code status
+		// Exit code status with emojis
 		let exit_status = if report.both_failed_unexpectedly {
-			"✗"
+			"❌"
 		} else if !report.exit_codes_consistent {
-			"✗"
+			"❌"
 		} else if report.exit_code_matched {
-			"✓"
+			"✅"
 		} else {
-			"✗"
+			"❌"
 		};
 
-		// Output status (three levels)
+		// Output status (three levels) with emojis
 		let output_status = if report.stdout_matched {
-			"✓".to_string()
+			"✅".to_string()
 		} else if let Some((similarity, _, _)) = report.stdout_similarity {
 			if similarity >= 99.5 {
-				format!("~ {:.1}%", similarity)
+				format!("⚠️ {:.1}%", similarity)
 			} else {
-				format!("✗ {:.1}%", similarity)
+				format!("❌ {:.1}%", similarity)
 			}
 		} else {
-			"✗".to_string()
+			"❌".to_string()
 		};
 
 		// Truncate command if too long
@@ -290,10 +291,10 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 	// Performance summary
 	println!("### Performance Summary");
 	println!();
-	println!("| Cmd | Result | Command |");
-	println!("|-----|--------|---------|");
+	println!("| Command | Result |");
+	println!("|---------|--------|");
 
-	for (idx, report) in reports.iter().enumerate() {
+	for report in reports {
 		if report.runs > 1 {
 			let exec1_ms = report.exec1_stats.median.as_millis();
 			let exec2_ms = report.exec2_stats.median.as_millis();
@@ -321,7 +322,7 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 				report.command.clone()
 			};
 
-			println!("| {} | {} {} | `{}` |", idx + 1, emoji, speed_text, cmd);
+			println!("| `{}` | {} {} |", cmd, emoji, speed_text);
 		}
 	}
 

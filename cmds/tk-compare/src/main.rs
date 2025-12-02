@@ -421,7 +421,7 @@ fn main() -> Result<()> {
 			!command.expect_error && exec1_exit_code != 0 && exec2_exit_code != 0;
 
 		let report = CommandReport {
-			command: command.as_string(),
+			command: command.display_name(),
 			runs,
 			exit_code_matched,
 			exit_codes_consistent,

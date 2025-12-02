@@ -28,32 +28,38 @@ working_dir = "${DEPLOYMENT_TOOLS_PATH}/ksonnet"
 
 # ==================== ENV LIST COMMANDS ====================
 [[commands]]
+name = "env list: mimir-ops-03"
 args = ["env", "list", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--json"]
 runs = 5
 json_compare = true
 
 [[commands]]
+name = "env list: aws-metric-streams"
 args = ["env", "list", "environments/aws-metric-streams", "--json"]
 runs = 5
 json_compare = true
 
 [[commands]]
+name = "env list: grafana-o11y"
 args = ["env", "list", "environments/grafana-o11y", "--json"]
 runs = 5
 json_compare = true
 
 [[commands]]
+name = "env list: all environments"
 args = ["env", "list", "environments", "--json"]
 runs = 3
 json_compare = true
 
 # ==================== EVAL COMMANDS ====================
 [[commands]]
+name = "eval: mimir-ops-03"
 args = ["eval", "environments/cortex/ops-eu-south-0.mimir-ops-03"]
 runs = 3
 json_compare = true
 
 [[commands]]
+name = "eval: flux-system"
 args = ["eval", "environments/flux-system"]
 runs = 3
 json_compare = true
@@ -64,17 +70,20 @@ json_compare = true
 # Note: Export is slower, so fewer runs. dir_compare compares the output directories.
 
 [[commands]]
+name = "export: mimir-ops-03"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: grafana-o11y"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 1
 dir_compare = true
 
 # Multi-environment export (all cortex environments)
 [[commands]]
+name = "export: all cortex environments"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 1
 dir_compare = true

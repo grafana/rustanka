@@ -25,6 +25,8 @@ fn default_exec2_name() -> String {
 #[derive(Debug, Deserialize)]
 pub struct Command {
 	pub args: Vec<String>,
+	#[serde(default)]
+	pub name: Option<String>,
 	#[serde(default = "default_runs")]
 	pub runs: usize,
 	#[serde(default)]
@@ -110,6 +112,10 @@ impl Command {
 		self.args.join(" ")
 	}
 
+	pub fn display_name(&self) -> String {
+		self.name.clone().unwrap_or_else(|| self.as_string())
+	}
+
 	/// Get args with placeholders substituted for a specific executable
 	/// Supports {{EXEC_NAME}} placeholder which gets replaced with the executable name
 	pub fn args_for_exec(&self, exec_name: &str) -> Vec<String> {
@@ -133,6 +139,7 @@ mod tests {
 				"/tmp/{{EXEC_NAME}}/out".to_string(),
 				"path".to_string(),
 			],
+			name: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: true,
@@ -147,6 +154,7 @@ mod tests {
 	fn test_args_for_exec_multiple_placeholders() {
 		let cmd = Command {
 			args: vec!["/{{EXEC_NAME}}/{{EXEC_NAME}}".to_string()],
+			name: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,
@@ -161,6 +169,7 @@ mod tests {
 	fn test_args_for_exec_no_placeholder() {
 		let cmd = Command {
 			args: vec!["eval".to_string(), "path".to_string()],
+			name: None,
 			runs: 1,
 			json_compare: true,
 			dir_compare: false,
@@ -175,6 +184,7 @@ mod tests {
 	fn test_as_string() {
 		let cmd = Command {
 			args: vec!["env".to_string(), "list".to_string(), "--json".to_string()],
+			name: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,
@@ -182,5 +192,33 @@ mod tests {
 		};
 
 		assert_eq!(cmd.as_string(), "env list --json");
+	}
+
+	#[test]
+	fn test_display_name_with_name() {
+		let cmd = Command {
+			args: vec!["eval".to_string(), "path".to_string()],
+			name: Some("Test Command".to_string()),
+			runs: 1,
+			json_compare: false,
+			dir_compare: false,
+			expect_error: false,
+		};
+
+		assert_eq!(cmd.display_name(), "Test Command");
+	}
+
+	#[test]
+	fn test_display_name_without_name() {
+		let cmd = Command {
+			args: vec!["eval".to_string(), "path".to_string()],
+			name: None,
+			runs: 1,
+			json_compare: false,
+			dir_compare: false,
+			expect_error: false,
+		};
+
+		assert_eq!(cmd.display_name(), "eval path");
 	}
 }
