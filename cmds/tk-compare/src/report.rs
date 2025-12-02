@@ -245,11 +245,11 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 	);
 	println!();
 
-	// Correctness table
-	println!("### Correctness");
+	// Combined Correctness and Performance table
+	println!("### Summary");
 	println!();
-	println!("| Command | Exit Code | Output |");
-	println!("|---------|-----------|--------|");
+	println!("| Command | Exit Code | Output | Performance |");
+	println!("|---------|-----------|--------|-------------|");
 
 	for report in reports {
 		// Exit code status with emojis
@@ -276,26 +276,8 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			"❌".to_string()
 		};
 
-		// Truncate command if too long
-		let cmd = if report.command.len() > 50 {
-			format!("{}...", &report.command[..47])
-		} else {
-			report.command.clone()
-		};
-
-		println!("| `{}` | {} | {} |", cmd, exit_status, output_status);
-	}
-
-	println!();
-
-	// Performance summary
-	println!("### Performance Summary");
-	println!();
-	println!("| Command | Result |");
-	println!("|---------|--------|");
-
-	for report in reports {
-		if report.runs > 1 {
+		// Performance status (only if multiple runs)
+		let performance = if report.runs > 1 {
 			let exec1_ms = report.exec1_stats.median.as_millis();
 			let exec2_ms = report.exec2_stats.median.as_millis();
 			let ratio = if exec1_ms > 0 {
@@ -305,30 +287,34 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			};
 
 			let (emoji, speed_text) = if ratio > 1.0 {
-				("🐢", format!("{} is {:.2}x slower", exec2_name, ratio))
+				("🐢", format!("{:.2}x slower", ratio))
 			} else if ratio < 1.0 && ratio > 0.0 {
-				(
-					"🚀",
-					format!("{} is {:.2}x faster", exec2_name, 1.0 / ratio),
-				)
+				("🚀", format!("{:.2}x faster", 1.0 / ratio))
 			} else {
 				("⚡", "same".to_string())
 			};
 
-			// Truncate command if too long
-			let cmd = if report.command.len() > 60 {
-				format!("{}...", &report.command[..57])
-			} else {
-				report.command.clone()
-			};
+			format!("{} {}", emoji, speed_text)
+		} else {
+			"-".to_string()
+		};
 
-			println!("| `{}` | {} {} |", cmd, emoji, speed_text);
-		}
+		// Truncate command if too long
+		let cmd = if report.command.len() > 50 {
+			format!("{}...", &report.command[..47])
+		} else {
+			report.command.clone()
+		};
+
+		println!(
+			"| `{}` | {} | {} | {} |",
+			cmd, exit_status, output_status, performance
+		);
 	}
 
 	println!();
 
-	// Overall summary
+	// Overall summary stats
 	let total = reports.len();
 	let exit_code_matches = reports
 		.iter()
@@ -346,7 +332,7 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 		})
 		.count();
 
-	println!("### Summary");
+	println!("### Overall");
 	println!("- Exit code matches: {}/{}", exit_code_matches, total);
 	println!(
 		"- Output matches: {}/{} ({} near-matches at >= 99.5%)",
