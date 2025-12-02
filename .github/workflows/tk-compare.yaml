@@ -33,6 +33,16 @@ jobs:
           chmod +x /usr/local/bin/tk
           tk --version
 
+      - name: Install jrsonnet
+        run: |
+          git clone https://github.com/CertainLach/jrsonnet.git /tmp/jrsonnet
+          cd /tmp/jrsonnet
+          git checkout 6baa18de6571b015cd2cf1eaac93030250a136a3
+          cargo build --release
+          sudo cp target/release/jrsonnet /usr/local/bin/jrsonnet
+          sudo chmod +x /usr/local/bin/jrsonnet
+          jrsonnet --version
+
       - id: get-secrets
         uses: grafana/shared-workflows/actions/get-vault-secrets@get-vault-secrets/v1.3.0
         with:
