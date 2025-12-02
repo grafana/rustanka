@@ -12,9 +12,103 @@ use serde::Deserialize;
 use serde_json;
 use serde_yaml_with_quirks as serde_yaml;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::{BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::sync::RwLock;
 use std::thread;
+
+// Global Helm template cache - caches raw YAML output from helm to avoid
+// redundant helm invocations (same optimization as Go Tanka)
+// We cache the raw YAML string rather than Val because Val doesn't implement Sync
+static HELM_TEMPLATE_CACHE: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
+
+/// Get or create the Helm template cache
+fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
+	// Initialize the cache if needed
+	{
+		let read = HELM_TEMPLATE_CACHE.read().unwrap();
+		if read.is_some() {
+			return &HELM_TEMPLATE_CACHE;
+		}
+	}
+	{
+		let mut write = HELM_TEMPLATE_CACHE.write().unwrap();
+		if write.is_none() {
+			*write = Some(HashMap::new());
+		}
+	}
+	&HELM_TEMPLATE_CACHE
+}
+
+/// Parse YAML output from helm into a Val object
+fn parse_helm_yaml_output(yaml_content: &str) -> Result<Val> {
+	use jrsonnet_evaluator::ObjValueBuilder;
+	let mut builder = ObjValueBuilder::new();
+	let deserializer = serde_yaml::Deserializer::from_str(yaml_content);
+
+	for document in deserializer {
+		let val: Val = Val::deserialize(document)
+			.map_err(|e| RuntimeError(format!("failed to parse helm output: {e}").into()))?;
+		// Skip null documents
+		if matches!(val, Val::Null) {
+			continue;
+		}
+
+		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
+		let key = if let Val::Obj(ref obj) = val {
+			let kind = obj
+				.get("kind".into())?
+				.and_then(|v| match v {
+					Val::Str(s) => Some(to_snake_case(&s.to_string())),
+					_ => None,
+				})
+				.unwrap_or_else(|| "unknown".to_string());
+
+			let metadata = obj.get("metadata".into())?;
+			let name = if let Some(Val::Obj(meta)) = metadata {
+				meta.get("name".into())?
+					.and_then(|v| match v {
+						Val::Str(s) => Some(to_snake_case(&s.to_string())),
+						_ => None,
+					})
+					.unwrap_or_else(|| "unknown".to_string())
+			} else {
+				"unknown".to_string()
+			};
+
+			format!("{}_{}", kind, name)
+		} else {
+			"unknown".to_string()
+		};
+
+		builder.field(&key).try_value(val)?;
+	}
+
+	Ok(Val::Obj(builder.build()))
+}
+
+/// Generate a cache key for Helm template
+fn helm_cache_key(
+	name: &str,
+	chart_path: &str,
+	namespace: Option<&str>,
+	values_json: Option<&str>,
+) -> String {
+	let mut hasher = Sha256::new();
+	hasher.update(name.as_bytes());
+	hasher.update(b"|");
+	hasher.update(chart_path.as_bytes());
+	hasher.update(b"|");
+	if let Some(ns) = namespace {
+		hasher.update(ns.as_bytes());
+	}
+	hasher.update(b"|");
+	if let Some(v) = values_json {
+		hasher.update(v.as_bytes());
+	}
+	format!("{:x}", hasher.finalize())
+}
 
 /// Convert a string to snake_case (lowercase with underscores)
 fn to_snake_case(s: &str) -> String {
@@ -191,7 +285,7 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 			let chart_relative = if chart.starts_with('/') {
 				format!(".{}", chart)
 			} else {
-				chart.clone()
+				chart
 			};
 			// Join the chart path with the directory
 			let chart_full = dir.join(&chart_relative);
@@ -218,31 +312,58 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		return Err(RuntimeError("calledFrom must be a string".into()).into());
 	};
 
+	// Extract namespace for cache key
+	let namespace = if let Some(ns) = opts.get("namespace".into())? {
+		if let Val::Str(s) = ns {
+			Some(s.to_string())
+		} else {
+			None
+		}
+	} else {
+		None
+	};
+
+	// Extract values and serialize to JSON for cache key
+	let values_json =
+		if let Some(values) = opts.get("values".into())? {
+			Some(serde_json::to_string(&values).map_err(|e| {
+				RuntimeError(format!("failed to serialize values to json: {e}").into())
+			})?)
+		} else {
+			None
+		};
+
+	// Check cache first
+	let cache_key = helm_cache_key(
+		&name,
+		&chart_path,
+		namespace.as_deref(),
+		values_json.as_deref(),
+	);
+	{
+		let cache = get_helm_cache();
+		let read = cache.read().unwrap();
+		if let Some(ref map) = *read {
+			if let Some(cached_yaml) = map.get(&cache_key) {
+				// Cache hit - parse the cached YAML
+				return parse_helm_yaml_output(cached_yaml);
+			}
+		}
+	}
+
 	let mut cmd = Command::new("helm");
 	cmd.arg("template");
 	cmd.arg(&name);
 	cmd.arg(&chart_path);
 
-	// Parse other options
-	// namespace
-	if let Some(ns) = opts.get("namespace".into())? {
-		if let Val::Str(s) = ns {
-			cmd.arg("--namespace");
-			cmd.arg(&s.to_string());
-		}
+	// Add namespace if present
+	if let Some(ref ns) = namespace {
+		cmd.arg("--namespace");
+		cmd.arg(ns);
 	}
 
-	// values - marshal as JSON (which is valid YAML) and pipe to helm via stdin
-	let values_yaml = if let Some(values) = opts.get("values".into())? {
-		let json_str = serde_json::to_string(&values)
-			.map_err(|e| RuntimeError(format!("failed to serialize values to json: {e}").into()))?;
-		Some(json_str)
-	} else {
-		None
-	};
-
 	// If we have values, configure stdin and add --values=-
-	if values_yaml.is_some() {
+	if values_json.is_some() {
 		cmd.arg("--values=-");
 		cmd.stdin(Stdio::piped());
 	}
@@ -254,9 +375,9 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		.map_err(|e| RuntimeError(format!("failed to execute helm: {e}").into()))?;
 
 	// Write values to stdin if present, then close it
-	if let Some(yaml) = values_yaml {
+	if let Some(ref json) = values_json {
 		if let Some(mut stdin) = child.stdin.take() {
-			stdin.write_all(yaml.as_bytes()).map_err(|e| {
+			stdin.write_all(json.as_bytes()).map_err(|e| {
 				RuntimeError(format!("failed to write values to helm stdin: {e}").into())
 			})?;
 			// Close stdin explicitly
@@ -274,7 +395,14 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		.take()
 		.ok_or_else(|| RuntimeError("failed to capture helm stderr".into()))?;
 
-	// Spawn a thread to collect stderr
+	// Spawn threads to collect stdout and stderr in parallel
+	let stdout_handle = thread::spawn(move || {
+		let mut stdout_buf = Vec::new();
+		let mut stdout_reader = BufReader::new(stdout);
+		stdout_reader.read_to_end(&mut stdout_buf).ok();
+		stdout_buf
+	});
+
 	let stderr_handle = thread::spawn(move || {
 		let mut stderr_buf = Vec::new();
 		let mut stderr_reader = BufReader::new(stderr);
@@ -282,54 +410,15 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		stderr_buf
 	});
 
-	// Parse YAML output while streaming from stdout
-	use jrsonnet_evaluator::ObjValueBuilder;
-	let mut builder = ObjValueBuilder::new();
-	let stdout_reader = BufReader::new(stdout);
-	let deserializer = serde_yaml::Deserializer::from_reader(stdout_reader);
-
-	for document in deserializer {
-		let val: Val = Val::deserialize(document)
-			.map_err(|e| RuntimeError(format!("failed to parse helm output: {e}").into()))?;
-		// Skip null documents
-		if matches!(val, Val::Null) {
-			continue;
-		}
-
-		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
-		let key = if let Val::Obj(ref obj) = val {
-			let kind = obj
-				.get("kind".into())?
-				.and_then(|v| match v {
-					Val::Str(s) => Some(to_snake_case(&s.to_string())),
-					_ => None,
-				})
-				.unwrap_or_else(|| "unknown".to_string());
-
-			let metadata = obj.get("metadata".into())?;
-			let name = if let Some(Val::Obj(meta)) = metadata {
-				meta.get("name".into())?
-					.and_then(|v| match v {
-						Val::Str(s) => Some(to_snake_case(&s.to_string())),
-						_ => None,
-					})
-					.unwrap_or_else(|| "unknown".to_string())
-			} else {
-				"unknown".to_string()
-			};
-
-			format!("{}_{}", kind, name)
-		} else {
-			"unknown".to_string()
-		};
-
-		builder.field(&key).try_value(val)?;
-	}
-
 	// Wait for the process to complete
 	let status = child
 		.wait()
 		.map_err(|e| RuntimeError(format!("failed to wait for helm: {e}").into()))?;
+
+	// Get stdout from the thread
+	let stdout_buf = stdout_handle
+		.join()
+		.map_err(|_| RuntimeError("failed to join stdout thread".into()))?;
 
 	// Get stderr from the thread
 	let stderr_buf = stderr_handle
@@ -342,7 +431,21 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		return Err(RuntimeError(format!("helm template failed: {stderr}").into()).into());
 	}
 
-	Ok(Val::Obj(builder.build()))
+	// Convert stdout to string (YAML content)
+	let yaml_content = String::from_utf8(stdout_buf)
+		.map_err(|e| RuntimeError(format!("invalid UTF-8 in helm output: {e}").into()))?;
+
+	// Store raw YAML in cache before parsing
+	{
+		let cache = get_helm_cache();
+		let mut write = cache.write().unwrap();
+		if let Some(ref mut map) = *write {
+			map.insert(cache_key, yaml_content.clone());
+		}
+	}
+
+	// Parse and return the YAML output
+	parse_helm_yaml_output(&yaml_content)
 }
 
 /// Tanka-compatible kustomizeBuild

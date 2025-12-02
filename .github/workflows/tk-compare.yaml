@@ -51,28 +51,103 @@ jobs:
         run: |
           make tk-compare-grafana DEPLOYMENT_TOOLS_PATH=$(pwd)/../deployment_tools TK_PATH=/usr/local/bin/tk | tee ../comparison-output.txt
 
-      - name: Prepare comment body
-        id: prepare_comment
+      - name: Prepare artifact and summary
+        id: prepare_summary
         run: |
-          if [ -f comparison-output.txt ]; then
-            echo "comment<<EOF" >> $GITHUB_OUTPUT
-            echo "## 🔬 Tanka Comparison Results" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "Comparing [Grafana Tanka](https://github.com/grafana/tanka) with rustanka:" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo '```' >> $GITHUB_OUTPUT
-            cat comparison-output.txt >> $GITHUB_OUTPUT
-            echo '```' >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+          # Generate artifact filename with PR number and commit hash
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUM="${{ github.event.pull_request.number }}"
+            ARTIFACT_NAME="comparison_output_pr${PR_NUM}_${SHORT_SHA}.txt"
           else
-            echo "comment=No comparison output available" >> $GITHUB_OUTPUT
+            ARTIFACT_NAME="comparison_output_${SHORT_SHA}.txt"
           fi
+          
+          # Rename the output file
+          if [ -f comparison-output.txt ]; then
+            cp comparison-output.txt "${ARTIFACT_NAME}"
+            echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Extract performance summary from output
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "## 🔬 Tanka Comparison Results" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "Comparing [Grafana Tanka](https://github.com/grafana/tanka) \`tk\` with \`rtk\` (rustanka):" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          
+          if [ -f comparison-output.txt ]; then
+            # Extract the summary section
+            echo "### Performance Summary" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "| Cmd | Result | Command |" >> $GITHUB_OUTPUT
+            echo "|-----|--------|---------|" >> $GITHUB_OUTPUT
+            
+            # Parse each command's comparison result
+            CMD_NUM=0
+            CURRENT_CMD=""
+            while IFS= read -r line; do
+              # Capture the command string
+              if echo "$line" | grep -q "^Command:"; then
+                CURRENT_CMD=$(echo "$line" | sed 's/^Command: //')
+              fi
+              
+              # Look for "Comparison (median):" lines which contain the speed comparison
+              if echo "$line" | grep -q "Comparison (median):"; then
+                CMD_NUM=$((CMD_NUM + 1))
+                SPEED=$(echo "$line" | sed 's/.*Comparison (median): //')
+                
+                # Determine if faster or slower
+                if echo "$SPEED" | grep -q "faster"; then
+                  EMOJI="🚀"
+                elif echo "$SPEED" | grep -q "slower"; then
+                  EMOJI="🐢"
+                else
+                  EMOJI="⚡"
+                fi
+                
+                # Truncate command if too long for table readability
+                SHORT_CMD="$CURRENT_CMD"
+                if [ ${#SHORT_CMD} -gt 60 ]; then
+                  SHORT_CMD="${SHORT_CMD:0:57}..."
+                fi
+                
+                echo "| ${CMD_NUM} | ${EMOJI} ${SPEED} | \`${SHORT_CMD}\` |" >> $GITHUB_OUTPUT
+              fi
+            done < comparison-output.txt
+            
+            echo "" >> $GITHUB_OUTPUT
+            
+            # Extract overall summary
+            if grep -q "Exit code matches:" comparison-output.txt; then
+              EXIT_MATCH=$(grep "Exit code matches:" comparison-output.txt | tail -1)
+              STDOUT_MATCH=$(grep "Stdout matches:" comparison-output.txt | tail -1)
+              echo "### Correctness" >> $GITHUB_OUTPUT
+              echo "- ${EXIT_MATCH}" >> $GITHUB_OUTPUT
+              echo "- ${STDOUT_MATCH}" >> $GITHUB_OUTPUT
+              echo "" >> $GITHUB_OUTPUT
+            fi
+            
+            # Check for pass/fail
+            if grep -q "All tests passed" comparison-output.txt; then
+              echo "✅ **All tests passed!**" >> $GITHUB_OUTPUT
+            elif grep -q "Some tests failed" comparison-output.txt; then
+              echo "❌ **Some tests failed** - see full output for details" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ No comparison output available" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "" >> $GITHUB_OUTPUT
+          echo "---" >> $GITHUB_OUTPUT
+          echo "📎 [View full comparison output](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Post PR comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         env:
-          COMMENT_BODY: ${{ steps.prepare_comment.outputs.comment }}
+          COMMENT_BODY: ${{ steps.prepare_summary.outputs.summary }}
         with:
           script: |
             const comment = process.env.COMMENT_BODY;
@@ -111,7 +186,7 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         env:
-          COMMENT_BODY: ${{ steps.prepare_comment.outputs.comment }}
+          COMMENT_BODY: ${{ steps.prepare_summary.outputs.summary }}
         with:
           script: |
             const comment = process.env.COMMENT_BODY;
@@ -126,8 +201,8 @@ jobs:
       - name: Upload comparison output
         uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4
         with:
-          name: tk-compare-output
-          path: comparison-output.txt
+          name: ${{ steps.prepare_summary.outputs.artifact_name || 'comparison-output.txt' }}
+          path: ${{ steps.prepare_summary.outputs.artifact_name || 'comparison-output.txt' }}
           if-no-files-found: ignore
 
       - name: Upload workspace on failure

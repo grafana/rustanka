@@ -31,6 +31,9 @@ pub struct Command {
 	pub runs: usize,
 	#[serde(default)]
 	pub json_compare: bool,
+	/// Compare output directories instead of stdout (for export commands)
+	#[serde(default)]
+	pub dir_compare: bool,
 }
 
 fn default_runs() -> usize {
@@ -104,5 +107,78 @@ fn expand_env_vars(s: &str) -> String {
 impl Command {
 	pub fn as_string(&self) -> String {
 		self.args.join(" ")
+	}
+
+	/// Get args with placeholders substituted for a specific executable
+	/// Supports {{EXEC_NAME}} placeholder which gets replaced with the executable name
+	pub fn args_for_exec(&self, exec_name: &str) -> Vec<String> {
+		self.args
+			.iter()
+			.map(|arg| arg.replace("{{EXEC_NAME}}", exec_name))
+			.collect()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_args_for_exec_basic() {
+		let cmd = Command {
+			args: vec![
+				"export".to_string(),
+				"/tmp/{{EXEC_NAME}}/out".to_string(),
+				"path".to_string(),
+			],
+			result_dir: None,
+			runs: 1,
+			json_compare: false,
+			dir_compare: true,
+		};
+
+		let args = cmd.args_for_exec("rtk");
+		assert_eq!(args, vec!["export", "/tmp/rtk/out", "path"]);
+	}
+
+	#[test]
+	fn test_args_for_exec_multiple_placeholders() {
+		let cmd = Command {
+			args: vec!["/{{EXEC_NAME}}/{{EXEC_NAME}}".to_string()],
+			result_dir: None,
+			runs: 1,
+			json_compare: false,
+			dir_compare: false,
+		};
+
+		let args = cmd.args_for_exec("test");
+		assert_eq!(args, vec!["/test/test"]);
+	}
+
+	#[test]
+	fn test_args_for_exec_no_placeholder() {
+		let cmd = Command {
+			args: vec!["eval".to_string(), "path".to_string()],
+			result_dir: None,
+			runs: 1,
+			json_compare: true,
+			dir_compare: false,
+		};
+
+		let args = cmd.args_for_exec("rtk");
+		assert_eq!(args, vec!["eval", "path"]);
+	}
+
+	#[test]
+	fn test_as_string() {
+		let cmd = Command {
+			args: vec!["env".to_string(), "list".to_string(), "--json".to_string()],
+			result_dir: None,
+			runs: 1,
+			json_compare: false,
+			dir_compare: false,
+		};
+
+		assert_eq!(cmd.as_string(), "env list --json");
 	}
 }

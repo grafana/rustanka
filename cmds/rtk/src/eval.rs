@@ -19,7 +19,7 @@ use crate::spec::Environment;
 const ENV_EXT_CODE_KEY: &str = "tanka.dev/environment";
 
 /// Options for evaluation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EvalOpts {
 	/// External variables (string values)
 	pub ext_str: HashMap<String, String>,

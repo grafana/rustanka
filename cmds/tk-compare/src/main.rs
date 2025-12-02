@@ -8,6 +8,43 @@ mod runner;
 use config::Config;
 use report::CommandReport;
 
+/// Find output directory in export command args
+/// Looks for positional argument after "export" subcommand (first non-flag arg)
+fn find_output_dir_in_args(args: &[String]) -> Option<String> {
+	let mut found_export = false;
+	for arg in args {
+		if arg == "export" {
+			found_export = true;
+			continue;
+		}
+		if found_export && !arg.starts_with('-') {
+			return Some(arg.clone());
+		}
+	}
+	None
+}
+
+/// Clean up export output directories for a command (both exec1 and exec2 variants)
+fn cleanup_export_dirs(command: &config::Command, exec1_name: &str, exec2_name: &str) {
+	if !command.dir_compare {
+		return;
+	}
+
+	let args1 = command.args_for_exec(exec1_name);
+	let args2 = command.args_for_exec(exec2_name);
+
+	if let Some(dir) = find_output_dir_in_args(&args1) {
+		if std::path::Path::new(&dir).exists() {
+			let _ = std::fs::remove_dir_all(&dir);
+		}
+	}
+	if let Some(dir) = find_output_dir_in_args(&args2) {
+		if std::path::Path::new(&dir).exists() {
+			let _ = std::fs::remove_dir_all(&dir);
+		}
+	}
+}
+
 #[derive(Parser)]
 #[command(name = "tk-compare")]
 #[command(about = "Integration testing and benchmarking tool for comparing two executables", long_about = None)]
@@ -164,6 +201,9 @@ fn main() -> Result<()> {
 			index + 1
 		};
 
+		// Clean up export directories before running (if dir_compare is enabled)
+		cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
+
 		if runs > 1 {
 			eprintln!(
 				"Running command {}/{}: {} ({} runs)",
@@ -200,10 +240,14 @@ fn main() -> Result<()> {
 				std::io::stderr().flush().ok();
 			}
 
+			// Get args for each executable (may differ due to {{EXEC_NAME}} substitution)
+			let args1 = command.args_for_exec(&config.tk_exec_1_name);
+			let args2 = command.args_for_exec(&config.tk_exec_2_name);
+
 			// Run with exec1 in its workspace
 			let result1 = runner::run_command(
 				&exec1_str,
-				&command.args,
+				&args1,
 				workspace1.as_deref(),
 				config.working_dir.as_deref(),
 			)?;
@@ -211,7 +255,7 @@ fn main() -> Result<()> {
 			// Run with exec2 in its workspace
 			let result2 = runner::run_command(
 				&exec2_str,
-				&command.args,
+				&args2,
 				workspace2.as_deref(),
 				config.working_dir.as_deref(),
 			)?;
@@ -223,8 +267,47 @@ fn main() -> Result<()> {
 			if run == 0 {
 				exit_code_matched = result1.exit_code == result2.exit_code;
 
-				// Use JSON comparison if enabled, otherwise use string comparison
-				stdout_matched = if command.json_compare {
+				// Use directory comparison for export commands, JSON comparison if enabled, otherwise string
+				stdout_matched = if command.dir_compare {
+					// For dir_compare, look for output directories in args ({{EXEC_NAME}} substituted)
+					let dir1 = find_output_dir_in_args(&args1);
+					let dir2 = find_output_dir_in_args(&args2);
+
+					match (dir1, dir2) {
+						(Some(d1), Some(d2)) => {
+							match runner::compare_directories_detailed(&d1, &d2) {
+								Ok((matched, similarity, matched_files, total_files, diffs)) => {
+									stdout_similarity =
+										Some((similarity, matched_files, total_files));
+									if !matched && debug_mode {
+										eprintln!("\n=== DIRECTORY DIFF ===");
+										for diff in diffs.iter().take(debug_max_lines) {
+											eprintln!("  {}", diff);
+										}
+										if diffs.len() > debug_max_lines {
+											eprintln!(
+												"... ({} more differences)",
+												diffs.len() - debug_max_lines
+											);
+										}
+									}
+									matched
+								}
+								Err(e) => {
+									eprintln!("\nWarning: Directory comparison failed: {}", e);
+									false
+								}
+							}
+						}
+						_ => {
+							eprintln!(
+								"\nWarning: Could not find output directories to compare in args"
+							);
+							// Fall back to stdout comparison
+							result1.stdout == result2.stdout
+						}
+					}
+				} else if command.json_compare {
 					match runner::compare_json(&result1.stdout, &result2.stdout) {
 						Ok((matched, similarity, matched_count, total_count)) => {
 							stdout_similarity = Some((similarity, matched_count, total_count));
@@ -351,9 +434,85 @@ fn main() -> Result<()> {
 		if std::path::Path::new(".tk-compare-workspace").exists() {
 			std::fs::remove_dir_all(".tk-compare-workspace")?;
 		}
+		// Clean up export directories
+		for (_, command) in &commands_to_run {
+			cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
+		}
 	} else {
 		eprintln!("\nWorkspace preserved at: .tk-compare-workspace/");
+		eprintln!("Export directories preserved at: /tmp/tk-compare-export-*/");
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_find_output_dir_basic() {
+		let args = vec![
+			"export".to_string(),
+			"/tmp/output".to_string(),
+			"path/to/env".to_string(),
+		];
+		assert_eq!(
+			find_output_dir_in_args(&args),
+			Some("/tmp/output".to_string())
+		);
+	}
+
+	#[test]
+	fn test_find_output_dir_with_flags_after() {
+		let args = vec![
+			"export".to_string(),
+			"/tmp/output".to_string(),
+			"path".to_string(),
+			"-p".to_string(),
+			"8".to_string(),
+		];
+		assert_eq!(
+			find_output_dir_in_args(&args),
+			Some("/tmp/output".to_string())
+		);
+	}
+
+	#[test]
+	fn test_find_output_dir_no_export() {
+		let args = vec!["eval".to_string(), "path".to_string()];
+		assert_eq!(find_output_dir_in_args(&args), None);
+	}
+
+	#[test]
+	fn test_find_output_dir_empty_args() {
+		let args: Vec<String> = vec![];
+		assert_eq!(find_output_dir_in_args(&args), None);
+	}
+
+	#[test]
+	fn test_find_output_dir_export_only() {
+		let args = vec!["export".to_string()];
+		assert_eq!(find_output_dir_in_args(&args), None);
+	}
+
+	#[test]
+	fn test_find_output_dir_flag_after_export() {
+		// Edge case: flag immediately after export (no output dir specified yet)
+		let args = vec![
+			"export".to_string(),
+			"--recursive".to_string(),
+			"/tmp/output".to_string(),
+		];
+		// Current implementation would return None since --recursive starts with '-'
+		// and we skip it, then /tmp/output would be found
+		// Actually looking at the code: we skip flags, so we'd get /tmp/output
+		// But wait, the loop continues after finding --recursive...
+		// Let me trace: found_export=true, then --recursive starts with '-' so skip
+		// then /tmp/output doesn't start with '-' so return it
+		assert_eq!(
+			find_output_dir_in_args(&args),
+			Some("/tmp/output".to_string())
+		);
+	}
 }

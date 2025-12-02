@@ -22,7 +22,11 @@ working_dir = "${DEPLOYMENT_TOOLS_PATH}"
 # Commands to test
 # These commands test various Tanka functionality against real Grafana infrastructure configs
 # Optional 'runs' parameter specifies how many times to run the command for benchmark statistics
+#
+# For export commands, use {{EXEC_NAME}} placeholder in output directory to create separate
+# output directories for each executable, enabling directory comparison.
 
+# ==================== ENV LIST COMMANDS ====================
 [[commands]]
 args = ["env", "list", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03", "--json"]
 runs = 5
@@ -38,6 +42,7 @@ args = ["env", "list", "ksonnet/environments", "--json"]
 runs = 3
 json_compare = true
 
+# ==================== EVAL COMMANDS ====================
 [[commands]]
 args = ["eval", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03"]
 runs = 3
@@ -47,3 +52,23 @@ json_compare = true
 args = ["eval", "ksonnet/environments/flux-system"]
 runs = 3
 json_compare = true
+
+# ==================== EXPORT COMMANDS ====================
+# Export commands use {{EXEC_NAME}} placeholder for separate output directories
+# Note: Export is slower, so fewer runs. dir_compare compares the output directories.
+
+[[commands]]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03"]
+runs = 3
+dir_compare = true
+
+[[commands]]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "ksonnet/environments/grafana-o11y"]
+runs = 3
+dir_compare = true
+
+# Multi-environment export (all cortex environments)
+[[commands]]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "ksonnet/environments/cortex", "-r"]
+runs = 2
+dir_compare = true

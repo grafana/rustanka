@@ -89,6 +89,66 @@ pub fn compare_directories(dir1: &str, dir2: &str) -> Result<bool> {
 	Ok(true)
 }
 
+/// Compare two directories and return detailed results
+/// Returns (matched, similarity_percentage, matched_files, total_files, differences)
+pub fn compare_directories_detailed(
+	dir1: &str,
+	dir2: &str,
+) -> Result<(bool, f64, usize, usize, Vec<String>)> {
+	let files1 = collect_files(dir1)?;
+	let files2 = collect_files(dir2)?;
+
+	let mut diffs = Vec::new();
+	let mut matched_files = 0;
+
+	// Get all unique file paths
+	let all_paths: std::collections::HashSet<_> = files1.keys().chain(files2.keys()).collect();
+	let total_files = all_paths.len();
+
+	for path in &all_paths {
+		match (files1.get(*path), files2.get(*path)) {
+			(Some(content1), Some(content2)) => {
+				if content1 == content2 {
+					matched_files += 1;
+				} else {
+					// Try to show meaningful diff for text files
+					let text1 = String::from_utf8_lossy(content1);
+					let text2 = String::from_utf8_lossy(content2);
+					let lines1: Vec<&str> = text1.lines().collect();
+					let lines2: Vec<&str> = text2.lines().collect();
+					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
+						lines1
+							.iter()
+							.zip(lines2.iter())
+							.filter(|(a, b)| a != b)
+							.count(),
+					);
+					diffs.push(format!(
+						"{}: content differs (~{} line differences)",
+						path, diff_lines
+					));
+				}
+			}
+			(Some(_), None) => {
+				diffs.push(format!("{}: only in first directory", path));
+			}
+			(None, Some(_)) => {
+				diffs.push(format!("{}: only in second directory", path));
+			}
+			(None, None) => unreachable!(),
+		}
+	}
+
+	let similarity = if total_files > 0 {
+		(matched_files as f64 / total_files as f64) * 100.0
+	} else {
+		100.0
+	};
+
+	let matched = diffs.is_empty();
+	Ok((matched, similarity, matched_files, total_files, diffs))
+}
+
 fn collect_files(dir: &str) -> Result<HashMap<String, Vec<u8>>> {
 	use std::collections::HashMap;
 	use std::fs;
@@ -504,5 +564,147 @@ pub fn print_string_diff(str1: &str, str2: &str, name1: &str, name2: &str, max_l
 			eprint!("{}{}{}", sign, prefix, change);
 			line_count += 1;
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::fs;
+	use tempfile::tempdir;
+
+	#[test]
+	fn test_compare_directories_identical() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		fs::write(dir1.join("file.txt"), "hello").unwrap();
+		fs::write(dir2.join("file.txt"), "hello").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(result.0); // matched
+		assert_eq!(result.1, 100.0); // 100% similarity
+		assert_eq!(result.2, 1); // 1 matched file
+		assert_eq!(result.3, 1); // 1 total file
+		assert!(result.4.is_empty()); // no diffs
+	}
+
+	#[test]
+	fn test_compare_directories_different_content() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		fs::write(dir1.join("file.txt"), "hello").unwrap();
+		fs::write(dir2.join("file.txt"), "world").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(!result.0); // not matched
+		assert_eq!(result.1, 0.0); // 0% similarity
+		assert_eq!(result.2, 0); // 0 matched files
+		assert_eq!(result.3, 1); // 1 total file
+		assert_eq!(result.4.len(), 1); // 1 diff
+	}
+
+	#[test]
+	fn test_compare_directories_missing_file() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		fs::write(dir1.join("file1.txt"), "hello").unwrap();
+		fs::write(dir2.join("file2.txt"), "world").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(!result.0); // not matched
+		assert_eq!(result.2, 0); // 0 matched files
+		assert_eq!(result.3, 2); // 2 total files
+		assert_eq!(result.4.len(), 2); // 2 diffs (one in each dir only)
+	}
+
+	#[test]
+	fn test_compare_directories_empty() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(result.0); // matched (both empty)
+		assert_eq!(result.1, 100.0); // 100% similarity
+		assert_eq!(result.2, 0); // 0 matched files
+		assert_eq!(result.3, 0); // 0 total files
+	}
+
+	#[test]
+	fn test_compare_directories_nested() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(dir1.join("sub")).unwrap();
+		fs::create_dir_all(dir2.join("sub")).unwrap();
+
+		fs::write(dir1.join("sub/file.txt"), "hello").unwrap();
+		fs::write(dir2.join("sub/file.txt"), "hello").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(result.0); // matched
+		assert_eq!(result.2, 1); // 1 matched file
+	}
+
+	#[test]
+	fn test_compare_json_identical() {
+		let json1 = r#"{"a": 1, "b": 2}"#;
+		let json2 = r#"{"a": 1, "b": 2}"#;
+
+		let result = compare_json(json1, json2).unwrap();
+		assert!(result.0); // matched
+		assert_eq!(result.1, 100.0); // 100% similarity
+	}
+
+	#[test]
+	fn test_compare_json_different() {
+		let json1 = r#"{"a": 1, "b": 2}"#;
+		let json2 = r#"{"a": 1, "b": 3}"#;
+
+		let result = compare_json(json1, json2).unwrap();
+		assert!(!result.0); // not matched
+	}
+
+	#[test]
+	fn test_calculate_string_similarity_identical() {
+		let (similarity, matched, total) =
+			calculate_string_similarity("hello\nworld", "hello\nworld");
+		assert_eq!(similarity, 100.0);
+		assert_eq!(matched, 2);
+		assert_eq!(total, 2);
+	}
+
+	#[test]
+	fn test_calculate_string_similarity_different() {
+		let (similarity, matched, total) =
+			calculate_string_similarity("hello\nworld", "hello\nrust");
+		assert_eq!(similarity, 50.0);
+		assert_eq!(matched, 1);
+		assert_eq!(total, 2);
+	}
+
+	#[test]
+	fn test_calculate_string_similarity_empty() {
+		let (similarity, _, _) = calculate_string_similarity("", "");
+		assert_eq!(similarity, 100.0);
 	}
 }

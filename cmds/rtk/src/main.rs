@@ -1,8 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod discover;
 mod env;
 mod eval;
+mod export;
 mod jpath;
 mod spec;
 
@@ -625,8 +627,99 @@ fn main() -> Result<()> {
 		Commands::Status { .. } => {
 			anyhow::bail!("not implemented");
 		}
-		Commands::Export { .. } => {
-			anyhow::bail!("not implemented");
+		Commands::Export {
+			output_dir,
+			paths,
+			ext_code,
+			ext_str,
+			extension,
+			format,
+			max_stack,
+			parallel,
+			tla_code,
+			tla_str,
+			..
+		} => {
+			// Parse ext_code flags
+			let mut ext_code_map = std::collections::HashMap::new();
+			for item in ext_code {
+				if let Some((key, value)) = item.split_once('=') {
+					ext_code_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse ext_str flags
+			let mut ext_str_map = std::collections::HashMap::new();
+			for item in ext_str {
+				if let Some((key, value)) = item.split_once('=') {
+					ext_str_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse tla_code flags
+			let mut tla_code_map = std::collections::HashMap::new();
+			for item in tla_code {
+				if let Some((key, value)) = item.split_once('=') {
+					tla_code_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Parse tla_str flags
+			let mut tla_str_map = std::collections::HashMap::new();
+			for item in tla_str {
+				if let Some((key, value)) = item.split_once('=') {
+					tla_str_map.insert(key.to_string(), value.to_string());
+				}
+			}
+
+			// Convert format from Go template syntax to handlebars
+			// Go: {{.apiVersion}} -> Handlebars: {{apiVersion}}
+			let hb_format = format
+				.replace("{{.", "{{")
+				.replace("{{or ", "{{")
+				.replace(" .metadata.generateName}}", "}}");
+
+			let eval_opts = eval::EvalOpts {
+				ext_str: ext_str_map,
+				ext_code: ext_code_map,
+				tla_str: tla_str_map,
+				tla_code: tla_code_map,
+				max_stack: max_stack.map(|s| s as usize),
+				eval_expr: None,
+			};
+
+			let export_opts = export::ExportOpts {
+				output_dir: std::path::PathBuf::from(&output_dir),
+				extension,
+				format: hb_format,
+				parallelism: parallel as usize,
+				eval_opts,
+			};
+
+			let result = export::export(&paths, export_opts)?;
+
+			println!(
+				"Exported {} environments ({} successful, {} failed)",
+				result.total_envs, result.successful, result.failed
+			);
+
+			for env_result in &result.results {
+				if let Some(ref error) = env_result.error {
+					eprintln!("  ✗ {:?}: {}", env_result.env_path, error);
+				} else {
+					println!(
+						"  ✓ {:?}: {} files",
+						env_result.env_path,
+						env_result.files_written.len()
+					);
+				}
+			}
+
+			if result.failed > 0 {
+				anyhow::bail!("{} environments failed to export", result.failed);
+			}
+
+			Ok(())
 		}
 		Commands::Fmt { .. } => {
 			anyhow::bail!("not implemented");

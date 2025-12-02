@@ -18,10 +18,13 @@ help:
 	@echo "  ci                     - Run CI checks locally (fmt, lint-ci, test-rtk)"
 	@echo "  ci-full                - Run full CI checks (fmt, lint-ci, all tests)"
 	@echo "  tk-compare-grafana     - Run tk-compare against Grafana deployment_tools"
+	@echo "                           (includes env list, eval, and export comparisons)"
 	@echo ""
 	@echo "Environment variables for tk-compare-grafana:"
 	@echo "  DEPLOYMENT_TOOLS_PATH  - Path to grafana/deployment_tools repository (required)"
 	@echo "  TK_PATH                - Path to tk executable (required)"
+	@echo "  DEBUG=true             - Show diff details when outputs don't match"
+	@echo "  COMPARE_REGEXP=pattern - Filter commands to run (e.g., 'export')"
 
 
 build-rtk:
