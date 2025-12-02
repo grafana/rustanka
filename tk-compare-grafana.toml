@@ -17,7 +17,7 @@ tk_exec_2 = "target/release/rtk"
 tk_exec_2_name = "rtk"
 
 # Working directory for all commands (from DEPLOYMENT_TOOLS_PATH env var)
-working_dir = "${DEPLOYMENT_TOOLS_PATH}"
+working_dir = "${DEPLOYMENT_TOOLS_PATH}/ksonnet"
 
 # Commands to test
 # These commands test various Tanka functionality against real Grafana infrastructure configs
@@ -28,47 +28,48 @@ working_dir = "${DEPLOYMENT_TOOLS_PATH}"
 
 # ==================== ENV LIST COMMANDS ====================
 [[commands]]
-args = ["env", "list", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03", "--json"]
+args = ["env", "list", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--json"]
 runs = 5
 json_compare = true
 
 [[commands]]
-args = ["env", "list", "ksonnet/environments/grafana-o11y", "--json"]
+args = ["env", "list", "environments/grafana-o11y", "--json"]
 runs = 5
 json_compare = true
 
 [[commands]]
-args = ["env", "list", "ksonnet/environments", "--json"]
+args = ["env", "list", "environments", "--json"]
 runs = 3
 json_compare = true
 
 # ==================== EVAL COMMANDS ====================
 [[commands]]
-args = ["eval", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03"]
+args = ["eval", "environments/cortex/ops-eu-south-0.mimir-ops-03"]
 runs = 3
 json_compare = true
 
 [[commands]]
-args = ["eval", "ksonnet/environments/flux-system"]
+args = ["eval", "environments/flux-system"]
 runs = 3
 json_compare = true
 
 # ==================== EXPORT COMMANDS ====================
 # Export commands use {{EXEC_NAME}} placeholder for separate output directories
+# {{EXPORT_FORMAT}} is the format string we use for tk
 # Note: Export is slower, so fewer runs. dir_compare compares the output directories.
 
 [[commands]]
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "ksonnet/environments/cortex/ops-eu-south-0.mimir-ops-03"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 3
 dir_compare = true
 
 [[commands]]
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "ksonnet/environments/grafana-o11y"]
-runs = 3
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}"]
+runs = 1
 dir_compare = true
 
 # Multi-environment export (all cortex environments)
 [[commands]]
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "ksonnet/environments/cortex", "-r"]
-runs = 2
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}"]
+runs = 1
 dir_compare = true

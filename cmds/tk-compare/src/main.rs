@@ -226,7 +226,7 @@ fn main() -> Result<()> {
 		let mut exit_code_matched = true;
 		let mut stdout_matched = true;
 		let mut stdout_similarity = None;
-		let mut result_dir_matched = None;
+		let mut result_dir_matched: Option<(bool, f64, usize, usize)> = None;
 		let mut exec1_exit_code = 0;
 		let mut exec2_exit_code = 0;
 		let mut exec1_stderr = String::new();
@@ -373,7 +373,9 @@ fn main() -> Result<()> {
 						let dir1 = format!("{}/{}", ws1, result_dir);
 						let dir2 = format!("{}/{}", ws2, result_dir);
 
-						Some(runner::compare_directories(&dir1, &dir2)?)
+						let (matched, similarity, matched_count, total_count, _diffs) =
+							runner::compare_directories_detailed(&dir1, &dir2)?;
+						Some((matched, similarity, matched_count, total_count))
 					} else {
 						// Can't compare result directories when using shared working_dir
 						None

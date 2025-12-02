@@ -65,30 +65,6 @@ pub fn run_command(
 	})
 }
 
-pub fn compare_directories(dir1: &str, dir2: &str) -> Result<bool> {
-	// Get all files recursively from both directories
-	let files1 = collect_files(dir1)?;
-	let files2 = collect_files(dir2)?;
-
-	// Compare file sets
-	if files1.keys().collect::<Vec<_>>() != files2.keys().collect::<Vec<_>>() {
-		return Ok(false);
-	}
-
-	// Compare file contents
-	for (path, content1) in &files1 {
-		if let Some(content2) = files2.get(path) {
-			if content1 != content2 {
-				return Ok(false);
-			}
-		} else {
-			return Ok(false);
-		}
-	}
-
-	Ok(true)
-}
-
 /// Compare two directories and return detailed results
 /// Returns (matched, similarity_percentage, matched_files, total_files, differences)
 pub fn compare_directories_detailed(

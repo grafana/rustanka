@@ -115,6 +115,7 @@ impl Command {
 		self.args
 			.iter()
 			.map(|arg| arg.replace("{{EXEC_NAME}}", exec_name))
+			.map(|arg| arg.replace("{{EXPORT_FORMAT}}", "--format='{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}'"))
 			.collect()
 	}
 }

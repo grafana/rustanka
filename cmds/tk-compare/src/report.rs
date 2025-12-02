@@ -68,7 +68,7 @@ pub struct CommandReport {
 	pub exit_code_matched: bool,
 	pub stdout_matched: bool,
 	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total)
-	pub result_dir_matched: Option<bool>,
+	pub result_dir_matched: Option<(bool, f64, usize, usize)>, // (matched, percentage, matched_count, total_count)
 	pub exec1_name: String,
 	pub exec1_stats: RuntimeStats,
 	pub exec1_exit_code: i32,
@@ -115,13 +115,16 @@ impl CommandReport {
 		}
 
 		// Result dir
-		if let Some(result_dir_matched) = self.result_dir_matched {
-			let result_dir_status = if result_dir_matched {
+		if let Some((matched, similarity, matched_count, total_count)) = self.result_dir_matched {
+			let result_dir_status = if matched {
 				"✓ MATCHED".green()
 			} else {
 				"✗ MISMATCH".red()
 			};
-			println!("Result Dir: {}", result_dir_status);
+			println!(
+				"Result Dir: {} ({:.1}% similar: {}/{} files matching)",
+				result_dir_status, similarity, matched_count, total_count
+			);
 		} else {
 			println!("Result Dir: {}", "N/A".yellow());
 		}
@@ -205,22 +208,69 @@ pub fn print_summary(reports: &[CommandReport]) {
 	let total = reports.len();
 	let exit_code_matches = reports.iter().filter(|r| r.exit_code_matched).count();
 	let stdout_matches = reports.iter().filter(|r| r.stdout_matched).count();
+
+	// Calculate stdout near-matches (>= 99.5% similarity)
+	let stdout_near_matches = reports
+		.iter()
+		.filter(|r| {
+			if let Some((similarity, _, _)) = r.stdout_similarity {
+				similarity >= 99.5
+			} else {
+				false
+			}
+		})
+		.count();
+
 	let result_dir_total = reports
 		.iter()
 		.filter(|r| r.result_dir_matched.is_some())
 		.count();
 	let result_dir_matches = reports
 		.iter()
-		.filter(|r| r.result_dir_matched == Some(true))
+		.filter(|r| {
+			if let Some((matched, _, _, _)) = r.result_dir_matched {
+				matched
+			} else {
+				false
+			}
+		})
 		.count();
+
+	// Calculate result dir near-matches (>= 99.5% similarity)
+	let result_dir_near_matches = reports
+		.iter()
+		.filter(|r| {
+			if let Some((_, similarity, _, _)) = r.result_dir_matched {
+				similarity >= 99.5
+			} else {
+				false
+			}
+		})
+		.count();
+
+	// Calculate total files matched/total for result dirs
+	let (result_dir_files_matched, result_dir_files_total): (usize, usize) =
+		reports.iter().filter_map(|r| r.result_dir_matched).fold(
+			(0, 0),
+			|(acc_matched, acc_total), (_, _, matched, total)| {
+				(acc_matched + matched, acc_total + total)
+			},
+		);
 
 	println!("Total commands: {}", total);
 	println!("Exit code matches: {}/{}", exit_code_matches, total);
-	println!("Stdout matches: {}/{}", stdout_matches, total);
+	println!(
+		"Stdout matches: {}/{} ({} near-matches at >= 99.5%)",
+		stdout_matches, total, stdout_near_matches
+	);
 	if result_dir_total > 0 {
 		println!(
-			"Result dir matches: {}/{}",
-			result_dir_matches, result_dir_total
+			"Result dir matches: {}/{} ({}/{} files, {} near-matches at >= 99.5%)",
+			result_dir_matches,
+			result_dir_total,
+			result_dir_files_matched,
+			result_dir_files_total,
+			result_dir_near_matches
 		);
 	}
 
