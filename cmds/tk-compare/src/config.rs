@@ -25,8 +25,6 @@ fn default_exec2_name() -> String {
 #[derive(Debug, Deserialize)]
 pub struct Command {
 	pub args: Vec<String>,
-	#[serde(default)]
-	pub result_dir: Option<String>,
 	#[serde(default = "default_runs")]
 	pub runs: usize,
 	#[serde(default)]
@@ -132,7 +130,6 @@ mod tests {
 				"/tmp/{{EXEC_NAME}}/out".to_string(),
 				"path".to_string(),
 			],
-			result_dir: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: true,
@@ -146,7 +143,6 @@ mod tests {
 	fn test_args_for_exec_multiple_placeholders() {
 		let cmd = Command {
 			args: vec!["/{{EXEC_NAME}}/{{EXEC_NAME}}".to_string()],
-			result_dir: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,
@@ -160,7 +156,6 @@ mod tests {
 	fn test_args_for_exec_no_placeholder() {
 		let cmd = Command {
 			args: vec!["eval".to_string(), "path".to_string()],
-			result_dir: None,
 			runs: 1,
 			json_compare: true,
 			dir_compare: false,
@@ -174,7 +169,6 @@ mod tests {
 	fn test_as_string() {
 		let cmd = Command {
 			args: vec!["env".to_string(), "list".to_string(), "--json".to_string()],
-			result_dir: None,
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,

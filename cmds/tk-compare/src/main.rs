@@ -224,9 +224,9 @@ fn main() -> Result<()> {
 		let mut exec1_durations = Vec::new();
 		let mut exec2_durations = Vec::new();
 		let mut exit_code_matched = true;
+		let mut exit_codes_consistent = true;
 		let mut stdout_matched = true;
 		let mut stdout_similarity = None;
-		let mut result_dir_matched: Option<(bool, f64, usize, usize)> = None;
 		let mut exec1_exit_code = 0;
 		let mut exec2_exit_code = 0;
 		let mut exec1_stderr = String::new();
@@ -365,28 +365,13 @@ fn main() -> Result<()> {
 				exec2_exit_code = result2.exit_code;
 				exec1_stderr = result1.stderr;
 				exec2_stderr = result2.stderr;
-
-				// Compare result directories if specified (only on first run)
-				result_dir_matched = if let Some(ref result_dir) = command.result_dir {
-					if let (Some(ref ws1), Some(ref ws2)) = (&workspace1, &workspace2) {
-						// Construct result directory paths within each workspace
-						let dir1 = format!("{}/{}", ws1, result_dir);
-						let dir2 = format!("{}/{}", ws2, result_dir);
-
-						let (matched, similarity, matched_count, total_count, _diffs) =
-							runner::compare_directories_detailed(&dir1, &dir2)?;
-						Some((matched, similarity, matched_count, total_count))
-					} else {
-						// Can't compare result directories when using shared working_dir
-						None
-					}
-				} else {
-					None
-				};
 			} else {
 				// Verify consistency
 				if result1.exit_code != exec1_exit_code || result2.exit_code != exec2_exit_code {
-					eprintln!("\nWarning: Exit codes changed across runs!");
+					if exit_codes_consistent {
+						eprintln!("\nWarning: Exit codes changed across runs!");
+						exit_codes_consistent = false;
+					}
 				}
 				if result1.stdout != exec1_stderr.replace(&exec1_stderr, &result1.stdout)
 					|| result2.stdout != exec2_stderr.replace(&exec2_stderr, &result2.stdout)
@@ -407,9 +392,9 @@ fn main() -> Result<()> {
 			command: command.as_string(),
 			runs,
 			exit_code_matched,
+			exit_codes_consistent,
 			stdout_matched,
 			stdout_similarity,
-			result_dir_matched,
 			exec1_name: config.tk_exec_1_name.clone(),
 			exec1_stats,
 			exec1_exit_code,

@@ -66,9 +66,9 @@ pub struct CommandReport {
 	pub command: String,
 	pub runs: usize,
 	pub exit_code_matched: bool,
+	pub exit_codes_consistent: bool, // True if exit codes were same across all runs
 	pub stdout_matched: bool,
 	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total)
-	pub result_dir_matched: Option<(bool, f64, usize, usize)>, // (matched, percentage, matched_count, total_count)
 	pub exec1_name: String,
 	pub exec1_stats: RuntimeStats,
 	pub exec1_exit_code: i32,
@@ -85,7 +85,9 @@ impl CommandReport {
 		println!("Command: {}", self.command.cyan());
 
 		// Exit code
-		let exit_code_status = if self.exit_code_matched {
+		let exit_code_status = if !self.exit_codes_consistent {
+			"✗ INCONSISTENT ACROSS RUNS".red()
+		} else if self.exit_code_matched {
 			"✓ MATCHED".green()
 		} else {
 			"✗ MISMATCH".red()
@@ -99,34 +101,19 @@ impl CommandReport {
 			self.exec2_exit_code
 		);
 
-		// Stdout
-		let stdout_status = if self.stdout_matched {
+		// Output
+		let output_status = if self.stdout_matched {
 			"✓ MATCHED".green()
 		} else {
 			"✗ MISMATCH".red()
 		};
 		if let Some((similarity, matched, total)) = self.stdout_similarity {
 			println!(
-				"Stdout: {} ({:.1}% similar: {}/{} matching)",
-				stdout_status, similarity, matched, total
+				"Output: {} ({:.1}% similar: {}/{} matching)",
+				output_status, similarity, matched, total
 			);
 		} else {
-			println!("Stdout: {}", stdout_status);
-		}
-
-		// Result dir
-		if let Some((matched, similarity, matched_count, total_count)) = self.result_dir_matched {
-			let result_dir_status = if matched {
-				"✓ MATCHED".green()
-			} else {
-				"✗ MISMATCH".red()
-			};
-			println!(
-				"Result Dir: {} ({:.1}% similar: {}/{} files matching)",
-				result_dir_status, similarity, matched_count, total_count
-			);
-		} else {
-			println!("Result Dir: {}", "N/A".yellow());
+			println!("Output: {}", output_status);
 		}
 
 		// Show runtime comparison regardless of result match
@@ -206,10 +193,13 @@ pub fn print_summary(reports: &[CommandReport]) {
 	println!("\n{}", "=== SUMMARY ===".bold());
 
 	let total = reports.len();
-	let exit_code_matches = reports.iter().filter(|r| r.exit_code_matched).count();
+	let exit_code_matches = reports
+		.iter()
+		.filter(|r| r.exit_code_matched && r.exit_codes_consistent)
+		.count();
 	let stdout_matches = reports.iter().filter(|r| r.stdout_matched).count();
 
-	// Calculate stdout near-matches (>= 99.5% similarity)
+	// Calculate output near-matches (>= 99.5% similarity)
 	let stdout_near_matches = reports
 		.iter()
 		.filter(|r| {
@@ -221,62 +211,16 @@ pub fn print_summary(reports: &[CommandReport]) {
 		})
 		.count();
 
-	let result_dir_total = reports
-		.iter()
-		.filter(|r| r.result_dir_matched.is_some())
-		.count();
-	let result_dir_matches = reports
-		.iter()
-		.filter(|r| {
-			if let Some((matched, _, _, _)) = r.result_dir_matched {
-				matched
-			} else {
-				false
-			}
-		})
-		.count();
-
-	// Calculate result dir near-matches (>= 99.5% similarity)
-	let result_dir_near_matches = reports
-		.iter()
-		.filter(|r| {
-			if let Some((_, similarity, _, _)) = r.result_dir_matched {
-				similarity >= 99.5
-			} else {
-				false
-			}
-		})
-		.count();
-
-	// Calculate total files matched/total for result dirs
-	let (result_dir_files_matched, result_dir_files_total): (usize, usize) =
-		reports.iter().filter_map(|r| r.result_dir_matched).fold(
-			(0, 0),
-			|(acc_matched, acc_total), (_, _, matched, total)| {
-				(acc_matched + matched, acc_total + total)
-			},
-		);
-
 	println!("Total commands: {}", total);
 	println!("Exit code matches: {}/{}", exit_code_matches, total);
 	println!(
-		"Stdout matches: {}/{} ({} near-matches at >= 99.5%)",
+		"Output matches: {}/{} ({} near-matches at >= 99.5%)",
 		stdout_matches, total, stdout_near_matches
 	);
-	if result_dir_total > 0 {
-		println!(
-			"Result dir matches: {}/{} ({}/{} files, {} near-matches at >= 99.5%)",
-			result_dir_matches,
-			result_dir_total,
-			result_dir_files_matched,
-			result_dir_files_total,
-			result_dir_near_matches
-		);
-	}
 
 	let all_passed = exit_code_matches == total
 		&& stdout_matches == total
-		&& (result_dir_total == 0 || result_dir_matches == result_dir_total);
+		&& reports.iter().all(|r| r.exit_codes_consistent);
 
 	if all_passed {
 		println!("\n{}", "✓ All tests passed!".green().bold());
