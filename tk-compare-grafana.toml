@@ -33,7 +33,12 @@ runs = 5
 json_compare = true
 
 [[commands]]
-args = ["env", "list", "environments/grafana-o11y", "--json"]
+args = ["env", "list", "ksonnet/environments/aws-metric-streams", "--json"]
+runs = 5
+json_compare = true
+
+[[commands]]
+args = ["env", "list", "ksonnet/environments/grafana-o11y", "--json"]
 runs = 5
 json_compare = true
 

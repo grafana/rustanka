@@ -311,7 +311,9 @@ noDataEnv(main)
 	let json_value: serde_json::Value =
 		serde_json::from_str(&json_str).context("Failed to parse manifested JSON")?;
 
-	extract_environments(&json_value)
+	let environments = extract_environments(&json_value)?;
+
+	Ok(environments)
 }
 
 /// Extract Environment objects from Jsonnet output
