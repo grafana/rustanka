@@ -64,6 +64,28 @@ args = ["eval", "environments/flux-system"]
 runs = 3
 json_compare = true
 
+# ==================== TOOL IMPORTERS COMMANDS ====================
+[[commands]]
+name = "tool importers: env files"
+args = [
+    "tool", "importers", 
+    "environments/cortex/prod-eu-west-0.mimir-dedicated-33/automated-horizontal-scaling.json", 
+    "environments/cortex/prod-eu-west-0.mimir-dedicated-33/automated-scaling.json",
+    "environments/cortex/prod-eu-west-0.mimir-dedicated-33/main.jsonnet",
+    "environments/cortex/prod-eu-west-0.mimir-dedicated-33/temp.libsonnet",
+]
+runs = 3
+
+[[commands]]
+name = "tool importers: env+lib files"
+args = [
+    "tool", "importers", 
+    "environments/grafana-iam/iam-grafana-app-config.jsonnet", 
+    "environments/grafana-iam/iam-grafana-app.jsonnet",
+    "lib/argo-workflows-util/utils/cron-workflow.libsonnet",
+]
+runs = 3
+
 # ==================== EXPORT COMMANDS ====================
 # Export commands use {{EXEC_NAME}} placeholder for separate output directories
 # {{EXPORT_FORMAT}} is the format string we use for tk

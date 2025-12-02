@@ -5,6 +5,7 @@ mod discover;
 mod env;
 mod eval;
 mod export;
+mod importers;
 mod jpath;
 mod spec;
 
@@ -796,8 +797,12 @@ fn main() -> Result<()> {
 			ToolCommands::Imports { .. } => {
 				anyhow::bail!("not implemented");
 			}
-			ToolCommands::Importers { .. } => {
-				anyhow::bail!("not implemented");
+			ToolCommands::Importers { files, root, .. } => {
+				let envs = importers::find_importers(&root, files)?;
+				for env in envs {
+					println!("{}", env);
+				}
+				Ok(())
 			}
 			ToolCommands::Charts { command, .. } => match command {
 				ChartsCommands::Init { .. } => {
