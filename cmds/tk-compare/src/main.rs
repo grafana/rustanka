@@ -255,15 +255,6 @@ fn main() -> Result<()> {
 			let args1 = command.args_for_exec(&config.tk_exec_1_name);
 			let args2 = command.args_for_exec(&config.tk_exec_2_name);
 
-			// Clean export directories before exec1 run
-			if command.dir_compare {
-				if let Some(dir) = find_output_dir_in_args(&args1) {
-					if std::path::Path::new(&dir).exists() {
-						let _ = std::fs::remove_dir_all(&dir);
-					}
-				}
-			}
-
 			// Run with exec1 in its workspace
 			let result1 = runner::run_command(
 				&exec1_str,
@@ -271,15 +262,6 @@ fn main() -> Result<()> {
 				workspace1.as_deref(),
 				config.working_dir.as_deref(),
 			)?;
-
-			// Clean export directories before exec2 run
-			if command.dir_compare {
-				if let Some(dir) = find_output_dir_in_args(&args2) {
-					if std::path::Path::new(&dir).exists() {
-						let _ = std::fs::remove_dir_all(&dir);
-					}
-				}
-			}
 
 			// Run with exec2 in its workspace
 			let result2 = runner::run_command(

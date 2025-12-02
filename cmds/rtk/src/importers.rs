@@ -220,111 +220,127 @@ fn find_importers_recursive(
 		}
 	}
 
-	// Check all jsonnet files for imports
-	for (jsonnet_file_path, jsonnet_file_content) in jsonnet_files.iter() {
-		if jsonnet_file_content.imports.is_empty() {
-			continue;
-		}
+	// Check all jsonnet files for imports in parallel
+	use rayon::prelude::*;
 
-		let mut is_importer = false;
+	let search_basename = Path::new(search_for_file)
+		.file_name()
+		.and_then(|n| n.to_str())
+		.unwrap_or("")
+		.to_string();
 
-		for import_path in &jsonnet_file_content.imports {
-			// If the filename is not the same as the file we are looking for, skip it
-			let import_basename = Path::new(import_path)
-				.file_name()
-				.and_then(|n| n.to_str())
-				.unwrap_or("");
-			let search_basename = Path::new(search_for_file)
-				.file_name()
-				.and_then(|n| n.to_str())
-				.unwrap_or("");
-
-			if import_basename != search_basename {
-				continue;
+	let found_importers: Vec<(String, bool)> = jsonnet_files
+		.par_iter()
+		.filter_map(|(jsonnet_file_path, jsonnet_file_content)| {
+			if jsonnet_file_content.imports.is_empty() {
+				return None;
 			}
 
-			// Clean the import path
-			let import_path_clean = Path::new(import_path)
-				.components()
-				.collect::<PathBuf>()
-				.to_string_lossy()
-				.to_string();
+			for import_path in &jsonnet_file_content.imports {
+				// If the filename is not the same as the file we are looking for, skip it
+				let import_basename = Path::new(import_path)
+					.file_name()
+					.and_then(|n| n.to_str())
+					.unwrap_or("");
 
-			// Match on relative imports with ..
-			if import_path.starts_with("..") {
-				let jsonnet_dir = Path::new(jsonnet_file_path)
-					.parent()
-					.unwrap_or(Path::new("/"));
+				if import_basename != search_basename {
+					continue;
+				}
 
-				// Shallow import (one less level of ..)
-				let shallow_import = import_path_clean.replacen("../", "", 1);
-				let shallow_import_path = jsonnet_dir.join(&shallow_import);
-				let shallow_import_clean = shallow_import_path
+				// Clean the import path
+				let import_path_clean = Path::new(import_path)
 					.components()
 					.collect::<PathBuf>()
 					.to_string_lossy()
 					.to_string();
 
-				// Full import
-				let import_full_path = jsonnet_dir.join(&import_path_clean);
-				let import_full_clean = import_full_path
-					.components()
-					.collect::<PathBuf>()
-					.to_string_lossy()
-					.to_string();
+				let mut is_importer = false;
 
-				is_importer = path_matches(search_for_file, &import_full_clean)
-					|| path_matches(search_for_file, &shallow_import_clean);
-			}
+				// Match on relative imports with ..
+				if import_path.starts_with("..") {
+					let jsonnet_dir = Path::new(jsonnet_file_path)
+						.parent()
+						.unwrap_or(Path::new("/"));
 
-			// Match on imports to lib/ or vendor/
-			if !is_importer {
-				let vendor_path = root_vendor.join(&import_path_clean);
-				let lib_path = root_lib.join(&import_path_clean);
-				is_importer = path_matches(search_for_file, &vendor_path.to_string_lossy())
-					|| path_matches(search_for_file, &lib_path.to_string_lossy());
-			}
+					// Shallow import (one less level of ..)
+					let shallow_import = import_path_clean.replacen("../", "", 1);
+					let shallow_import_path = jsonnet_dir.join(&shallow_import);
+					let shallow_import_clean = shallow_import_path
+						.components()
+						.collect::<PathBuf>()
+						.to_string_lossy()
+						.to_string();
 
-			// Match on imports to the base dir where the file is located
-			if !is_importer {
-				let base = if jsonnet_file_content.base.is_empty() {
-					find_base(jsonnet_file_path, root)?
-				} else {
-					jsonnet_file_content.base.clone()
-				};
+					// Full import
+					let import_full_path = jsonnet_dir.join(&import_path_clean);
+					let import_full_clean = import_full_path
+						.components()
+						.collect::<PathBuf>()
+						.to_string_lossy()
+						.to_string();
 
-				// Check if the search file is in the base directory and ends with the import path
-				// But also ensure that the path segment before the import path in search_for_file
-				// matches the path segment in the base (to avoid false positives)
-				if search_for_file.starts_with(&base) && search_for_file.ends_with(import_path) {
-					// Extract the part between base and the file
-					let relative_to_base = search_for_file.strip_prefix(&base).unwrap_or("");
-					let relative_to_base = relative_to_base.trim_start_matches('/');
+					is_importer = path_matches(search_for_file, &import_full_clean)
+						|| path_matches(search_for_file, &shallow_import_clean);
+				}
 
-					// The relative path should match the import path exactly
-					is_importer = relative_to_base == import_path;
+				// Match on imports to lib/ or vendor/
+				if !is_importer {
+					let vendor_path = root_vendor.join(&import_path_clean);
+					let lib_path = root_lib.join(&import_path_clean);
+					is_importer = path_matches(search_for_file, &vendor_path.to_string_lossy())
+						|| path_matches(search_for_file, &lib_path.to_string_lossy());
+				}
+
+				// Match on imports to the base dir where the file is located
+				if !is_importer {
+					let base = if jsonnet_file_content.base.is_empty() {
+						match find_base(jsonnet_file_path, root) {
+							Ok(b) => b,
+							Err(_) => continue,
+						}
+					} else {
+						jsonnet_file_content.base.clone()
+					};
+
+					// Check if the search file is in the base directory and ends with the import path
+					// But also ensure that the path segment before the import path in search_for_file
+					// matches the path segment in the base (to avoid false positives)
+					if search_for_file.starts_with(&base) && search_for_file.ends_with(import_path)
+					{
+						// Extract the part between base and the file
+						let relative_to_base = search_for_file.strip_prefix(&base).unwrap_or("");
+						let relative_to_base = relative_to_base.trim_start_matches('/');
+
+						// The relative path should match the import path exactly
+						is_importer = relative_to_base == import_path;
+					}
+				}
+
+				// Also check if the import is relative to the directory of the importing file
+				// This handles cases like 'text-file.txt' imported from 'vendor/vendored/main.libsonnet'
+				if !is_importer {
+					let importer_dir = Path::new(jsonnet_file_path)
+						.parent()
+						.unwrap_or(Path::new("/"));
+					let import_full_path = importer_dir.join(import_path);
+					let import_full_str = import_full_path.to_string_lossy().to_string();
+					is_importer = path_matches(search_for_file, &import_full_str);
+				}
+
+				if is_importer {
+					return Some((jsonnet_file_path.clone(), jsonnet_file_content.is_main_file));
 				}
 			}
+			None
+		})
+		.collect();
 
-			// Also check if the import is relative to the directory of the importing file
-			// This handles cases like 'text-file.txt' imported from 'vendor/vendored/main.libsonnet'
-			if !is_importer {
-				let importer_dir = Path::new(jsonnet_file_path)
-					.parent()
-					.unwrap_or(Path::new("/"));
-				let import_full_path = importer_dir.join(import_path);
-				let import_full_str = import_full_path.to_string_lossy().to_string();
-				is_importer = path_matches(search_for_file, &import_full_str);
-			}
-
-			if is_importer {
-				if jsonnet_file_content.is_main_file {
-					importers.push(jsonnet_file_path.clone());
-				}
-				intermediate_importers.push(jsonnet_file_path.clone());
-				break;
-			}
+	// Process the results
+	for (jsonnet_file_path, is_main_file) in found_importers {
+		if is_main_file {
+			importers.push(jsonnet_file_path.clone());
 		}
+		intermediate_importers.push(jsonnet_file_path);
 	}
 
 	// Process intermediate importers recursively
@@ -376,30 +392,38 @@ fn create_jsonnet_file_cache(
 		return Ok(cached.clone());
 	}
 
-	let mut files_map = HashMap::new();
 	let files = find_jsonnet_files(Path::new(root))?;
+
+	// Compile regex once (thread-safe to share across threads)
 	let imports_regexp = Regex::new(r#"import(str)?\s+['"]([^'"%()]+)['"]"#)?;
 
-	for file in files {
-		let content = fs::read_to_string(&file).context(format!("reading file {}", file))?;
-		let is_main_file = file.ends_with(DEFAULT_ENTRYPOINT);
+	// Process files in parallel
+	use rayon::prelude::*;
+	let results: Result<Vec<_>> = files
+		.par_iter()
+		.map(|file| {
+			let content = fs::read_to_string(file).context(format!("reading file {}", file))?;
+			let is_main_file = file.ends_with(DEFAULT_ENTRYPOINT);
 
-		let mut imports = Vec::new();
-		for cap in imports_regexp.captures_iter(&content) {
-			if let Some(import_path) = cap.get(2) {
-				imports.push(import_path.as_str().to_string());
+			let mut imports = Vec::new();
+			for cap in imports_regexp.captures_iter(&content) {
+				if let Some(import_path) = cap.get(2) {
+					imports.push(import_path.as_str().to_string());
+				}
 			}
-		}
 
-		files_map.insert(
-			file,
-			CachedJsonnetFile {
-				base: String::new(),
-				imports,
-				is_main_file,
-			},
-		);
-	}
+			Ok((
+				file.clone(),
+				CachedJsonnetFile {
+					base: String::new(),
+					imports,
+					is_main_file,
+				},
+			))
+		})
+		.collect();
+
+	let files_map: HashMap<String, CachedJsonnetFile> = results?.into_iter().collect();
 
 	cache.insert(root.to_string(), files_map.clone());
 	Ok(files_map)
