@@ -3,7 +3,8 @@ use rayon::prelude::*;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tabwriter::TabWriter;
 
 use crate::spec::Environment;
@@ -90,61 +91,84 @@ fn print_table(envs: &[Environment], search_path: &Path) -> Result<()> {
 /// Find all environments recursively
 fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environment>> {
 	let main_files = find_main_jsonnet_files(root)?;
-	let environments = Arc::new(Mutex::new(Vec::new()));
+	let profile = std::env::var("RTK_PROFILE").is_ok();
 
-	// Process files in chunks - use min of CPU count and file count to avoid unnecessary threads
-	let chunk_size = num_cpus::get().min(main_files.len().max(1));
-	for chunk in main_files.chunks(chunk_size) {
-		let chunk_envs: Vec<Vec<Environment>> = chunk
-			.par_iter()
-			.filter_map(|main_file| {
-				let dir = main_file.parent()?;
-				let spec_file = dir.join("spec.json");
+	// Track timing for each file if profiling is enabled
+	let timings: Mutex<Vec<(PathBuf, Duration)>> = Mutex::new(Vec::new());
 
-				if spec_file.exists() {
-					// Static environment
-					if let Ok(mut env) = load_static_env(dir) {
-						if set_env_metadata(&mut env, dir, original_path).is_ok() {
-							return Some(vec![env]);
-						}
+	// Process all files in parallel - Rayon handles work-stealing automatically
+	let all_envs: Vec<Vec<Environment>> = main_files
+		.par_iter()
+		.filter_map(|main_file| {
+			let start = Instant::now();
+			let dir = main_file.parent()?;
+			let spec_file = dir.join("spec.json");
+
+			let result = if spec_file.exists() {
+				// Static environment
+				if let Ok(mut env) = load_static_env(dir) {
+					if set_env_metadata(&mut env, dir, original_path).is_ok() {
+						Some(vec![env])
+					} else {
+						None
 					}
-					None
 				} else {
-					// Inline environment
-					match load_inline_envs(dir) {
-						Ok(mut envs) => {
-							for env in &mut envs {
-								// Inline envs may already have full paths from Jsonnet
-								// Only update name if it doesn't start with "environments/"
-								let should_update_name = if let Some(name) = &env.metadata.name {
-									!name.starts_with("environments/")
-								} else {
-									true
-								};
-
-								if should_update_name {
-									let _ = set_env_metadata(env, dir, original_path);
-								} else {
-									// Still set namespace even if name is preserved
-									let _ = set_env_namespace(env, dir);
-								}
-							}
-							Some(envs)
-						}
-						Err(_) => None,
-					}
+					None
 				}
-			})
-			.collect();
+			} else {
+				// Inline environment
+				match load_inline_envs(dir) {
+					Ok(mut envs) => {
+						for env in &mut envs {
+							// Inline envs may already have full paths from Jsonnet
+							// Only update name if it doesn't start with "environments/"
+							let should_update_name = if let Some(name) = &env.metadata.name {
+								!name.starts_with("environments/")
+							} else {
+								true
+							};
 
-		// Collect results from this chunk
-		let mut envs = environments.lock().unwrap();
-		for env_vec in chunk_envs {
-			envs.extend(env_vec);
+							if should_update_name {
+								let _ = set_env_metadata(env, dir, original_path);
+							} else {
+								// Still set namespace even if name is preserved
+								let _ = set_env_namespace(env, dir);
+							}
+						}
+						Some(envs)
+					}
+					Err(_) => None,
+				}
+			};
+
+			// Record timing if profiling
+			if profile {
+				let elapsed = start.elapsed();
+				timings.lock().unwrap().push((dir.to_path_buf(), elapsed));
+			}
+
+			result
+		})
+		.collect();
+
+	// Print slowest files if profiling
+	if profile {
+		let mut timing_vec = timings.into_inner().unwrap();
+		timing_vec.sort_by(|a, b| b.1.cmp(&a.1)); // Sort descending by duration
+
+		eprintln!("\n=== 20 Slowest Environment Files ===");
+		for (path, duration) in timing_vec.iter().take(20) {
+			eprintln!(
+				"{:>8.2}ms  {}",
+				duration.as_secs_f64() * 1000.0,
+				path.display()
+			);
 		}
+		eprintln!();
 	}
 
-	let mut final_envs = Arc::try_unwrap(environments).unwrap().into_inner().unwrap();
+	// Flatten results
+	let mut final_envs: Vec<Environment> = all_envs.into_iter().flatten().collect();
 
 	// Sort by name
 	final_envs.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
