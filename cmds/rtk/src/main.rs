@@ -55,8 +55,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -94,8 +94,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -136,8 +136,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -184,8 +184,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -226,8 +226,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -268,8 +268,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		name: Option<String>,
@@ -319,8 +319,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		mem_ballast_size_bytes: Option<i32>,
@@ -413,8 +413,8 @@ enum Commands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		tla_code: Vec<String>,
@@ -476,8 +476,8 @@ enum EnvCommands {
 		#[arg(long, default_value = "info")]
 		log_level: String,
 
-		#[arg(long)]
-		max_stack: Option<i32>,
+		#[arg(long, default_value = "500")]
+		max_stack: i32,
 
 		#[arg(long)]
 		names: bool,
@@ -685,7 +685,7 @@ fn main() -> Result<()> {
 				ext_code: ext_code_map,
 				tla_str: tla_str_map,
 				tla_code: tla_code_map,
-				max_stack: max_stack.map(|s| s as usize),
+				max_stack: Some(max_stack as usize),
 				eval_expr: None,
 			};
 
@@ -770,7 +770,7 @@ fn main() -> Result<()> {
 				ext_code: ext_code_map,
 				tla_str: tla_str_map,
 				tla_code: tla_code_map,
-				max_stack: max_stack.map(|s| s as usize),
+				max_stack: Some(max_stack as usize),
 				eval_expr,
 			};
 

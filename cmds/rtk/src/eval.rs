@@ -5,7 +5,8 @@
 
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
-	function::TlaArg, gc::GcHashMap, trace::PathResolver, FileImportResolver, IStr, State,
+	function::TlaArg, gc::GcHashMap, stack::set_stack_depth_limit, trace::PathResolver,
+	FileImportResolver, IStr, State,
 };
 use jrsonnet_stdlib::ContextInitializer;
 use std::collections::HashMap;
@@ -121,12 +122,12 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 		.import_resolver(import_resolver)
 		.context_initializer(context_init);
 
-	let state = builder.build();
-
-	// Set max stack if specified
+	// Set max stack if specified - must be done before building state
 	if let Some(max_stack) = opts.max_stack {
-		jrsonnet_evaluator::stack::limit_stack_depth(max_stack);
+		set_stack_depth_limit(max_stack);
 	}
+
+	let state = builder.build();
 
 	Ok(state)
 }

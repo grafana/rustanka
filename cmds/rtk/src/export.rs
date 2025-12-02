@@ -319,11 +319,11 @@ fn export_single_env(
 
 	// Check for multiple Environment objects (Issue C - match tk behavior)
 	let env_count = count_environment_objects(&result.value);
-	if env_count > 1 && opts.name.is_none() {
+	if env_count > 1 && opts.name.is_none() && !opts.recursive {
 		return Err(ExportError::EnvError(
 			env.path.clone(),
 			format!(
-				"found {} Environments. Use --name to select a single one",
+				"found {} Environments. Use --name to select a single one or --recursive to export all",
 				env_count
 			),
 		));
@@ -740,8 +740,9 @@ fn format_filename_gtmpl(
 	// Create template
 	let mut tmpl = Template::default();
 
-	// Register env function if environment spec is available
-	if let Some(env) = env_spec {
+	// Always register env function, even if env_spec is None
+	// This allows templates to reference env without errors
+	let env_value = if let Some(env) = env_spec {
 		// Clone and ensure labels is always an empty map if None
 		let mut env_clone = env.clone();
 		if env_clone.metadata.labels.is_none() {
@@ -749,16 +750,43 @@ fn format_filename_gtmpl(
 		}
 
 		let env_json = serde_json::to_value(&env_clone)?;
-		let env_value = json_to_gtmpl(&env_json);
+		json_to_gtmpl(&env_json)
+	} else {
+		// Provide a default empty environment structure for inline environments
+		// This ensures templates can reference env fields without errors
+		use crate::spec::{Environment, Metadata, Spec};
+		let default_env = Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: None,
+				namespace: None,
+				labels: Some(std::collections::BTreeMap::new()),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: String::new(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		};
+		let env_json = serde_json::to_value(&default_env)?;
+		json_to_gtmpl(&env_json)
+	};
 
-		// Store env value in thread-local storage
-		ENV_VALUE.with(|cell| {
-			*cell.borrow_mut() = Some(env_value);
-		});
+	// Store env value in thread-local storage
+	ENV_VALUE.with(|cell| {
+		*cell.borrow_mut() = Some(env_value);
+	});
 
-		// Register env function
-		tmpl.add_func("env", env_func as gtmpl::Func);
-	}
+	// Register env function (always, for both static and inline environments)
+	tmpl.add_func("env", env_func as gtmpl::Func);
 
 	// Parse the template
 	tmpl.parse(format)?;
@@ -2063,6 +2091,158 @@ mod tests {
 		let result2 =
 			format_filename_gtmpl(&manifest, &env, "{{env.metadata.name}}/{{.kind}}").unwrap();
 		assert_eq!(result2, "test-env/ConfigMap");
+	}
+
+	#[test]
+	fn test_gtmpl_env_with_conditional() {
+		// Test the complex template from tk-compare with conditional logic
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "prod-cluster".to_string());
+		labels.insert("fluxExport".to_string(), "true".to_string());
+		labels.insert("fluxExportDir".to_string(), "test-dir".to_string());
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Test the actual tk-compare template format (simplified)
+		let template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else }}flux-enabled{{ end }}/{{.kind}}";
+		let result = format_filename_gtmpl(&manifest, &env, template);
+
+		// This should work - env.metadata.labels.fluxExport exists and is "true" (non-empty string)
+		// In Go templates, non-empty strings are truthy, so "not env.metadata.labels.fluxExport" should be false
+		assert!(
+			result.is_ok(),
+			"Template with 'not env.metadata.labels' should work: {:?}",
+			result
+		);
+	}
+
+	#[test]
+	fn test_gtmpl_env_inline_environment() {
+		// Test that env works even when env_spec is None (inline environments)
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config" }
+		});
+
+		// No env_spec (inline environment)
+		let env = None;
+
+		// Template tries to access env fields - should not error even with no env
+		let template = "{{ if env.metadata.labels.cluster_name }}{{ env.metadata.labels.cluster_name }}{{ else }}default{{ end }}/{{.kind}}";
+		let result = format_filename_gtmpl(&manifest, &env, template);
+
+		// Should work with default empty env structure
+		assert!(
+			result.is_ok(),
+			"Template with env should work for inline environments: {:?}",
+			result
+		);
+		// Should fall back to "default" since env.metadata.labels.cluster_name is empty
+		assert_eq!(result.unwrap(), "default/ConfigMap");
+	}
+
+	#[test]
+	fn test_gtmpl_env_complex_tk_compare_template() {
+		// Test the full tk-compare template with inline environment (None)
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "test-config",
+				"namespace": "default"
+			}
+		});
+
+		let env = None; // Inline environment
+
+		// The actual tk-compare template (simplified version)
+		let template = "{{ if env.metadata.labels.fluxExport }}flux/{{ env.metadata.labels.cluster_name }}{{ else }}flux{{ end }}/{{ if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}";
+		let result = format_filename_gtmpl(&manifest, &env, template);
+
+		assert!(
+			result.is_ok(),
+			"Complex tk-compare template should work: {:?}",
+			result
+		);
+		// Since env has no fluxExport label, should use "flux" prefix and default namespace
+		let output = result.unwrap();
+		assert!(output.contains("flux/"), "Should contain flux prefix");
+		assert!(output.contains("default/"), "Should contain namespace");
+		assert!(
+			output.contains("ConfigMap-test-config"),
+			"Should contain kind and name"
+		);
+	}
+
+	#[test]
+	fn test_gtmpl_actual_tk_compare_format() {
+		// Test the EXACT template from tk-compare's config.rs (line 123)
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ServiceAccount",
+			"metadata": {
+				"name": "external-secrets-kubernetes-argo-workflows",
+				"namespace": "mimir-cd",
+				"labels": {
+					"fluxExportDir": "mimir-cd"
+				}
+			}
+		});
+
+		// Inline environment with no labels
+		let env = None;
+
+		// The EXACT tk-compare template
+		let template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}";
+
+		let result = format_filename_gtmpl(&manifest, &env, template);
+		assert!(
+			result.is_ok(),
+			"Actual tk-compare template should work with inline env: {:?}",
+			result
+		);
+
+		// Verify output format
+		let output = result.unwrap();
+		assert!(output.starts_with("flux/"), "Should start with flux prefix");
+		assert!(
+			output.contains("/mimir-cd/"),
+			"Should use manifest's fluxExportDir label"
+		);
+		assert!(
+			output.ends_with("/ServiceAccount-external-secrets-kubernetes-argo-workflows"),
+			"Should end with kind-name"
+		);
 	}
 
 	// ==================== Manifest.json Tests ====================
