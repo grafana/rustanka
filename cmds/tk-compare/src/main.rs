@@ -444,6 +444,9 @@ fn main() -> Result<()> {
 	// Print summary
 	report::print_summary(&reports);
 
+	// Generate GitHub comment
+	report::generate_github_comment(&reports, &config.tk_exec_1_name, &config.tk_exec_2_name);
+
 	// Clean up workspace unless --keep-workspace is specified
 	if !cli.keep_workspace {
 		if std::path::Path::new(".tk-compare-workspace").exists() {

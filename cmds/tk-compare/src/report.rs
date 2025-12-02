@@ -228,3 +228,137 @@ pub fn print_summary(reports: &[CommandReport]) {
 		println!("\n{}", "✗ Some tests failed!".red().bold());
 	}
 }
+
+/// Generate GitHub-compatible markdown comment for CI
+pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec2_name: &str) {
+	println!("\n<!-- GITHUB_COMMENT_START -->");
+	println!("## 🔬 Tanka Comparison Results");
+	println!();
+	println!(
+		"Comparing [Grafana Tanka](https://github.com/grafana/tanka) `{}` with `{}` (rustanka):",
+		exec1_name, exec2_name
+	);
+	println!();
+
+	// Correctness table
+	println!("### Correctness");
+	println!();
+	println!("| Command | Exit Code | Output |");
+	println!("|---------|-----------|--------|");
+
+	for report in reports {
+		// Exit code status
+		let exit_status = if !report.exit_codes_consistent {
+			"✗"
+		} else if report.exit_code_matched {
+			"✓"
+		} else {
+			"✗"
+		};
+
+		// Output status (three levels)
+		let output_status = if report.stdout_matched {
+			"✓".to_string()
+		} else if let Some((similarity, _, _)) = report.stdout_similarity {
+			if similarity >= 99.5 {
+				format!("~ {:.1}%", similarity)
+			} else {
+				format!("✗ {:.1}%", similarity)
+			}
+		} else {
+			"✗".to_string()
+		};
+
+		// Truncate command if too long
+		let cmd = if report.command.len() > 50 {
+			format!("{}...", &report.command[..47])
+		} else {
+			report.command.clone()
+		};
+
+		println!("| `{}` | {} | {} |", cmd, exit_status, output_status);
+	}
+
+	println!();
+
+	// Performance summary
+	println!("### Performance Summary");
+	println!();
+	println!("| Cmd | Result | Command |");
+	println!("|-----|--------|---------|");
+
+	for (idx, report) in reports.iter().enumerate() {
+		if report.runs > 1 {
+			let exec1_ms = report.exec1_stats.median.as_millis();
+			let exec2_ms = report.exec2_stats.median.as_millis();
+			let ratio = if exec1_ms > 0 {
+				exec2_ms as f64 / exec1_ms as f64
+			} else {
+				0.0
+			};
+
+			let (emoji, speed_text) = if ratio > 1.0 {
+				("🐢", format!("{} is {:.2}x slower", exec2_name, ratio))
+			} else if ratio < 1.0 && ratio > 0.0 {
+				(
+					"🚀",
+					format!("{} is {:.2}x faster", exec2_name, 1.0 / ratio),
+				)
+			} else {
+				("⚡", "same".to_string())
+			};
+
+			// Truncate command if too long
+			let cmd = if report.command.len() > 60 {
+				format!("{}...", &report.command[..57])
+			} else {
+				report.command.clone()
+			};
+
+			println!("| {} | {} {} | `{}` |", idx + 1, emoji, speed_text, cmd);
+		}
+	}
+
+	println!();
+
+	// Overall summary
+	let total = reports.len();
+	let exit_code_matches = reports
+		.iter()
+		.filter(|r| r.exit_code_matched && r.exit_codes_consistent)
+		.count();
+	let stdout_matches = reports.iter().filter(|r| r.stdout_matched).count();
+	let stdout_near_matches = reports
+		.iter()
+		.filter(|r| {
+			if let Some((similarity, _, _)) = r.stdout_similarity {
+				similarity >= 99.5
+			} else {
+				false
+			}
+		})
+		.count();
+
+	println!("### Summary");
+	println!("- Exit code matches: {}/{}", exit_code_matches, total);
+	println!(
+		"- Output matches: {}/{} ({} near-matches at >= 99.5%)",
+		stdout_matches, total, stdout_near_matches
+	);
+	println!();
+
+	let all_passed = exit_code_matches == total
+		&& stdout_matches == total
+		&& reports.iter().all(|r| r.exit_codes_consistent);
+
+	if all_passed {
+		println!("✅ **All tests passed!**");
+	} else {
+		println!("❌ **Some tests failed** - see full output for details");
+	}
+
+	println!();
+	println!("---");
+	println!("📎 View full comparison output in the workflow logs");
+	println!("{}", "<!-- GITHUB_COMMENT_END -->");
+}

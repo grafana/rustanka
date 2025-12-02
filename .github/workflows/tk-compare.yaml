@@ -69,79 +69,36 @@ jobs:
             echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
           fi
           
-          # Extract performance summary from output
-          echo "summary<<EOF" >> $GITHUB_OUTPUT
-          echo "## 🔬 Tanka Comparison Results" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "Comparing [Grafana Tanka](https://github.com/grafana/tanka) \`tk\` with \`rtk\` (rustanka):" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          
-          if [ -f comparison-output.txt ]; then
-            # Extract the summary section
-            echo "### Performance Summary" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "| Cmd | Result | Command |" >> $GITHUB_OUTPUT
-            echo "|-----|--------|---------|" >> $GITHUB_OUTPUT
-            
-            # Parse each command's comparison result
-            CMD_NUM=0
-            CURRENT_CMD=""
-            while IFS= read -r line; do
-              # Capture the command string
-              if echo "$line" | grep -q "^Command:"; then
-                CURRENT_CMD=$(echo "$line" | sed 's/^Command: //')
-              fi
+          # Extract GitHub comment from output
+          {
+            echo "summary<<EOF"
+            if [ -f comparison-output.txt ]; then
+              # Strip ANSI color codes and extract the comment section
+              # Use awk for more reliable extraction
+              awk '
+                /<!-- GITHUB_COMMENT_START -->/ { flag=1; next }
+                /<!-- GITHUB_COMMENT_END -->/ { flag=0; next }
+                flag { print }
+              ' comparison-output.txt | sed 's/\x1b\[[0-9;]*m//g'
               
-              # Look for "Comparison (median):" lines which contain the speed comparison
-              if echo "$line" | grep -q "Comparison (median):"; then
-                CMD_NUM=$((CMD_NUM + 1))
-                SPEED=$(echo "$line" | sed 's/.*Comparison (median): //')
-                
-                # Determine if faster or slower
-                if echo "$SPEED" | grep -q "faster"; then
-                  EMOJI="🚀"
-                elif echo "$SPEED" | grep -q "slower"; then
-                  EMOJI="🐢"
-                else
-                  EMOJI="⚡"
-                fi
-                
-                # Truncate command if too long for table readability
-                SHORT_CMD="$CURRENT_CMD"
-                if [ ${#SHORT_CMD} -gt 60 ]; then
-                  SHORT_CMD="${SHORT_CMD:0:57}..."
-                fi
-                
-                echo "| ${CMD_NUM} | ${EMOJI} ${SPEED} | \`${SHORT_CMD}\` |" >> $GITHUB_OUTPUT
+              # Fallback check
+              if ! grep -q "GITHUB_COMMENT_START" comparison-output.txt; then
+                echo ""
+                echo "⚠️ GitHub comment markers not found in output"
               fi
-            done < comparison-output.txt
-            
-            echo "" >> $GITHUB_OUTPUT
-            
-            # Extract overall summary
-            if grep -q "Exit code matches:" comparison-output.txt; then
-              EXIT_MATCH=$(grep "Exit code matches:" comparison-output.txt | tail -1)
-              STDOUT_MATCH=$(grep "Stdout matches:" comparison-output.txt | tail -1)
-              echo "### Correctness" >> $GITHUB_OUTPUT
-              echo "- ${EXIT_MATCH}" >> $GITHUB_OUTPUT
-              echo "- ${STDOUT_MATCH}" >> $GITHUB_OUTPUT
-              echo "" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ No comparison output available"
             fi
-            
-            # Check for pass/fail
-            if grep -q "All tests passed" comparison-output.txt; then
-              echo "✅ **All tests passed!**" >> $GITHUB_OUTPUT
-            elif grep -q "Some tests failed" comparison-output.txt; then
-              echo "❌ **Some tests failed** - see full output for details" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "⚠️ No comparison output available" >> $GITHUB_OUTPUT
-          fi
-          
-          echo "" >> $GITHUB_OUTPUT
-          echo "---" >> $GITHUB_OUTPUT
-          echo "📎 [View full comparison output](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Debug output
+        run: |
+          echo "Summary output length: ${#SUMMARY}"
+          echo "First 100 chars:"
+          echo "$SUMMARY" | head -c 100
+        env:
+          SUMMARY: ${{ steps.prepare_summary.outputs.summary }}
 
       - name: Post PR comment
         if: github.event_name == 'pull_request'
