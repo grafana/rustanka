@@ -287,7 +287,14 @@ fn main() -> Result<()> {
 					match (dir1, dir2) {
 						(Some(d1), Some(d2)) => {
 							match runner::compare_directories_detailed(&d1, &d2) {
-								Ok((matched, similarity, matched_files, total_files, diffs)) => {
+								Ok((
+									matched,
+									similarity,
+									matched_files,
+									total_files,
+									diffs,
+									file_diffs,
+								)) => {
 									stdout_similarity =
 										Some((similarity, matched_files, total_files));
 									if !matched && debug_mode {
@@ -301,6 +308,13 @@ fn main() -> Result<()> {
 												diffs.len() - debug_max_lines
 											);
 										}
+										// Print detailed file diffs
+										runner::print_directory_file_diffs(
+											&file_diffs,
+											&config.tk_exec_1_name,
+											&config.tk_exec_2_name,
+											debug_max_lines,
+										);
 									}
 									matched
 								}

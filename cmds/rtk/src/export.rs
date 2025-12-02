@@ -4,7 +4,7 @@
 //! It evaluates environments and writes the resulting Kubernetes manifests to disk.
 
 use anyhow::{bail, Context, Result};
-use gtmpl::{template, Value};
+use gtmpl::Value;
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -15,6 +15,11 @@ use std::sync::Arc;
 
 use crate::discover::{find_environments, DiscoveredEnv};
 use crate::eval::{eval, EvalOpts};
+
+/// When exporting manifests to files, it becomes increasingly hard to map manifests back to its environment.
+/// This file can be used to map the files back to their environment.
+/// This is aimed to be used by CI/CD but can also be used for debugging purposes.
+const MANIFEST_FILE: &str = "manifest.json";
 
 /// Options for the export command
 #[derive(Debug, Clone)]
@@ -33,6 +38,8 @@ pub struct ExportOpts {
 	pub name: Option<String>,
 	/// Recursive mode - process all environments found
 	pub recursive: bool,
+	/// Skip generating manifest.json file that tracks exported files
+	pub skip_manifest: bool,
 }
 
 impl Default for ExportOpts {
@@ -46,6 +53,7 @@ impl Default for ExportOpts {
 			eval_opts: EvalOpts::default(),
 			name: None,
 			recursive: false,
+			skip_manifest: false,
 		}
 	}
 }
@@ -55,9 +63,11 @@ impl Default for ExportOpts {
 pub struct ExportEnvResult {
 	/// Path to the environment
 	pub env_path: PathBuf,
-	/// Files that were written
+	/// Files that were written (relative to output_dir)
 	#[allow(dead_code)]
 	pub files_written: Vec<PathBuf>,
+	/// Environment namespace (for manifest.json tracking)
+	pub env_namespace: Option<String>,
 	/// Any error that occurred
 	pub error: Option<String>,
 }
@@ -164,14 +174,16 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 					return ExportEnvResult {
 						env_path: env.path.clone(),
 						files_written: vec![],
+						env_namespace: None,
 						error: Some("Skipped due to earlier fatal error".to_string()),
 					};
 				}
 
 				match export_single_env(env, &opts) {
-					Ok(files) => ExportEnvResult {
+					Ok((files, namespace)) => ExportEnvResult {
 						env_path: env.path.clone(),
 						files_written: files,
+						env_namespace: Some(namespace),
 						error: None,
 					},
 					Err(ExportError::Fatal(msg)) => {
@@ -180,12 +192,14 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 						ExportEnvResult {
 							env_path: env.path.clone(),
 							files_written: vec![],
+							env_namespace: None,
 							error: Some(format!("FATAL: {}", msg)),
 						}
 					}
 					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
 						env_path: env.path.clone(),
 						files_written: vec![],
+						env_namespace: None,
 						error: Some(msg),
 					},
 				}
@@ -197,6 +211,11 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 	let successful = results.iter().filter(|r| r.error.is_none()).count();
 	let failed = results.iter().filter(|r| r.error.is_some()).count();
 
+	// Generate manifest.json file if not skipped
+	if !opts.skip_manifest {
+		export_manifest_file(&opts.output_dir, &results)?;
+	}
+
 	Ok(ExportResult {
 		total_envs: envs.len(),
 		successful,
@@ -207,6 +226,9 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 
 /// Validate that the filename template is valid Go text/template syntax (Issue #2)
 fn validate_filename_template(format: &str) -> Result<()> {
+	use crate::spec::{Environment, Metadata, Spec};
+	use std::collections::BTreeMap;
+
 	// Create a test manifest with all expected fields
 	let test_manifest = serde_json::json!({
 		"apiVersion": "v1",
@@ -214,12 +236,45 @@ fn validate_filename_template(format: &str) -> Result<()> {
 		"metadata": {
 			"name": "test",
 			"generateName": "test-",
-			"namespace": "default"
+			"namespace": "default",
+			"labels": {
+				"app": "test"
+			}
 		}
 	});
 
+	// Create a test environment with typical fields including labels
+	let mut labels = BTreeMap::new();
+	labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+	labels.insert("team".to_string(), "test-team".to_string());
+	labels.insert("fluxExport".to_string(), "true".to_string());
+	labels.insert("fluxExportDir".to_string(), "test-dir".to_string());
+
+	let test_env = Some(Environment {
+		api_version: "tanka.dev/v1alpha1".to_string(),
+		kind: "Environment".to_string(),
+		metadata: Metadata {
+			name: Some("test-env".to_string()),
+			namespace: Some("default".to_string()),
+			labels: Some(labels),
+		},
+		spec: Spec {
+			api_server: Some("https://kubernetes.default.svc".to_string()),
+			context_names: None,
+			namespace: "default".to_string(),
+			diff_strategy: None,
+			apply_strategy: None,
+			inject_labels: None,
+			resource_defaults: None,
+			expect_versions: None,
+			export_jsonnet_implementation: None,
+		},
+		data: None,
+	});
+
 	// Try to render with the template
-	format_filename_gtmpl(&test_manifest, format).context("Template validation failed")?;
+	format_filename_gtmpl(&test_manifest, &test_env, format)
+		.context("Template validation failed")?;
 
 	Ok(())
 }
@@ -253,7 +308,11 @@ fn count_environment_objects(value: &JsonValue) -> usize {
 }
 
 /// Export a single environment
-fn export_single_env(env: &DiscoveredEnv, opts: &ExportOpts) -> Result<Vec<PathBuf>, ExportError> {
+/// Returns (files_written, environment_namespace)
+fn export_single_env(
+	env: &DiscoveredEnv,
+	opts: &ExportOpts,
+) -> Result<(Vec<PathBuf>, String), ExportError> {
 	// Evaluate the environment
 	let result = eval(env.path.to_string_lossy().as_ref(), opts.eval_opts.clone())
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
@@ -270,12 +329,26 @@ fn export_single_env(env: &DiscoveredEnv, opts: &ExportOpts) -> Result<Vec<PathB
 		));
 	}
 
+	// Extract environment namespace (for manifest.json tracking)
+	// Use metadata.namespace if available, otherwise fall back to spec.namespace
+	let env_namespace = if let Some(ref env_spec) = result.spec {
+		env_spec
+			.metadata
+			.namespace
+			.clone()
+			.or_else(|| Some(env_spec.spec.namespace.clone()))
+			.unwrap_or_else(|| env.path.to_string_lossy().to_string())
+	} else {
+		// Fallback to environment path if no spec
+		env.path.to_string_lossy().to_string()
+	};
+
 	// Extract Kubernetes manifests from the result
 	let manifests = extract_manifests(&result.value)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 
 	if manifests.is_empty() {
-		return Ok(vec![]);
+		return Ok((vec![], env_namespace));
 	}
 
 	// Use output directory directly (matching tk behavior)
@@ -286,15 +359,46 @@ fn export_single_env(env: &DiscoveredEnv, opts: &ExportOpts) -> Result<Vec<PathB
 	let mut files_written = Vec::new();
 
 	// Write each manifest to a file
-	for manifest in manifests {
-		let filename = format_filename_gtmpl(&manifest, &opts.format).map_err(|e| {
-			// Template errors after validation are fatal (something very wrong)
-			ExportError::Fatal(format!("Template rendering failed: {}", e))
-		})?;
+	for mut manifest in manifests {
+		// Inject namespace if needed (matching Tanka's behavior in pkg/process/namespace.go)
+		inject_namespace(&mut manifest, &result.spec);
 
-		let filename_with_ext =
-			format!("{}.{}", sanitize_path_component(&filename), opts.extension);
-		let filepath = opts.output_dir.join(&filename_with_ext);
+		let filename =
+			format_filename_gtmpl(&manifest, &result.spec, &opts.format).map_err(|e| {
+				// Template errors after validation are fatal (something very wrong)
+				ExportError::Fatal(format!("Template rendering failed: {}", e))
+			})?;
+
+		// Split by / and sanitize each path component separately
+		// Filter out empty components and <no value> placeholders
+		let path_parts: Vec<String> = filename
+			.split('/')
+			.map(|part| part.trim())
+			.filter(|part| !part.is_empty() && *part != "<no value>")
+			.map(|part| sanitize_path_component(part))
+			.filter(|part| !part.is_empty())
+			.collect();
+
+		if path_parts.is_empty() {
+			return Err(ExportError::Fatal(format!(
+				"Template produced empty filename for manifest: {}",
+				serde_json::to_string(&manifest).unwrap_or_else(|_| "unknown".to_string())
+			)));
+		}
+
+		// Join path components and add extension to the last component
+		let mut relative_path = std::path::PathBuf::new();
+		for (i, part) in path_parts.iter().enumerate() {
+			if i == path_parts.len() - 1 {
+				// Last component - add extension
+				relative_path.push(format!("{}.{}", part, opts.extension));
+			} else {
+				// Directory component
+				relative_path.push(part);
+			}
+		}
+
+		let filepath = opts.output_dir.join(&relative_path);
 
 		// Create parent directories if needed
 		if let Some(parent) = filepath.parent() {
@@ -313,10 +417,51 @@ fn export_single_env(env: &DiscoveredEnv, opts: &ExportOpts) -> Result<Vec<PathB
 
 		fs::write(&filepath, content)
 			.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-		files_written.push(filepath);
+
+		// Track relative path for manifest.json
+		files_written.push(relative_path);
 	}
 
-	Ok(files_written)
+	Ok((files_written, env_namespace))
+}
+
+/// Export manifest file that maps exported files to their environment
+/// Merges with existing manifest.json if present
+fn export_manifest_file(output_dir: &PathBuf, results: &[ExportEnvResult]) -> Result<()> {
+	let manifest_path = output_dir.join(MANIFEST_FILE);
+
+	// Read existing manifest.json if it exists
+	let mut file_to_env: HashMap<String, String> = if manifest_path.exists() {
+		let content =
+			fs::read_to_string(&manifest_path).context("reading existing manifest.json")?;
+		serde_json::from_str(&content).context("parsing existing manifest.json")?
+	} else {
+		HashMap::new()
+	};
+
+	// Add new entries from successful exports
+	for result in results {
+		if result.error.is_none() {
+			if let Some(ref namespace) = result.env_namespace {
+				for file in &result.files_written {
+					// Convert PathBuf to string with forward slashes (cross-platform)
+					let file_str = file
+						.components()
+						.map(|c| c.as_os_str().to_string_lossy())
+						.collect::<Vec<_>>()
+						.join("/");
+					file_to_env.insert(file_str, namespace.clone());
+				}
+			}
+		}
+	}
+
+	// Write manifest.json
+	let content =
+		serde_json::to_string_pretty(&file_to_env).context("serializing manifest.json")?;
+	fs::write(&manifest_path, content).context("writing manifest.json")?;
+
+	Ok(())
 }
 
 /// Extract Kubernetes manifests from evaluation result
@@ -377,6 +522,84 @@ fn collect_manifests(value: &JsonValue, manifests: &mut Vec<JsonValue>) {
 	}
 }
 
+/// Check if a Kubernetes kind is cluster-wide (not namespaced)
+/// This list is from Tanka's pkg/process/namespace.go
+fn is_cluster_wide_kind(kind: &str) -> bool {
+	matches!(
+		kind,
+		"APIService"
+			| "CertificateSigningRequest"
+			| "ClusterRole"
+			| "ClusterRoleBinding"
+			| "ComponentStatus"
+			| "CSIDriver"
+			| "CSINode"
+			| "CustomResourceDefinition"
+			| "MutatingWebhookConfiguration"
+			| "Namespace"
+			| "Node" | "NodeMetrics"
+			| "PersistentVolume"
+			| "PodSecurityPolicy"
+			| "PriorityClass"
+			| "RuntimeClass"
+			| "SelfSubjectAccessReview"
+			| "SelfSubjectRulesReview"
+			| "StorageClass"
+			| "SubjectAccessReview"
+			| "TokenReview"
+			| "ValidatingWebhookConfiguration"
+			| "VolumeAttachment"
+	)
+}
+
+/// Inject namespace into a manifest if needed (matching Tanka's pkg/process/namespace.go)
+fn inject_namespace(manifest: &mut JsonValue, env_spec: &Option<crate::spec::Environment>) {
+	if let JsonValue::Object(ref mut obj) = manifest {
+		// Get kind and check if it's cluster-wide
+		let kind = obj.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+		let is_cluster_wide = is_cluster_wide_kind(kind);
+
+		// Ensure metadata exists
+		if !obj.contains_key("metadata") {
+			obj.insert(
+				"metadata".to_string(),
+				JsonValue::Object(serde_json::Map::new()),
+			);
+		}
+
+		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
+			// Check for annotation override (tanka.dev/namespaced)
+			let mut namespaced = !is_cluster_wide;
+			if let Some(JsonValue::Object(annotations)) = metadata.get("annotations") {
+				if let Some(JsonValue::String(ns_str)) = annotations.get("tanka.dev/namespaced") {
+					namespaced = ns_str == "true";
+				}
+			}
+
+			// Inject namespace if needed
+			if namespaced {
+				let has_namespace = metadata.contains_key("namespace")
+					&& metadata
+						.get("namespace")
+						.and_then(|v| v.as_str())
+						.map(|s| !s.is_empty())
+						.unwrap_or(false);
+
+				if !has_namespace {
+					if let Some(env) = env_spec {
+						if !env.spec.namespace.is_empty() {
+							metadata.insert(
+								"namespace".to_string(),
+								JsonValue::String(env.spec.namespace.clone()),
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 /// Sanitize a string for use as a path component
 fn sanitize_path_component(s: &str) -> String {
 	s.chars()
@@ -416,14 +639,133 @@ fn json_to_gtmpl(value: &JsonValue) -> Value {
 	}
 }
 
+// Thread-local storage for env value during template rendering
+thread_local! {
+	static ENV_VALUE: std::cell::RefCell<Option<Value>> = std::cell::RefCell::new(None);
+}
+
+// Function to return the env value for gtmpl templates
+fn env_func(_args: &[Value]) -> Result<Value, gtmpl::FuncError> {
+	ENV_VALUE.with(|env| {
+		env.borrow()
+			.clone()
+			.ok_or_else(|| gtmpl::FuncError::Generic("env not available".to_string()))
+	})
+}
+
 /// Format filename using Go text/template (gtmpl)
-fn format_filename_gtmpl(manifest: &JsonValue, format: &str) -> Result<String> {
-	// Convert manifest to gtmpl Value
-	let context = json_to_gtmpl(manifest);
+fn format_filename_gtmpl(
+	manifest: &JsonValue,
+	env_spec: &Option<crate::spec::Environment>,
+	format: &str,
+) -> Result<String> {
+	use gtmpl::{Context, Template};
+
+	// Create template
+	let mut tmpl = Template::default();
+
+	// Register env function if environment spec is available
+	if let Some(env) = env_spec {
+		// Clone and ensure labels is always an empty map if None
+		let mut env_clone = env.clone();
+		if env_clone.metadata.labels.is_none() {
+			env_clone.metadata.labels = Some(std::collections::BTreeMap::new());
+		}
+
+		let env_json = serde_json::to_value(&env_clone)?;
+		let env_value = json_to_gtmpl(&env_json);
+
+		// Store env value in thread-local storage
+		ENV_VALUE.with(|cell| {
+			*cell.borrow_mut() = Some(env_value);
+		});
+
+		// Register env function
+		tmpl.add_func("env", env_func as gtmpl::Func);
+	}
+
+	// Parse the template
+	tmpl.parse(format)?;
+
+	// Create context with manifest fields
+	// Ensure metadata.labels exists as empty object and inject namespace if needed
+	let mut manifest_clone = manifest.clone();
+	if let JsonValue::Object(ref mut obj) = manifest_clone {
+		// Get kind and check if it's cluster-wide
+		let kind = obj
+			.get("kind")
+			.and_then(|v| v.as_str())
+			.unwrap_or("")
+			.to_string();
+		let is_cluster_wide = is_cluster_wide_kind(&kind);
+
+		// Ensure metadata exists
+		if !obj.contains_key("metadata") {
+			obj.insert(
+				"metadata".to_string(),
+				JsonValue::Object(serde_json::Map::new()),
+			);
+		}
+
+		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
+			// Ensure labels exists as empty object if not present
+			// This prevents template errors when accessing .metadata.labels.field
+			if !metadata.contains_key("labels") {
+				metadata.insert(
+					"labels".to_string(),
+					JsonValue::Object(serde_json::Map::new()),
+				);
+			}
+
+			// Check for annotation override (tanka.dev/namespaced)
+			let mut namespaced = !is_cluster_wide;
+			if let Some(JsonValue::Object(annotations)) = metadata.get("annotations") {
+				if let Some(JsonValue::String(ns_str)) = annotations.get("tanka.dev/namespaced") {
+					namespaced = ns_str == "true";
+				}
+			}
+
+			// Inject namespace if needed (matching Tanka's behavior)
+			if namespaced {
+				let has_namespace = metadata.contains_key("namespace")
+					&& metadata
+						.get("namespace")
+						.and_then(|v| v.as_str())
+						.map(|s| !s.is_empty())
+						.unwrap_or(false);
+
+				if !has_namespace {
+					if let Some(env) = env_spec {
+						if !env.spec.namespace.is_empty() {
+							metadata.insert(
+								"namespace".to_string(),
+								JsonValue::String(env.spec.namespace.clone()),
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	let mut context_map = HashMap::new();
+	if let JsonValue::Object(obj) = manifest_clone {
+		for (key, value) in obj {
+			context_map.insert(key.clone(), json_to_gtmpl(&value));
+		}
+	}
+
+	let context = Context::from(Value::Map(context_map));
 
 	// Render template
-	let result =
-		template(format, context).map_err(|e| anyhow::anyhow!("Template error: {:?}", e))?;
+	let result = tmpl
+		.render(&context)
+		.map_err(|e| anyhow::anyhow!("Template error: {:?}", e))?;
+
+	// Clean up thread-local storage
+	ENV_VALUE.with(|cell| {
+		*cell.borrow_mut() = None;
+	});
 
 	// Clean up empty segments (from missing optional fields)
 	let cleaned: String = result
@@ -487,7 +829,8 @@ mod tests {
 			"metadata": { "name": "my-config" }
 		});
 
-		let result = format_filename_gtmpl(&manifest, "{{.kind}}-{{.metadata.name}}").unwrap();
+		let result =
+			format_filename_gtmpl(&manifest, &None, "{{.kind}}-{{.metadata.name}}").unwrap();
 		assert_eq!(result, "ConfigMap-my-config");
 	}
 
@@ -501,6 +844,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -517,6 +861,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -533,6 +878,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.apiVersion}}.{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -648,6 +994,7 @@ mod tests {
 			eval_opts: EvalOpts::default(),
 			name: None,
 			recursive: true, // Allow single env
+			skip_manifest: false,
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -680,6 +1027,7 @@ mod tests {
 			eval_opts: EvalOpts::default(),
 			name: None,
 			recursive: true,
+			skip_manifest: false,
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -733,6 +1081,7 @@ mod tests {
 			eval_opts: EvalOpts::default(),
 			name: None,
 			recursive: true,
+			skip_manifest: false,
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -898,7 +1247,7 @@ mod tests {
 		});
 
 		let result =
-			format_filename_gtmpl(&manifest, "{{.metadata.labels.app}}-{{.kind}}").unwrap();
+			format_filename_gtmpl(&manifest, &None, "{{.metadata.labels.app}}-{{.kind}}").unwrap();
 		assert_eq!(result, "nginx-Service");
 	}
 
@@ -915,6 +1264,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -935,6 +1285,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -950,9 +1301,12 @@ mod tests {
 			"metadata": { "name": "my-ingress" }
 		});
 
-		let result =
-			format_filename_gtmpl(&manifest, "{{.apiVersion}}.{{.kind}}-{{.metadata.name}}")
-				.unwrap();
+		let result = format_filename_gtmpl(
+			&manifest,
+			&None,
+			"{{.apiVersion}}.{{.kind}}-{{.metadata.name}}",
+		)
+		.unwrap();
 		assert_eq!(result, "networking.k8s.io/v1.Ingress-my-ingress");
 	}
 
@@ -965,7 +1319,8 @@ mod tests {
 			"metadata": { "name": "my-config-map.v2" }
 		});
 
-		let result = format_filename_gtmpl(&manifest, "{{.kind}}-{{.metadata.name}}").unwrap();
+		let result =
+			format_filename_gtmpl(&manifest, &None, "{{.kind}}-{{.metadata.name}}").unwrap();
 		assert_eq!(result, "ConfigMap-my-config-map.v2");
 	}
 
@@ -980,6 +1335,7 @@ mod tests {
 
 		let result = format_filename_gtmpl(
 			&manifest,
+			&None,
 			"{{.apiVersion}}.{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
@@ -1490,7 +1846,7 @@ mod tests {
 		});
 
 		// Should not fail, just produce empty segment
-		let result = format_filename_gtmpl(&manifest, "{{.kind}}-{{.metadata.name}}");
+		let result = format_filename_gtmpl(&manifest, &None, "{{.kind}}-{{.metadata.name}}");
 		assert!(result.is_ok());
 	}
 
@@ -1502,7 +1858,7 @@ mod tests {
 			"kind": "ConfigMap"
 		});
 
-		let result = format_filename_gtmpl(&manifest, "{{.kind}}");
+		let result = format_filename_gtmpl(&manifest, &None, "{{.kind}}");
 		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), "ConfigMap");
 	}
@@ -1578,5 +1934,247 @@ mod tests {
 		assert!(json_result.results[0].files_written[0]
 			.to_string_lossy()
 			.ends_with(".json"));
+	}
+
+	#[test]
+	fn test_gtmpl_env_function() {
+		// Test that env variable works in templates
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "prod-cluster".to_string());
+		labels.insert("team".to_string(), "platform".to_string());
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Test accessing env.metadata.labels
+		let result = format_filename_gtmpl(
+			&manifest,
+			&env,
+			"{{env.metadata.labels.cluster_name}}/{{.kind}}-{{.metadata.name}}",
+		)
+		.unwrap();
+		assert_eq!(result, "prod-cluster/ConfigMap-test-config");
+
+		// Test accessing env.metadata.name
+		let result2 =
+			format_filename_gtmpl(&manifest, &env, "{{env.metadata.name}}/{{.kind}}").unwrap();
+		assert_eq!(result2, "test-env/ConfigMap");
+	}
+
+	// ==================== Manifest.json Tests ====================
+
+	#[test]
+	fn test_manifest_json_generated() {
+		let temp = TempDir::new().unwrap();
+		let env_path = setup_test_env(
+			&temp,
+			"test",
+			r#"{
+				apiVersion: "v1",
+				kind: "ConfigMap",
+				metadata: { name: "test-config" },
+				data: { key: "value" }
+			}"#,
+		);
+
+		let output_dir = temp.path().join("output");
+		let opts = ExportOpts {
+			output_dir: output_dir.clone(),
+			extension: "yaml".to_string(),
+			format: "{{.kind}}-{{.metadata.name}}".to_string(),
+			parallelism: 1,
+			eval_opts: EvalOpts::default(),
+			name: None,
+			recursive: true,
+			skip_manifest: false,
+		};
+
+		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+
+		// Check manifest.json exists
+		let manifest_path = output_dir.join(MANIFEST_FILE);
+		assert!(manifest_path.exists(), "manifest.json should exist");
+
+		// Read and verify contents
+		let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+		let manifest_map: HashMap<String, String> =
+			serde_json::from_str(&manifest_content).unwrap();
+
+		// Should have one entry
+		assert_eq!(manifest_map.len(), 1);
+
+		// Entry should map the file to the environment path
+		let expected_file = "ConfigMap-test-config.yaml";
+		assert!(
+			manifest_map.contains_key(expected_file),
+			"manifest.json should contain the exported file"
+		);
+	}
+
+	#[test]
+	fn test_manifest_json_skipped() {
+		let temp = TempDir::new().unwrap();
+		let env_path = setup_test_env(
+			&temp,
+			"test",
+			r#"{
+				apiVersion: "v1",
+				kind: "ConfigMap",
+				metadata: { name: "test-config" },
+				data: { key: "value" }
+			}"#,
+		);
+
+		let output_dir = temp.path().join("output");
+		let opts = ExportOpts {
+			output_dir: output_dir.clone(),
+			extension: "yaml".to_string(),
+			format: "{{.kind}}-{{.metadata.name}}".to_string(),
+			parallelism: 1,
+			eval_opts: EvalOpts::default(),
+			name: None,
+			recursive: true,
+			skip_manifest: true,
+		};
+
+		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+
+		// Check manifest.json does not exist
+		let manifest_path = output_dir.join(MANIFEST_FILE);
+		assert!(
+			!manifest_path.exists(),
+			"manifest.json should not exist when skip_manifest is true"
+		);
+	}
+
+	#[test]
+	fn test_manifest_json_merges_with_existing() {
+		let temp = TempDir::new().unwrap();
+		let output_dir = temp.path().join("output");
+		fs::create_dir_all(&output_dir).unwrap();
+
+		// Create existing manifest.json
+		let existing_manifest = serde_json::json!({
+			"old-file.yaml": "old-env"
+		});
+		fs::write(
+			output_dir.join(MANIFEST_FILE),
+			serde_json::to_string_pretty(&existing_manifest).unwrap(),
+		)
+		.unwrap();
+
+		// Export a new environment
+		let env_path = setup_test_env(
+			&temp,
+			"test",
+			r#"{
+				apiVersion: "v1",
+				kind: "ConfigMap",
+				metadata: { name: "new-config" },
+				data: { key: "value" }
+			}"#,
+		);
+
+		let opts = ExportOpts {
+			output_dir: output_dir.clone(),
+			extension: "yaml".to_string(),
+			format: "{{.kind}}-{{.metadata.name}}".to_string(),
+			parallelism: 1,
+			eval_opts: EvalOpts::default(),
+			name: None,
+			recursive: true,
+			skip_manifest: false,
+		};
+
+		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+
+		// Read manifest.json
+		let manifest_content = fs::read_to_string(output_dir.join(MANIFEST_FILE)).unwrap();
+		let manifest_map: HashMap<String, String> =
+			serde_json::from_str(&manifest_content).unwrap();
+
+		// Should have both entries
+		assert_eq!(manifest_map.len(), 2);
+		assert!(manifest_map.contains_key("old-file.yaml"));
+		assert!(manifest_map.contains_key("ConfigMap-new-config.yaml"));
+	}
+
+	#[test]
+	fn test_manifest_json_with_multiple_envs() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+
+		// Create two environments
+		let env1 = root.join("environments/env1");
+		let env2 = root.join("environments/env2");
+		fs::create_dir_all(&env1).unwrap();
+		fs::create_dir_all(&env2).unwrap();
+		fs::write(
+			env1.join("main.jsonnet"),
+			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "config1" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("main.jsonnet"),
+			r#"{ apiVersion: "v1", kind: "Secret", metadata: { name: "secret1" } }"#,
+		)
+		.unwrap();
+
+		let output_dir = temp.path().join("output");
+		let opts = ExportOpts {
+			output_dir: output_dir.clone(),
+			format: "{{.kind}}-{{.metadata.name}}".to_string(),
+			recursive: true,
+			skip_manifest: false,
+			..Default::default()
+		};
+
+		let _ = export(
+			&[root.join("environments").to_string_lossy().to_string()],
+			opts,
+		)
+		.unwrap();
+
+		// Read manifest.json
+		let manifest_path = output_dir.join(MANIFEST_FILE);
+		assert!(manifest_path.exists());
+
+		let manifest_content = fs::read_to_string(&manifest_path).unwrap();
+		let manifest_map: HashMap<String, String> =
+			serde_json::from_str(&manifest_content).unwrap();
+
+		// Should have entries for both environments
+		assert_eq!(manifest_map.len(), 2);
+		assert!(manifest_map.contains_key("ConfigMap-config1.yaml"));
+		assert!(manifest_map.contains_key("Secret-secret1.yaml"));
 	}
 }

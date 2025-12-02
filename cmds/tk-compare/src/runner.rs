@@ -65,17 +65,44 @@ pub fn run_command(
 	})
 }
 
+/// File diff information for detailed output
+#[derive(Debug)]
+pub struct FileDiff {
+	pub path: String,
+	pub kind: FileDiffKind,
+}
+
+#[derive(Debug)]
+pub enum FileDiffKind {
+	ContentDiffers {
+		content1: String,
+		content2: String,
+		diff_lines: usize,
+	},
+	OnlyInFirst,
+	OnlyInSecond,
+}
+
 /// Compare two directories and return detailed results
-/// Returns (matched, similarity_percentage, matched_files, total_files, differences)
+/// Returns (matched, similarity_percentage, matched_files, total_files, differences, file_diffs)
+///
+/// Similarity calculation:
+/// - If file lists don't match (missing/extra files): 0%
+/// - If all files exist but content differs: calculate line-by-line similarity across all files
+/// - If all files match perfectly: 100%
 pub fn compare_directories_detailed(
 	dir1: &str,
 	dir2: &str,
-) -> Result<(bool, f64, usize, usize, Vec<String>)> {
+) -> Result<(bool, f64, usize, usize, Vec<String>, Vec<FileDiff>)> {
 	let files1 = collect_files(dir1)?;
 	let files2 = collect_files(dir2)?;
 
 	let mut diffs = Vec::new();
+	let mut file_diffs = Vec::new();
 	let mut matched_files = 0;
+	let mut total_lines = 0;
+	let mut matched_lines = 0;
+	let mut has_missing_or_extra_files = false;
 
 	// Get all unique file paths
 	let all_paths: std::collections::HashSet<_> = files1.keys().chain(files2.keys()).collect();
@@ -84,14 +111,28 @@ pub fn compare_directories_detailed(
 	for path in &all_paths {
 		match (files1.get(*path), files2.get(*path)) {
 			(Some(content1), Some(content2)) => {
+				let text1 = String::from_utf8_lossy(content1);
+				let text2 = String::from_utf8_lossy(content2);
+				let lines1: Vec<&str> = text1.lines().collect();
+				let lines2: Vec<&str> = text2.lines().collect();
+
 				if content1 == content2 {
 					matched_files += 1;
+					// Count all lines as matched
+					let line_count = lines1.len();
+					total_lines += line_count;
+					matched_lines += line_count;
 				} else {
-					// Try to show meaningful diff for text files
-					let text1 = String::from_utf8_lossy(content1);
-					let text2 = String::from_utf8_lossy(content2);
-					let lines1: Vec<&str> = text1.lines().collect();
-					let lines2: Vec<&str> = text2.lines().collect();
+					// Calculate line-by-line similarity for this file
+					let max_lines = lines1.len().max(lines2.len());
+					total_lines += max_lines;
+
+					for i in 0..max_lines {
+						if lines1.get(i) == lines2.get(i) {
+							matched_lines += 1;
+						}
+					}
+
 					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
 						lines1
 							.iter()
@@ -103,26 +144,67 @@ pub fn compare_directories_detailed(
 						"{}: content differs (~{} line differences)",
 						path, diff_lines
 					));
+
+					// Store full content for detailed diff printing
+					file_diffs.push(FileDiff {
+						path: path.to_string(),
+						kind: FileDiffKind::ContentDiffers {
+							content1: text1.to_string(),
+							content2: text2.to_string(),
+							diff_lines,
+						},
+					});
 				}
 			}
 			(Some(_), None) => {
+				has_missing_or_extra_files = true;
 				diffs.push(format!("{}: only in first directory", path));
+				file_diffs.push(FileDiff {
+					path: path.to_string(),
+					kind: FileDiffKind::OnlyInFirst,
+				});
 			}
 			(None, Some(_)) => {
+				has_missing_or_extra_files = true;
 				diffs.push(format!("{}: only in second directory", path));
+				file_diffs.push(FileDiff {
+					path: path.to_string(),
+					kind: FileDiffKind::OnlyInSecond,
+				});
 			}
 			(None, None) => unreachable!(),
 		}
 	}
 
-	let similarity = if total_files > 0 {
-		(matched_files as f64 / total_files as f64) * 100.0
+	let matched = diffs.is_empty();
+
+	// NEW LOGIC:
+	// - Missing/extra files: 0%
+	// - All files present but different content: calculate line similarity
+	// - All files match: 100%
+	let similarity = if has_missing_or_extra_files {
+		0.0
+	} else if total_files > 0 {
+		// All files present in both directories - calculate line-based similarity
+		if total_lines > 0 {
+			(matched_lines as f64 / total_lines as f64) * 100.0
+		} else {
+			// All files match but no lines (empty files)
+			100.0
+		}
 	} else {
+		// No files in either directory
 		100.0
 	};
 
-	let matched = diffs.is_empty();
-	Ok((matched, similarity, matched_files, total_files, diffs))
+	Ok((
+		matched,
+		similarity,
+		matched_files,
+		total_files,
+		diffs,
+		file_diffs,
+	))
 }
 
 fn collect_files(dir: &str) -> Result<HashMap<String, Vec<u8>>> {
@@ -543,6 +625,78 @@ pub fn print_string_diff(str1: &str, str2: &str, name1: &str, name2: &str, max_l
 	}
 }
 
+/// Print detailed file diffs for directory comparison
+pub fn print_directory_file_diffs(
+	file_diffs: &[FileDiff],
+	name1: &str,
+	name2: &str,
+	max_lines: usize,
+) {
+	use similar::{ChangeTag, TextDiff};
+
+	eprintln!("\n=== DIRECTORY FILE DIFFS ===");
+
+	let mut total_line_count = 0;
+	for file_diff in file_diffs {
+		if total_line_count >= max_lines {
+			eprintln!("... (truncated, {} lines shown)", max_lines);
+			break;
+		}
+
+		match &file_diff.kind {
+			FileDiffKind::ContentDiffers {
+				content1,
+				content2,
+				diff_lines,
+			} => {
+				eprintln!(
+					"\nFile: {} (~{} line differences)",
+					file_diff.path, diff_lines
+				);
+
+				let diff = TextDiff::from_lines(content1, content2);
+				let mut file_line_count = 0;
+
+				for change in diff.iter_all_changes() {
+					if total_line_count >= max_lines {
+						eprintln!("  ... (truncated, {} lines shown total)", max_lines);
+						return;
+					}
+
+					let sign = match change.tag() {
+						ChangeTag::Delete => "-",
+						ChangeTag::Insert => "+",
+						ChangeTag::Equal => " ",
+					};
+
+					if change.tag() != ChangeTag::Equal {
+						let prefix = match change.tag() {
+							ChangeTag::Delete => format!("({}) ", name1),
+							ChangeTag::Insert => format!("({}) ", name2),
+							ChangeTag::Equal => String::new(),
+						};
+						eprint!("  {}{}{}", sign, prefix, change);
+						file_line_count += 1;
+						total_line_count += 1;
+					}
+				}
+
+				if file_line_count == 0 {
+					eprintln!("  (no visible differences in first {} lines)", max_lines);
+				}
+			}
+			FileDiffKind::OnlyInFirst => {
+				eprintln!("\nFile: {} - only in {} directory", file_diff.path, name1);
+				total_line_count += 1;
+			}
+			FileDiffKind::OnlyInSecond => {
+				eprintln!("\nFile: {} - only in {} directory", file_diff.path, name2);
+				total_line_count += 1;
+			}
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -567,6 +721,7 @@ mod tests {
 		assert_eq!(result.2, 1); // 1 matched file
 		assert_eq!(result.3, 1); // 1 total file
 		assert!(result.4.is_empty()); // no diffs
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -583,10 +738,33 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
-		assert_eq!(result.1, 0.0); // 0% similarity
+		assert_eq!(result.1, 0.0); // 0% similarity (both are 1 line, 0 match)
 		assert_eq!(result.2, 0); // 0 matched files
 		assert_eq!(result.3, 1); // 1 total file
 		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
+	}
+
+	#[test]
+	fn test_compare_directories_different_content_partial_match() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		fs::write(dir1.join("file.txt"), "line1\nline2\nline3").unwrap();
+		fs::write(dir2.join("file.txt"), "line1\ndifferent\nline3").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(!result.0); // not matched
+					  // 2 out of 3 lines match = 66.67%
+		assert!((result.1 - 66.67).abs() < 0.1);
+		assert_eq!(result.2, 0); // 0 matched files
+		assert_eq!(result.3, 1); // 1 total file
+		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -603,9 +781,11 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
+		assert_eq!(result.1, 0.0); // 0% similarity (files don't match)
 		assert_eq!(result.2, 0); // 0 matched files
 		assert_eq!(result.3, 2); // 2 total files
 		assert_eq!(result.4.len(), 2); // 2 diffs (one in each dir only)
+		assert_eq!(result.5.len(), 2); // 2 file_diffs
 	}
 
 	#[test]
@@ -622,6 +802,7 @@ mod tests {
 		assert_eq!(result.1, 100.0); // 100% similarity
 		assert_eq!(result.2, 0); // 0 matched files
 		assert_eq!(result.3, 0); // 0 total files
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -638,7 +819,84 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
+		assert_eq!(result.1, 100.0); // 100% similarity (all files match)
 		assert_eq!(result.2, 1); // 1 matched file
+		assert!(result.5.is_empty()); // no file_diffs
+	}
+
+	#[test]
+	fn test_compare_directories_multiple_matching_files() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		// Create multiple files with multiple lines
+		fs::write(dir1.join("file1.txt"), "line1\nline2\nline3").unwrap();
+		fs::write(dir2.join("file1.txt"), "line1\nline2\nline3").unwrap();
+		fs::write(dir1.join("file2.txt"), "content\nhere").unwrap();
+		fs::write(dir2.join("file2.txt"), "content\nhere").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(result.0); // matched
+		assert_eq!(result.1, 100.0); // 100% similarity (all files match)
+		assert_eq!(result.2, 2); // 2 matched files
+		assert_eq!(result.3, 2); // 2 total files
+		assert!(result.4.is_empty()); // no diffs
+		assert!(result.5.is_empty()); // no file_diffs
+	}
+
+	#[test]
+	fn test_compare_directories_multiple_files_with_differences() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		// file1: 3 lines, all match
+		fs::write(dir1.join("file1.txt"), "line1\nline2\nline3").unwrap();
+		fs::write(dir2.join("file1.txt"), "line1\nline2\nline3").unwrap();
+		// file2: 2 lines, 1 matches, 1 doesn't
+		fs::write(dir1.join("file2.txt"), "match\ndiff1").unwrap();
+		fs::write(dir2.join("file2.txt"), "match\ndiff2").unwrap();
+		// Total: 5 lines, 4 match = 80%
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(!result.0); // not matched
+		assert_eq!(result.1, 80.0); // 4/5 lines match
+		assert_eq!(result.2, 1); // 1 matched file (file1)
+		assert_eq!(result.3, 2); // 2 total files
+		assert_eq!(result.4.len(), 1); // 1 diff (file2)
+		assert_eq!(result.5.len(), 1); // 1 file_diff
+	}
+
+	#[test]
+	fn test_compare_directories_mixed_content() {
+		let dir = tempdir().unwrap();
+		let dir1 = dir.path().join("a");
+		let dir2 = dir.path().join("b");
+		fs::create_dir_all(&dir1).unwrap();
+		fs::create_dir_all(&dir2).unwrap();
+
+		// Two files: one matches, one doesn't
+		fs::write(dir1.join("file1.txt"), "hello").unwrap();
+		fs::write(dir2.join("file1.txt"), "hello").unwrap();
+		fs::write(dir1.join("file2.txt"), "world").unwrap();
+		fs::write(dir2.join("file2.txt"), "different").unwrap();
+
+		let result =
+			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
+		assert!(!result.0); // not matched
+					  // file1: 1 line matches, file2: 0 lines match = 1/2 = 50%
+		assert_eq!(result.1, 50.0);
+		assert_eq!(result.2, 1); // 1 matched file
+		assert_eq!(result.3, 2); // 2 total files
+		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]

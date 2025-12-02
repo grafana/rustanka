@@ -343,6 +343,10 @@ enum Commands {
 		#[arg(short = 'l', long)]
 		selector: Option<String>,
 
+		/// Skip generating manifest.json file that tracks exported files
+		#[arg(long)]
+		skip_manifest: bool,
+
 		#[arg(short = 't', long)]
 		target: Vec<String>,
 
@@ -639,6 +643,7 @@ fn main() -> Result<()> {
 			name,
 			parallel,
 			recursive,
+			skip_manifest,
 			tla_code,
 			tla_str,
 			..
@@ -694,6 +699,7 @@ fn main() -> Result<()> {
 				eval_opts,
 				name,
 				recursive,
+				skip_manifest,
 			};
 
 			let result = export::export(&paths, export_opts)?;

@@ -118,12 +118,22 @@ impl Command {
 
 	/// Get args with placeholders substituted for a specific executable
 	/// Supports {{EXEC_NAME}} placeholder which gets replaced with the executable name
+	/// Supports {{EXPORT_FORMAT}} which expands to two args: --format and the template value
 	pub fn args_for_exec(&self, exec_name: &str) -> Vec<String> {
-		self.args
-			.iter()
-			.map(|arg| arg.replace("{{EXEC_NAME}}", exec_name))
-			.map(|arg| arg.replace("{{EXPORT_FORMAT}}", "--format='{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}'"))
-			.collect()
+		let export_format_template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}";
+
+		let mut result = Vec::new();
+		for arg in &self.args {
+			let arg = arg.replace("{{EXEC_NAME}}", exec_name);
+			if arg == "{{EXPORT_FORMAT}}" {
+				// Expand to two separate arguments
+				result.push("--format".to_string());
+				result.push(export_format_template.to_string());
+			} else {
+				result.push(arg);
+			}
+		}
+		result
 	}
 }
 
@@ -178,6 +188,31 @@ mod tests {
 
 		let args = cmd.args_for_exec("rtk");
 		assert_eq!(args, vec!["eval", "path"]);
+	}
+
+	#[test]
+	fn test_args_for_exec_export_format() {
+		let cmd = Command {
+			args: vec![
+				"export".to_string(),
+				"/tmp/out".to_string(),
+				"{{EXPORT_FORMAT}}".to_string(),
+				"path".to_string(),
+			],
+			name: None,
+			runs: 1,
+			json_compare: false,
+			dir_compare: true,
+			expect_error: false,
+		};
+
+		let args = cmd.args_for_exec("rtk");
+		assert_eq!(args.len(), 5);
+		assert_eq!(args[0], "export");
+		assert_eq!(args[1], "/tmp/out");
+		assert_eq!(args[2], "--format");
+		assert!(args[3].contains("flux"));
+		assert_eq!(args[4], "path");
 	}
 
 	#[test]

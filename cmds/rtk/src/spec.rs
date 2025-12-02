@@ -20,7 +20,7 @@ pub struct Metadata {
 	pub name: Option<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub namespace: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
+	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub labels: Option<BTreeMap<String, String>>,
 }
 
