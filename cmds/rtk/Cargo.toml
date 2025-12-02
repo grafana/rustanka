@@ -20,7 +20,7 @@ serde_yaml = "0.9"
 tabwriter = "1.4"
 rayon = "1.10"
 walkdir = "2.5"
-handlebars = "6.0"
+gtmpl = "0.7.1"
 regex = "1.10"
 
 # jrsonnet dependencies for evaluation

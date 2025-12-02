@@ -201,10 +201,7 @@ fn main() -> Result<()> {
 			index + 1
 		};
 
-		// Clean up export directories before running (if dir_compare is enabled)
-		cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
-
-		// Clean workspace directories between commands
+		// Clean workspace directories between commands (not export dirs - those are cleaned per-run)
 		if let (Some(ref ws1), Some(ref ws2)) = (&workspace1, &workspace2) {
 			if std::path::Path::new(ws1).exists() {
 				let _ = std::fs::remove_dir_all(ws1);
@@ -249,6 +246,10 @@ fn main() -> Result<()> {
 				use std::io::Write;
 				std::io::stderr().flush().ok();
 			}
+
+			// Clean up export directories before EACH run to avoid "file already exists" errors
+			// This is especially important for multi-run benchmarks
+			cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
 
 			// Get args for each executable (may differ due to {{EXEC_NAME}} substitution)
 			let args1 = command.args_for_exec(&config.tk_exec_1_name);

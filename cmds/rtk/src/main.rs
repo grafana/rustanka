@@ -636,7 +636,9 @@ fn main() -> Result<()> {
 			extension,
 			format,
 			max_stack,
+			name,
 			parallel,
+			recursive,
 			tla_code,
 			tla_str,
 			..
@@ -673,13 +675,6 @@ fn main() -> Result<()> {
 				}
 			}
 
-			// Convert format from Go template syntax to handlebars
-			// Go: {{.apiVersion}} -> Handlebars: {{apiVersion}}
-			let hb_format = format
-				.replace("{{.", "{{")
-				.replace("{{or ", "{{")
-				.replace(" .metadata.generateName}}", "}}");
-
 			let eval_opts = eval::EvalOpts {
 				ext_str: ext_str_map,
 				ext_code: ext_code_map,
@@ -689,30 +684,24 @@ fn main() -> Result<()> {
 				eval_expr: None,
 			};
 
+			// Note: format is now passed directly as Go text/template syntax
+			// gtmpl handles it natively without conversion
 			let export_opts = export::ExportOpts {
 				output_dir: std::path::PathBuf::from(&output_dir),
 				extension,
-				format: hb_format,
+				format,
 				parallelism: parallel as usize,
 				eval_opts,
+				name,
+				recursive,
 			};
 
 			let result = export::export(&paths, export_opts)?;
 
-			println!(
-				"Exported {} environments ({} successful, {} failed)",
-				result.total_envs, result.successful, result.failed
-			);
-
+			// Match tk behavior: silent on success, errors to stderr
 			for env_result in &result.results {
 				if let Some(ref error) = env_result.error {
 					eprintln!("  ✗ {:?}: {}", env_result.env_path, error);
-				} else {
-					println!(
-						"  ✓ {:?}: {} files",
-						env_result.env_path,
-						env_result.files_written.len()
-					);
 				}
 			}
 

@@ -34,8 +34,10 @@ build-tk-compare:
 	@cargo build --release -p tk-compare
 
 tk-compare-grafana:
-	make build-rtk > /dev/null 2>&1
-	make build-tk-compare > /dev/null 2>&1
+	@echo "Building rtk..."
+	@cargo build --release -p rtk
+	@echo "Building tk-compare..."
+	@cargo build --release -p tk-compare
 	@if [ -z "$(DEPLOYMENT_TOOLS_PATH)" ]; then \
 		echo "Error: DEPLOYMENT_TOOLS_PATH is not set"; \
 		echo "Usage: make tk-compare-grafana DEPLOYMENT_TOOLS_PATH=/path/to/deployment_tools TK_PATH=/path/to/tk"; \
