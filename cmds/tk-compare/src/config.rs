@@ -32,6 +32,9 @@ pub struct Command {
 	/// Compare output directories instead of stdout (for export commands)
 	#[serde(default)]
 	pub dir_compare: bool,
+	/// Expect both commands to fail - if false (default) and both commands fail, it's a test failure
+	#[serde(default)]
+	pub expect_error: bool,
 }
 
 fn default_runs() -> usize {
@@ -133,6 +136,7 @@ mod tests {
 			runs: 1,
 			json_compare: false,
 			dir_compare: true,
+			expect_error: false,
 		};
 
 		let args = cmd.args_for_exec("rtk");
@@ -146,6 +150,7 @@ mod tests {
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,
+			expect_error: false,
 		};
 
 		let args = cmd.args_for_exec("test");
@@ -159,6 +164,7 @@ mod tests {
 			runs: 1,
 			json_compare: true,
 			dir_compare: false,
+			expect_error: false,
 		};
 
 		let args = cmd.args_for_exec("rtk");
@@ -172,6 +178,7 @@ mod tests {
 			runs: 1,
 			json_compare: false,
 			dir_compare: false,
+			expect_error: false,
 		};
 
 		assert_eq!(cmd.as_string(), "env list --json");

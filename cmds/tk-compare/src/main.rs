@@ -416,6 +416,10 @@ fn main() -> Result<()> {
 		let exec1_stats = report::RuntimeStats::from_durations(exec1_durations);
 		let exec2_stats = report::RuntimeStats::from_durations(exec2_durations);
 
+		// Check if both commands failed when we expected success
+		let both_failed_unexpectedly =
+			!command.expect_error && exec1_exit_code != 0 && exec2_exit_code != 0;
+
 		let report = CommandReport {
 			command: command.as_string(),
 			runs,
@@ -423,6 +427,7 @@ fn main() -> Result<()> {
 			exit_codes_consistent,
 			stdout_matched,
 			stdout_similarity,
+			both_failed_unexpectedly,
 			exec1_name: config.tk_exec_1_name.clone(),
 			exec1_stats,
 			exec1_exit_code,

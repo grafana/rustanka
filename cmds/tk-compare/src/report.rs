@@ -69,6 +69,7 @@ pub struct CommandReport {
 	pub exit_codes_consistent: bool, // True if exit codes were same across all runs
 	pub stdout_matched: bool,
 	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total)
+	pub both_failed_unexpectedly: bool, // True if both commands failed but expect_error was false
 	pub exec1_name: String,
 	pub exec1_stats: RuntimeStats,
 	pub exec1_exit_code: i32,
@@ -85,7 +86,9 @@ impl CommandReport {
 		println!("Command: {}", self.command.cyan());
 
 		// Exit code
-		let exit_code_status = if !self.exit_codes_consistent {
+		let exit_code_status = if self.both_failed_unexpectedly {
+			"✗ BOTH FAILED (expected success)".red()
+		} else if !self.exit_codes_consistent {
 			"✗ INCONSISTENT ACROSS RUNS".red()
 		} else if self.exit_code_matched {
 			"✓ MATCHED".green()
@@ -195,7 +198,7 @@ pub fn print_summary(reports: &[CommandReport]) {
 	let total = reports.len();
 	let exit_code_matches = reports
 		.iter()
-		.filter(|r| r.exit_code_matched && r.exit_codes_consistent)
+		.filter(|r| r.exit_code_matched && r.exit_codes_consistent && !r.both_failed_unexpectedly)
 		.count();
 	let stdout_matches = reports.iter().filter(|r| r.stdout_matched).count();
 
@@ -220,7 +223,8 @@ pub fn print_summary(reports: &[CommandReport]) {
 
 	let all_passed = exit_code_matches == total
 		&& stdout_matches == total
-		&& reports.iter().all(|r| r.exit_codes_consistent);
+		&& reports.iter().all(|r| r.exit_codes_consistent)
+		&& !reports.iter().any(|r| r.both_failed_unexpectedly);
 
 	if all_passed {
 		println!("\n{}", "✓ All tests passed!".green().bold());
@@ -248,7 +252,9 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 
 	for report in reports {
 		// Exit code status
-		let exit_status = if !report.exit_codes_consistent {
+		let exit_status = if report.both_failed_unexpectedly {
+			"✗"
+		} else if !report.exit_codes_consistent {
 			"✗"
 		} else if report.exit_code_matched {
 			"✓"
@@ -325,7 +331,7 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 	let total = reports.len();
 	let exit_code_matches = reports
 		.iter()
-		.filter(|r| r.exit_code_matched && r.exit_codes_consistent)
+		.filter(|r| r.exit_code_matched && r.exit_codes_consistent && !r.both_failed_unexpectedly)
 		.count();
 	let stdout_matches = reports.iter().filter(|r| r.stdout_matched).count();
 	let stdout_near_matches = reports
@@ -349,7 +355,8 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 
 	let all_passed = exit_code_matches == total
 		&& stdout_matches == total
-		&& reports.iter().all(|r| r.exit_codes_consistent);
+		&& reports.iter().all(|r| r.exit_codes_consistent)
+		&& !reports.iter().any(|r| r.both_failed_unexpectedly);
 
 	if all_passed {
 		println!("✅ **All tests passed!**");
