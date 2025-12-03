@@ -145,9 +145,21 @@ impl CommandReport {
 
 			print!("  Comparison (median): ");
 			if ratio > 1.0 {
-				println!("{} is {:.2}x slower", self.exec2_name, ratio);
+				println!(
+					"{} is {:.2}x slower ({} vs {})",
+					self.exec2_name,
+					ratio,
+					format_duration(self.exec2_stats.median),
+					format_duration(self.exec1_stats.median)
+				);
 			} else if ratio < 1.0 && ratio > 0.0 {
-				println!("{} is {:.2}x faster", self.exec2_name, 1.0 / ratio);
+				println!(
+					"{} is {:.2}x faster ({} vs {})",
+					self.exec2_name,
+					1.0 / ratio,
+					format_duration(self.exec2_stats.median),
+					format_duration(self.exec1_stats.median)
+				);
 			} else {
 				println!("same");
 			}
@@ -173,9 +185,21 @@ impl CommandReport {
 			};
 
 			if ratio > 1.0 {
-				println!("  {} is {:.2}x slower", self.exec2_name, ratio);
+				println!(
+					"  {} is {:.2}x slower ({} vs {})",
+					self.exec2_name,
+					ratio,
+					format_duration(self.exec2_stats.average),
+					format_duration(self.exec1_stats.average)
+				);
 			} else if ratio < 1.0 && ratio > 0.0 {
-				println!("  {} is {:.2}x faster", self.exec2_name, 1.0 / ratio);
+				println!(
+					"  {} is {:.2}x faster ({} vs {})",
+					self.exec2_name,
+					1.0 / ratio,
+					format_duration(self.exec2_stats.average),
+					format_duration(self.exec1_stats.average)
+				);
 			}
 		}
 		// End of runtime comparison
@@ -294,10 +318,32 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 				0.0
 			};
 
+			let exec2_time = if report.runs > 1 {
+				format_duration(report.exec2_stats.median)
+			} else {
+				format_duration(report.exec2_stats.average)
+			};
+			let exec1_time = if report.runs > 1 {
+				format_duration(report.exec1_stats.median)
+			} else {
+				format_duration(report.exec1_stats.average)
+			};
+
 			let (emoji, speed_text) = if ratio > 1.0 {
-				("🐢", format!("{:.2}x slower", ratio))
+				(
+					"🐢",
+					format!("{:.2}x slower ({} vs {})", ratio, exec2_time, exec1_time),
+				)
 			} else if ratio < 1.0 && ratio > 0.0 {
-				("🚀", format!("{:.2}x faster", 1.0 / ratio))
+				(
+					"🚀",
+					format!(
+						"{:.2}x faster ({} vs {})",
+						1.0 / ratio,
+						exec2_time,
+						exec1_time
+					),
+				)
 			} else {
 				("⚡", "same".to_string())
 			};

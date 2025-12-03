@@ -19,6 +19,38 @@ use crate::spec::Environment;
 /// Environment ext code key used by Tanka
 const ENV_EXT_CODE_KEY: &str = "tanka.dev/environment";
 
+/// SingleEnvEvalScript returns a single Environment object by name
+/// This matches Tanka's SingleEnvEvalScript in pkg/tanka/evaluators.go
+/// The %s placeholder is replaced with the environment name
+const SINGLE_ENV_EVAL_SCRIPT: &str = r#"
+local singleEnv(object) =
+  if std.isObject(object)
+  then
+    if std.objectHas(object, 'apiVersion')
+       && std.objectHas(object, 'kind')
+    then
+      if object.kind == 'Environment'
+      && std.member(object.metadata.name, '%s')
+      then object
+      else {}
+    else
+      std.mapWithKey(
+        function(key, obj)
+          singleEnv(obj),
+        object
+      )
+  else if std.isArray(object)
+  then
+    std.map(
+      function(obj)
+        singleEnv(obj),
+      object
+    )
+  else {};
+
+singleEnv(main)
+"#;
+
 /// Options for evaluation
 #[derive(Debug, Default, Clone)]
 pub struct EvalOpts {
@@ -34,6 +66,8 @@ pub struct EvalOpts {
 	pub max_stack: Option<usize>,
 	/// Optional eval expression to apply to output (e.g., ".data" or "[0]")
 	pub eval_expr: Option<String>,
+	/// For inline environments with multiple sub-environments, the name of the specific environment to evaluate
+	pub env_name: Option<String>,
 }
 
 /// Result of jsonnet evaluation
@@ -194,17 +228,35 @@ fn register_native_functions(context: &ContextInitializer) {
 
 /// Evaluate the entrypoint file
 fn evaluate_file(state: &State, entrypoint: &Path, opts: &EvalOpts) -> Result<String> {
+	// For import statements in eval scripts, use just the filename
+	// The import resolver will find it in the import paths
+	let entrypoint_filename = entrypoint
+		.file_name()
+		.and_then(|n| n.to_str())
+		.ok_or_else(|| anyhow::anyhow!("invalid entrypoint path"))?;
+
+	// For direct imports, use the full path
 	let entrypoint_str = entrypoint.to_string_lossy();
 
-	// If we have an eval expression, wrap the import
-	let result = if let Some(expr) = &opts.eval_expr {
+	// Determine if we need to apply a filter script
+	let result = if let Some(env_name) = &opts.env_name {
+		// Use SingleEnvEvalScript to filter to a specific inline environment
+		let eval_script = format!(
+			"local main = (import '{}');\n{}",
+			entrypoint_filename,
+			SINGLE_ENV_EVAL_SCRIPT.replace("%s", env_name)
+		);
+		state
+			.evaluate_snippet("<single-env-eval>".to_owned(), &eval_script)
+			.map_err(|e| anyhow::anyhow!("evaluation error: {:?}", e))?
+	} else if let Some(expr) = &opts.eval_expr {
 		// Build an expression that imports the file and applies the eval expression
 		let eval_script = format!(
 			r#"
 local main = (import '{}');
 main{}
 "#,
-			entrypoint_str, expr
+			entrypoint_filename, expr
 		);
 		state
 			.evaluate_snippet("<eval>".to_owned(), &eval_script)

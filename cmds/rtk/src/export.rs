@@ -378,8 +378,11 @@ fn export_single_env(
 	env: &DiscoveredEnv,
 	opts: &ExportOpts,
 ) -> Result<(Vec<PathBuf>, String), ExportError> {
-	// Evaluate the environment
-	let result = eval(env.path.to_string_lossy().as_ref(), opts.eval_opts.clone())
+	// Evaluate the environment, passing the env_name if this is a sub-environment
+	let mut eval_opts = opts.eval_opts.clone();
+	eval_opts.env_name = env.env_name.clone();
+
+	let result = eval(env.path.to_string_lossy().as_ref(), eval_opts)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 
 	// Check for multiple Environment objects (Issue C - match tk behavior)
@@ -396,8 +399,9 @@ fn export_single_env(
 
 	// Extract environment identifier for manifest.json tracking
 	// This should be the path to main.jsonnet (relative to working directory if possible)
+	// For inline sub-environments, append the environment name
 	let main_jsonnet_path = env.path.join("main.jsonnet");
-	let env_namespace = if let Ok(cwd) = std::env::current_dir() {
+	let mut env_namespace = if let Ok(cwd) = std::env::current_dir() {
 		// Make path relative to current directory if possible
 		main_jsonnet_path
 			.strip_prefix(&cwd)
@@ -407,6 +411,11 @@ fn export_single_env(
 	} else {
 		main_jsonnet_path.to_string_lossy().to_string()
 	};
+
+	// For inline sub-environments, append the environment name to make it unique
+	if let Some(name) = &env.env_name {
+		env_namespace = format!("{}:{}", env_namespace, name);
+	}
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
 	let environments = extract_environments(&result.value, &result.spec)
@@ -1225,7 +1234,19 @@ fn delete_previously_exported_by_names(
 	// Delete files belonging to these environments
 	let mut deleted_keys = Vec::new();
 	for (file, env) in &file_to_env {
-		if normalized_names.contains(env) {
+		// Check for exact match or prefix match (for inline sub-environments)
+		// For example, if we're deleting "main.jsonnet", we should also delete
+		// "main.jsonnet:inline-namespace1" and "main.jsonnet:inline-namespace2"
+		let should_delete = normalized_names.contains(env)
+			|| normalized_names.iter().any(|name| {
+				// Check if env starts with name followed by ':'
+				// This handles inline sub-environments like "main.jsonnet:env-name"
+				env.starts_with(&format!("{}:", name)) || 
+			// Also check without extension in case paths are normalized differently
+			env.starts_with(&format!("{}:", name.trim_end_matches(".jsonnet")))
+			});
+
+		if should_delete {
 			deleted_keys.push(file.clone());
 			let file_path = output_dir.join(file);
 			// Ignore errors if file doesn't exist

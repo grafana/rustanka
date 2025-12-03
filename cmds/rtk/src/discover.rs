@@ -5,7 +5,7 @@
 //! - `spec.json` (static environment)
 //! - `main.jsonnet` with inline environment definition
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -16,14 +16,49 @@ const ENV_MARKERS: &[&str] = &["spec.json", "main.jsonnet"];
 /// Directories to skip during discovery
 const SKIP_DIRS: &[&str] = &["vendor", "node_modules", ".git", "lib"];
 
+/// MetadataEvalScript finds Environment objects (without their .data field)
+/// This matches Tanka's MetadataEvalScript in pkg/tanka/evaluators.go
+const METADATA_EVAL_SCRIPT: &str = r#"
+local noDataEnv(object) =
+  std.prune(
+    if std.isObject(object)
+    then
+      if std.objectHas(object, 'apiVersion')
+         && std.objectHas(object, 'kind')
+      then
+        if object.kind == 'Environment'
+        then object { data+:: {} }
+        else {}
+      else
+        std.mapWithKey(
+          function(key, obj)
+            noDataEnv(obj),
+          object
+        )
+    else if std.isArray(object)
+    then
+      std.map(
+        function(obj)
+          noDataEnv(obj),
+        object
+      )
+    else {}
+  );
+
+noDataEnv(main)
+"#;
+
 /// Result of environment discovery
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiscoveredEnv {
 	/// Path to the environment directory
 	pub path: PathBuf,
 	/// Whether this is a static environment (has spec.json)
 	#[allow(dead_code)]
 	pub is_static: bool,
+	/// For inline environments with multiple sub-environments, this is the name of the specific environment
+	/// For static environments or single inline environments, this is None
+	pub env_name: Option<String>,
 }
 
 /// Find all Tanka environments in the given paths
@@ -45,10 +80,28 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 		// If path is directly an environment, add it
 		if is_environment(&abs_path) {
 			if seen_dirs.insert(abs_path.clone()) {
-				envs.push(DiscoveredEnv {
-					is_static: abs_path.join("spec.json").exists(),
-					path: abs_path,
-				});
+				let is_static = abs_path.join("spec.json").exists();
+				if is_static {
+					// Static environment
+					envs.push(DiscoveredEnv {
+						is_static: true,
+						path: abs_path,
+						env_name: None,
+					});
+				} else {
+					// Inline environment(s) - discover sub-environments
+					match discover_inline_environments(&abs_path) {
+						Ok(inline_envs) => envs.extend(inline_envs),
+						Err(_) => {
+							// If discovery fails, add as single env with no name
+							envs.push(DiscoveredEnv {
+								is_static: false,
+								path: abs_path,
+								env_name: None,
+							});
+						}
+					}
+				}
 			}
 			continue;
 		}
@@ -82,10 +135,28 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 			if entry.file_type().is_dir() && is_environment(entry_path) {
 				let canonical = entry_path.to_path_buf();
 				if seen_dirs.insert(canonical.clone()) {
-					envs.push(DiscoveredEnv {
-						is_static: canonical.join("spec.json").exists(),
-						path: canonical,
-					});
+					let is_static = canonical.join("spec.json").exists();
+					if is_static {
+						// Static environment
+						envs.push(DiscoveredEnv {
+							is_static: true,
+							path: canonical,
+							env_name: None,
+						});
+					} else {
+						// Inline environment(s) - discover sub-environments
+						match discover_inline_environments(&canonical) {
+							Ok(inline_envs) => envs.extend(inline_envs),
+							Err(_) => {
+								// If discovery fails, add as single env with no name
+								envs.push(DiscoveredEnv {
+									is_static: false,
+									path: canonical,
+									env_name: None,
+								});
+							}
+						}
+					}
 				}
 			}
 		}
@@ -110,6 +181,125 @@ fn is_environment(path: &Path) -> bool {
 	false
 }
 
+/// Discover inline environments within a main.jsonnet file
+/// Returns a list of DiscoveredEnv, one for each sub-environment found
+fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
+	use jrsonnet_evaluator::{manifest::JsonFormat, State};
+	use jrsonnet_stdlib::ContextInitializer;
+
+	let main_path = path.join("main.jsonnet");
+	if !main_path.exists() {
+		return Ok(vec![DiscoveredEnv {
+			is_static: false,
+			path: path.to_path_buf(),
+			env_name: None,
+		}]);
+	}
+
+	// Set up import paths
+	let mut import_paths = vec![path.to_path_buf()];
+
+	// Find project root and add lib/vendor directories
+	if let Ok(root) = crate::jpath::find_root(path) {
+		for subdir in &["lib", "vendor"] {
+			let dir_path = root.join(subdir);
+			if dir_path.is_dir() {
+				import_paths.push(dir_path);
+			}
+		}
+	}
+
+	// Create evaluator state
+	let import_resolver = jrsonnet_evaluator::FileImportResolver::new(import_paths);
+	let mut builder = State::builder();
+	builder.import_resolver(import_resolver);
+
+	use jrsonnet_evaluator::trace::PathResolver;
+	let ctx_init = ContextInitializer::new(PathResolver::new_cwd_fallback());
+	builder.context_initializer(ctx_init);
+
+	let state = builder.build();
+
+	// Evaluate with MetadataEvalScript to get environment list without data
+	let eval_script = format!(
+		"local main = (import '{}');\n{}",
+		main_path.file_name().unwrap().to_string_lossy(),
+		METADATA_EVAL_SCRIPT
+	);
+
+	let result = state
+		.evaluate_snippet("<metadata-eval>", &eval_script)
+		.map_err(|e| anyhow::anyhow!("evaluating jsonnet for environment discovery: {}", e))?;
+
+	let json_str = result
+		.manifest(JsonFormat::cli(2))
+		.map_err(|e| anyhow::anyhow!("manifesting jsonnet: {}", e))?;
+
+	let json_value: serde_json::Value =
+		serde_json::from_str(&json_str).context("parsing manifested JSON")?;
+
+	// Extract environment names
+	let env_names = extract_environment_names(&json_value);
+
+	if env_names.is_empty() {
+		// No environments found or single unnamed environment
+		return Ok(vec![DiscoveredEnv {
+			is_static: false,
+			path: path.to_path_buf(),
+			env_name: None,
+		}]);
+	}
+
+	if env_names.len() == 1 {
+		// Single environment - no need to specify name
+		return Ok(vec![DiscoveredEnv {
+			is_static: false,
+			path: path.to_path_buf(),
+			env_name: None,
+		}]);
+	}
+
+	// Multiple environments - create one DiscoveredEnv per sub-environment
+	Ok(env_names
+		.into_iter()
+		.map(|name| DiscoveredEnv {
+			is_static: false,
+			path: path.to_path_buf(),
+			env_name: Some(name),
+		})
+		.collect())
+}
+
+/// Extract environment names from a JSON value
+fn extract_environment_names(value: &serde_json::Value) -> Vec<String> {
+	let mut names = Vec::new();
+
+	match value {
+		serde_json::Value::Object(obj) => {
+			// Check if this is an Environment object
+			if obj.get("kind").and_then(|v| v.as_str()) == Some("Environment") {
+				if let Some(metadata) = obj.get("metadata") {
+					if let Some(name) = metadata.get("name").and_then(|v| v.as_str()) {
+						names.push(name.to_string());
+					}
+				}
+			}
+			// Recurse into object values
+			for v in obj.values() {
+				names.extend(extract_environment_names(v));
+			}
+		}
+		serde_json::Value::Array(arr) => {
+			for v in arr {
+				names.extend(extract_environment_names(v));
+			}
+		}
+		_ => {}
+	}
+
+	names
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -129,6 +319,7 @@ mod tests {
 		let envs = find_environments(&[root.join("env").to_string_lossy().to_string()]).unwrap();
 		assert_eq!(envs.len(), 1);
 		assert!(!envs[0].is_static);
+		assert!(envs[0].env_name.is_none());
 	}
 
 	#[test]
@@ -148,6 +339,7 @@ mod tests {
 		let envs = find_environments(&[root.join("env").to_string_lossy().to_string()]).unwrap();
 		assert_eq!(envs.len(), 1);
 		assert!(envs[0].is_static);
+		assert!(envs[0].env_name.is_none());
 	}
 
 	#[test]
@@ -170,6 +362,10 @@ mod tests {
 		let envs =
 			find_environments(&[root.join("environments").to_string_lossy().to_string()]).unwrap();
 		assert_eq!(envs.len(), 3);
+		// All should have no env_name since they're separate directories
+		for env in &envs {
+			assert!(env.env_name.is_none());
+		}
 	}
 
 	#[test]

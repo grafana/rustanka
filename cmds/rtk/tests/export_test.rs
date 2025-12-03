@@ -55,7 +55,12 @@ fn test_export_environments() {
 		.to_string_lossy()
 		.to_string()])
 	.unwrap();
-	assert_eq!(envs.len(), 2, "Should find 2 environments");
+	// Should find 3 environments: 1 static (static-env) + 2 inline sub-envs (inline-namespace1, inline-namespace2)
+	assert_eq!(
+		envs.len(),
+		3,
+		"Should find 3 environments (1 static + 2 inline sub-envs)"
+	);
 
 	// Export all envs
 	let mut ext_code = HashMap::new();
@@ -89,7 +94,8 @@ fn test_export_environments() {
 	)
 	.unwrap();
 
-	assert_eq!(result.successful, 2);
+	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
+	assert_eq!(result.successful, 3);
 	assert_eq!(result.failed, 0);
 
 	// Check that expected files were created
@@ -236,7 +242,8 @@ fn test_export_environments_skip_manifest() {
 	)
 	.unwrap();
 
-	assert_eq!(result.successful, 2);
+	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
+	assert_eq!(result.successful, 3);
 	assert_eq!(result.failed, 0);
 
 	// Check that all manifest files are created but manifest.json is NOT created
@@ -273,7 +280,12 @@ fn test_export_merge_strategies() {
 		.to_string_lossy()
 		.to_string()])
 	.unwrap();
-	assert_eq!(envs.len(), 2, "Should find 2 environments");
+	// Should find 3 environments: 1 static (static-env) + 2 inline sub-envs (inline-namespace1, inline-namespace2)
+	assert_eq!(
+		envs.len(),
+		3,
+		"Should find 3 environments (1 static + 2 inline sub-envs)"
+	);
 
 	// STEP 1: Initial export with default strategy
 	let mut ext_code = HashMap::new();
@@ -307,7 +319,8 @@ fn test_export_merge_strategies() {
 	)
 	.unwrap();
 
-	assert_eq!(result.successful, 2);
+	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
+	assert_eq!(result.successful, 3);
 	assert_eq!(result.failed, 0);
 
 	// Check initial files

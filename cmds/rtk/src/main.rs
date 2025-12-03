@@ -689,6 +689,7 @@ fn main() -> Result<()> {
 				tla_code: tla_code_map,
 				max_stack: Some(max_stack as usize),
 				eval_expr: None,
+				env_name: None,
 			};
 
 			// Parse merge strategy
@@ -783,6 +784,7 @@ fn main() -> Result<()> {
 				tla_code: tla_code_map,
 				max_stack: Some(max_stack as usize),
 				eval_expr,
+				env_name: None,
 			};
 
 			let result = eval::eval(&path, opts)?;

@@ -71,7 +71,7 @@ pub fn resolve(path: &str) -> Result<JpathResult> {
 }
 
 /// Find the project root directory by looking for marker files
-fn find_root(start: &Path) -> Result<PathBuf> {
+pub fn find_root(start: &Path) -> Result<PathBuf> {
 	let start_dir = fs_dir(start)?;
 
 	for marker in ROOT_MARKERS {
