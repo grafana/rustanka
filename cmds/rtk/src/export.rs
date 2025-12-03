@@ -4,7 +4,7 @@
 //! It evaluates environments and writes the resulting Kubernetes manifests to disk.
 
 use anyhow::{bail, Context, Result};
-use gtmpl::Value;
+use gtmpl::{FuncError, Value};
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -24,6 +24,37 @@ const MANIFEST_FILE: &str = "manifest.json";
 /// BEL character used as placeholder for intentional path separators in templates
 /// This matches Go Tanka's approach in pkg/tanka/export.go
 const BEL_RUNE: char = '\x07';
+
+/// Custom template function: default
+/// Returns the first non-empty argument, mimicking Sprig's default function
+/// Usage in templates: {{ .value | default "fallback" }}
+/// Note: In Go templates, piped values become the LAST argument, so:
+/// {{ .value | default "fallback" }} results in args = ["fallback", .value]
+fn tmpl_default(args: &[Value]) -> Result<Value, FuncError> {
+	// Iterate in REVERSE order because piped values come last
+	// This way we check the piped value first, then fall back to explicit defaults
+	for arg in args.iter().rev() {
+		if !is_empty_value(arg) {
+			return Ok(arg.clone());
+		}
+	}
+	// If all are empty, return the first explicit default (or empty Value if no args)
+	Ok(args.first().cloned().unwrap_or(Value::NoValue))
+}
+
+/// Helper function to check if a Value is empty (for default function)
+fn is_empty_value(v: &Value) -> bool {
+	match v {
+		Value::NoValue | Value::Nil => true,
+		Value::Bool(b) => !b,
+		Value::String(s) => s.is_empty(),
+		Value::Number(n) => n.as_f64().map(|f| f == 0.0).unwrap_or(false),
+		Value::Array(a) => a.is_empty(),
+		Value::Map(m) => m.is_empty(),
+		Value::Object(o) => o.is_empty(),
+		_ => false,
+	}
+}
 
 /// Merge strategy for exporting to existing directories
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +477,8 @@ fn export_single_env(
 
 		// Parse the specialized template once per environment
 		let mut tmpl = gtmpl::Template::default();
+		// Register custom Sprig-compatible functions
+		tmpl.add_func("default", tmpl_default);
 		tmpl.parse(&specialized_template)
 			.map_err(|e| ExportError::Fatal(format!("Template parse error: {:?}", e)))?;
 
@@ -1139,6 +1172,8 @@ fn format_filename_gtmpl(
 
 	// Create and parse template (no env function needed - values are baked in)
 	let mut tmpl = Template::default();
+	// Register custom Sprig-compatible functions
+	tmpl.add_func("default", tmpl_default);
 	tmpl.parse(&specialized)?;
 
 	// Use the optimized render function
@@ -1379,6 +1414,51 @@ mod tests {
 		.unwrap();
 		// apiVersion apps/v1 becomes apps-v1 (/ replaced with -)
 		assert_eq!(result, "apps-v1.Deployment-nginx");
+	}
+
+	#[test]
+	fn test_format_filename_gtmpl_with_default() {
+		// Test the default function (Sprig-compatible)
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "test-config"
+				// Note: no namespace field
+			}
+		});
+
+		// Template uses default to provide a fallback value
+		let result = format_filename_gtmpl(
+			&manifest,
+			&None,
+			"{{.kind}}-{{.metadata.namespace | default \"global\"}}",
+		)
+		.unwrap();
+		// Since namespace is missing, should use "global" as default
+		assert_eq!(result, "ConfigMap-global");
+	}
+
+	#[test]
+	fn test_format_filename_gtmpl_with_default_non_empty() {
+		// Test that default returns the value when it's non-empty
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "test-config",
+				"namespace": "prod"
+			}
+		});
+
+		let result = format_filename_gtmpl(
+			&manifest,
+			&None,
+			"{{.kind}}-{{.metadata.namespace | default \"global\"}}",
+		)
+		.unwrap();
+		// Since namespace exists, should use "prod"
+		assert_eq!(result, "ConfigMap-prod");
 	}
 
 	#[test]
