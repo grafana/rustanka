@@ -509,10 +509,12 @@ fn export_single_env(
 				serde_json::to_string_pretty(&manifest)
 					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
 			} else {
-				// Use 4-space indentation and 2-space array indentation to match Go's yaml.v3 output
+				// Use serializer options to match Go's yaml.v3 output
 				let options = serde_saphyr::SerializerOptions {
 					indent_step: 2,
 					indent_array: Some(0),
+					prefer_block_scalars: true,
+					empty_map_as_braces: true,
 					..Default::default()
 				};
 				let mut output = String::new();
@@ -2123,7 +2125,7 @@ mod tests {
 		let json = serde_json::json!({
 			"string": "hello",
 			"number_int": 42,
-			"number_float": 3.14,
+			"number_float": 3.5,
 			"boolean": true,
 			"null_value": null,
 			"array": [1, 2, 3],

@@ -1164,7 +1164,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#3e5d6ad96a402fc41d1a217d64ba773d50ddf03e"
+source = "git+https://github.com/grafana/serde-saphyr?branch=master#dd7ba654c54a7ae06e49a129aa45f354098424e7"
 dependencies = [
  "ahash",
  "base64",
