@@ -21,6 +21,10 @@ use crate::eval::{eval, EvalOpts};
 /// This is aimed to be used by CI/CD but can also be used for debugging purposes.
 const MANIFEST_FILE: &str = "manifest.json";
 
+/// BEL character used as placeholder for intentional path separators in templates
+/// This matches Go Tanka's approach in pkg/tanka/export.go
+const BEL_RUNE: char = '\x07';
+
 /// Merge strategy for exporting to existing directories
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportMergeStrategy {
@@ -444,13 +448,18 @@ fn export_single_env(
 			// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
 			inject_environment_label(&mut manifest, &env_data.spec);
 
-			let filename =
-				render_filename_simple(&tmpl, &manifest, &env_data.spec).map_err(|e| {
+			let rendered_filename = render_filename_simple(&tmpl, &manifest, &env_data.spec)
+				.map_err(|e| {
 					// Template errors after validation are fatal (something very wrong)
 					ExportError::Fatal(format!("Template rendering failed: {}", e))
 				})?;
 
-			// Split by / and sanitize each path component separately
+			// Apply Go Tanka's path processing:
+			// 1. Replace / with - (prevents accidental subdirs from values like apps/v1)
+			// 2. Replace BEL_RUNE back to / (restores intentional subdirs from format)
+			let filename = apply_template_path_processing(&rendered_filename);
+
+			// Split by / (now only intentional separators) and sanitize each path component
 			// Filter out empty components and <no value> placeholders
 			let path_parts: Vec<String> = filename
 				.split('/')
@@ -842,6 +851,47 @@ fn sanitize_path_component(s: &str) -> String {
 		.collect()
 }
 
+/// Replace text only OUTSIDE of template action blocks ({{ }})
+/// This matches Go Tanka's replaceTmplText in pkg/tanka/export.go
+fn replace_tmpl_text(s: &str, old: &str, new: &str) -> String {
+	let mut result = String::new();
+	let mut remaining = s;
+
+	while let Some(start) = remaining.find("{{") {
+		// Find matching }}
+		if let Some(end_offset) = remaining[start..].find("}}") {
+			let end = start + end_offset + 2;
+
+			// Text before {{ - replace in this part
+			let text_before = &remaining[..start];
+			result.push_str(&text_before.replace(old, new));
+
+			// Template action {{ ... }} - keep as-is
+			let action = &remaining[start..end];
+			result.push_str(action);
+
+			remaining = &remaining[end..];
+		} else {
+			// No matching }}, treat rest as text
+			break;
+		}
+	}
+
+	// Remaining text after last }} - replace in this part
+	result.push_str(&remaining.replace(old, new));
+	result
+}
+
+/// Apply template path processing matching Go Tanka's behavior:
+/// 1. Replace / in rendered output with - (prevents accidental subdirs from values like apps/v1)
+/// 2. Replace BEL_RUNE back to / (restores intentional subdirs from format)
+fn apply_template_path_processing(rendered: &str) -> String {
+	// First: replace / with - (this handles values like "apps/v1" -> "apps-v1")
+	let with_dashes = rendered.replace('/', "-");
+	// Second: replace BEL back to / (restores intentional subdirs)
+	with_dashes.replace(BEL_RUNE, "/")
+}
+
 /// Convert serde_json::Value to gtmpl::Value
 fn json_to_gtmpl(value: &JsonValue) -> Value {
 	match value {
@@ -938,6 +988,11 @@ fn specialize_template_for_env(
 			result = result.replace(&pattern, "\"\"");
 		}
 	}
+
+	// Replace / with BEL_RUNE in template TEXT (outside {{ }} blocks)
+	// This preserves intentional subdirectory separators while allowing
+	// values containing / (like apps/v1) to be replaced with - later
+	let result = replace_tmpl_text(&result, "/", &BEL_RUNE.to_string());
 
 	Ok(result)
 }
@@ -1067,7 +1122,7 @@ fn format_filename_gtmpl(
 ) -> Result<String> {
 	use gtmpl::Template;
 
-	// Specialize template with env values
+	// Specialize template with env values (also replaces / with BEL_RUNE in text)
 	let specialized = specialize_template_for_env(format, env_spec)?;
 
 	// Create and parse template (no env function needed - values are baked in)
@@ -1075,7 +1130,12 @@ fn format_filename_gtmpl(
 	tmpl.parse(&specialized)?;
 
 	// Use the optimized render function
-	render_filename_with_template(&tmpl, manifest, env_spec)
+	let rendered = render_filename_with_template(&tmpl, manifest, env_spec)?;
+
+	// Apply Go Tanka's path processing:
+	// 1. Replace / with - (prevents accidental subdirs from values like apps/v1)
+	// 2. Replace BEL_RUNE back to / (restores intentional subdirs from format)
+	Ok(apply_template_path_processing(&rendered))
 }
 
 /// Check if a directory is empty
@@ -1293,7 +1353,8 @@ mod tests {
 			"{{.apiVersion}}.{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
-		assert_eq!(result, "apps/v1.Deployment-nginx");
+		// apiVersion apps/v1 becomes apps-v1 (/ replaced with -)
+		assert_eq!(result, "apps-v1.Deployment-nginx");
 	}
 
 	#[test]
@@ -1380,6 +1441,70 @@ mod tests {
 		assert_eq!(sanitize_path_component("hello/world"), "hello-world");
 		assert_eq!(sanitize_path_component("hello:world"), "hello-world");
 		assert_eq!(sanitize_path_component("my_app"), "my_app");
+	}
+
+	#[test]
+	fn test_replace_tmpl_text_basic() {
+		// Replace / with BEL only outside {{ }}
+		// a/b/ is text before {{.x}}, /c is text after {{.x}}
+		// Both get replaced
+		let result = replace_tmpl_text("a/b/{{.x}}/c", "/", "\x07");
+		assert_eq!(result, "a\x07b\x07{{.x}}\x07c");
+	}
+
+	#[test]
+	fn test_replace_tmpl_text_multiple_actions() {
+		let result = replace_tmpl_text("{{.a}}/{{.b}}/{{.c}}", "/", "\x07");
+		// / between actions gets replaced, / inside actions stays
+		assert_eq!(result, "{{.a}}\x07{{.b}}\x07{{.c}}");
+	}
+
+	#[test]
+	fn test_replace_tmpl_text_no_actions() {
+		let result = replace_tmpl_text("a/b/c", "/", "-");
+		assert_eq!(result, "a-b-c");
+	}
+
+	#[test]
+	fn test_replace_tmpl_text_preserves_action_content() {
+		// The / inside {{ }} should NOT be replaced
+		let result = replace_tmpl_text("prefix/{{.apiVersion}}/suffix", "/", "\x07");
+		assert_eq!(result, "prefix\x07{{.apiVersion}}\x07suffix");
+	}
+
+	#[test]
+	fn test_apply_template_path_processing() {
+		// Test: / becomes -, BEL becomes /
+		let result = apply_template_path_processing("apps/v1.Deployment-nginx");
+		assert_eq!(result, "apps-v1.Deployment-nginx");
+
+		// Test: intentional subdir (BEL in input)
+		let result = apply_template_path_processing("namespace\x07apps/v1.Deployment-nginx");
+		assert_eq!(result, "namespace/apps-v1.Deployment-nginx");
+	}
+
+	#[test]
+	fn test_intentional_subdirectory_in_template() {
+		// When / is in the template FORMAT (not values), it creates subdirectories
+		let manifest = serde_json::json!({
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": "nginx",
+				"namespace": "production"
+			}
+		});
+
+		// Template with / in format text (between {{ }} blocks) creates subdirs
+		let result = format_filename_gtmpl(
+			&manifest,
+			&None,
+			"{{.metadata.namespace}}/{{.apiVersion}}.{{.kind}}-{{.metadata.name}}",
+		)
+		.unwrap();
+		// namespace/apiVersion.Kind-name where / in namespace is intentional (subdir)
+		// and / in apps/v1 is replaced with -
+		assert_eq!(result, "production/apps-v1.Deployment-nginx");
 	}
 
 	#[test]
@@ -1709,6 +1834,7 @@ mod tests {
 	#[test]
 	fn test_gtmpl_apiversion_with_slash() {
 		// Test apiVersion like "apps/v1" or "networking.k8s.io/v1"
+		// The / in values gets replaced with - to prevent accidental subdirectories
 		let manifest = serde_json::json!({
 			"apiVersion": "networking.k8s.io/v1",
 			"kind": "Ingress",
@@ -1721,7 +1847,8 @@ mod tests {
 			"{{.apiVersion}}.{{.kind}}-{{.metadata.name}}",
 		)
 		.unwrap();
-		assert_eq!(result, "networking.k8s.io/v1.Ingress-my-ingress");
+		// / in apiVersion becomes - (matching Go Tanka behavior)
+		assert_eq!(result, "networking.k8s.io-v1.Ingress-my-ingress");
 	}
 
 	#[test]
@@ -1753,7 +1880,8 @@ mod tests {
 			"{{.apiVersion}}.{{.kind}}-{{or .metadata.name .metadata.generateName}}",
 		)
 		.unwrap();
-		assert_eq!(result, "apps/v1.Deployment-nginx-deployment");
+		// / in apiVersion becomes - (matching Go Tanka behavior)
+		assert_eq!(result, "apps-v1.Deployment-nginx-deployment");
 	}
 
 	// ==================== ISSUE 2: Fail-Fast Validation Tests ====================

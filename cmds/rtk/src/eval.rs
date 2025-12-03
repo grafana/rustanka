@@ -52,7 +52,9 @@ pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
 	let jpath_result = jpath::resolve(path)?;
 
 	// Load spec.json if it exists (static environment)
-	let spec = load_spec(&jpath_result.base)?;
+	// Note: This also sets metadata.name and metadata.namespace to relative paths
+	// matching Go Tanka's behavior in pkg/spec/spec.go:ParseDir
+	let spec = load_spec(&jpath_result)?;
 
 	// Set up the evaluator state
 	let state = setup_state(&jpath_result, &spec, &opts)?;
@@ -68,8 +70,9 @@ pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
 }
 
 /// Load spec.json from the environment directory if it exists
-fn load_spec(base: &Path) -> Result<Option<Environment>> {
-	let spec_path = base.join("spec.json");
+/// Also sets metadata.name and metadata.namespace to relative paths matching Go Tanka's behavior
+fn load_spec(jpath: &jpath::JpathResult) -> Result<Option<Environment>> {
+	let spec_path = jpath.base.join("spec.json");
 	if !spec_path.exists() {
 		return Ok(None);
 	}
@@ -77,8 +80,20 @@ fn load_spec(base: &Path) -> Result<Option<Environment>> {
 	let content =
 		fs::read_to_string(&spec_path).context(format!("reading {}", spec_path.display()))?;
 
-	let env: Environment =
+	let mut env: Environment =
 		serde_json::from_str(&content).context(format!("parsing {}", spec_path.display()))?;
+
+	// Set metadata.name to relative path from root to base directory
+	// This matches Go Tanka's behavior in pkg/spec/spec.go:ParseDir
+	if let Ok(rel_base) = jpath.base.strip_prefix(&jpath.root) {
+		env.metadata.name = Some(rel_base.to_string_lossy().to_string());
+	}
+
+	// Set metadata.namespace to relative path from root to entrypoint file
+	// This matches Go Tanka's behavior in pkg/spec/spec.go:ParseDir
+	if let Ok(rel_entrypoint) = jpath.entrypoint.strip_prefix(&jpath.root) {
+		env.metadata.namespace = Some(rel_entrypoint.to_string_lossy().to_string());
+	}
 
 	Ok(Some(env))
 }
@@ -294,10 +309,10 @@ mod tests {
 
 		let result = eval(env_path.to_str().unwrap(), EvalOpts::default()).unwrap();
 		assert!(result.spec.is_some());
-		assert_eq!(
-			result.spec.unwrap().metadata.name,
-			Some("test-env".to_string())
-		);
+		// Note: metadata.name is overridden with the relative path from root to base
+		// (matching Go Tanka's behavior in pkg/spec/spec.go:ParseDir)
+		// In this test setup, the env is at "env/" relative to root
+		assert_eq!(result.spec.unwrap().metadata.name, Some("env".to_string()));
 	}
 
 	#[test]
