@@ -323,7 +323,7 @@ enum Commands {
 		max_stack: i32,
 
 		#[arg(long)]
-		mem_ballast_size_bytes: Option<i32>,
+		mem_ballast_size_bytes: Option<i64>,
 
 		#[arg(long)]
 		merge_deleted_envs: Vec<String>,
