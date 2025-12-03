@@ -640,6 +640,8 @@ fn main() -> Result<()> {
 			extension,
 			format,
 			max_stack,
+			merge_deleted_envs,
+			merge_strategy,
 			name,
 			parallel,
 			recursive,
@@ -689,6 +691,13 @@ fn main() -> Result<()> {
 				eval_expr: None,
 			};
 
+			// Parse merge strategy
+			let merge_strategy = if let Some(ref strategy) = merge_strategy {
+				strategy.parse::<export::ExportMergeStrategy>()?
+			} else {
+				export::ExportMergeStrategy::default()
+			};
+
 			// Note: format is now passed directly as Go text/template syntax
 			// gtmpl handles it natively without conversion
 			let export_opts = export::ExportOpts {
@@ -700,6 +709,8 @@ fn main() -> Result<()> {
 				name,
 				recursive,
 				skip_manifest,
+				merge_strategy,
+				merge_deleted_envs,
 			};
 
 			let result = export::export(&paths, export_opts)?;

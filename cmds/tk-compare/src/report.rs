@@ -276,10 +276,18 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			"❌".to_string()
 		};
 
-		// Performance status (only if multiple runs)
-		let performance = if report.runs > 1 {
-			let exec1_ms = report.exec1_stats.median.as_millis();
-			let exec2_ms = report.exec2_stats.median.as_millis();
+		// Performance status (show for all runs, use median for multiple runs, average for single run)
+		let performance = {
+			let exec1_ms = if report.runs > 1 {
+				report.exec1_stats.median.as_millis()
+			} else {
+				report.exec1_stats.average.as_millis()
+			};
+			let exec2_ms = if report.runs > 1 {
+				report.exec2_stats.median.as_millis()
+			} else {
+				report.exec2_stats.average.as_millis()
+			};
 			let ratio = if exec1_ms > 0 {
 				exec2_ms as f64 / exec1_ms as f64
 			} else {
@@ -295,8 +303,6 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			};
 
 			format!("{} {}", emoji, speed_text)
-		} else {
-			"-".to_string()
 		};
 
 		// Truncate command if too long

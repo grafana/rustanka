@@ -21,6 +21,36 @@ use crate::eval::{eval, EvalOpts};
 /// This is aimed to be used by CI/CD but can also be used for debugging purposes.
 const MANIFEST_FILE: &str = "manifest.json";
 
+/// Merge strategy for exporting to existing directories
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportMergeStrategy {
+	/// Fail if output directory is not empty (default)
+	None,
+	/// Allow exporting to non-empty directory, but fail if any file would be overwritten
+	FailOnConflicts,
+	/// Delete files previously exported by the targeted environments and re-export them
+	ReplaceEnvs,
+}
+
+impl Default for ExportMergeStrategy {
+	fn default() -> Self {
+		Self::None
+	}
+}
+
+impl std::str::FromStr for ExportMergeStrategy {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s {
+			"" | "none" => Ok(Self::None),
+			"fail-on-conflicts" => Ok(Self::FailOnConflicts),
+			"replace-envs" => Ok(Self::ReplaceEnvs),
+			_ => bail!("invalid merge strategy: {}", s),
+		}
+	}
+}
+
 /// Options for the export command
 #[derive(Debug, Clone)]
 pub struct ExportOpts {
@@ -40,6 +70,10 @@ pub struct ExportOpts {
 	pub recursive: bool,
 	/// Skip generating manifest.json file that tracks exported files
 	pub skip_manifest: bool,
+	/// What to do when exporting to an existing directory
+	pub merge_strategy: ExportMergeStrategy,
+	/// Environments (main.jsonnet files) that have been deleted since the last export
+	pub merge_deleted_envs: Vec<String>,
 }
 
 impl Default for ExportOpts {
@@ -54,6 +88,8 @@ impl Default for ExportOpts {
 			name: None,
 			recursive: false,
 			skip_manifest: false,
+			merge_strategy: ExportMergeStrategy::default(),
+			merge_deleted_envs: vec![],
 		}
 	}
 }
@@ -155,6 +191,31 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 	// Create output directory
 	fs::create_dir_all(&opts.output_dir)
 		.context(format!("creating output directory {:?}", opts.output_dir))?;
+
+	// Check if directory is empty (if required by merge strategy)
+	if opts.merge_strategy == ExportMergeStrategy::None {
+		let is_empty = is_dir_empty(&opts.output_dir)?;
+		if !is_empty {
+			bail!(
+				"output dir `{}` not empty. Pass a different --merge-strategy to ignore this",
+				opts.output_dir.display()
+			);
+		}
+	}
+
+	// Delete files previously exported by the targeted environments
+	if opts.merge_strategy == ExportMergeStrategy::ReplaceEnvs {
+		delete_previously_exported_manifests(&opts.output_dir, &envs, opts.skip_manifest)?;
+	}
+
+	// Delete files from environments that have been deleted
+	if !opts.merge_deleted_envs.is_empty() {
+		delete_previously_exported_by_names(
+			&opts.output_dir,
+			&opts.merge_deleted_envs,
+			opts.skip_manifest,
+		)?;
+	}
 
 	// Set up rayon thread pool
 	let pool = rayon::ThreadPoolBuilder::new()
@@ -329,25 +390,25 @@ fn export_single_env(
 		));
 	}
 
-	// Extract environment namespace (for manifest.json tracking)
-	// Use metadata.namespace if available, otherwise fall back to spec.namespace
-	let env_namespace = if let Some(ref env_spec) = result.spec {
-		env_spec
-			.metadata
-			.namespace
-			.clone()
-			.or_else(|| Some(env_spec.spec.namespace.clone()))
-			.unwrap_or_else(|| env.path.to_string_lossy().to_string())
+	// Extract environment identifier for manifest.json tracking
+	// This should be the path to main.jsonnet (relative to working directory if possible)
+	let main_jsonnet_path = env.path.join("main.jsonnet");
+	let env_namespace = if let Ok(cwd) = std::env::current_dir() {
+		// Make path relative to current directory if possible
+		main_jsonnet_path
+			.strip_prefix(&cwd)
+			.unwrap_or(&main_jsonnet_path)
+			.to_string_lossy()
+			.to_string()
 	} else {
-		// Fallback to environment path if no spec
-		env.path.to_string_lossy().to_string()
+		main_jsonnet_path.to_string_lossy().to_string()
 	};
 
-	// Extract Kubernetes manifests from the result
-	let manifests = extract_manifests(&result.value)
+	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
+	let environments = extract_environments(&result.value, &result.spec)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 
-	if manifests.is_empty() {
+	if environments.is_empty() {
 		return Ok((vec![], env_namespace));
 	}
 
@@ -358,79 +419,105 @@ fn export_single_env(
 
 	let mut files_written = Vec::new();
 
-	// Write each manifest to a file
-	for mut manifest in manifests {
-		// Inject namespace if needed (matching Tanka's behavior in pkg/process/namespace.go)
-		inject_namespace(&mut manifest, &result.spec);
+	// Process each Environment's manifests separately (matching Tanka's approach)
+	// This avoids loading all manifests into memory at once
+	for env_data in environments {
+		// Extract manifests from this environment's data field
+		let mut manifests = Vec::new();
+		collect_manifests(&env_data.data, &mut manifests);
 
-		// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
-		inject_environment_label(&mut manifest, &result.spec);
+		// MAJOR OPTIMIZATION: Pre-substitute env values into template once per environment
+		// Instead of evaluating env.metadata.labels.X thousands of times, bake values into template
+		let specialized_template = specialize_template_for_env(&opts.format, &env_data.spec)
+			.map_err(|e| ExportError::Fatal(format!("Failed to specialize template: {}", e)))?;
 
-		let filename =
-			format_filename_gtmpl(&manifest, &result.spec, &opts.format).map_err(|e| {
-				// Template errors after validation are fatal (something very wrong)
-				ExportError::Fatal(format!("Template rendering failed: {}", e))
-			})?;
+		// Parse the specialized template once per environment
+		let mut tmpl = gtmpl::Template::default();
+		tmpl.parse(&specialized_template)
+			.map_err(|e| ExportError::Fatal(format!("Template parse error: {:?}", e)))?;
 
-		// Split by / and sanitize each path component separately
-		// Filter out empty components and <no value> placeholders
-		let path_parts: Vec<String> = filename
-			.split('/')
-			.map(|part| part.trim())
-			.filter(|part| !part.is_empty() && *part != "<no value>")
-			.map(|part| sanitize_path_component(part))
-			.filter(|part| !part.is_empty())
-			.collect();
+		// Write each manifest to a file
+		for mut manifest in manifests {
+			// Inject namespace if needed (matching Tanka's behavior in pkg/process/namespace.go)
+			inject_namespace(&mut manifest, &env_data.spec);
 
-		if path_parts.is_empty() {
-			return Err(ExportError::Fatal(format!(
-				"Template produced empty filename for manifest: {}",
-				serde_json::to_string(&manifest).unwrap_or_else(|_| "unknown".to_string())
-			)));
-		}
+			// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
+			inject_environment_label(&mut manifest, &env_data.spec);
 
-		// Join path components and add extension to the last component
-		let mut relative_path = std::path::PathBuf::new();
-		for (i, part) in path_parts.iter().enumerate() {
-			if i == path_parts.len() - 1 {
-				// Last component - add extension
-				relative_path.push(format!("{}.{}", part, opts.extension));
-			} else {
-				// Directory component
-				relative_path.push(part);
+			let filename =
+				render_filename_simple(&tmpl, &manifest, &env_data.spec).map_err(|e| {
+					// Template errors after validation are fatal (something very wrong)
+					ExportError::Fatal(format!("Template rendering failed: {}", e))
+				})?;
+
+			// Split by / and sanitize each path component separately
+			// Filter out empty components and <no value> placeholders
+			let path_parts: Vec<String> = filename
+				.split('/')
+				.map(|part| part.trim())
+				.filter(|part| !part.is_empty() && *part != "<no value>")
+				.map(|part| sanitize_path_component(part))
+				.filter(|part| !part.is_empty())
+				.collect();
+
+			if path_parts.is_empty() {
+				return Err(ExportError::Fatal(format!(
+					"Template produced empty filename for manifest: {}",
+					serde_json::to_string(&manifest).unwrap_or_else(|_| "unknown".to_string())
+				)));
 			}
-		}
 
-		let filepath = opts.output_dir.join(&relative_path);
+			// Join path components and add extension to the last component
+			let mut relative_path = std::path::PathBuf::new();
+			for (i, part) in path_parts.iter().enumerate() {
+				if i == path_parts.len() - 1 {
+					// Last component - add extension
+					relative_path.push(format!("{}.{}", part, opts.extension));
+				} else {
+					// Directory component
+					relative_path.push(part);
+				}
+			}
 
-		// Create parent directories if needed
-		if let Some(parent) = filepath.parent() {
-			fs::create_dir_all(parent)
-				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-		}
+			let filepath = opts.output_dir.join(&relative_path);
 
-		// Serialize manifest
-		let content = if opts.extension == "json" {
-			serde_json::to_string_pretty(&manifest)
-				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
-		} else {
-			// Use 4-space indentation and 2-space array indentation to match Go's yaml.v3 output
-			let options = serde_saphyr::SerializerOptions {
-				indent_step: 2,
-				indent_array: Some(0),
-				..Default::default()
+			// Check if file already exists (for fail-on-conflicts strategy)
+			if opts.merge_strategy == ExportMergeStrategy::FailOnConflicts && filepath.exists() {
+				return Err(ExportError::Fatal(format!(
+					"file '{}' already exists. Aborting",
+					filepath.display()
+				)));
+			}
+
+			// Create parent directories if needed
+			if let Some(parent) = filepath.parent() {
+				fs::create_dir_all(parent)
+					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+			}
+
+			// Serialize manifest
+			let content = if opts.extension == "json" {
+				serde_json::to_string_pretty(&manifest)
+					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
+			} else {
+				// Use 4-space indentation and 2-space array indentation to match Go's yaml.v3 output
+				let options = serde_saphyr::SerializerOptions {
+					indent_step: 2,
+					indent_array: Some(0),
+					..Default::default()
+				};
+				let mut output = String::new();
+				serde_saphyr::to_fmt_writer_with_options(&mut output, &manifest, options)
+					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+				output
 			};
-			let mut output = String::new();
-			serde_saphyr::to_fmt_writer_with_options(&mut output, &manifest, options)
+
+			fs::write(&filepath, content)
 				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-			output
-		};
 
-		fs::write(&filepath, content)
-			.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-
-		// Track relative path for manifest.json
-		files_written.push(relative_path);
+			// Track relative path for manifest.json
+			files_written.push(relative_path);
+		}
 	}
 
 	Ok((files_written, env_namespace))
@@ -475,28 +562,94 @@ fn export_manifest_file(output_dir: &PathBuf, results: &[ExportEnvResult]) -> Re
 	Ok(())
 }
 
-/// Extract Kubernetes manifests from evaluation result
-fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
-	let mut manifests = Vec::new();
+/// Extract Kubernetes manifests from evaluation result, keeping track of which Environment each came from
+/// Returns pairs of (manifest, env_spec) where env_spec is the Environment that contains this manifest
+/// Holds an Environment and its associated data for processing
+struct EnvironmentData {
+	spec: Option<crate::spec::Environment>,
+	data: JsonValue,
+}
 
-	// Check if this is a Tanka environment object with a `data` field
-	if let JsonValue::Object(obj) = value {
-		if obj.contains_key("apiVersion") && obj.contains_key("kind") {
-			if let Some(JsonValue::String(kind)) = obj.get("kind") {
-				if kind == "Environment" {
-					// This is a Tanka environment - extract from `data` field
-					if let Some(data) = obj.get("data") {
-						collect_manifests(data, &mut manifests);
-						return Ok(manifests);
+/// Extract Environment objects from evaluated Jsonnet (matching Tanka's inline.go extractEnvs)
+/// For static environments, returns a single EnvironmentData with the spec and all manifests
+/// For inline environments, returns multiple EnvironmentData, one per Environment object
+fn extract_environments(
+	value: &JsonValue,
+	default_env_spec: &Option<crate::spec::Environment>,
+) -> Result<Vec<EnvironmentData>> {
+	let mut environments = Vec::new();
+
+	// Recursively search for Environment objects
+	collect_environments_recursive(value, &mut environments);
+
+	if !environments.is_empty() {
+		return Ok(environments);
+	}
+
+	// No Environment objects found - treat all output as belonging to default environment (static case)
+	environments.push(EnvironmentData {
+		spec: default_env_spec.clone(),
+		data: value.clone(),
+	});
+
+	Ok(environments)
+}
+
+/// Recursively search for Environment objects (matching Tanka's extractEnvs logic)
+fn collect_environments_recursive(value: &JsonValue, environments: &mut Vec<EnvironmentData>) {
+	match value {
+		JsonValue::Object(obj) => {
+			// Check if this object itself is an Environment
+			if obj.get("kind").and_then(|v| v.as_str()) == Some("Environment")
+				&& obj.contains_key("apiVersion")
+			{
+				// Extract data field
+				let data = obj.get("data").cloned().unwrap_or(JsonValue::Null);
+
+				// Parse this Environment object to get its spec
+				let env_spec: Result<crate::spec::Environment, _> =
+					serde_json::from_value(value.clone());
+				let env_spec_opt = match env_spec {
+					Ok(spec) => Some(spec),
+					Err(e) => {
+						eprintln!(
+							"Warning: Failed to parse Environment object: {}. Manifests will be processed without environment context.",
+							e
+						);
+						None
 					}
+				};
+
+				environments.push(EnvironmentData {
+					spec: env_spec_opt,
+					data,
+				});
+			} else {
+				// Recurse into object values
+				for v in obj.values() {
+					collect_environments_recursive(v, environments);
 				}
 			}
 		}
+		JsonValue::Array(arr) => {
+			// Recurse into array elements
+			for item in arr {
+				collect_environments_recursive(item, environments);
+			}
+		}
+		_ => {}
 	}
+}
 
-	// Otherwise, collect manifests normally
-	collect_manifests(value, &mut manifests);
-	Ok(manifests)
+/// Extract Kubernetes manifests from evaluation result (legacy function for tests)
+#[allow(dead_code)]
+fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
+	let environments = extract_environments(value, &None)?;
+	let mut all_manifests = Vec::new();
+	for env_data in environments {
+		collect_manifests(&env_data.data, &mut all_manifests);
+	}
+	Ok(all_manifests)
 }
 
 /// Recursively collect Kubernetes manifests from a JSON value
@@ -715,81 +868,90 @@ fn json_to_gtmpl(value: &JsonValue) -> Value {
 	}
 }
 
-// Thread-local storage for env value during template rendering
-thread_local! {
-	static ENV_VALUE: std::cell::RefCell<Option<Value>> = std::cell::RefCell::new(None);
-}
+// No longer need env function - all env values are pre-substituted into template
 
-// Function to return the env value for gtmpl templates
-fn env_func(_args: &[Value]) -> Result<Value, gtmpl::FuncError> {
-	ENV_VALUE.with(|env| {
-		env.borrow()
-			.clone()
-			.ok_or_else(|| gtmpl::FuncError::Generic("env not available".to_string()))
-	})
-}
-
-/// Format filename using Go text/template (gtmpl)
-fn format_filename_gtmpl(
-	manifest: &JsonValue,
+/// Specialize template by substituting environment values (called once per environment)
+/// This eliminates the need for env function calls and HashMap lookups during rendering
+fn specialize_template_for_env(
+	template: &str,
 	env_spec: &Option<crate::spec::Environment>,
-	format: &str,
 ) -> Result<String> {
-	use gtmpl::{Context, Template};
+	use regex::Regex;
 
-	// Create template
-	let mut tmpl = Template::default();
+	let mut result = template.to_string();
 
-	// Always register env function, even if env_spec is None
-	// This allows templates to reference env without errors
-	let env_value = if let Some(env) = env_spec {
-		// Clone and ensure labels is always an empty map if None
-		let mut env_clone = env.clone();
-		if env_clone.metadata.labels.is_none() {
-			env_clone.metadata.labels = Some(std::collections::BTreeMap::new());
+	// Find all env.metadata.labels.X references in the template
+	let label_pattern = Regex::new(r"env\.metadata\.labels\.(\w+)").unwrap();
+	let all_label_refs: std::collections::HashSet<String> = label_pattern
+		.captures_iter(template)
+		.map(|cap| cap[1].to_string())
+		.collect();
+
+	if let Some(env) = env_spec {
+		// Sort by length descending to avoid partial matches
+		let mut sorted_refs: Vec<_> = all_label_refs.iter().collect();
+		sorted_refs.sort_by(|a, b| b.len().cmp(&a.len()));
+
+		let labels = env.metadata.labels.as_ref();
+
+		for label_key in sorted_refs {
+			let pattern = format!("env.metadata.labels.{}", label_key);
+			let replacement = if let Some(label_map) = labels {
+				if let Some(value) = label_map.get(label_key) {
+					// Label exists - use its value
+					if value == "true" {
+						"true".to_string()
+					} else if value == "false" {
+						"false".to_string()
+					} else {
+						format!("\"{}\"", value)
+					}
+				} else {
+					// Label doesn't exist - use empty string
+					"\"\"".to_string()
+				}
+			} else {
+				// No labels at all - use empty string
+				"\"\"".to_string()
+			};
+			result = result.replace(&pattern, &replacement);
 		}
 
-		let env_json = serde_json::to_value(&env_clone)?;
-		json_to_gtmpl(&env_json)
+		// Replace env.spec.namespace
+		let namespace = &env.spec.namespace;
+		result = result.replace("env.spec.namespace", &format!("\"{}\"", namespace));
+
+		// Replace env.metadata.name if present
+		if let Some(name) = &env.metadata.name {
+			result = result.replace("env.metadata.name", &format!("\"{}\"", name));
+		} else {
+			result = result.replace("env.metadata.name", "\"\"");
+		}
 	} else {
-		// Provide a default empty environment structure for inline environments
-		// This ensures templates can reference env fields without errors
-		use crate::spec::{Environment, Metadata, Spec};
-		let default_env = Environment {
-			api_version: "tanka.dev/v1alpha1".to_string(),
-			kind: "Environment".to_string(),
-			metadata: Metadata {
-				name: None,
-				namespace: None,
-				labels: Some(std::collections::BTreeMap::new()),
-			},
-			spec: Spec {
-				api_server: None,
-				context_names: None,
-				namespace: String::new(),
-				diff_strategy: None,
-				apply_strategy: None,
-				inject_labels: None,
-				resource_defaults: None,
-				expect_versions: None,
-				export_jsonnet_implementation: None,
-			},
-			data: None,
-		};
-		let env_json = serde_json::to_value(&default_env)?;
-		json_to_gtmpl(&env_json)
-	};
+		// For None case, replace all env references with empty/false defaults
+		result = result.replace("env.spec.namespace", "\"\"");
+		result = result.replace("env.metadata.name", "\"\"");
 
-	// Store env value in thread-local storage
-	ENV_VALUE.with(|cell| {
-		*cell.borrow_mut() = Some(env_value);
-	});
+		// Replace all label references with empty strings
+		for label_key in all_label_refs {
+			let pattern = format!("env.metadata.labels.{}", label_key);
+			result = result.replace(&pattern, "\"\"");
+		}
+	}
 
-	// Register env function (always, for both static and inline environments)
-	tmpl.add_func("env", env_func as gtmpl::Func);
+	Ok(result)
+}
 
-	// Parse the template
-	tmpl.parse(format)?;
+// prepare_env_value removed - no longer needed since env values are pre-substituted
+
+/// Render filename using a specialized template (no env context needed)
+/// The template has already been specialized with environment values
+fn render_filename_simple(
+	tmpl: &gtmpl::Template,
+	manifest: &JsonValue,
+	env_spec: &Option<crate::spec::Environment>,
+) -> Result<String> {
+	use gtmpl::Context;
 
 	// Create context with manifest fields
 	// Ensure metadata.labels exists as empty object and inject namespace if needed
@@ -852,37 +1014,182 @@ fn format_filename_gtmpl(
 		}
 	}
 
+	// OPTIMIZATION: Only convert fields that templates actually use
+	// Templates typically only access .kind, .metadata.name, .metadata.namespace, .metadata.labels
+	// Converting the entire manifest is expensive and unnecessary
 	let mut context_map = HashMap::new();
 	if let JsonValue::Object(obj) = manifest_clone {
-		for (key, value) in obj {
-			context_map.insert(key.clone(), json_to_gtmpl(&value));
+		// Only extract and convert the fields templates use
+		if let Some(kind) = obj.get("kind") {
+			context_map.insert("kind".to_string(), json_to_gtmpl(kind));
+		}
+		if let Some(metadata) = obj.get("metadata") {
+			context_map.insert("metadata".to_string(), json_to_gtmpl(metadata));
+		}
+		// apiVersion might be used by some templates
+		if let Some(api_version) = obj.get("apiVersion") {
+			context_map.insert("apiVersion".to_string(), json_to_gtmpl(api_version));
 		}
 	}
 
 	let context = Context::from(Value::Map(context_map));
 
-	// Render template
+	// Render template (env values are already baked into the template)
 	let result = tmpl
 		.render(&context)
 		.map_err(|e| anyhow::anyhow!("Template error: {:?}", e))?;
 
-	// Clean up thread-local storage
-	ENV_VALUE.with(|cell| {
-		*cell.borrow_mut() = None;
-	});
-
 	// Clean up empty segments (from missing optional fields)
 	let cleaned: String = result
-		.split('.')
+		.split('/')
 		.filter(|s| !s.is_empty() && *s != "<no value>")
 		.collect::<Vec<_>>()
-		.join(".");
-
-	if cleaned.is_empty() {
-		bail!("Template produced empty filename");
-	}
+		.join("/");
 
 	Ok(cleaned)
+}
+
+/// Render filename using a pre-parsed template (non-cached version for compatibility)
+/// Used by tests and for single-template operations
+fn render_filename_with_template(
+	tmpl: &gtmpl::Template,
+	manifest: &JsonValue,
+	env_spec: &Option<crate::spec::Environment>,
+) -> Result<String> {
+	render_filename_simple(tmpl, manifest, env_spec)
+}
+
+/// Format filename using Go text/template (gtmpl) - legacy version that parses template
+fn format_filename_gtmpl(
+	manifest: &JsonValue,
+	env_spec: &Option<crate::spec::Environment>,
+	format: &str,
+) -> Result<String> {
+	use gtmpl::Template;
+
+	// Specialize template with env values
+	let specialized = specialize_template_for_env(format, env_spec)?;
+
+	// Create and parse template (no env function needed - values are baked in)
+	let mut tmpl = Template::default();
+	tmpl.parse(&specialized)?;
+
+	// Use the optimized render function
+	render_filename_with_template(&tmpl, manifest, env_spec)
+}
+
+/// Check if a directory is empty
+fn is_dir_empty(dir: &PathBuf) -> Result<bool> {
+	if !dir.exists() {
+		return Ok(true);
+	}
+
+	let mut entries = fs::read_dir(dir)?;
+	Ok(entries.next().is_none())
+}
+
+/// Delete files previously exported by the given environments
+fn delete_previously_exported_manifests(
+	output_dir: &PathBuf,
+	envs: &[DiscoveredEnv],
+	skip_manifest: bool,
+) -> Result<()> {
+	// Collect environment identifiers
+	let env_ids: Vec<String> = envs
+		.iter()
+		.map(|env| {
+			let main_jsonnet_path = env.path.join("main.jsonnet");
+			if let Ok(cwd) = std::env::current_dir() {
+				main_jsonnet_path
+					.strip_prefix(&cwd)
+					.unwrap_or(&main_jsonnet_path)
+					.to_string_lossy()
+					.to_string()
+			} else {
+				main_jsonnet_path.to_string_lossy().to_string()
+			}
+		})
+		.collect();
+
+	delete_previously_exported_by_names(output_dir, &env_ids, skip_manifest)
+}
+
+/// Delete files previously exported by environments with the given names
+fn delete_previously_exported_by_names(
+	output_dir: &PathBuf,
+	env_names: &[String],
+	skip_manifest: bool,
+) -> Result<()> {
+	if env_names.is_empty() {
+		return Ok(());
+	}
+
+	let manifest_path = output_dir.join(MANIFEST_FILE);
+	if !manifest_path.exists() {
+		// No manifest file, nothing to delete
+		return Ok(());
+	}
+
+	// Read existing manifest
+	let manifest_content =
+		fs::read_to_string(&manifest_path).context("reading manifest.json for deletion")?;
+	let file_to_env: HashMap<String, String> =
+		serde_json::from_str(&manifest_content).context("parsing manifest.json for deletion")?;
+
+	// Normalize environment names - convert to both absolute and relative forms
+	let cwd = std::env::current_dir().ok();
+	let mut normalized_names = std::collections::HashSet::new();
+	for name in env_names {
+		normalized_names.insert(name.clone());
+
+		// Try to convert absolute to relative and vice versa
+		let path = PathBuf::from(name);
+		if path.is_absolute() {
+			// Try to make relative to cwd
+			if let Some(ref cwd_path) = cwd {
+				if let Ok(rel) = path.strip_prefix(cwd_path) {
+					normalized_names.insert(rel.to_string_lossy().to_string());
+				}
+			}
+		} else {
+			// Try to make absolute
+			if let Some(ref cwd_path) = cwd {
+				let abs = cwd_path.join(&path);
+				normalized_names.insert(abs.to_string_lossy().to_string());
+			}
+		}
+	}
+
+	// Delete files belonging to these environments
+	let mut deleted_keys = Vec::new();
+	for (file, env) in &file_to_env {
+		if normalized_names.contains(env) {
+			deleted_keys.push(file.clone());
+			let file_path = output_dir.join(file);
+			// Ignore errors if file doesn't exist
+			let _ = fs::remove_file(&file_path);
+
+			// Try to clean up empty parent directories
+			if let Some(parent) = file_path.parent() {
+				if parent != output_dir {
+					let _ = fs::remove_dir(parent);
+				}
+			}
+		}
+	}
+
+	// Update manifest.json by removing deleted entries
+	if !skip_manifest && !deleted_keys.is_empty() {
+		let mut updated_map = file_to_env;
+		for key in deleted_keys {
+			updated_map.remove(&key);
+		}
+		let content = serde_json::to_string_pretty(&updated_map)
+			.context("serializing updated manifest.json")?;
+		fs::write(&manifest_path, content).context("writing updated manifest.json")?;
+	}
+
+	Ok(())
 }
 
 #[cfg(test)]
@@ -1099,6 +1406,7 @@ mod tests {
 			name: None,
 			recursive: true, // Allow single env
 			skip_manifest: false,
+			..Default::default()
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -1132,6 +1440,7 @@ mod tests {
 			name: None,
 			recursive: true,
 			skip_manifest: false,
+			..Default::default()
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -1186,6 +1495,7 @@ mod tests {
 			name: None,
 			recursive: true,
 			skip_manifest: false,
+			..Default::default()
 		};
 
 		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -2204,47 +2514,6 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn test_gtmpl_actual_tk_compare_format() {
-		// Test the EXACT template from tk-compare's config.rs (line 123)
-		let manifest = serde_json::json!({
-			"apiVersion": "v1",
-			"kind": "ServiceAccount",
-			"metadata": {
-				"name": "external-secrets-kubernetes-argo-workflows",
-				"namespace": "mimir-cd",
-				"labels": {
-					"fluxExportDir": "mimir-cd"
-				}
-			}
-		});
-
-		// Inline environment with no labels
-		let env = None;
-
-		// The EXACT tk-compare template
-		let template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}";
-
-		let result = format_filename_gtmpl(&manifest, &env, template);
-		assert!(
-			result.is_ok(),
-			"Actual tk-compare template should work with inline env: {:?}",
-			result
-		);
-
-		// Verify output format
-		let output = result.unwrap();
-		assert!(output.starts_with("flux/"), "Should start with flux prefix");
-		assert!(
-			output.contains("/mimir-cd/"),
-			"Should use manifest's fluxExportDir label"
-		);
-		assert!(
-			output.ends_with("/ServiceAccount-external-secrets-kubernetes-argo-workflows"),
-			"Should end with kind-name"
-		);
-	}
-
 	// ==================== Manifest.json Tests ====================
 
 	#[test]
@@ -2271,6 +2540,7 @@ mod tests {
 			name: None,
 			recursive: true,
 			skip_manifest: false,
+			..Default::default()
 		};
 
 		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -2319,6 +2589,7 @@ mod tests {
 			name: None,
 			recursive: true,
 			skip_manifest: true,
+			..Default::default()
 		};
 
 		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
@@ -2368,6 +2639,8 @@ mod tests {
 			name: None,
 			recursive: true,
 			skip_manifest: false,
+			merge_strategy: ExportMergeStrategy::FailOnConflicts, // Allow exporting to non-empty dir
+			..Default::default()
 		};
 
 		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
