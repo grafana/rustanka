@@ -329,12 +329,14 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 				format_duration(report.exec1_stats.average)
 			};
 
-			let (emoji, speed_text) = if ratio > 1.0 {
+			let (emoji, speed_text) = if ratio >= 0.9 && ratio <= 1.1 {
+				("⚖️", format!("~equal ({} vs {})", exec2_time, exec1_time))
+			} else if ratio > 1.1 {
 				(
 					"🐢",
 					format!("{:.2}x slower ({} vs {})", ratio, exec2_time, exec1_time),
 				)
-			} else if ratio < 1.0 && ratio > 0.0 {
+			} else if ratio < 0.9 && ratio > 0.0 {
 				(
 					"🚀",
 					format!(
