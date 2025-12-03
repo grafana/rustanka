@@ -111,6 +111,12 @@ runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: grafana-apps"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-grafana-apps", "environments/grafana-apps", "--recursive", "{{EXPORT_FORMAT}}"]
+runs = 3
+dir_compare = true
+
+[[commands]]
 name = "export: grafana-o11y (tk runs jrsonnet)"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 1
@@ -124,7 +130,7 @@ dir_compare = true
 
 [[commands]]
 name = "export: all loki environments"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/loki-all", "environments/loki", "--recursive", "{{EXPORT_FORMAT}}", "--max-stack", "10000"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/loki-all", "environments/loki", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 1
 dir_compare = true
 

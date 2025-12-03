@@ -156,7 +156,7 @@ impl Command {
 	/// Supports {{EXPORT_FORMAT}} which expands to two args: --format and the template value
 	/// Supports {{LIST_MAIN_FILES}} which expands to all main.jsonnet files in <working_dir>
 	pub fn args_for_exec(&self, exec_name: &str, working_dir: Option<&str>) -> Vec<String> {
-		let export_format_template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{.metadata.name}}";
+		let export_format_template = "{{ if not env.metadata.labels.fluxExport }}flux{{ else if eq env.metadata.labels.fluxExport \"true\" }}flux{{ else }}flux-disabled{{ end }}/{{ env.metadata.labels.cluster_name }}/{{ if .metadata.labels.fluxExportDir }}{{ .metadata.labels.fluxExportDir }}{{ else if env.metadata.labels.fluxExportDir }}{{ env.metadata.labels.fluxExportDir }}{{ else if .metadata.namespace }}{{.metadata.namespace}}{{ else }}_cluster{{ end }}/{{.kind}}-{{ if eq env.metadata.labels.namespaceToExportFilenames \"true\" }}{{ .metadata.namespace | default \"global\" }}-{{ end }}{{.metadata.name}}";
 
 		let mut result = Vec::new();
 		for arg in &self.args {
