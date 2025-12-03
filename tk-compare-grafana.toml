@@ -86,6 +86,13 @@ args = [
 ]
 runs = 3
 
+[[commands]]
+name = "tool importers: all main files"
+args = [
+    "tool", "importers", "{{LIST_MAIN_FILES}}",
+]
+runs = 1
+
 # ==================== EXPORT COMMANDS ====================
 # Export commands use {{EXEC_NAME}} placeholder for separate output directories
 # {{EXPORT_FORMAT}} is the format string we use for tk

@@ -25,13 +25,18 @@ fn find_output_dir_in_args(args: &[String]) -> Option<String> {
 }
 
 /// Clean up export output directories for a command (both exec1 and exec2 variants)
-fn cleanup_export_dirs(command: &config::Command, exec1_name: &str, exec2_name: &str) {
+fn cleanup_export_dirs(
+	command: &config::Command,
+	exec1_name: &str,
+	exec2_name: &str,
+	working_dir: Option<&str>,
+) {
 	if !command.dir_compare {
 		return;
 	}
 
-	let args1 = command.args_for_exec(exec1_name);
-	let args2 = command.args_for_exec(exec2_name);
+	let args1 = command.args_for_exec(exec1_name, working_dir);
+	let args2 = command.args_for_exec(exec2_name, working_dir);
 
 	if let Some(dir) = find_output_dir_in_args(&args1) {
 		if std::path::Path::new(&dir).exists() {
@@ -249,11 +254,18 @@ fn main() -> Result<()> {
 
 			// Clean up export directories before EACH run to avoid "file already exists" errors
 			// This is especially important for multi-run benchmarks
-			cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
+			cleanup_export_dirs(
+				command,
+				&config.tk_exec_1_name,
+				&config.tk_exec_2_name,
+				config.working_dir.as_deref(),
+			);
 
 			// Get args for each executable (may differ due to {{EXEC_NAME}} substitution)
-			let args1 = command.args_for_exec(&config.tk_exec_1_name);
-			let args2 = command.args_for_exec(&config.tk_exec_2_name);
+			let args1 =
+				command.args_for_exec(&config.tk_exec_1_name, config.working_dir.as_deref());
+			let args2 =
+				command.args_for_exec(&config.tk_exec_2_name, config.working_dir.as_deref());
 
 			// Run with exec1 in its workspace
 			let result1 = runner::run_command(
@@ -456,7 +468,12 @@ fn main() -> Result<()> {
 		}
 		// Clean up export directories
 		for (_, command) in &commands_to_run {
-			cleanup_export_dirs(command, &config.tk_exec_1_name, &config.tk_exec_2_name);
+			cleanup_export_dirs(
+				command,
+				&config.tk_exec_1_name,
+				&config.tk_exec_2_name,
+				config.working_dir.as_deref(),
+			);
 		}
 	} else {
 		eprintln!("\nWorkspace preserved at: .tk-compare-workspace/");

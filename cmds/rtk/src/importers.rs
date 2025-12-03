@@ -93,6 +93,9 @@ pub fn find_importers(root: &str, files: Vec<String>) -> Result<Vec<String>> {
 fn expand_symlinks_in_files(root: &str, files: Vec<String>) -> Result<Vec<String>> {
 	let mut files_map = HashSet::new();
 
+	// Build symlink map once for all files
+	let symlink_map = build_symlink_map(root)?;
+
 	for file in files {
 		let abs_file = fs::canonicalize(&file).context("making file absolute")?;
 		let abs_file_str = abs_file.to_string_lossy().to_string();
@@ -104,8 +107,8 @@ fn expand_symlinks_in_files(root: &str, files: Vec<String>) -> Result<Vec<String
 			files_map.insert(symlink_eval);
 		}
 
-		// Find all symlinks that point to this file
-		let symlinks = find_symlinks(root, &abs_file_str)?;
+		// Find all symlinks that point to this file using the pre-built map
+		let symlinks = find_symlinks_from_map(&abs_file_str, &symlink_map);
 		for symlink in symlinks {
 			files_map.insert(symlink);
 		}
@@ -128,37 +131,110 @@ fn eval_symlinks(path: &str) -> Result<String> {
 	}
 }
 
-fn find_symlinks(root: &str, file: &str) -> Result<Vec<String>> {
-	let mut symlinks = Vec::new();
+/// Recursively collect directories up to a certain depth for better parallelization
+fn collect_directories_recursive(path: &Path, max_depth: usize) -> Vec<PathBuf> {
+	if max_depth == 0 {
+		return vec![path.to_path_buf()];
+	}
+
+	let Ok(entries) = fs::read_dir(path) else {
+		return vec![path.to_path_buf()];
+	};
+
+	let mut dirs = Vec::new();
+	let mut has_subdirs = false;
+
+	for entry in entries.filter_map(|e| e.ok()) {
+		let entry_path = entry.path();
+		if entry_path.is_dir() {
+			has_subdirs = true;
+			dirs.extend(collect_directories_recursive(&entry_path, max_depth - 1));
+		}
+	}
+
+	// If no subdirectories were found, return this directory itself
+	if !has_subdirs {
+		dirs.push(path.to_path_buf());
+	}
+
+	dirs
+}
+
+/// Build a map of canonical targets to their symlink paths
+/// This is done once to avoid repeated walkdir traversals
+fn build_symlink_map(root: &str) -> Result<HashMap<String, Vec<(String, String)>>> {
+	use rayon::prelude::*;
+
 	let root_path = Path::new(root);
 
-	// Walk the directory tree looking for symlinks
-	for entry in walkdir::WalkDir::new(root_path).follow_links(false) {
-		let entry = entry?;
-		let path = entry.path();
+	// Collect directories at multiple levels for better parallelization
+	// This ensures work is evenly distributed even if directory structure is unbalanced
+	let dirs_to_walk = collect_directories_recursive(root_path, 2);
 
-		if path.is_symlink() {
-			if let Ok(link_target) = fs::read_link(path) {
-				// Resolve the link target
-				let resolved = if link_target.is_absolute() {
-					link_target
-				} else {
-					path.parent().unwrap_or(Path::new("/")).join(link_target)
-				};
+	// Process each directory in parallel
+	let symlink_entries: Vec<(String, (String, String))> = dirs_to_walk
+		.par_iter()
+		.flat_map(|dir| {
+			walkdir::WalkDir::new(dir)
+				.follow_links(false)
+				.into_iter()
+				.filter_map(|entry| {
+					let entry = entry.ok()?;
+					let path = entry.path();
 
-				if let Ok(canonical_target) = fs::canonicalize(&resolved) {
-					let canonical_target_str = canonical_target.to_string_lossy().to_string();
-					if file.contains(&canonical_target_str) {
-						let symlink_path = path.to_string_lossy().to_string();
-						let result = file.replace(&canonical_target_str, &symlink_path);
-						symlinks.push(result);
+					if !path.is_symlink() {
+						return None;
 					}
-				}
+
+					let link_target = fs::read_link(path).ok()?;
+
+					// Resolve the link target
+					let resolved = if link_target.is_absolute() {
+						link_target
+					} else {
+						path.parent().unwrap_or(Path::new("/")).join(link_target)
+					};
+
+					let canonical_target = fs::canonicalize(&resolved).ok()?;
+					let canonical_target_str = canonical_target.to_string_lossy().to_string();
+					let symlink_path = path.to_string_lossy().to_string();
+
+					Some((
+						canonical_target_str.clone(),
+						(symlink_path, canonical_target_str),
+					))
+				})
+				.collect::<Vec<_>>()
+		})
+		.collect();
+
+	// Build the final map
+	let mut symlink_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+	for (key, value) in symlink_entries {
+		symlink_map.entry(key).or_insert_with(Vec::new).push(value);
+	}
+
+	Ok(symlink_map)
+}
+
+/// Find symlinks for a file using a pre-built symlink map
+fn find_symlinks_from_map(
+	file: &str,
+	symlink_map: &HashMap<String, Vec<(String, String)>>,
+) -> Vec<String> {
+	let mut symlinks = Vec::new();
+
+	// Check all entries in the symlink map
+	for (canonical_target, links) in symlink_map {
+		if file.contains(canonical_target) {
+			for (symlink_path, _) in links {
+				let result = file.replace(canonical_target, symlink_path);
+				symlinks.push(result);
 			}
 		}
 	}
 
-	Ok(symlinks)
+	symlinks
 }
 
 fn find_importers_recursive(
@@ -430,23 +506,35 @@ fn create_jsonnet_file_cache(
 }
 
 fn find_jsonnet_files(dir: &Path) -> Result<Vec<String>> {
-	let mut files = Vec::new();
+	use rayon::prelude::*;
 
-	for entry in walkdir::WalkDir::new(dir) {
-		let entry = entry?;
-		let path = entry.path();
+	// Collect directories at multiple levels for better parallelization
+	let dirs_to_walk = collect_directories_recursive(dir, 2);
 
-		if !path.is_file() {
-			continue;
-		}
+	// Process each directory in parallel
+	let files: Vec<String> = dirs_to_walk
+		.par_iter()
+		.flat_map(|path| {
+			walkdir::WalkDir::new(path)
+				.into_iter()
+				.filter_map(|entry| {
+					let entry = entry.ok()?;
+					let path = entry.path();
 
-		if let Some(ext) = path.extension() {
-			let ext_str = ext.to_string_lossy();
-			if ext_str == "jsonnet" || ext_str == "libsonnet" {
-				files.push(path.to_string_lossy().to_string());
-			}
-		}
-	}
+					if !path.is_file() {
+						return None;
+					}
+
+					let ext = path.extension()?.to_string_lossy();
+					if ext == "jsonnet" || ext == "libsonnet" {
+						Some(path.to_string_lossy().to_string())
+					} else {
+						None
+					}
+				})
+				.collect::<Vec<_>>()
+		})
+		.collect();
 
 	Ok(files)
 }
