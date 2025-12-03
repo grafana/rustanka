@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 mod discover;
 mod env;
@@ -717,10 +718,50 @@ fn main() -> Result<()> {
 			let result = export::export(&paths, export_opts)?;
 
 			// Match tk behavior: silent on success, errors to stderr
+			// But report fatal errors prominently and summarize skipped ones
+			let mut fatal_error: Option<(PathBuf, String)> = None;
+			let mut env_errors = Vec::new();
+			let mut skipped_count = 0;
+
 			for env_result in &result.results {
 				if let Some(ref error) = env_result.error {
-					eprintln!("  ✗ {:?}: {}", env_result.env_path, error);
+					if error.starts_with("FATAL:") && fatal_error.is_none() {
+						// Capture the first fatal error
+						fatal_error = Some((env_result.env_path.clone(), error.clone()));
+					} else if error == "Skipped due to earlier fatal error" {
+						skipped_count += 1;
+					} else {
+						// Regular environment error
+						env_errors.push((env_result.env_path.clone(), error.clone()));
+					}
 				}
+			}
+
+			// Report fatal error first if present
+			if let Some((path, error)) = fatal_error {
+				eprintln!("\n{}", "=".repeat(80));
+				eprintln!("FATAL ERROR during export:");
+				eprintln!("{}", "=".repeat(80));
+				eprintln!("  Environment: {:?}", path);
+				eprintln!(
+					"  Error: {}",
+					error.strip_prefix("FATAL: ").unwrap_or(&error)
+				);
+				eprintln!("{}", "=".repeat(80));
+				eprintln!();
+			}
+
+			// Report individual environment errors
+			for (path, error) in &env_errors {
+				eprintln!("  ✗ {:?}: {}", path, error);
+			}
+
+			// Summarize skipped environments
+			if skipped_count > 0 {
+				eprintln!(
+					"\nSkipped {} environments due to earlier fatal error",
+					skipped_count
+				);
 			}
 
 			if result.failed > 0 {
