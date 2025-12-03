@@ -171,14 +171,17 @@ fn manifest_yaml_ex_buf(
 					}
 					_ => buf.push(' '),
 				}
-				let extra_padding = match &item {
-					Val::Arr(a) => !a.is_empty(),
-					Val::Obj(o) => !o.is_empty(),
-					_ => false,
-				};
 				let prev_len = cur_padding.len();
-				if extra_padding {
-					cur_padding.push_str(&options.padding);
+				match &item {
+					// For arrays, add full padding
+					Val::Arr(a) if !a.is_empty() => {
+						cur_padding.push_str(&options.padding);
+					}
+					// For objects in arrays, only add 2 spaces to align after "- "
+					Val::Obj(o) if !o.is_empty() => {
+						cur_padding.push_str("  ");
+					}
+					_ => {}
 				}
 				in_description_frame(
 					|| format!("elem <{i}> manifestification"),
@@ -240,4 +243,92 @@ fn manifest_yaml_ex_buf(
 		Val::Func(_) => bail!("tried to manifest function"),
 	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use jrsonnet_evaluator::{val::NumValue, ObjValueBuilder};
+
+	#[test]
+	fn test_array_of_objects_indentation() {
+		// Test that objects inside arrays have correct indentation
+		// This is a regression test for the bug where object fields in arrays
+		// were indented with full padding instead of 2 spaces after the dash
+		let mut arr = Vec::new();
+
+		// Create first object
+		let mut obj1 = ObjValueBuilder::new();
+		obj1.field("name").value("item1");
+		obj1.field("value")
+			.value(Val::Num(NumValue::new(100.0).unwrap()));
+		arr.push(Val::Obj(obj1.build()));
+
+		// Create second object
+		let mut obj2 = ObjValueBuilder::new();
+		obj2.field("name").value("item2");
+		obj2.field("value")
+			.value(Val::Num(NumValue::new(200.0).unwrap()));
+		arr.push(Val::Obj(obj2.build()));
+
+		// Create container object
+		let mut container = ObjValueBuilder::new();
+		container.field("objectArray").value(Val::Arr(arr.into()));
+
+		let val = Val::Obj(container.build());
+
+		let formatter = YamlFormat::cli(
+			4,
+			#[cfg(feature = "exp-preserve-order")]
+			false,
+		);
+		let yaml = formatter.manifest(val).unwrap();
+
+		// The YAML should have this exact format:
+		// objectArray:
+		//     - name: item1
+		//       value: 100
+		//     - name: item2
+		//       value: 200
+		//
+		// Note: "value:" should be at 6 spaces (4 base + 2 for alignment after "- ")
+		// NOT at 8 spaces (4 base + 4 padding)
+		assert_eq!(
+			yaml.trim_end(),
+			"objectArray:\n    - name: item1\n      value: 100\n    - name: item2\n      value: 200"
+		);
+
+		// Verify the YAML can be parsed back
+		use serde_yaml_with_quirks as serde_yaml;
+		let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+		assert!(parsed.is_mapping());
+	}
+
+	#[test]
+	fn test_nested_arrays_and_objects() {
+		// Test more complex nesting scenarios
+		let mut inner_obj = ObjValueBuilder::new();
+		inner_obj.field("key").value("value");
+
+		let mut arr = Vec::new();
+		arr.push(Val::Num(NumValue::new(1.0).unwrap()));
+		arr.push(Val::from("string"));
+		arr.push(Val::Obj(inner_obj.build()));
+
+		let mut container = ObjValueBuilder::new();
+		container.field("mixedArray").value(Val::Arr(arr.into()));
+
+		let val = Val::Obj(container.build());
+
+		let formatter = YamlFormat::cli(
+			4,
+			#[cfg(feature = "exp-preserve-order")]
+			false,
+		);
+		let yaml = formatter.manifest(val).unwrap();
+
+		// Verify it can be parsed
+		use serde_yaml_with_quirks as serde_yaml;
+		let _parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+	}
 }
