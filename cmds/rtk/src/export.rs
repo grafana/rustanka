@@ -524,6 +524,7 @@ fn export_single_env(
 					indent_array: Some(0),
 					prefer_block_scalars: true,
 					empty_map_as_braces: true,
+					empty_array_as_brackets: true,
 					..Default::default()
 				};
 				let mut output = String::new();
