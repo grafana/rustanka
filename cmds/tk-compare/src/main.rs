@@ -239,6 +239,7 @@ fn main() -> Result<()> {
 		let mut exit_codes_consistent = true;
 		let mut stdout_matched = true;
 		let mut stdout_similarity = None;
+		let mut semantic_similarity = None;
 		let mut exec1_exit_code = 0;
 		let mut exec2_exit_code = 0;
 		let mut exec1_stderr = String::new();
@@ -301,14 +302,18 @@ fn main() -> Result<()> {
 							match runner::compare_directories_detailed(&d1, &d2) {
 								Ok((
 									matched,
-									similarity,
-									matched_files,
+									line_similarity,
+									semantic_sim,
+									matched_files_line,
+									matched_files_semantic,
 									total_files,
 									diffs,
 									file_diffs,
 								)) => {
 									stdout_similarity =
-										Some((similarity, matched_files, total_files));
+										Some((line_similarity, matched_files_line, total_files));
+									semantic_similarity =
+										Some((semantic_sim, matched_files_semantic, total_files));
 									if !matched && debug_mode {
 										eprintln!("\n=== DIRECTORY DIFF ===");
 										for diff in diffs.iter().take(debug_max_lines) {
@@ -436,6 +441,8 @@ fn main() -> Result<()> {
 			exit_codes_consistent,
 			stdout_matched,
 			stdout_similarity,
+			semantic_similarity,
+			is_export_command: command.dir_compare,
 			both_failed_unexpectedly,
 			exec1_name: config.tk_exec_1_name.clone(),
 			exec1_stats,

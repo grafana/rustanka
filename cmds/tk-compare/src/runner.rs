@@ -213,22 +213,33 @@ pub enum FileDiffKind {
 }
 
 /// Compare two directories and return detailed results
-/// Returns (matched, similarity_percentage, matched_files, total_files, differences, file_diffs)
+/// Returns (matched, line_similarity_percentage, semantic_similarity_percentage, matched_files_line, matched_files_semantic, total_files, differences, file_diffs)
 ///
 /// Similarity calculation:
-/// - Percentage of files that are semantically equivalent (matched_files / total_files)
+/// - Line similarity: Percentage of files that match exactly (byte-for-byte)
+/// - Semantic similarity: Percentage of files that are semantically equivalent (includes YAML semantic comparison)
 /// - Missing/extra files count toward total_files but not matched_files
 /// - YAML files use semantic comparison (ignoring cosmetic differences)
 pub fn compare_directories_detailed(
 	dir1: &str,
 	dir2: &str,
-) -> Result<(bool, f64, usize, usize, Vec<String>, Vec<FileDiff>)> {
+) -> Result<(
+	bool,
+	f64,
+	f64,
+	usize,
+	usize,
+	usize,
+	Vec<String>,
+	Vec<FileDiff>,
+)> {
 	let files1 = collect_files(dir1)?;
 	let files2 = collect_files(dir2)?;
 
 	let mut diffs = Vec::new();
 	let mut file_diffs = Vec::new();
-	let mut matched_files = 0;
+	let mut matched_files_line = 0; // Exact line-by-line matches
+	let mut matched_files_semantic = 0; // Semantic matches (includes exact matches)
 	let mut has_missing_or_extra_files = false;
 
 	// Get all unique file paths
@@ -243,6 +254,9 @@ pub fn compare_directories_detailed(
 				let lines1: Vec<&str> = text1.lines().collect();
 				let lines2: Vec<&str> = text2.lines().collect();
 
+				// Check exact match first
+				let exact_match = content1 == content2;
+
 				// For YAML files, use semantic comparison
 				let semantically_equal = if is_yaml_file(path) {
 					compare_yaml_docs_semantically(&text1, &text2).unwrap_or(false)
@@ -250,11 +264,31 @@ pub fn compare_directories_detailed(
 					false
 				};
 
-				if content1 == content2 {
-					matched_files += 1;
+				if exact_match {
+					matched_files_line += 1;
+					matched_files_semantic += 1;
 				} else if semantically_equal {
 					// YAML files are semantically equal despite text differences
-					matched_files += 1;
+					matched_files_semantic += 1;
+
+					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
+						lines1
+							.iter()
+							.zip(lines2.iter())
+							.filter(|(a, b)| a != b)
+							.count(),
+					);
+
+					// Note: Not adding to diffs since it's semantically equivalent
+					// Store as a semantic-only match in file_diffs for informational purposes
+					file_diffs.push(FileDiff {
+						path: path.to_string(),
+						kind: FileDiffKind::ContentDiffers {
+							content1: text1.to_string(),
+							content2: text2.to_string(),
+							diff_lines,
+						},
+					});
 				} else {
 					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
 						lines1
@@ -311,14 +345,17 @@ pub fn compare_directories_detailed(
 
 	let matched = diffs.is_empty();
 
-	// Calculate file-based similarity (more meaningful for semantic YAML comparison)
-	// This shows percentage of files that are semantically equivalent
-	// Note: We calculate similarity even when there are missing/extra files
-	// The similarity reflects what percentage of all files matched
-	let similarity = if total_files > 0 {
-		(matched_files as f64 / total_files as f64) * 100.0
+	// Calculate line-based similarity (exact byte-for-byte matches)
+	let line_similarity = if total_files > 0 {
+		(matched_files_line as f64 / total_files as f64) * 100.0
 	} else {
-		// No files in either directory
+		100.0
+	};
+
+	// Calculate semantic similarity (includes YAML semantic comparison)
+	let semantic_similarity = if total_files > 0 {
+		(matched_files_semantic as f64 / total_files as f64) * 100.0
+	} else {
 		100.0
 	};
 
@@ -327,8 +364,10 @@ pub fn compare_directories_detailed(
 
 	Ok((
 		matched,
-		similarity,
-		matched_files,
+		line_similarity,
+		semantic_similarity,
+		matched_files_line,
+		matched_files_semantic,
 		total_files,
 		diffs,
 		file_diffs,
@@ -855,11 +894,13 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
-		assert_eq!(result.1, 100.0); // 100% similarity
-		assert_eq!(result.2, 1); // 1 matched file
-		assert_eq!(result.3, 1); // 1 total file
-		assert!(result.4.is_empty()); // no diffs
-		assert!(result.5.is_empty()); // no file_diffs
+		assert_eq!(result.1, 100.0); // 100% line similarity
+		assert_eq!(result.2, 100.0); // 100% semantic similarity
+		assert_eq!(result.3, 1); // 1 matched file (line)
+		assert_eq!(result.4, 1); // 1 matched file (semantic)
+		assert_eq!(result.5, 1); // 1 total file
+		assert!(result.6.is_empty()); // no diffs
+		assert!(result.7.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -876,11 +917,13 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
-		assert_eq!(result.1, 0.0); // 0% similarity (both are 1 line, 0 match)
-		assert_eq!(result.2, 0); // 0 matched files
-		assert_eq!(result.3, 1); // 1 total file
-		assert_eq!(result.4.len(), 1); // 1 diff
-		assert_eq!(result.5.len(), 1); // 1 file_diff
+		assert_eq!(result.1, 0.0); // 0% line similarity
+		assert_eq!(result.2, 0.0); // 0% semantic similarity
+		assert_eq!(result.3, 0); // 0 matched files (line)
+		assert_eq!(result.4, 0); // 0 matched files (semantic)
+		assert_eq!(result.5, 1); // 1 total file
+		assert_eq!(result.6.len(), 1); // 1 diff
+		assert_eq!(result.7.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -898,11 +941,13 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
 					  // File-based similarity: 0 matched files / 1 total file = 0%
-		assert_eq!(result.1, 0.0);
-		assert_eq!(result.2, 0); // 0 matched files
-		assert_eq!(result.3, 1); // 1 total file
-		assert_eq!(result.4.len(), 1); // 1 diff
-		assert_eq!(result.5.len(), 1); // 1 file_diff
+		assert_eq!(result.1, 0.0); // 0% line similarity
+		assert_eq!(result.2, 0.0); // 0% semantic similarity
+		assert_eq!(result.3, 0); // 0 matched files (line)
+		assert_eq!(result.4, 0); // 0 matched files (semantic)
+		assert_eq!(result.5, 1); // 1 total file
+		assert_eq!(result.6.len(), 1); // 1 diff
+		assert_eq!(result.7.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -919,11 +964,13 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
-		assert_eq!(result.1, 0.0); // 0% similarity (files don't match)
-		assert_eq!(result.2, 0); // 0 matched files
-		assert_eq!(result.3, 2); // 2 total files
-		assert_eq!(result.4.len(), 2); // 2 diffs (one in each dir only)
-		assert_eq!(result.5.len(), 2); // 2 file_diffs
+		assert_eq!(result.1, 0.0); // 0% line similarity
+		assert_eq!(result.2, 0.0); // 0% semantic similarity
+		assert_eq!(result.3, 0); // 0 matched files (line)
+		assert_eq!(result.4, 0); // 0 matched files (semantic)
+		assert_eq!(result.5, 2); // 2 total files
+		assert_eq!(result.6.len(), 2); // 2 diffs (one in each dir only)
+		assert_eq!(result.7.len(), 2); // 2 file_diffs
 	}
 
 	#[test]
@@ -937,10 +984,12 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched (both empty)
-		assert_eq!(result.1, 100.0); // 100% similarity
-		assert_eq!(result.2, 0); // 0 matched files
-		assert_eq!(result.3, 0); // 0 total files
-		assert!(result.5.is_empty()); // no file_diffs
+		assert_eq!(result.1, 100.0); // 100% line similarity
+		assert_eq!(result.2, 100.0); // 100% semantic similarity
+		assert_eq!(result.3, 0); // 0 matched files (line)
+		assert_eq!(result.4, 0); // 0 matched files (semantic)
+		assert_eq!(result.5, 0); // 0 total files
+		assert!(result.7.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -957,9 +1006,11 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
-		assert_eq!(result.1, 100.0); // 100% similarity (all files match)
-		assert_eq!(result.2, 1); // 1 matched file
-		assert!(result.5.is_empty()); // no file_diffs
+		assert_eq!(result.1, 100.0); // 100% line similarity
+		assert_eq!(result.2, 100.0); // 100% semantic similarity
+		assert_eq!(result.3, 1); // 1 matched file (line)
+		assert_eq!(result.4, 1); // 1 matched file (semantic)
+		assert!(result.7.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -979,11 +1030,13 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
-		assert_eq!(result.1, 100.0); // 100% similarity (all files match)
-		assert_eq!(result.2, 2); // 2 matched files
-		assert_eq!(result.3, 2); // 2 total files
-		assert!(result.4.is_empty()); // no diffs
-		assert!(result.5.is_empty()); // no file_diffs
+		assert_eq!(result.1, 100.0); // 100% line similarity
+		assert_eq!(result.2, 100.0); // 100% semantic similarity
+		assert_eq!(result.3, 2); // 2 matched files (line)
+		assert_eq!(result.4, 2); // 2 matched files (semantic)
+		assert_eq!(result.5, 2); // 2 total files
+		assert!(result.6.is_empty()); // no diffs
+		assert!(result.7.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -1005,11 +1058,13 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
 					  // File-based similarity: 1 matched file / 2 total files = 50%
-		assert_eq!(result.1, 50.0);
-		assert_eq!(result.2, 1); // 1 matched file (file1)
-		assert_eq!(result.3, 2); // 2 total files
-		assert_eq!(result.4.len(), 1); // 1 diff (file2)
-		assert_eq!(result.5.len(), 1); // 1 file_diff
+		assert_eq!(result.1, 50.0); // 50% line similarity
+		assert_eq!(result.2, 50.0); // 50% semantic similarity
+		assert_eq!(result.3, 1); // 1 matched file (line) - file1
+		assert_eq!(result.4, 1); // 1 matched file (semantic) - file1
+		assert_eq!(result.5, 2); // 2 total files
+		assert_eq!(result.6.len(), 1); // 1 diff (file2)
+		assert_eq!(result.7.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -1029,12 +1084,14 @@ mod tests {
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
-					  // file1: 1 line matches, file2: 0 lines match = 1/2 = 50%
-		assert_eq!(result.1, 50.0);
-		assert_eq!(result.2, 1); // 1 matched file
-		assert_eq!(result.3, 2); // 2 total files
-		assert_eq!(result.4.len(), 1); // 1 diff
-		assert_eq!(result.5.len(), 1); // 1 file_diff
+					  // file1: matches, file2: doesn't match = 1/2 = 50%
+		assert_eq!(result.1, 50.0); // 50% line similarity
+		assert_eq!(result.2, 50.0); // 50% semantic similarity
+		assert_eq!(result.3, 1); // 1 matched file (line)
+		assert_eq!(result.4, 1); // 1 matched file (semantic)
+		assert_eq!(result.5, 2); // 2 total files
+		assert_eq!(result.6.len(), 1); // 1 diff
+		assert_eq!(result.7.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -1403,9 +1460,12 @@ value: 0.1
 		let result =
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 
-		// Should match semantically
+		// Should match semantically (even though lines differ)
 		assert!(result.0); // matched
-		assert_eq!(result.1, 100.0); // 100% similarity
-		assert_eq!(result.2, 1); // 1 matched file
+		assert_eq!(result.1, 0.0); // 0% line similarity (content differs)
+		assert_eq!(result.2, 100.0); // 100% semantic similarity (YAML semantically equal)
+		assert_eq!(result.3, 0); // 0 matched files (line)
+		assert_eq!(result.4, 1); // 1 matched file (semantic)
+		assert_eq!(result.5, 1); // 1 total file
 	}
 }
