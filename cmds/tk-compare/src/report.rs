@@ -337,14 +337,17 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 					format!("{:.2}x slower ({} vs {})", ratio, exec2_time, exec1_time),
 				)
 			} else if ratio < 0.9 && ratio > 0.0 {
+				let speedup = 1.0 / ratio;
+				let emoji = if speedup >= 3.0 {
+					"🚀"
+				} else if speedup >= 1.5 {
+					"🏎️"
+				} else {
+					"🐎"
+				};
 				(
-					"🚀",
-					format!(
-						"{:.2}x faster ({} vs {})",
-						1.0 / ratio,
-						exec2_time,
-						exec1_time
-					),
+					emoji,
+					format!("{:.2}x faster ({} vs {})", speedup, exec2_time, exec1_time),
 				)
 			} else {
 				("⚡", "same".to_string())

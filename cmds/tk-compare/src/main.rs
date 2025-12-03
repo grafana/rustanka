@@ -447,13 +447,14 @@ fn main() -> Result<()> {
 			exec2_stderr,
 		};
 
+		// Print report immediately after test completes
+		report.print(display_index - 1);
+
 		reports.push(report);
 	}
 
-	// Print individual reports
-	for (index, report) in reports.iter().enumerate() {
-		report.print(index);
-	}
+	// Print divider before final summary
+	eprintln!("\n{}", "=".repeat(80));
 
 	// Print summary
 	report::print_summary(&reports);
