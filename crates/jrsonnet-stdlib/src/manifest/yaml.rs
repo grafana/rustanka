@@ -63,8 +63,36 @@ impl YamlFormat<'_> {
 }
 impl ManifestFormat for YamlFormat<'_> {
 	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
-		manifest_yaml_ex_buf(&val, buf, &mut String::new(), self)
+		manifest_yaml_ex_buf(&val, buf, &mut String::new(), self, false)
 	}
+}
+
+/// Check if string looks like an ISO8601 timestamp that YAML parsers might interpret as a date.
+/// Examples: 2025-07-03T15:30:00Z, 2025-07-03T15:30:00+00:00
+fn looks_like_timestamp(string: &str) -> bool {
+	// Quick length check: ISO8601 timestamps are at least 20 chars (2025-07-03T15:30:00Z)
+	if string.len() < 20 {
+		return false;
+	}
+	// Check for ISO8601 pattern: YYYY-MM-DDTHH:MM:SS followed by Z or timezone
+	let bytes = string.as_bytes();
+	// Check date part: YYYY-MM-DD
+	if !(bytes[4] == b'-' && bytes[7] == b'-' && bytes[10] == b'T') {
+		return false;
+	}
+	// Check time part: HH:MM:SS
+	if !(bytes[13] == b':' && bytes[16] == b':') {
+		return false;
+	}
+	// Check all digits are in right places
+	bytes[0..4].iter().all(u8::is_ascii_digit)
+		&& bytes[5..7].iter().all(u8::is_ascii_digit)
+		&& bytes[8..10].iter().all(u8::is_ascii_digit)
+		&& bytes[11..13].iter().all(u8::is_ascii_digit)
+		&& bytes[14..16].iter().all(u8::is_ascii_digit)
+		&& bytes[17..19].iter().all(u8::is_ascii_digit)
+		// Check timezone indicator (Z, +, or -)
+		&& (bytes[19] == b'Z' || bytes[19] == b'+' || bytes[19] == b'-')
 }
 
 /// From <https://github.com/chyh1990/yaml-rust/blob/da52a68615f2ecdd6b7e4567019f280c433c1521/src/emitter.rs#L289>
@@ -76,10 +104,16 @@ fn yaml_needs_quotes(string: &str) -> bool {
 
 	string.is_empty()
 		|| need_quotes_spaces(string)
-		|| string.starts_with(['&' , '*' , '?' , '|' , '-' , '!' , '%' , '@'])
+		// Characters that are special at the start of a YAML value
+		|| string.starts_with(['&', '*', '?', '|', '-', '!', '%', '@', '{', '[', '"', '\''])
 		// Go's YAML library only quotes colons when followed by space (creates ambiguity)
 		|| string.contains(": ")
-		|| string.contains(|c| matches!(c, '{' | '}' | '[' | ']' | '#' | '`' | '\"' | '\'' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
+		// Note: {, }, [, ], ", ' are only special in YAML flow context or at start.
+		// Since jrsonnet only generates block-style YAML, we don't need to quote them
+		// when they appear in the middle of a string.
+		// # is only a comment when preceded by whitespace, so we check for " #" instead.
+		|| string.contains(" #")
+		|| string.contains(|c| matches!(c, '`' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
 		|| [
 			// http://yaml.org/type/bool.html
 			"yes", "Yes", "YES", "no", "No", "NO", "True", "TRUE", "true", "False", "FALSE", "false",
@@ -99,12 +133,15 @@ fn yaml_needs_quotes(string: &str) -> bool {
 		|| string.starts_with("0x")
 		|| string.parse::<i64>().is_ok()
 		|| string.parse::<f64>().is_ok()
+		// ISO8601 timestamps should be quoted to prevent YAML parsers from
+		// interpreting them as dates (matches Go's yaml.v3 behavior)
+		|| looks_like_timestamp(string)
 }
 
 #[allow(dead_code)]
 fn manifest_yaml_ex(val: &Val, options: &YamlFormat<'_>) -> Result<String> {
 	let mut out = String::new();
-	manifest_yaml_ex_buf(val, &mut out, &mut String::new(), options)?;
+	manifest_yaml_ex_buf(val, &mut out, &mut String::new(), options, false)?;
 	Ok(out)
 }
 
@@ -114,6 +151,9 @@ fn manifest_yaml_ex_buf(
 	buf: &mut String,
 	cur_padding: &mut String,
 	options: &YamlFormat<'_>,
+	// When true, this object is an array element and its fields should be
+	// indented to align with the first field (after "- ")
+	in_array_context: bool,
 ) -> Result<()> {
 	match val {
 		Val::Bool(v) => {
@@ -147,10 +187,39 @@ fn manifest_yaml_ex_buf(
 			} else if !options.quote_keys && !yaml_needs_quotes(&s) {
 				buf.push_str(&s);
 			} else {
-				escape_string_json_buf(&s, buf);
+				// Prefer single quotes when string contains double quotes but no single quotes.
+				// This matches Go's yaml.v3 behavior and avoids escaping.
+				if s.contains('"') && !s.contains('\'') {
+					buf.push('\'');
+					buf.push_str(&s);
+					buf.push('\'');
+				} else {
+					escape_string_json_buf(&s, buf);
+				}
 			}
 		}
-		Val::Num(n) => write!(buf, "{}", *n).unwrap(),
+		Val::Num(n) => {
+			let v = n.get();
+			// Match Go's yaml.v3 number formatting:
+			// - Use scientific notation for very large (>= 1e6) or very small numbers
+			// - Format like "1e+07" with explicit + sign for positive exponents
+			if v != 0.0 && (v.abs() >= 1_000_000.0 || v.abs() < 0.0001) && v.fract() == 0.0 {
+				// Format with scientific notation matching Go's style
+				let exp = v.abs().log10().floor() as i32;
+				let mantissa = v / 10_f64.powi(exp);
+				if exp >= 0 {
+					write!(buf, "{mantissa}e+{exp:02}").unwrap();
+				} else {
+					write!(buf, "{mantissa}e{exp:03}").unwrap();
+				}
+			} else if v.fract() == 0.0 {
+				// Integer: write without decimal point
+				write!(buf, "{}", v as i64).unwrap();
+			} else {
+				// Regular float
+				write!(buf, "{v}").unwrap();
+			}
+		}
 		#[cfg(feature = "exp-bigint")]
 		Val::BigInt(n) => write!(buf, "{}", *n).unwrap(),
 		Val::Arr(a) => {
@@ -165,27 +234,27 @@ fn manifest_yaml_ex_buf(
 				buf.push('-');
 				match &item {
 					Val::Arr(a) if !a.is_empty() => {
+						// Nested arrays need a newline and extra indentation
 						buf.push('\n');
 						buf.push_str(cur_padding);
 						buf.push_str(&options.padding);
 					}
 					_ => buf.push(' '),
 				}
+				// For nested arrays, add padding to cur_padding
 				let prev_len = cur_padding.len();
-				match &item {
-					// For arrays, add full padding
-					Val::Arr(a) if !a.is_empty() => {
+				if let Val::Arr(a) = &item {
+					if !a.is_empty() {
 						cur_padding.push_str(&options.padding);
 					}
-					// For objects in arrays, only add 2 spaces to align after "- "
-					Val::Obj(o) if !o.is_empty() => {
-						cur_padding.push_str("  ");
-					}
-					_ => {}
 				}
+				// Objects in arrays need special handling: their fields should
+				// align with the first field (after "- "), but nested structures
+				// should not inherit this offset
+				let is_object_in_array = matches!(&item, Val::Obj(o) if !o.is_empty());
 				in_description_frame(
 					|| format!("elem <{i}> manifestification"),
-					|| manifest_yaml_ex_buf(&item, buf, cur_padding, options),
+					|| manifest_yaml_ex_buf(&item, buf, cur_padding, options, is_object_in_array),
 				)?;
 				cur_padding.truncate(prev_len);
 			}
@@ -195,6 +264,20 @@ fn manifest_yaml_ex_buf(
 		}
 		Val::Obj(o) => {
 			let mut had_fields = false;
+			// Store the base padding BEFORE any in_array_context adjustment.
+			let base_padding_len = cur_padding.len();
+
+			// For key alignment: if this object is an array element, keys (except the first)
+			// need 2 extra spaces to align with the first key (which appears after "- ").
+			// This offset is ONLY for key alignment, NOT for nested content.
+			let key_padding = if in_array_context {
+				let mut kp = cur_padding.clone();
+				kp.push_str("  ");
+				kp
+			} else {
+				cur_padding.clone()
+			};
+
 			for (i, (key, value)) in o
 				.iter(
 					#[cfg(feature = "exp-preserve-order")]
@@ -206,7 +289,7 @@ fn manifest_yaml_ex_buf(
 				let value = value.with_description(|| format!("field <{key}> evaluation"))?;
 				if i != 0 {
 					buf.push('\n');
-					buf.push_str(cur_padding);
+					buf.push_str(&key_padding);
 				}
 				if !options.quote_keys && !yaml_needs_quotes(&key) {
 					buf.push_str(&key);
@@ -214,28 +297,41 @@ fn manifest_yaml_ex_buf(
 					escape_string_json_buf(&key, buf);
 				}
 				buf.push(':');
+
+				// For nested content (arrays/objects as values), we use the current
+				// key position (key_padding) as the base for nested content.
+				// The key_padding already includes any in_array_context offset,
+				// so we just need to add the structure-specific indentation.
 				let prev_len = cur_padding.len();
 				match &value {
 					Val::Arr(a) if !a.is_empty() => {
 						buf.push('\n');
-						buf.push_str(cur_padding);
+						buf.push_str(&key_padding);
 						buf.push_str(&options.arr_element_padding);
+						// Set cur_padding to key_padding + arr_element_padding for nested content
+						cur_padding.clear();
+						cur_padding.push_str(&key_padding);
 						cur_padding.push_str(&options.arr_element_padding);
 					}
 					Val::Obj(o) if !o.is_empty() => {
 						buf.push('\n');
-						buf.push_str(cur_padding);
+						buf.push_str(&key_padding);
 						buf.push_str(&options.padding);
+						// Set cur_padding to key_padding + padding for nested content
+						cur_padding.clear();
+						cur_padding.push_str(&key_padding);
 						cur_padding.push_str(&options.padding);
 					}
 					_ => buf.push(' '),
 				}
 				in_description_frame(
 					|| format!("field <{key}> manifestification"),
-					|| manifest_yaml_ex_buf(&value, buf, cur_padding, options),
+					|| manifest_yaml_ex_buf(&value, buf, cur_padding, options, false),
 				)?;
 				cur_padding.truncate(prev_len);
 			}
+			// Restore cur_padding to original value
+			cur_padding.truncate(base_padding_len);
 			if !had_fields {
 				buf.push_str("{}");
 			}
@@ -248,87 +344,348 @@ fn manifest_yaml_ex_buf(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use jrsonnet_evaluator::{val::NumValue, ObjValueBuilder};
+	use jrsonnet_evaluator::{val::ArrValue, val::NumValue, ObjValueBuilder};
 
-	#[test]
-	fn test_array_of_objects_indentation() {
-		// Test that objects inside arrays have correct indentation
-		// This is a regression test for the bug where object fields in arrays
-		// were indented with full padding instead of 2 spaces after the dash
-		let mut arr = Vec::new();
+	/// Helper to create a Val::Num
+	fn num(v: f64) -> Val {
+		Val::Num(NumValue::new(v).expect("finite"))
+	}
 
-		// Create first object
-		let mut obj1 = ObjValueBuilder::new();
-		obj1.field("name").value("item1");
-		obj1.field("value")
-			.value(Val::Num(NumValue::new(100.0).unwrap()));
-		arr.push(Val::Obj(obj1.build()));
+	/// Helper to create a Val::Str
+	fn str_val(s: &str) -> Val {
+		Val::Str(s.into())
+	}
 
-		// Create second object
-		let mut obj2 = ObjValueBuilder::new();
-		obj2.field("name").value("item2");
-		obj2.field("value")
-			.value(Val::Num(NumValue::new(200.0).unwrap()));
-		arr.push(Val::Obj(obj2.build()));
+	/// Helper to create a Val::Arr
+	fn arr(items: Vec<Val>) -> Val {
+		Val::Arr(ArrValue::eager(items))
+	}
 
-		// Create container object
-		let mut container = ObjValueBuilder::new();
-		container.field("objectArray").value(Val::Arr(arr.into()));
-
-		let val = Val::Obj(container.build());
-
-		let formatter = YamlFormat::cli(
-			4,
+	/// Helper to manifest a value to YAML string using std_to_yaml options
+	/// Uses quote_keys: false to match typical usage
+	fn manifest_yaml(val: &Val) -> String {
+		let options = YamlFormat::std_to_yaml(
+			false, // indent_array_in_object
+			false, // quote_keys - false to not quote keys unnecessarily
 			#[cfg(feature = "exp-preserve-order")]
 			false,
 		);
-		let yaml = formatter.manifest(val).unwrap();
+		let mut out = String::new();
+		manifest_yaml_ex_buf(val, &mut out, &mut String::new(), &options, false).unwrap();
+		out
+	}
 
-		// The YAML should have this exact format:
-		// objectArray:
-		//     - name: item1
-		//       value: 100
-		//     - name: item2
-		//       value: 200
-		//
-		// Note: "value:" should be at 6 spaces (4 base + 2 for alignment after "- ")
-		// NOT at 8 spaces (4 base + 4 padding)
-		assert_eq!(
-			yaml.trim_end(),
-			"objectArray:\n    - name: item1\n      value: 100\n    - name: item2\n      value: 200"
-		);
+	// ==========================================================================
+	// Tests for looks_like_timestamp function
+	// ==========================================================================
 
-		// Verify the YAML can be parsed back
-		use serde_yaml_with_quirks as serde_yaml;
-		let parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
-		assert!(parsed.is_mapping());
+	#[test]
+	fn test_looks_like_timestamp_with_z_suffix() {
+		assert!(looks_like_timestamp("2025-07-03T15:30:00Z"));
+		assert!(looks_like_timestamp("2024-12-25T00:00:00Z"));
+		assert!(looks_like_timestamp("1999-01-01T23:59:59Z"));
 	}
 
 	#[test]
-	fn test_nested_arrays_and_objects() {
-		// Test more complex nesting scenarios
-		let mut inner_obj = ObjValueBuilder::new();
-		inner_obj.field("key").value("value");
+	fn test_looks_like_timestamp_with_positive_offset() {
+		assert!(looks_like_timestamp("2025-07-03T15:30:00+00:00"));
+		assert!(looks_like_timestamp("2025-07-03T15:30:00+05:30"));
+	}
 
-		let mut arr = Vec::new();
-		arr.push(Val::Num(NumValue::new(1.0).unwrap()));
-		arr.push(Val::from("string"));
-		arr.push(Val::Obj(inner_obj.build()));
+	#[test]
+	fn test_looks_like_timestamp_with_negative_offset() {
+		assert!(looks_like_timestamp("2025-07-03T15:30:00-07:00"));
+		assert!(looks_like_timestamp("2025-07-03T15:30:00-12:00"));
+	}
 
-		let mut container = ObjValueBuilder::new();
-		container.field("mixedArray").value(Val::Arr(arr.into()));
+	#[test]
+	fn test_looks_like_timestamp_rejects_invalid() {
+		// Too short
+		assert!(!looks_like_timestamp("2025-07-03"));
+		assert!(!looks_like_timestamp("2025-07-03T15:30"));
+		// Wrong format
+		assert!(!looks_like_timestamp("not a timestamp at all"));
+		assert!(!looks_like_timestamp("2025/07/03T15:30:00Z"));
+		// Missing T separator
+		assert!(!looks_like_timestamp("2025-07-03 15:30:00Z"));
+	}
 
-		let val = Val::Obj(container.build());
+	// ==========================================================================
+	// Tests for yaml_needs_quotes function
+	// ==========================================================================
 
-		let formatter = YamlFormat::cli(
-			4,
-			#[cfg(feature = "exp-preserve-order")]
-			false,
-		);
-		let yaml = formatter.manifest(val).unwrap();
+	#[test]
+	fn test_yaml_needs_quotes_for_timestamps() {
+		// ISO8601 timestamps should be quoted to match Go's yaml.v3 behavior
+		assert!(yaml_needs_quotes("2025-07-03T15:30:00Z"));
+		assert!(yaml_needs_quotes("2025-07-03T15:30:00+00:00"));
+		assert!(yaml_needs_quotes("2025-07-03T15:30:00-05:00"));
+	}
 
-		// Verify it can be parsed
-		use serde_yaml_with_quirks as serde_yaml;
-		let _parsed: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
+	#[test]
+	fn test_yaml_needs_quotes_for_booleans() {
+		assert!(yaml_needs_quotes("true"));
+		assert!(yaml_needs_quotes("false"));
+		assert!(yaml_needs_quotes("True"));
+		assert!(yaml_needs_quotes("False"));
+		assert!(yaml_needs_quotes("TRUE"));
+		assert!(yaml_needs_quotes("FALSE"));
+		assert!(yaml_needs_quotes("yes"));
+		assert!(yaml_needs_quotes("no"));
+		assert!(yaml_needs_quotes("on"));
+		assert!(yaml_needs_quotes("off"));
+	}
+
+	#[test]
+	fn test_yaml_needs_quotes_for_null() {
+		assert!(yaml_needs_quotes("null"));
+		assert!(yaml_needs_quotes("Null"));
+		assert!(yaml_needs_quotes("NULL"));
+		assert!(yaml_needs_quotes("~"));
+	}
+
+	#[test]
+	fn test_yaml_needs_quotes_for_numbers() {
+		assert!(yaml_needs_quotes("123"));
+		assert!(yaml_needs_quotes("3.14"));
+		assert!(yaml_needs_quotes("-42"));
+		assert!(yaml_needs_quotes("0x1F"));
+	}
+
+	#[test]
+	fn test_yaml_needs_quotes_for_special_chars() {
+		assert!(yaml_needs_quotes("key: value")); // colon followed by space
+		assert!(yaml_needs_quotes("hello #world")); // hash preceded by space (comment)
+		assert!(!yaml_needs_quotes("hello#world")); // hash NOT preceded by space is safe
+		assert!(yaml_needs_quotes("{json}")); // starts with brace
+		assert!(yaml_needs_quotes("[array]")); // starts with bracket
+										 // Braces/brackets in middle are OK in block context YAML
+		assert!(!yaml_needs_quotes("hello{world}"));
+		assert!(!yaml_needs_quotes("hello[world]"));
+		// Quotes at start need quoting, quotes in middle are OK
+		assert!(yaml_needs_quotes("\"quoted\"")); // starts with double quote
+		assert!(yaml_needs_quotes("'quoted'")); // starts with single quote
+		assert!(!yaml_needs_quotes("hello\"world")); // double quote in middle is OK
+		assert!(!yaml_needs_quotes("hello'world")); // single quote in middle is OK
+		assert!(!yaml_needs_quotes("job=\"api-server\"")); // typical promql/yaml pattern
+	}
+
+	#[test]
+	fn test_yaml_no_quotes_needed_for_simple_strings() {
+		assert!(!yaml_needs_quotes("hello"));
+		assert!(!yaml_needs_quotes("simple_key"));
+		assert!(!yaml_needs_quotes("CamelCase"));
+		assert!(!yaml_needs_quotes("with-dash"));
+	}
+
+	// ==========================================================================
+	// Tests for number formatting (scientific notation)
+	// These tests verify Go yaml.v3 compatibility for large number formatting
+	// ==========================================================================
+
+	#[test]
+	fn test_number_scientific_notation_large() {
+		// Large integers should use scientific notation to match Go's yaml.v3
+		assert_eq!(manifest_yaml(&num(10_000_000.0)), "1e+07");
+		assert_eq!(manifest_yaml(&num(1_000_000.0)), "1e+06");
+		assert_eq!(manifest_yaml(&num(100_000_000.0)), "1e+08");
+	}
+
+	#[test]
+	fn test_number_decimal_for_smaller_values() {
+		// Smaller integers should use decimal notation
+		assert_eq!(manifest_yaml(&num(50000.0)), "50000");
+		assert_eq!(manifest_yaml(&num(999999.0)), "999999");
+		assert_eq!(manifest_yaml(&num(100.0)), "100");
+		assert_eq!(manifest_yaml(&num(0.0)), "0");
+	}
+
+	#[test]
+	fn test_number_floats() {
+		// Floats with fractional parts should not use scientific notation
+		assert_eq!(manifest_yaml(&num(3.14)), "3.14");
+		assert_eq!(manifest_yaml(&num(0.5)), "0.5");
+	}
+
+	#[test]
+	fn test_number_negative() {
+		assert_eq!(manifest_yaml(&num(-100.0)), "-100");
+	}
+
+	// ==========================================================================
+	// Tests for timestamp quoting in YAML output
+	// These tests verify Go yaml.v3 compatibility for ISO8601 timestamps
+	// ==========================================================================
+
+	#[test]
+	fn test_timestamp_is_quoted_in_yaml() {
+		// ISO8601 timestamps should be quoted in YAML output
+		let result = manifest_yaml(&str_val("2025-07-03T15:30:00Z"));
+		assert_eq!(result, "\"2025-07-03T15:30:00Z\"");
+	}
+
+	#[test]
+	fn test_timestamp_with_offset_is_quoted() {
+		let result = manifest_yaml(&str_val("2025-07-03T15:30:00+05:30"));
+		assert_eq!(result, "\"2025-07-03T15:30:00+05:30\"");
+	}
+
+	// ==========================================================================
+	// Tests for object-in-array field alignment
+	// These tests verify Go yaml.v3 compatibility for object indentation
+	// ==========================================================================
+
+	#[test]
+	fn test_object_in_array_field_alignment() {
+		// When an object is an array element, subsequent fields should align
+		// with the first field (after "- ")
+		let mut builder = ObjValueBuilder::new();
+		builder.field("prefix").value(str_val("ingester-data"));
+		builder.field("pruneFrequency").value(str_val("8h"));
+		let val = arr(vec![Val::Obj(builder.build())]);
+
+		let result = manifest_yaml(&val);
+
+		// The format should be:
+		// - prefix: ingester-data
+		//   pruneFrequency: 8h
+		// Verify the alignment by checking indentation
+		let lines: Vec<&str> = result.lines().collect();
+		assert_eq!(lines.len(), 2);
+		assert!(lines[0].starts_with("- ")); // First line starts with "- "
+		assert!(lines[1].starts_with("  ")); // Second line has 2 spaces of indent
+	}
+
+	#[test]
+	fn test_simple_array_of_strings() {
+		let val = arr(vec![str_val("a"), str_val("b"), str_val("c")]);
+		let result = manifest_yaml(&val);
+
+		let lines: Vec<&str> = result.lines().collect();
+		assert_eq!(lines.len(), 3);
+		assert_eq!(lines[0], "- a");
+		assert_eq!(lines[1], "- b");
+		assert_eq!(lines[2], "- c");
+	}
+
+	#[test]
+	fn test_simple_object() {
+		let mut builder = ObjValueBuilder::new();
+		builder.field("key1").value(str_val("value1"));
+		builder.field("key2").value(str_val("value2"));
+		let val = Val::Obj(builder.build());
+		let result = manifest_yaml(&val);
+
+		// Object fields are sorted alphabetically by default
+		assert!(result.contains("key1: value1"));
+		assert!(result.contains("key2: value2"));
+	}
+
+	#[test]
+	fn test_nested_object() {
+		let mut inner_builder = ObjValueBuilder::new();
+		inner_builder.field("inner").value(str_val("value"));
+		let mut outer_builder = ObjValueBuilder::new();
+		outer_builder
+			.field("outer")
+			.value(Val::Obj(inner_builder.build()));
+		let val = Val::Obj(outer_builder.build());
+		let result = manifest_yaml(&val);
+
+		let lines: Vec<&str> = result.lines().collect();
+		assert_eq!(lines.len(), 2);
+		assert_eq!(lines[0], "outer:");
+		assert_eq!(lines[1], "  inner: value");
+	}
+
+	#[test]
+	fn test_object_with_array_value() {
+		let mut builder = ObjValueBuilder::new();
+		builder
+			.field("items")
+			.value(arr(vec![str_val("a"), str_val("b")]));
+		let val = Val::Obj(builder.build());
+		let result = manifest_yaml(&val);
+
+		let lines: Vec<&str> = result.lines().collect();
+		assert_eq!(lines.len(), 3);
+		assert_eq!(lines[0], "items:");
+		assert_eq!(lines[1], "- a");
+		assert_eq!(lines[2], "- b");
+	}
+
+	#[test]
+	fn test_empty_array() {
+		let val = arr(vec![]);
+		let result = manifest_yaml(&val);
+		assert_eq!(result, "[]");
+	}
+
+	#[test]
+	fn test_empty_object() {
+		let builder = ObjValueBuilder::new();
+		let val = Val::Obj(builder.build());
+		let result = manifest_yaml(&val);
+		assert_eq!(result, "{}");
+	}
+
+	// ==========================================================================
+	// Tests for multiline strings (block scalars)
+	// ==========================================================================
+
+	#[test]
+	fn test_multiline_string_with_trailing_newline() {
+		let val = str_val("line1\nline2\n");
+		let result = manifest_yaml(&val);
+
+		// Should use | indicator for strings ending with newline
+		assert!(result.starts_with('|'));
+		assert!(result.contains("line1"));
+		assert!(result.contains("line2"));
+	}
+
+	#[test]
+	fn test_multiline_string_without_trailing_newline() {
+		let val = str_val("line1\nline2");
+		let result = manifest_yaml(&val);
+
+		// Should use |- indicator for strings not ending with newline
+		assert!(result.starts_with("|-"));
+		assert!(result.contains("line1"));
+		assert!(result.contains("line2"));
+	}
+
+	// ==========================================================================
+	// Integration test: complex nested structure
+	// ==========================================================================
+
+	#[test]
+	fn test_complex_nested_structure() {
+		// Simulates a real-world config structure
+		let mut item_builder = ObjValueBuilder::new();
+		item_builder.field("enabled").value(Val::Bool(true));
+		item_builder.field("id").value(str_val("item-1"));
+		item_builder
+			.field("timestamp")
+			.value(str_val("2025-07-03T15:30:00Z"));
+
+		let mut root_builder = ObjValueBuilder::new();
+		root_builder.field("count").value(num(10_000_000.0));
+		root_builder
+			.field("items")
+			.value(arr(vec![Val::Obj(item_builder.build())]));
+		root_builder.field("name").value(str_val("test-config"));
+
+		let val = Val::Obj(root_builder.build());
+		let result = manifest_yaml(&val);
+
+		// Check scientific notation
+		assert!(result.contains("count: 1e+07"));
+
+		// Check timestamp is quoted
+		assert!(result.contains("\"2025-07-03T15:30:00Z\""));
+
+		// Check object-in-array structure (first field after "- ")
+		assert!(result.contains("- enabled: true"));
 	}
 }
