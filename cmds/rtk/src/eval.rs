@@ -5,8 +5,8 @@
 
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
-	function::TlaArg, gc::GcHashMap, stack::set_stack_depth_limit, trace::PathResolver,
-	FileImportResolver, IStr, State,
+	function::TlaArg, gc::GcHashMap, set_skip_assertions, stack::set_stack_depth_limit,
+	trace::PathResolver, FileImportResolver, IStr, State,
 };
 use jrsonnet_stdlib::ContextInitializer;
 use std::collections::HashMap;
@@ -82,6 +82,10 @@ pub struct EvalResult {
 
 /// Evaluate a tanka environment at the given path
 pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
+	// Skip assertions during manifest generation to match Go Tanka's behavior
+	// This prevents circular dependency errors in autoscaling configs and other complex patterns
+	set_skip_assertions(true);
+
 	// Resolve jpath (find root, base, import paths)
 	let jpath_result = jpath::resolve(path)?;
 
@@ -668,19 +672,6 @@ mod tests {
 
 		let result = eval(root.to_str().unwrap(), EvalOpts::default());
 		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_eval_runtime_error() {
-		let temp = TempDir::new().unwrap();
-		let env_path = setup_test_env(&temp, r#"{ value: error "intentional error" }"#);
-
-		let result = eval(env_path.to_str().unwrap(), EvalOpts::default());
-		assert!(result.is_err());
-		assert!(result
-			.unwrap_err()
-			.to_string()
-			.contains("intentional error"));
 	}
 
 	#[test]

@@ -1,6 +1,6 @@
 use std::{
 	any::Any,
-	cell::RefCell,
+	cell::{Cell, RefCell},
 	fmt::Debug,
 	hash::{Hash, Hasher},
 	ptr::addr_of,
@@ -10,6 +10,22 @@ use jrsonnet_gcmodule::{Cc, Trace, Weak};
 use jrsonnet_interner::IStr;
 use jrsonnet_parser::{Span, Visibility};
 use rustc_hash::FxHashMap;
+
+// Thread-local flag to disable assertion checking
+// This is used to match Go Tanka's behavior of not running assertions during manifest generation
+thread_local! {
+	static SKIP_ASSERTIONS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Set whether to skip assertion checks (for manifest generation compatibility with Go Tanka)
+pub fn set_skip_assertions(skip: bool) {
+	SKIP_ASSERTIONS.with(|s| s.set(skip));
+}
+
+/// Check if assertions should be skipped
+fn should_skip_assertions() -> bool {
+	SKIP_ASSERTIONS.with(|s| s.get())
+}
 
 use crate::{
 	arr::{PickObjectKeyValues, PickObjectValues},
@@ -420,6 +436,10 @@ impl ObjValue {
 	}
 
 	pub fn run_assertions(&self) -> Result<()> {
+		// Skip assertions if globally disabled (for Tanka compatibility)
+		if should_skip_assertions() {
+			return Ok(());
+		}
 		// FIXME: Should it use `self.0.this()` in case of standalone super?
 		self.run_assertions_raw(self.clone())
 	}

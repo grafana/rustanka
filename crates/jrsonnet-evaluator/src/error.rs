@@ -221,6 +221,8 @@ pub enum ErrorKind {
 	StackOverflow,
 	#[error("infinite recursion detected")]
 	InfiniteRecursionDetected,
+	#[error("infinite recursion detected2")]
+	InfiniteRecursionDetected2,
 	#[error("tried to index by fractional value")]
 	FractionalIndex,
 	#[error("attempted to divide by zero")]

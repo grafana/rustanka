@@ -123,6 +123,12 @@ runs = 1
 dir_compare = true
 
 [[commands]]
+name = "export: all loki environments"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/loki-all", "environments/loki", "--recursive", "{{EXPORT_FORMAT}}", "--max-stack", "10000"]
+runs = 1
+dir_compare = true
+
+[[commands]]
 name = "export: all cortex environments"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}"]
 runs = 1

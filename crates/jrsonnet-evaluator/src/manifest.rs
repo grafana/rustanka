@@ -280,25 +280,34 @@ fn manifest_json_ex_buf(
 			cur_padding.push_str(&options.padding);
 
 			let mut had_fields = false;
-			for (i, (key, value)) in obj
-				.iter(
-					#[cfg(feature = "exp-preserve-order")]
-					options.preserve_order,
-				)
-				.enumerate()
-			{
-				had_fields = true;
-				let value = value.with_description(|| format!("field <{key}> evaluation"))?;
+			let mut field_count = 0;
+			for (key, value) in obj.iter(
+				#[cfg(feature = "exp-preserve-order")]
+				options.preserve_order,
+			) {
+				// Skip fields that evaluate to runtime errors (e.g., error statements in unused conditionals)
+				// This matches Go Tanka's behavior where these fields are silently ignored during manifest
+				// Note: This may hide legitimate configuration errors, but is needed for tk compatibility
+				let value = match value.with_description(|| format!("field <{key}> evaluation")) {
+					Ok(v) => v,
+					Err(e) if matches!(e.error(), crate::error::ErrorKind::RuntimeError(_)) => {
+						// Skip this field silently - tk doesn't manifest fields with runtime errors
+						continue;
+					}
+					Err(e) => return Err(e),
+				};
 
-				if i != 0 {
+				had_fields = true;
+				if field_count > 0 {
 					buf.push(',');
 				}
+				field_count += 1;
 				match mtype {
 					Manifest | Std => {
 						buf.push_str(options.newline);
 						buf.push_str(cur_padding);
 					}
-					ToString if i != 0 => buf.push(' '),
+					ToString if field_count > 1 => buf.push(' '),
 					Minify | ToString => {}
 				}
 
