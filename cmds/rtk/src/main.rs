@@ -713,6 +713,7 @@ fn main() -> Result<()> {
 				skip_manifest,
 				merge_strategy,
 				merge_deleted_envs,
+				show_timing: false, // Can be enabled via CLI flag in the future
 			};
 
 			let result = export::export(&paths, export_opts)?;

@@ -25,7 +25,7 @@ pub fn set_skip_assertions(skip: bool) {
 
 /// Check if assertions should be skipped
 fn should_skip_assertions() -> bool {
-	SKIP_ASSERTIONS.with(|s| s.get())
+	SKIP_ASSERTIONS.with(std::cell::Cell::get)
 }
 
 /// Set whether to use lenient mode for super field access (return empty object instead of error)
@@ -36,7 +36,7 @@ pub fn set_lenient_super(lenient: bool) {
 
 /// Check if lenient super mode is enabled
 pub fn should_use_lenient_super() -> bool {
-	LENIENT_SUPER.with(|s| s.get())
+	LENIENT_SUPER.with(std::cell::Cell::get)
 }
 
 use crate::{

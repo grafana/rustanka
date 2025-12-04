@@ -465,6 +465,7 @@ fn test_export_merge_strategies() {
 		skip_manifest: false,
 		merge_strategy: ExportMergeStrategy::ReplaceEnvs,
 		merge_deleted_envs: vec![inline_env_path.to_string_lossy().to_string()],
+		show_timing: false,
 	};
 
 	let result = export(
@@ -596,3 +597,305 @@ fn test_export_empty_inline_environment() {
 // Note: The following tests from the Go version are not yet implemented:
 // - Test_replaceTmplText (not needed in Rust implementation - different path handling)
 // - BenchmarkExportEnvironmentsWithReplaceEnvs (benchmark test - can be added later)
+
+// ============================================================================
+// Performance-related tests
+// ============================================================================
+//
+// These tests verify that the performance optimizations (timing breakdown,
+// parallel processing, BufWriter) work correctly.
+
+/// Test that timing data is populated when show_timing is enabled
+#[test]
+fn test_export_timing_data_populated() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	// Export with timing enabled
+	let mut ext_code = HashMap::new();
+	ext_code.insert("serviceName".to_string(), "'test-service'".to_string());
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'test-deployment'".to_string(),
+	);
+
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 4,
+		eval_opts: EvalOpts {
+			ext_code,
+			..Default::default()
+		},
+		name: None,
+		recursive: true,
+		skip_manifest: false,
+		show_timing: true, // Enable timing
+		..Default::default()
+	};
+
+	let result = export(
+		&[testdata_path("test-export-envs")
+			.to_string_lossy()
+			.to_string()],
+		opts,
+	)
+	.unwrap();
+
+	// Verify timing data is present for successful environments
+	for env_result in &result.results {
+		if env_result.error.is_none() {
+			assert!(
+				env_result.timing.is_some(),
+				"Timing should be present when show_timing is enabled"
+			);
+
+			let timing = env_result.timing.as_ref().unwrap();
+
+			// Timing struct should be populated
+			// Note: For very fast operations (simple test environments), times could be 0ms
+			// The important thing is that the timing struct exists and is populated
+			//
+			// We verify the structure is sound by checking manifest_count matches files
+			let file_count = env_result.files_written.len();
+			assert!(
+				timing.manifest_count == file_count || file_count == 0,
+				"Manifest count ({}) should match files written ({})",
+				timing.manifest_count,
+				file_count
+			);
+		}
+	}
+}
+
+/// Test that timing data is NOT populated when show_timing is disabled
+#[test]
+fn test_export_timing_data_disabled() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	let mut ext_code = HashMap::new();
+	ext_code.insert("serviceName".to_string(), "'test-service'".to_string());
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'test-deployment'".to_string(),
+	);
+
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 4,
+		eval_opts: EvalOpts {
+			ext_code,
+			..Default::default()
+		},
+		name: None,
+		recursive: true,
+		skip_manifest: false,
+		show_timing: false, // Timing disabled
+		..Default::default()
+	};
+
+	let result = export(
+		&[testdata_path("test-export-envs")
+			.to_string_lossy()
+			.to_string()],
+		opts,
+	)
+	.unwrap();
+
+	// Verify timing data is NOT present when disabled
+	for env_result in &result.results {
+		assert!(
+			env_result.timing.is_none(),
+			"Timing should NOT be present when show_timing is disabled"
+		);
+	}
+}
+
+/// Test that parallel processing produces correct results
+/// This verifies that parallelism doesn't cause race conditions or data corruption
+#[test]
+fn test_export_parallel_processing_correctness() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	let mut ext_code = HashMap::new();
+	ext_code.insert("serviceName".to_string(), "'parallel-service'".to_string());
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'parallel-deployment'".to_string(),
+	);
+
+	// Export with high parallelism
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 16, // High parallelism to stress test
+		eval_opts: EvalOpts {
+			ext_code: ext_code.clone(),
+			..Default::default()
+		},
+		name: None,
+		recursive: true,
+		skip_manifest: false,
+		show_timing: true,
+		..Default::default()
+	};
+
+	let result = export(
+		&[testdata_path("test-export-envs")
+			.to_string_lossy()
+			.to_string()],
+		opts,
+	)
+	.unwrap();
+
+	// Should have exported environments successfully
+	assert!(
+		result.successful > 0,
+		"Should have exported at least one environment"
+	);
+	assert_eq!(result.failed, 0, "Should have no failures");
+
+	// Verify files exist and have valid YAML content
+	for env_result in &result.results {
+		for file_path in &env_result.files_written {
+			let full_path = output_dir.join(file_path);
+			assert!(full_path.exists(), "File should exist: {:?}", full_path);
+
+			let content = fs::read_to_string(&full_path).unwrap();
+			assert!(
+				!content.is_empty(),
+				"File should not be empty: {:?}",
+				full_path
+			);
+
+			// Verify it's valid YAML by checking for expected structure
+			if file_path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+				assert!(
+					content.contains("apiVersion:") || content.contains("kind:"),
+					"YAML file should contain Kubernetes manifest structure: {:?}",
+					full_path
+				);
+			}
+		}
+	}
+}
+
+/// Test that different parallelism values produce identical results
+/// This ensures the parallel implementation is deterministic
+#[test]
+fn test_export_parallelism_determinism() {
+	// Export with parallelism=1 (sequential)
+	let temp_dir_seq = tempfile::TempDir::new().unwrap();
+	let output_dir_seq = temp_dir_seq.path();
+
+	let mut ext_code = HashMap::new();
+	ext_code.insert(
+		"serviceName".to_string(),
+		"'determinism-service'".to_string(),
+	);
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'determinism-deployment'".to_string(),
+	);
+
+	let opts_seq = ExportOpts {
+		output_dir: output_dir_seq.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1, // Sequential
+		eval_opts: EvalOpts {
+			ext_code: ext_code.clone(),
+			..Default::default()
+		},
+		name: None,
+		recursive: true,
+		skip_manifest: true, // Skip manifest.json for simpler comparison
+		..Default::default()
+	};
+
+	let result_seq = export(
+		&[testdata_path("test-export-envs")
+			.to_string_lossy()
+			.to_string()],
+		opts_seq,
+	)
+	.unwrap();
+
+	// Export with parallelism=8 (parallel)
+	let temp_dir_par = tempfile::TempDir::new().unwrap();
+	let output_dir_par = temp_dir_par.path();
+
+	let opts_par = ExportOpts {
+		output_dir: output_dir_par.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 8, // Parallel
+		eval_opts: EvalOpts {
+			ext_code: ext_code.clone(),
+			..Default::default()
+		},
+		name: None,
+		recursive: true,
+		skip_manifest: true,
+		..Default::default()
+	};
+
+	let result_par = export(
+		&[testdata_path("test-export-envs")
+			.to_string_lossy()
+			.to_string()],
+		opts_par,
+	)
+	.unwrap();
+
+	// Both should succeed with same number of files
+	assert_eq!(
+		result_seq.successful, result_par.successful,
+		"Sequential and parallel should export same number of environments"
+	);
+
+	// Collect all files from both directories
+	let collect_files = |dir: &Path| -> HashMap<String, String> {
+		let mut files = HashMap::new();
+		for entry in walkdir::WalkDir::new(dir) {
+			let entry = entry.unwrap();
+			if entry.file_type().is_file() {
+				let rel_path = entry
+					.path()
+					.strip_prefix(dir)
+					.unwrap()
+					.to_string_lossy()
+					.to_string();
+				let content = fs::read_to_string(entry.path()).unwrap();
+				files.insert(rel_path, content);
+			}
+		}
+		files
+	};
+
+	let files_seq = collect_files(output_dir_seq);
+	let files_par = collect_files(output_dir_par);
+
+	// Same files should exist
+	assert_eq!(
+		files_seq.keys().collect::<std::collections::HashSet<_>>(),
+		files_par.keys().collect::<std::collections::HashSet<_>>(),
+		"Sequential and parallel should produce the same files"
+	);
+
+	// File contents should be identical
+	for (path, content_seq) in &files_seq {
+		let content_par = files_par.get(path).unwrap();
+		assert_eq!(
+			content_seq, content_par,
+			"File content should be identical for: {}",
+			path
+		);
+	}
+}
