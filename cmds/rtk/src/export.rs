@@ -993,23 +993,18 @@ fn specialize_template_for_env(
 			let pattern = format!("env.metadata.labels.{}", label_key);
 			let replacement = if let Some(label_map) = labels {
 				if let Some(value) = label_map.get(label_key.as_str()) {
-					// Label exists - use its value
-					if value == "true" {
-						"true".to_string()
-					} else if value == "false" {
-						"false".to_string()
-					} else {
-						format!("\"{}\"", value)
-					}
+					// Label exists - use its value as a quoted string
+					// All label values must be strings (not booleans) for template comparisons to work
+					format!("\"{}\"", value)
 				} else {
-					// Label doesn't exist - use false for boolean contexts
-					// Using "false" instead of `""` avoids template parse errors
-					// when the label is used in comparisons like {{ if eq env.metadata.labels.X "true" }}
-					"false".to_string()
+					// Label doesn't exist - use empty string (falsy in Go templates)
+					// This ensures `not env.metadata.labels.X` evaluates to true (empty string is falsy)
+					// and `if env.metadata.labels.X` evaluates to false
+					"\"\"".to_string()
 				}
 			} else {
-				// No labels at all - use false for boolean contexts
-				"false".to_string()
+				// No labels at all - use empty string (falsy in Go templates)
+				"\"\"".to_string()
 			};
 			result = result.replace(&pattern, &replacement);
 		}
@@ -1025,14 +1020,14 @@ fn specialize_template_for_env(
 			result = result.replace("env.metadata.name", "\"\"");
 		}
 	} else {
-		// For None case, replace all env references with empty/false defaults
+		// For None case, replace all env references with empty defaults
 		result = result.replace("env.spec.namespace", "\"\"");
 		result = result.replace("env.metadata.name", "\"\"");
 
-		// Replace all label references with false for boolean contexts
+		// Replace all label references with empty string (falsy in Go templates)
 		for label_key in all_label_refs {
 			let pattern = format!("env.metadata.labels.{}", label_key);
-			result = result.replace(&pattern, "false");
+			result = result.replace(&pattern, "\"\"");
 		}
 	}
 
@@ -2717,9 +2712,8 @@ mod tests {
 
 	#[test]
 	fn test_gtmpl_env_missing_label_with_eq_comparison() {
-		// Regression test for bug: "Template parse error: unexpected Dir in operand"
-		// This test ensures that missing labels are replaced with false, not "",
-		// which caused template parse errors when used in eq comparisons.
+		// Regression test: missing labels should be replaced with empty string ""
+		// This ensures comparisons like {{ if eq env.metadata.labels.X "true" }} work correctly
 		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
 
@@ -2765,9 +2759,217 @@ mod tests {
 		// This should NOT panic or return an error
 		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
 
-		// Since namespaceToExportFilenames is missing (replaced with false),
+		// Since namespaceToExportFilenames is missing (replaced with empty string),
 		// the eq comparison should be false, so the conditional block is skipped
 		assert_eq!(result, "Service-my-service");
+	}
+
+	#[test]
+	fn test_flux_export_label_missing() {
+		// Test case: fluxExport label is not set (missing)
+		// Expected: outputs to "flux-disabled/" directory
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config", "namespace": "default" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+		// NOT setting fluxExport label
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Real tk-compare template
+		let template = r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled{{ else if eq env.metadata.labels.fluxExport "true" }}flux{{ else }}flux-disabled{{ end }}/{{.kind}}"#;
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// Missing label → empty string → `not ""` = true → first branch
+		assert_eq!(result, "flux-disabled/ConfigMap");
+	}
+
+	#[test]
+	fn test_flux_export_label_true() {
+		// Test case: fluxExport label is set to "true"
+		// Expected: outputs to "flux/" directory
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config", "namespace": "default" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+		labels.insert("fluxExport".to_string(), "true".to_string());
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Real tk-compare template
+		let template = r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled{{ else if eq env.metadata.labels.fluxExport "true" }}flux{{ else }}flux-disabled{{ end }}/{{.kind}}"#;
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// Label is "true" → `not "true"` = false → check second condition → `eq "true" "true"` = true → second branch
+		assert_eq!(result, "flux/ConfigMap");
+	}
+
+	#[test]
+	fn test_flux_export_label_false() {
+		// Test case: fluxExport label is explicitly set to "false"
+		// Expected: outputs to "flux-disabled/" directory
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config", "namespace": "default" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+		labels.insert("fluxExport".to_string(), "false".to_string());
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Real tk-compare template
+		let template = r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled{{ else if eq env.metadata.labels.fluxExport "true" }}flux{{ else }}flux-disabled{{ end }}/{{.kind}}"#;
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// Label is "false" (string) → `not "false"` = false → check second condition → `eq "false" "true"` = false → else branch
+		assert_eq!(result, "flux-disabled/ConfigMap");
+	}
+
+	#[test]
+	fn test_flux_export_label_other_value() {
+		// Test case: fluxExport label is set to some other value (e.g., "disabled")
+		// Expected: outputs to "flux-disabled/" directory
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config", "namespace": "default" }
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+		labels.insert("fluxExport".to_string(), "disabled".to_string());
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// Real tk-compare template
+		let template = r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled{{ else if eq env.metadata.labels.fluxExport "true" }}flux{{ else }}flux-disabled{{ end }}/{{.kind}}"#;
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// Label is "disabled" → `not "disabled"` = false → check second condition → `eq "disabled" "true"` = false → else branch
+		assert_eq!(result, "flux-disabled/ConfigMap");
+	}
+
+	#[test]
+	fn test_flux_export_no_env() {
+		// Test case: no environment spec at all (inline environment)
+		// Expected: outputs to "flux-disabled/" directory
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test-config", "namespace": "default" }
+		});
+
+		let env = None;
+
+		// Real tk-compare template
+		let template = r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled{{ else if eq env.metadata.labels.fluxExport "true" }}flux{{ else }}flux-disabled{{ end }}/{{.kind}}"#;
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// No env → label replaced with "" → `not ""` = true → first branch
+		assert_eq!(result, "flux-disabled/ConfigMap");
 	}
 
 	#[test]

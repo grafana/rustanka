@@ -15,6 +15,7 @@ use rustc_hash::FxHashMap;
 // This is used to match Go Tanka's behavior of not running assertions during manifest generation
 thread_local! {
 	static SKIP_ASSERTIONS: Cell<bool> = const { Cell::new(false) };
+	static LENIENT_SUPER: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Set whether to skip assertion checks (for manifest generation compatibility with Go Tanka)
@@ -25,6 +26,17 @@ pub fn set_skip_assertions(skip: bool) {
 /// Check if assertions should be skipped
 fn should_skip_assertions() -> bool {
 	SKIP_ASSERTIONS.with(|s| s.get())
+}
+
+/// Set whether to use lenient mode for super field access (return empty object instead of error)
+/// This works around go-jsonnet compatibility issues where mixins reference super fields that don't exist yet
+pub fn set_lenient_super(lenient: bool) {
+	LENIENT_SUPER.with(|s| s.set(lenient));
+}
+
+/// Check if lenient super mode is enabled
+pub fn should_use_lenient_super() -> bool {
+	LENIENT_SUPER.with(|s| s.get())
 }
 
 use crate::{

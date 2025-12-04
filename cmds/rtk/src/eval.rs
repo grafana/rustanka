@@ -5,8 +5,8 @@
 
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
-	function::TlaArg, gc::GcHashMap, set_skip_assertions, stack::set_stack_depth_limit,
-	trace::PathResolver, FileImportResolver, IStr, State,
+	function::TlaArg, gc::GcHashMap, set_lenient_super, set_skip_assertions,
+	stack::set_stack_depth_limit, trace::PathResolver, FileImportResolver, IStr, State,
 };
 use jrsonnet_stdlib::ContextInitializer;
 use std::collections::HashMap;
@@ -85,6 +85,10 @@ pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
 	// Skip assertions during manifest generation to match Go Tanka's behavior
 	// This prevents circular dependency errors in autoscaling configs and other complex patterns
 	set_skip_assertions(true);
+
+	// Enable lenient super mode to handle mixins that reference super fields that don't exist yet
+	// This works around go-jsonnet compatibility issues in libraries like k8s-libsonnet
+	set_lenient_super(true);
 
 	// Resolve jpath (find root, base, import paths)
 	let jpath_result = jpath::resolve(path)?;

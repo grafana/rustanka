@@ -68,8 +68,8 @@ pub struct CommandReport {
 	pub exit_code_matched: bool,
 	pub exit_codes_consistent: bool, // True if exit codes were same across all runs
 	pub stdout_matched: bool,
-	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total) - Line similarity
-	pub semantic_similarity: Option<(f64, usize, usize)>, // (percentage, matched, total) - Semantic similarity (for export commands)
+	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched_lines, total_lines) - Line similarity
+	pub semantic_similarity: Option<(f64, usize, usize)>, // (percentage, matched_lines, total_lines) - Semantic similarity (for export commands)
 	pub is_export_command: bool, // True if this is an export/dir_compare command
 	pub both_failed_unexpectedly: bool, // True if both commands failed but expect_error was false
 	pub exec1_name: String,

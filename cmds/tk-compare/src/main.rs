@@ -304,16 +304,16 @@ fn main() -> Result<()> {
 									matched,
 									line_similarity,
 									semantic_sim,
-									matched_files_line,
-									matched_files_semantic,
-									total_files,
+									matched_lines_exact,
+									matched_lines_semantic,
+									total_lines,
 									diffs,
 									file_diffs,
 								)) => {
 									stdout_similarity =
-										Some((line_similarity, matched_files_line, total_files));
+										Some((line_similarity, matched_lines_exact, total_lines));
 									semantic_similarity =
-										Some((semantic_sim, matched_files_semantic, total_files));
+										Some((semantic_sim, matched_lines_semantic, total_lines));
 									if !matched && debug_mode {
 										eprintln!("\n=== DIRECTORY DIFF ===");
 										for diff in diffs.iter().take(debug_max_lines) {
