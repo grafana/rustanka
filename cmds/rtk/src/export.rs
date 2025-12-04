@@ -470,6 +470,11 @@ fn export_single_env(
 		let mut manifests = Vec::new();
 		collect_manifests(&env_data.data, &mut manifests);
 
+		// Skip if there are no manifests to process
+		if manifests.is_empty() {
+			continue;
+		}
+
 		// MAJOR OPTIMIZATION: Pre-substitute env values into template once per environment
 		// Instead of evaluating env.metadata.labels.X thousands of times, bake values into template
 		let specialized_template = specialize_template_for_env(&opts.format, &env_data.spec)
