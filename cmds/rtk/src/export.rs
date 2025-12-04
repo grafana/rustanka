@@ -5,13 +5,14 @@
 
 use anyhow::{bail, Context, Result};
 use gtmpl::{FuncError, Value};
-use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
+use std::thread;
 
 use crate::discover::{find_environments, DiscoveredEnv};
 use crate::eval::{eval, EvalOpts};
@@ -252,30 +253,36 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 		)?;
 	}
 
-	// Set up rayon thread pool
-	let pool = rayon::ThreadPoolBuilder::new()
-		.num_threads(opts.parallelism)
-		.build()
-		.context("building thread pool")?;
-
 	// Abort flag for early termination (Issue #3 & #5)
 	let abort_flag = Arc::new(AtomicBool::new(false));
 
-	// Process environments in parallel with early abort support
-	let results: Vec<ExportEnvResult> = pool.install(|| {
-		envs.par_iter()
-			.map(|env| {
-				// Check abort flag before expensive work (Issue #5)
+	// Dynamic scheduling: spawn threads up to parallelism limit
+	// Fresh threads for each export ensure thread-local GC state is freed
+	let (tx, rx) = mpsc::channel();
+	let mut env_iter = envs.iter().enumerate();
+	let total_envs = envs.len();
+
+	// Spawn initial batch of threads (up to parallelism limit)
+	for _ in 0..opts.parallelism {
+		if let Some((idx, env)) = env_iter.next() {
+			let env = env.clone();
+			let opts = opts.clone();
+			let abort_flag = Arc::clone(&abort_flag);
+			let tx = tx.clone();
+
+			thread::spawn(move || {
 				if abort_flag.load(Ordering::Relaxed) {
-					return ExportEnvResult {
+					let result = ExportEnvResult {
 						env_path: env.path.clone(),
 						files_written: vec![],
 						env_namespace: None,
 						error: Some("Skipped due to earlier fatal error".to_string()),
 					};
+					let _ = tx.send((idx, result));
+					return;
 				}
 
-				match export_single_env(env, &opts) {
+				let result = match export_single_env(&env, &opts) {
 					Ok((files, namespace)) => ExportEnvResult {
 						env_path: env.path.clone(),
 						files_written: files,
@@ -283,7 +290,6 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 						error: None,
 					},
 					Err(ExportError::Fatal(msg)) => {
-						// Set abort flag for fatal errors (Issue #3)
 						abort_flag.store(true, Ordering::Relaxed);
 						ExportEnvResult {
 							env_path: env.path.clone(),
@@ -298,10 +304,81 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 						env_namespace: None,
 						error: Some(msg),
 					},
+				};
+
+				let _ = tx.send((idx, result));
+			});
+		}
+	}
+
+	// Keep original sender alive for spawning more threads
+	let tx_main = tx.clone();
+	drop(tx); // Drop this clone so channel closes when all threads complete
+
+	// Collect results and dynamically spawn new threads as old ones complete
+	let mut collected_results = HashMap::with_capacity(total_envs);
+	let mut received_count = 0;
+
+	for (idx, result) in rx {
+		collected_results.insert(idx, result);
+		received_count += 1;
+
+		// Spawn a new thread for the next environment (if any remain)
+		if let Some((next_idx, env)) = env_iter.next() {
+			let env = env.clone();
+			let opts = opts.clone();
+			let abort_flag = Arc::clone(&abort_flag);
+			let tx = tx_main.clone();
+
+			thread::spawn(move || {
+				if abort_flag.load(Ordering::Relaxed) {
+					let result = ExportEnvResult {
+						env_path: env.path.clone(),
+						files_written: vec![],
+						env_namespace: None,
+						error: Some("Skipped due to earlier fatal error".to_string()),
+					};
+					let _ = tx.send((next_idx, result));
+					return;
 				}
-			})
-			.collect()
-	});
+
+				let result = match export_single_env(&env, &opts) {
+					Ok((files, namespace)) => ExportEnvResult {
+						env_path: env.path.clone(),
+						files_written: files,
+						env_namespace: Some(namespace),
+						error: None,
+					},
+					Err(ExportError::Fatal(msg)) => {
+						abort_flag.store(true, Ordering::Relaxed);
+						ExportEnvResult {
+							env_path: env.path.clone(),
+							files_written: vec![],
+							env_namespace: None,
+							error: Some(format!("FATAL: {}", msg)),
+						}
+					}
+					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
+						env_path: env.path.clone(),
+						files_written: vec![],
+						env_namespace: None,
+						error: Some(msg),
+					},
+				};
+
+				let _ = tx.send((next_idx, result));
+			});
+		} else if received_count == total_envs {
+			// All environments processed, drop the sender to close the channel
+			drop(tx_main);
+			break;
+		}
+	}
+
+	// Extract results in order by index
+	let mut results: Vec<_> = collected_results.into_iter().collect();
+	results.sort_by_key(|(idx, _)| *idx);
+	let results: Vec<ExportEnvResult> = results.into_iter().map(|(_, r)| r).collect();
 
 	// Summarize results
 	let successful = results.iter().filter(|r| r.error.is_none()).count();
