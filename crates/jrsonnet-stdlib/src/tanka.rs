@@ -44,10 +44,7 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 /// Generate a key for a manifest using the nameFormat template
 /// This is a simplified implementation that handles the common case where nameFormat
 /// includes namespace in the key format
-fn generate_manifest_key_from_val(
-	val: &Val,
-	name_format: Option<&str>,
-) -> Result<String> {
+fn generate_manifest_key_from_val(val: &Val, name_format: Option<&str>) -> Result<String> {
 	// Check if we should use nameFormat or default format
 	let use_namespace_in_key = name_format
 		.map(|fmt| fmt.contains("metadata.namespace") || fmt.contains(".or .metadata.namespace"))
@@ -67,7 +64,8 @@ fn generate_manifest_key_from_val(
 		let metadata = obj.get("metadata".into()).ok().flatten();
 
 		if let Some(Val::Obj(meta)) = metadata {
-			let name = meta.get("name".into())
+			let name = meta
+				.get("name".into())
 				.ok()
 				.flatten()
 				.and_then(|v| match v {
@@ -78,7 +76,8 @@ fn generate_manifest_key_from_val(
 
 			// If nameFormat suggests using namespace, include it in the key
 			if use_namespace_in_key {
-				let namespace = meta.get("namespace".into())
+				let namespace = meta
+					.get("namespace".into())
 					.ok()
 					.flatten()
 					.and_then(|v| match v {
@@ -640,12 +639,10 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 					})
 					.unwrap_or_else(|| "unknown".to_string());
 
-				let namespace = meta
-					.get("namespace".into())?
-					.and_then(|v| match v {
-						Val::Str(s) => Some(to_snake_case(&s.to_string())),
-						_ => None,
-					});
+				let namespace = meta.get("namespace".into())?.and_then(|v| match v {
+					Val::Str(s) => Some(to_snake_case(&s.to_string())),
+					_ => None,
+				});
 
 				(name, namespace)
 			} else {
