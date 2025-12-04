@@ -1531,6 +1531,12 @@ mod tests {
 		let env_path = root.join(format!("environments/{}", name));
 		fs::create_dir_all(&env_path).unwrap();
 		fs::write(env_path.join("main.jsonnet"), content).unwrap();
+		// Create spec.json to make this a static environment
+		fs::write(
+			env_path.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"test"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		env_path
 	}
@@ -2019,8 +2025,18 @@ mod tests {
 		)
 		.unwrap();
 		fs::write(
+			env1.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env1"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		fs::write(
 			env2.join("main.jsonnet"),
 			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "c2" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env2"},"spec":{"namespace":"default"}}"#,
 		)
 		.unwrap();
 
@@ -2058,8 +2074,18 @@ mod tests {
 		)
 		.unwrap();
 		fs::write(
+			env1.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env1"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		fs::write(
 			env2.join("main.jsonnet"),
 			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "c2" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env2"},"spec":{"namespace":"default"}}"#,
 		)
 		.unwrap();
 
@@ -2272,8 +2298,18 @@ mod tests {
 		)
 		.unwrap();
 		fs::write(
+			env1.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"prod-env"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		fs::write(
 			env2.join("main.jsonnet"),
 			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "staging" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"staging-env"},"spec":{"namespace":"default"}}"#,
 		)
 		.unwrap();
 
@@ -2313,8 +2349,18 @@ mod tests {
 		)
 		.unwrap();
 		fs::write(
+			env1.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"prod"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		fs::write(
 			env2.join("main.jsonnet"),
 			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "c2" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"staging"},"spec":{"namespace":"default"}}"#,
 		)
 		.unwrap();
 
@@ -2377,8 +2423,18 @@ mod tests {
 			r#"{ apiVersion: "v1", kind: "ConfigMap", metadata: { name: "valid" } }"#,
 		)
 		.unwrap();
+		fs::write(
+			valid_env.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"valid"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 		// Invalid jsonnet syntax
 		fs::write(invalid_env.join("main.jsonnet"), r#"{ invalid jsonnet }"#).unwrap();
+		fs::write(
+			invalid_env.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"invalid"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		let opts = ExportOpts {
 			output_dir: temp.path().join("output"),
@@ -2410,6 +2466,11 @@ mod tests {
 		let invalid_env = root.join("environments/broken");
 		fs::create_dir_all(&invalid_env).unwrap();
 		fs::write(invalid_env.join("main.jsonnet"), r#"syntax error here {"#).unwrap();
+		fs::write(
+			invalid_env.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"broken"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		let opts = ExportOpts {
 			output_dir: temp.path().join("output"),
@@ -2620,6 +2681,14 @@ mod tests {
 				),
 			)
 			.unwrap();
+			fs::write(
+				env.join("spec.json"),
+				format!(
+					r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{"name":"env{}"}},"spec":{{"namespace":"default"}}}}"#,
+					i
+				),
+			)
+			.unwrap();
 		}
 
 		let opts = ExportOpts {
@@ -2654,6 +2723,14 @@ mod tests {
 				env.join("main.jsonnet"),
 				format!(
 					r#"{{ apiVersion: "v1", kind: "ConfigMap", metadata: {{ name: "config{}" }} }}"#,
+					i
+				),
+			)
+			.unwrap();
+			fs::write(
+				env.join("spec.json"),
+				format!(
+					r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{"name":"env{}"}},"spec":{{"namespace":"default"}}}}"#,
 					i
 				),
 			)
@@ -3375,8 +3452,18 @@ mod tests {
 		)
 		.unwrap();
 		fs::write(
+			env1.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env1"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		fs::write(
 			env2.join("main.jsonnet"),
 			r#"{ apiVersion: "v1", kind: "Secret", metadata: { name: "secret1" } }"#,
+		)
+		.unwrap();
+		fs::write(
+			env2.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env2"},"spec":{"namespace":"default"}}"#,
 		)
 		.unwrap();
 

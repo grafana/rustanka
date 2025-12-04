@@ -242,12 +242,8 @@ fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
 	let env_names = extract_environment_names(&json_value);
 
 	if env_names.is_empty() {
-		// No environments found or single unnamed environment
-		return Ok(vec![DiscoveredEnv {
-			is_static: false,
-			path: path.to_path_buf(),
-			env_name: None,
-		}]);
+		// No valid Tanka environments found - return empty list
+		return Ok(vec![]);
 	}
 
 	if env_names.len() == 1 {
@@ -311,14 +307,19 @@ mod tests {
 		let temp = TempDir::new().unwrap();
 		let root = temp.path();
 
-		// Create a single environment
+		// Create a single static environment
 		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
 		fs::create_dir_all(root.join("env")).unwrap();
 		fs::write(root.join("env/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("env/spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		let envs = find_environments(&[root.join("env").to_string_lossy().to_string()]).unwrap();
 		assert_eq!(envs.len(), 1);
-		assert!(!envs[0].is_static);
+		assert!(envs[0].is_static);
 		assert!(envs[0].env_name.is_none());
 	}
 
@@ -349,12 +350,20 @@ mod tests {
 
 		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
 
-		// Create multiple environments
+		// Create multiple static environments
 		for name in ["dev", "staging", "prod"] {
 			fs::create_dir_all(root.join(format!("environments/{}", name))).unwrap();
 			fs::write(
 				root.join(format!("environments/{}/main.jsonnet", name)),
 				"{}",
+			)
+			.unwrap();
+			fs::write(
+				root.join(format!("environments/{}/spec.json", name)),
+				format!(
+					r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{"name":"{}"}},"spec":{{"namespace":"default"}}}}"#,
+					name
+				),
 			)
 			.unwrap();
 		}
@@ -378,9 +387,19 @@ mod tests {
 		// Create env in vendor (should be skipped)
 		fs::create_dir_all(root.join("vendor/somelib")).unwrap();
 		fs::write(root.join("vendor/somelib/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("vendor/somelib/spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment"}"#,
+		)
+		.unwrap();
 
 		// Create actual env at root level (not inside environments subdir)
 		fs::write(root.join("main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"root"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		let envs = find_environments(&[root.to_string_lossy().to_string()]).unwrap();
 		assert_eq!(envs.len(), 1);
@@ -396,6 +415,11 @@ mod tests {
 		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
 		fs::create_dir_all(root.join("env")).unwrap();
 		fs::write(root.join("env/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("env/spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env"},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
 
 		// Pass the same path twice
 		let envs = find_environments(&[

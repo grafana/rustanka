@@ -506,91 +506,21 @@ fn test_export_merge_strategies() {
 	);
 }
 
-// Test for inline env files with no environments
+// Test for inline env files with no valid Tanka Environment objects
+// With the new behavior, inline environments without valid Environment objects are not discovered
 #[test]
 fn test_export_empty_inline_environment() {
-	let temp_dir = tempfile::TempDir::new().unwrap();
-	let output_dir = temp_dir.path();
-
-	// Find environments - should find one (the directory with main.jsonnet)
+	// Find environments - should find none (no valid Tanka Environment object in the output)
 	let envs = find_environments(&[testdata_path("test-export-empty-inline-env")
 		.to_string_lossy()
 		.to_string()])
 	.unwrap();
 
-	// Should discover the environment directory
-	assert_eq!(envs.len(), 1, "Should find 1 environment directory");
-
-	// Try to export - should succeed but produce no files (no manifests)
-	let opts = ExportOpts {
-		output_dir: output_dir.to_path_buf(),
-		extension: "yaml".to_string(),
-		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
-			.to_string(),
-		parallelism: 1,
-		eval_opts: EvalOpts::default(),
-		name: None,
-		recursive: true,
-		skip_manifest: false,
-		..Default::default()
-	};
-
-	let result = export(
-		&[testdata_path("test-export-empty-inline-env")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	);
-
-	// Should succeed with no files written
-	match result {
-		Ok(r) => {
-			// Environment is discovered and processed successfully, but no manifests to export
-			assert_eq!(
-				r.successful, 1,
-				"Should have 1 successful export (environment was processed)"
-			);
-			assert_eq!(r.failed, 0, "Should have 0 failed exports (no error)");
-
-			// Verify no files were written (empty manifests)
-			let files_written: usize = r
-				.results
-				.iter()
-				.map(|result| result.files_written.len())
-				.sum();
-			assert_eq!(
-				files_written, 0,
-				"Should have written 0 files (no manifests in environment)"
-			);
-		}
-		Err(e) => {
-			// If it errors, it should NOT be a template parse error
-			let err_msg = e.to_string();
-			assert!(
-				!err_msg.contains("Template parse error"),
-				"Should not fail with template parse error, got: {}",
-				err_msg
-			);
-			assert!(
-				!err_msg.contains("unexpected Dir in operand"),
-				"Should not fail with 'unexpected Dir in operand', got: {}",
-				err_msg
-			);
-		}
-	}
-
-	// Verify no manifest files were created (only manifest.json might exist)
-	let files_count = walkdir::WalkDir::new(output_dir)
-		.into_iter()
-		.filter_map(|e| e.ok())
-		.filter(|e| e.file_type().is_file())
-		.count();
-
-	// Should only have manifest.json or nothing at all
-	assert!(
-		files_count <= 1,
-		"Should have at most manifest.json, got {} files",
-		files_count
+	// Should NOT discover the environment directory because it has no valid Tanka Environment
+	assert_eq!(
+		envs.len(),
+		0,
+		"Should find 0 environments (inline env with no Environment object)"
 	);
 }
 
