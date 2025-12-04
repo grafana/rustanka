@@ -992,7 +992,7 @@ fn specialize_template_for_env(
 		for label_key in sorted_refs {
 			let pattern = format!("env.metadata.labels.{}", label_key);
 			let replacement = if let Some(label_map) = labels {
-				if let Some(value) = label_map.get(label_key) {
+				if let Some(value) = label_map.get(label_key.as_str()) {
 					// Label exists - use its value
 					if value == "true" {
 						"true".to_string()
@@ -1002,12 +1002,14 @@ fn specialize_template_for_env(
 						format!("\"{}\"", value)
 					}
 				} else {
-					// Label doesn't exist - use empty string
-					"\"\"".to_string()
+					// Label doesn't exist - use false for boolean contexts
+					// Using "false" instead of `""` avoids template parse errors
+					// when the label is used in comparisons like {{ if eq env.metadata.labels.X "true" }}
+					"false".to_string()
 				}
 			} else {
-				// No labels at all - use empty string
-				"\"\"".to_string()
+				// No labels at all - use false for boolean contexts
+				"false".to_string()
 			};
 			result = result.replace(&pattern, &replacement);
 		}
@@ -1027,10 +1029,10 @@ fn specialize_template_for_env(
 		result = result.replace("env.spec.namespace", "\"\"");
 		result = result.replace("env.metadata.name", "\"\"");
 
-		// Replace all label references with empty strings
+		// Replace all label references with false for boolean contexts
 		for label_key in all_label_refs {
 			let pattern = format!("env.metadata.labels.{}", label_key);
-			result = result.replace(&pattern, "\"\"");
+			result = result.replace(&pattern, "false");
 		}
 	}
 
@@ -2711,6 +2713,61 @@ mod tests {
 		);
 		// Should fall back to "default" since env.metadata.labels.cluster_name is empty
 		assert_eq!(result.unwrap(), "default/ConfigMap");
+	}
+
+	#[test]
+	fn test_gtmpl_env_missing_label_with_eq_comparison() {
+		// Regression test for bug: "Template parse error: unexpected Dir in operand"
+		// This test ensures that missing labels are replaced with false, not "",
+		// which caused template parse errors when used in eq comparisons.
+		use crate::spec::{Environment, Metadata, Spec};
+		use std::collections::BTreeMap;
+
+		let manifest = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "Service",
+			"metadata": {
+				"name": "my-service",
+				"namespace": "production"
+			}
+		});
+
+		let mut labels = BTreeMap::new();
+		labels.insert("cluster_name".to_string(), "test-cluster".to_string());
+		// Intentionally NOT setting namespaceToExportFilenames label
+
+		let env = Some(Environment {
+			api_version: "tanka.dev/v1alpha1".to_string(),
+			kind: "Environment".to_string(),
+			metadata: Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("default".to_string()),
+				labels: Some(labels),
+			},
+			spec: Spec {
+				api_server: None,
+				context_names: None,
+				namespace: "default".to_string(),
+				diff_strategy: None,
+				apply_strategy: None,
+				inject_labels: None,
+				resource_defaults: None,
+				expect_versions: None,
+				export_jsonnet_implementation: None,
+			},
+			data: None,
+		});
+
+		// This template uses a label that doesn't exist in the environment
+		// The bug was that missing labels were replaced with "", causing template parse errors
+		let template = r#"{{.kind}}-{{ if eq env.metadata.labels.namespaceToExportFilenames "true" }}{{ .metadata.namespace | default "global" }}-{{ end }}{{.metadata.name}}"#;
+
+		// This should NOT panic or return an error
+		let result = format_filename_gtmpl(&manifest, &env, template).unwrap();
+
+		// Since namespaceToExportFilenames is missing (replaced with false),
+		// the eq comparison should be false, so the conditional block is skipped
+		assert_eq!(result, "Service-my-service");
 	}
 
 	#[test]
