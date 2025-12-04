@@ -452,10 +452,69 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 /// Executes `kustomize build` and returns the rendered manifests as an object
 /// Each manifest is keyed by "<snake_case_kind>_<snake_case_name>"
 #[builtin]
-pub fn builtin_tanka_kustomize_build(path: String) -> Result<Val> {
+pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val> {
+	// calledFrom is required for proper path resolution
+	let called_from = opts.get("calledFrom".into())?.ok_or_else(|| {
+		RuntimeError("kustomizeBuild requires calledFrom field (usually std.thisFile)".into())
+	})?;
+
+	// Resolve kustomize path relative to calledFrom
+	let kustomize_path = if let Val::Str(s) = called_from {
+		let called_from_str = s.to_string();
+
+		// Check that calledFrom is not empty
+		if called_from_str.is_empty() {
+			return Err(RuntimeError("calledFrom cannot be an empty string".into()).into());
+		}
+
+		let called_from_path = std::path::Path::new(&called_from_str);
+		// Get the directory containing the calling file
+		if let Some(dir) = called_from_path.parent() {
+			// Check if directory exists
+			if !dir.exists() {
+				return Err(RuntimeError(
+					format!("calledFrom directory does not exist: {}", dir.display()).into(),
+				)
+				.into());
+			}
+			// Prevent absolute paths by prefixing with '.' if path starts with '/'
+			let path_relative = if path.starts_with('/') {
+				format!(".{}", path)
+			} else {
+				path
+			};
+			// Join the kustomize path with the directory
+			let kustomize_full = dir.join(&path_relative);
+
+			// Check if the kustomize path exists
+			if !kustomize_full.exists() {
+				return Err(RuntimeError(
+					format!(
+						"kustomize path does not exist: {}",
+						kustomize_full.display()
+					)
+					.into(),
+				)
+				.into());
+			}
+
+			kustomize_full
+				.to_str()
+				.ok_or_else(|| RuntimeError("invalid kustomize path".into()))?
+				.to_string()
+		} else {
+			return Err(RuntimeError(
+				format!("calledFrom has no parent directory: {}", called_from_str).into(),
+			)
+			.into());
+		}
+	} else {
+		return Err(RuntimeError("calledFrom must be a string".into()).into());
+	};
+
 	let mut cmd = Command::new("kustomize");
 	cmd.arg("build");
-	cmd.arg(&path);
+	cmd.arg(&kustomize_path);
 	cmd.stdout(Stdio::piped());
 	cmd.stderr(Stdio::piped());
 
