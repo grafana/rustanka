@@ -17,6 +17,7 @@ use std::thread;
 
 use crate::discover::{find_environments, DiscoveredEnv};
 use crate::eval::{eval, EvalOpts};
+use crate::jpath;
 
 /// When exporting manifests to files, it becomes increasingly hard to map manifests back to its environment.
 /// This file can be used to map the files back to their environment.
@@ -595,6 +596,25 @@ fn export_single_env(
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
 	let mut environments = extract_environments(&result.value, &result.spec)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+
+	// For inline environments (those without spec.json), set metadata.namespace to the relative
+	// path from root to entrypoint. This matches Go Tanka's behavior in pkg/tanka/inline.go:inlineParse
+	// which calls spec.Parse with namespace = filepath.Rel(root, file)
+	if result.spec.is_none() {
+		// This is an inline environment - resolve jpath to get root and entrypoint
+		if let Ok(jpath_result) = jpath::resolve(env.path.to_string_lossy().as_ref()) {
+			// Compute namespace as relative path from root to entrypoint
+			if let Ok(rel_entrypoint) = jpath_result.entrypoint.strip_prefix(&jpath_result.root) {
+				let namespace = rel_entrypoint.to_string_lossy().to_string();
+				// Set namespace on all extracted inline environments
+				for env_data in &mut environments {
+					if let Some(ref mut spec) = env_data.spec {
+						spec.metadata.namespace = Some(namespace.clone());
+					}
+				}
+			}
+		}
+	}
 
 	// If a specific env_name is requested, filter to only that environment
 	// This prevents processing nested environments that belong to other DiscoveredEnv entries
