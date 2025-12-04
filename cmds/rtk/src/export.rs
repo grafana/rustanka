@@ -1146,7 +1146,7 @@ fn generate_environment_label(env: &crate::spec::Environment) -> String {
 fn sanitize_path_component(s: &str) -> String {
 	s.chars()
 		.map(|c| {
-			if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+			if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' {
 				c
 			} else {
 				'-'
@@ -1805,8 +1805,13 @@ mod tests {
 	fn test_sanitize_path_component() {
 		assert_eq!(sanitize_path_component("hello-world"), "hello-world");
 		assert_eq!(sanitize_path_component("hello/world"), "hello-world");
-		assert_eq!(sanitize_path_component("hello:world"), "hello-world");
+		assert_eq!(sanitize_path_component("hello:world"), "hello:world");
 		assert_eq!(sanitize_path_component("my_app"), "my_app");
+		// Colons should be preserved (e.g., for RoleBinding names like "system:leader-locking-vpa-recommender")
+		assert_eq!(
+			sanitize_path_component("RoleBinding-system:leader-locking-vpa-recommender"),
+			"RoleBinding-system:leader-locking-vpa-recommender"
+		);
 	}
 
 	#[test]
@@ -2037,7 +2042,7 @@ mod tests {
 
 	#[test]
 	fn test_sanitize_path_special_chars() {
-		assert_eq!(sanitize_path_component("a/b\\c:d"), "a-b-c-d");
+		assert_eq!(sanitize_path_component("a/b\\c:d"), "a-b-c:d");
 		assert_eq!(sanitize_path_component("test..path"), "test..path");
 		assert_eq!(
 			sanitize_path_component("normal-name_123"),
