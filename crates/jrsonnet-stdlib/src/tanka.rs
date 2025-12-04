@@ -41,11 +41,67 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 	&HELM_TEMPLATE_CACHE
 }
 
+/// Generate a key for a manifest using the nameFormat template
+/// This is a simplified implementation that handles the common case where nameFormat
+/// includes namespace in the key format
+fn generate_manifest_key_from_val(val: &Val, name_format: Option<&str>) -> Result<String> {
+	// Check if we should use nameFormat or default format
+	let use_namespace_in_key = name_format
+		.map(|fmt| fmt.contains("metadata.namespace") || fmt.contains(".or .metadata.namespace"))
+		.unwrap_or(false);
+
+	if let Val::Obj(ref obj) = val {
+		let kind = obj
+			.get("kind".into())
+			.ok()
+			.flatten()
+			.and_then(|v| match v {
+				Val::Str(s) => Some(to_snake_case(&s.to_string())),
+				_ => None,
+			})
+			.unwrap_or_else(|| "unknown".to_string());
+
+		let metadata = obj.get("metadata".into()).ok().flatten();
+
+		if let Some(Val::Obj(meta)) = metadata {
+			let name = meta
+				.get("name".into())
+				.ok()
+				.flatten()
+				.and_then(|v| match v {
+					Val::Str(s) => Some(to_snake_case(&s.to_string())),
+					_ => None,
+				})
+				.unwrap_or_else(|| "unknown".to_string());
+
+			// If nameFormat suggests using namespace, include it in the key
+			if use_namespace_in_key {
+				let namespace = meta
+					.get("namespace".into())
+					.ok()
+					.flatten()
+					.and_then(|v| match v {
+						Val::Str(s) => Some(to_snake_case(&s.to_string())),
+						_ => None,
+					})
+					.unwrap_or_else(|| "cluster".to_string());
+
+				return Ok(format!("{}_{}_{}", namespace, kind, name));
+			} else {
+				return Ok(format!("{}_{}", kind, name));
+			}
+		}
+	}
+
+	Ok("unknown".to_string())
+}
+
 /// Parse YAML output from helm into a Val object
-fn parse_helm_yaml_output(yaml_content: &str) -> Result<Val> {
+fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Result<Val> {
 	use jrsonnet_evaluator::ObjValueBuilder;
 	let mut builder = ObjValueBuilder::new();
 	let deserializer = serde_yaml::Deserializer::from_str(yaml_content);
+	let mut seen_keys = HashMap::new();
 
 	for document in deserializer {
 		let val: Val = Val::deserialize(document)
@@ -56,33 +112,29 @@ fn parse_helm_yaml_output(yaml_content: &str) -> Result<Val> {
 		}
 
 		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
-		let key = if let Val::Obj(ref obj) = val {
-			let kind = obj
-				.get("kind".into())?
-				.and_then(|v| match v {
-					Val::Str(s) => Some(to_snake_case(&s.to_string())),
-					_ => None,
-				})
-				.unwrap_or_else(|| "unknown".to_string());
-
-			let metadata = obj.get("metadata".into())?;
-			let name = if let Some(Val::Obj(meta)) = metadata {
-				meta.get("name".into())?
-					.and_then(|v| match v {
-						Val::Str(s) => Some(to_snake_case(&s.to_string())),
-						_ => None,
-					})
-					.unwrap_or_else(|| "unknown".to_string())
-			} else {
-				"unknown".to_string()
-			};
-
-			format!("{}_{}", kind, name)
+		// Skip resources that don't have proper structure (like Lists)
+		if let Val::Obj(ref obj) = val {
+			// Check if this is a List (has "items" field) - skip Lists as they're just containers
+			if let Ok(Some(Val::Arr(_))) = obj.get("items".into()) {
+				continue;
+			}
 		} else {
-			"unknown".to_string()
-		};
+			continue;
+		}
 
-		builder.field(&key).try_value(val)?;
+		// Use the nameFormat-aware key generation
+		let key = generate_manifest_key_from_val(&val, name_format)?;
+
+		// Check for duplicate keys and add counter if needed
+		let mut final_key = key.clone();
+		let mut counter = 2;
+		while seen_keys.contains_key(&final_key) {
+			final_key = format!("{}_{}", key, counter);
+			counter += 1;
+		}
+		seen_keys.insert(final_key.clone(), ());
+
+		builder.field(&final_key).try_value(val)?;
 	}
 
 	Ok(Val::Obj(builder.build()))
@@ -333,6 +385,17 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 			None
 		};
 
+	// Extract nameFormat if present
+	let name_format = if let Some(nf) = opts.get("nameFormat".into())? {
+		if let Val::Str(s) = nf {
+			Some(s.to_string())
+		} else {
+			None
+		}
+	} else {
+		None
+	};
+
 	// Check cache first
 	let cache_key = helm_cache_key(
 		&name,
@@ -346,7 +409,7 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		if let Some(ref map) = *read {
 			if let Some(cached_yaml) = map.get(&cache_key) {
 				// Cache hit - parse the cached YAML
-				return parse_helm_yaml_output(cached_yaml);
+				return parse_helm_yaml_output(cached_yaml, name_format.as_deref());
 			}
 		}
 	}
@@ -445,7 +508,7 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 	}
 
 	// Parse and return the YAML output
-	parse_helm_yaml_output(&yaml_content)
+	parse_helm_yaml_output(&yaml_content, name_format.as_deref())
 }
 
 /// Tanka-compatible kustomizeBuild
@@ -545,6 +608,7 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 	let mut builder = ObjValueBuilder::new();
 	let stdout_reader = BufReader::new(stdout);
 	let deserializer = serde_yaml::Deserializer::from_reader(stdout_reader);
+	let mut seen_keys = HashMap::new();
 
 	for document in deserializer {
 		let val: Val = Val::deserialize(document)
@@ -554,7 +618,8 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 			continue;
 		}
 
-		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
+		// Generate a key for this manifest: <snake_case_kind>_<snake_case_namespace>_<snake_case_name>
+		// or <snake_case_kind>_<snake_case_name> if no namespace
 		let key = if let Val::Obj(ref obj) = val {
 			let kind = obj
 				.get("kind".into())?
@@ -565,23 +630,45 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 				.unwrap_or_else(|| "unknown".to_string());
 
 			let metadata = obj.get("metadata".into())?;
-			let name = if let Some(Val::Obj(meta)) = metadata {
-				meta.get("name".into())?
+			let (name, namespace) = if let Some(Val::Obj(meta)) = metadata {
+				let name = meta
+					.get("name".into())?
 					.and_then(|v| match v {
 						Val::Str(s) => Some(to_snake_case(&s.to_string())),
 						_ => None,
 					})
-					.unwrap_or_else(|| "unknown".to_string())
+					.unwrap_or_else(|| "unknown".to_string());
+
+				let namespace = meta.get("namespace".into())?.and_then(|v| match v {
+					Val::Str(s) => Some(to_snake_case(&s.to_string())),
+					_ => None,
+				});
+
+				(name, namespace)
 			} else {
-				"unknown".to_string()
+				("unknown".to_string(), None)
 			};
 
-			format!("{}_{}", kind, name)
+			// Include namespace in key if present, otherwise just kind_name
+			if let Some(ns) = namespace {
+				format!("{}_{}_{}", kind, ns, name)
+			} else {
+				format!("{}_{}", kind, name)
+			}
 		} else {
 			"unknown".to_string()
 		};
 
-		builder.field(&key).try_value(val)?;
+		// Check for duplicate keys and add counter if needed
+		let mut final_key = key.clone();
+		let mut counter = 2;
+		while seen_keys.contains_key(&final_key) {
+			final_key = format!("{}_{}", key, counter);
+			counter += 1;
+		}
+		seen_keys.insert(final_key.clone(), ());
+
+		builder.field(&final_key).try_value(val)?;
 	}
 
 	// Wait for the process to complete
