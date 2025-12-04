@@ -100,48 +100,48 @@ runs = 1
 
 [[commands]]
 name = "export: mimir-ops-03"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/cortex/ops-eu-south-0.mimir-ops-03", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 
 [[commands]]
 name = "export: cd environments (tk runs jrsonnet)"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 
 [[commands]]
 name = "export: grafana-apps"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-grafana-apps", "environments/grafana-apps", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-grafana-apps", "environments/grafana-apps", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 
 [[commands]]
 name = "export: federal-ge-grafana"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-grafana", "environments/federal-ge-grafana", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-grafana", "environments/federal-ge-grafana", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 
 [[commands]]
 name = "export: grafana-o11y (tk runs jrsonnet)"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
 
 [[commands]]
 name = "export: two non jrsonnet environments"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/two-non-jrsonnet-environments", "environments/grafana-com", "environments/grafana-datasources", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/two-non-jrsonnet-environments", "environments/grafana-com", "environments/grafana-datasources", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
 
 [[commands]]
 name = "export: all loki environments"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/loki-all", "environments/loki", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/loki-all", "environments/loki", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
 
 [[commands]]
 name = "export: all cortex environments"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true

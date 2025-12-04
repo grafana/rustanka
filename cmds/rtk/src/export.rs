@@ -593,8 +593,21 @@ fn export_single_env(
 	}
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
-	let environments = extract_environments(&result.value, &result.spec)
+	let mut environments = extract_environments(&result.value, &result.spec)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+
+	// If a specific env_name is requested, filter to only that environment
+	// This prevents processing nested environments that belong to other DiscoveredEnv entries
+	if let Some(ref target_name) = env.env_name {
+		environments.retain(|env_data| {
+			let name = env_data
+				.spec
+				.as_ref()
+				.and_then(|s| s.metadata.name.as_deref())
+				.unwrap_or("");
+			name == target_name
+		});
+	}
 
 	if environments.is_empty() {
 		return Ok((vec![], env_namespace, timing));
@@ -609,7 +622,7 @@ fn export_single_env(
 
 	// Process each Environment's manifests separately (matching Tanka's approach)
 	// This avoids loading all manifests into memory at once
-	for env_data in environments {
+	for env_data in environments.iter() {
 		// Extract manifests from this environment's data field
 		let mut manifests = Vec::new();
 		collect_manifests(&env_data.data, &mut manifests);
@@ -847,6 +860,19 @@ fn extract_environments(
 	// Recursively search for Environment objects
 	collect_environments_recursive(value, &mut environments);
 
+	// Deduplicate environments by name (same Environment can appear at multiple JSON paths
+	// due to Jsonnet object composition with +)
+	let mut seen_names = std::collections::HashSet::new();
+	environments.retain(|env_data| {
+		let name = env_data
+			.spec
+			.as_ref()
+			.and_then(|s| s.metadata.name.as_ref())
+			.cloned()
+			.unwrap_or_default();
+		seen_names.insert(name)
+	});
+
 	if !environments.is_empty() {
 		return Ok(environments);
 	}
@@ -918,6 +944,8 @@ fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
 }
 
 /// Recursively collect Kubernetes manifests from a JSON value
+/// Generate a unique key for a manifest based on apiVersion, kind, namespace, and name
+/// Used to deduplicate manifests that appear at multiple paths in the JSON structure
 fn collect_manifests(value: &JsonValue, manifests: &mut Vec<JsonValue>) {
 	match value {
 		JsonValue::Object(obj) => {
@@ -3494,5 +3522,79 @@ mod tests {
 		assert_eq!(manifest_map.len(), 2);
 		assert!(manifest_map.contains_key("ConfigMap-config1.yaml"));
 		assert!(manifest_map.contains_key("Secret-secret1.yaml"));
+	}
+
+	#[test]
+	fn test_extract_environments_deduplicates_by_name() {
+		// Create a JSON structure with duplicate Environment objects (same name at different paths)
+		let value = serde_json::json!({
+			"env1": {
+				"apiVersion": "tanka.dev/v1alpha1",
+				"kind": "Environment",
+				"metadata": { "name": "my-env" },
+				"spec": { "namespace": "default" },
+				"data": {
+					"cm": {
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": { "name": "config1" }
+					}
+				}
+			},
+			"env2": {
+				"apiVersion": "tanka.dev/v1alpha1",
+				"kind": "Environment",
+				"metadata": { "name": "my-env" },  // Same name as env1
+				"spec": { "namespace": "default" },
+				"data": {
+					"cm": {
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": { "name": "config2" }
+					}
+				}
+			}
+		});
+
+		let environments = extract_environments(&value, &None).unwrap();
+
+		// Should deduplicate to just one environment (first one wins)
+		assert_eq!(environments.len(), 1);
+		assert_eq!(
+			environments[0]
+				.spec
+				.as_ref()
+				.unwrap()
+				.metadata
+				.name
+				.as_deref(),
+			Some("my-env")
+		);
+	}
+
+	#[test]
+	fn test_extract_environments_keeps_different_names() {
+		// Create a JSON structure with two Environment objects with different names
+		let value = serde_json::json!({
+			"env1": {
+				"apiVersion": "tanka.dev/v1alpha1",
+				"kind": "Environment",
+				"metadata": { "name": "env-a" },
+				"spec": { "namespace": "default" },
+				"data": {}
+			},
+			"env2": {
+				"apiVersion": "tanka.dev/v1alpha1",
+				"kind": "Environment",
+				"metadata": { "name": "env-b" },
+				"spec": { "namespace": "default" },
+				"data": {}
+			}
+		});
+
+		let environments = extract_environments(&value, &None).unwrap();
+
+		// Should keep both environments since they have different names
+		assert_eq!(environments.len(), 2);
 	}
 }
