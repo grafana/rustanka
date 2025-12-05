@@ -146,6 +146,7 @@ fn helm_cache_key(
 	chart_path: &str,
 	namespace: Option<&str>,
 	values_json: Option<&str>,
+	include_crds: bool,
 ) -> String {
 	let mut hasher = Sha256::new();
 	hasher.update(name.as_bytes());
@@ -159,6 +160,8 @@ fn helm_cache_key(
 	if let Some(v) = values_json {
 		hasher.update(v.as_bytes());
 	}
+	hasher.update(b"|");
+	hasher.update(if include_crds { b"1" } else { b"0" });
 	format!("{:x}", hasher.finalize())
 }
 
@@ -396,12 +399,20 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		None
 	};
 
+	// Extract includeCrds if present (defaults to false)
+	let include_crds = if let Some(ic) = opts.get("includeCrds".into())? {
+		matches!(ic, Val::Bool(true))
+	} else {
+		false
+	};
+
 	// Check cache first
 	let cache_key = helm_cache_key(
 		&name,
 		&chart_path,
 		namespace.as_deref(),
 		values_json.as_deref(),
+		include_crds,
 	);
 	{
 		let cache = get_helm_cache();
@@ -423,6 +434,11 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 	if let Some(ref ns) = namespace {
 		cmd.arg("--namespace");
 		cmd.arg(ns);
+	}
+
+	// Add --include-crds if requested
+	if include_crds {
+		cmd.arg("--include-crds");
 	}
 
 	// If we have values, configure stdin and add --values=-

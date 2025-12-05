@@ -13,10 +13,7 @@ fn is_yaml_file(path: &str) -> bool {
 /// Check if a key should be ignored during semantic comparison
 /// These are computed hashes that differ due to formatting differences
 fn is_ignored_key(key: &str) -> bool {
-	key.ends_with("-hash")
-		|| key.ends_with("_hash")
-		|| key == "config_hash"
-		|| key == "tanka.dev/environment" // Tanka environment hash label
+	key.ends_with("-hash") || key.ends_with("_hash") || key == "config_hash"
 }
 
 /// Normalize a floating point number to handle precision differences
@@ -1172,15 +1169,13 @@ mod tests {
 		assert!(is_ignored_key("config-hash"));
 		assert!(is_ignored_key("mimir-config-exporter-hash"));
 		assert!(is_ignored_key("some_hash"));
-		// Should ignore tanka.dev/environment
-		assert!(is_ignored_key("tanka.dev/environment"));
 
 		// Should NOT ignore regular keys
 		assert!(!is_ignored_key("name"));
 		assert!(!is_ignored_key("hash")); // exact match only for suffix
 		assert!(!is_ignored_key("hashcode"));
 		assert!(!is_ignored_key("config"));
-		assert!(!is_ignored_key("environment")); // only tanka.dev/environment
+		assert!(!is_ignored_key("environment"));
 	}
 
 	#[test]

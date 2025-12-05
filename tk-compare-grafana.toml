@@ -105,12 +105,6 @@ runs = 3
 dir_compare = true
 
 [[commands]]
-name = "export: cd environments (tk runs jrsonnet)"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
-runs = 3
-dir_compare = true
-
-[[commands]]
 name = "export: grafana-apps"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-grafana-apps", "environments/grafana-apps", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
@@ -119,6 +113,18 @@ dir_compare = true
 [[commands]]
 name = "export: federal-ge-grafana"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-grafana", "environments/federal-ge-grafana", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
+name = "export: flagger"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-flagger", "environments/flagger", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
+name = "export: cd environments (tk runs jrsonnet)"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 
