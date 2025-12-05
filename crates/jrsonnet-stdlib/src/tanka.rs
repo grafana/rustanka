@@ -399,11 +399,12 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		None
 	};
 
-	// Extract includeCrds if present (defaults to false)
+	// Extract includeCrds if present (defaults to true, matching Go Tanka's behavior)
+	// Go Tanka: "default IncludeCRDs to true, as this is the default in the `helm install`"
 	let include_crds = if let Some(ic) = opts.get("includeCrds".into())? {
 		matches!(ic, Val::Bool(true))
 	} else {
-		false
+		true
 	};
 
 	// Check cache first
