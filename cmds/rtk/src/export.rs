@@ -6,8 +6,9 @@
 use anyhow::{bail, Context, Result};
 use gtmpl::{FuncError, Value};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -575,9 +576,8 @@ fn export_single_env(
 
 	// Extract environment identifier for manifest.json tracking
 	// This should be the path to main.jsonnet (relative to working directory if possible)
-	// For inline sub-environments, append the environment name
 	let main_jsonnet_path = env.path.join("main.jsonnet");
-	let mut env_namespace = if let Ok(cwd) = std::env::current_dir() {
+	let env_namespace = if let Ok(cwd) = std::env::current_dir() {
 		// Make path relative to current directory if possible
 		main_jsonnet_path
 			.strip_prefix(&cwd)
@@ -587,11 +587,6 @@ fn export_single_env(
 	} else {
 		main_jsonnet_path.to_string_lossy().to_string()
 	};
-
-	// For inline sub-environments, append the environment name to make it unique
-	if let Some(name) = &env.env_name {
-		env_namespace = format!("{}:{}", env_namespace, name);
-	}
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
 	let mut environments = extract_environments(&result.value, &result.spec)
@@ -704,6 +699,9 @@ fn export_single_env(
 				// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
 				inject_environment_label(&mut manifest, &env_data.spec);
 
+				// Inject resourceDefaults annotations if present (matching Tanka's behavior)
+				inject_resource_defaults(&mut manifest, &env_data.spec);
+
 				let rendered_filename = render_filename_simple(&tmpl, &manifest, &env_data.spec)
 					.map_err(|e| {
 						// Template errors after validation are fatal (something very wrong)
@@ -749,6 +747,9 @@ fn export_single_env(
 					serde_json::to_string_pretty(&manifest)
 						.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?
 				} else {
+					// Sort all object keys to match Go's yaml.v3 output order
+					let sorted_manifest = sort_json_keys(manifest);
+
 					// Use serializer options to match Go's yaml.v3 output
 					let options = serde_saphyr::SerializerOptions {
 						indent_step: 2,
@@ -756,11 +757,17 @@ fn export_single_env(
 						prefer_block_scalars: true,
 						empty_map_as_braces: true,
 						empty_array_as_brackets: true,
+						line_width: Some(80),
+						use_scientific_notation: true,
 						..Default::default()
 					};
 					let mut output = String::new();
-					serde_saphyr::to_fmt_writer_with_options(&mut output, &manifest, options)
-						.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+					serde_saphyr::to_fmt_writer_with_options(
+						&mut output,
+						&sorted_manifest,
+						options,
+					)
+					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 					output
 				};
 
@@ -852,9 +859,18 @@ fn export_manifest_file(output_dir: &PathBuf, results: &[ExportEnvResult]) -> Re
 		}
 	}
 
-	// Write manifest.json
-	let content =
-		serde_json::to_string_pretty(&file_to_env).context("serializing manifest.json")?;
+	// Write manifest.json with sorted keys
+	let content = {
+		let mut buf = Vec::new();
+		let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+		let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+		// Convert to BTreeMap to ensure sorted keys
+		let sorted: BTreeMap<_, _> = file_to_env.into_iter().collect();
+		sorted
+			.serialize(&mut ser)
+			.context("serializing manifest.json")?;
+		String::from_utf8(buf).expect("valid utf8")
+	};
 	fs::write(&manifest_path, content).context("writing manifest.json")?;
 
 	Ok(())
@@ -1140,6 +1156,98 @@ fn generate_environment_label(env: &crate::spec::Environment) -> String {
 	// Convert to hex and take first 48 characters
 	let hex = format!("{:x}", result);
 	hex.chars().take(48).collect()
+}
+
+/// Sort all JSON object keys recursively to match Go's yaml.v3 output order
+/// Go's yaml.v3 sorts map keys lexicographically when serializing
+fn sort_json_keys(value: JsonValue) -> JsonValue {
+	match value {
+		JsonValue::Object(map) => {
+			// Convert to BTreeMap which maintains sorted order
+			let mut sorted: BTreeMap<String, JsonValue> = BTreeMap::new();
+			for (key, val) in map {
+				sorted.insert(key, sort_json_keys(val));
+			}
+			// Convert back to serde_json::Value with sorted keys
+			JsonValue::Object(sorted.into_iter().collect())
+		}
+		JsonValue::Array(arr) => {
+			// Recursively sort keys in array elements
+			JsonValue::Array(arr.into_iter().map(sort_json_keys).collect())
+		}
+		// Primitive values remain unchanged
+		other => other,
+	}
+}
+
+/// Inject resourceDefaults (annotations, labels, etc.) into manifest metadata
+/// This replicates Tanka's behavior for spec.resourceDefaults
+fn inject_resource_defaults(manifest: &mut JsonValue, env_spec: &Option<crate::spec::Environment>) {
+	let Some(env) = env_spec else { return };
+	let Some(resource_defaults) = &env.spec.resource_defaults else {
+		return;
+	};
+
+	// resource_defaults is a JSON object that can contain annotations, labels, etc.
+	let JsonValue::Object(defaults) = resource_defaults else {
+		return;
+	};
+
+	if let JsonValue::Object(ref mut obj) = manifest {
+		// Ensure metadata exists
+		if !obj.contains_key("metadata") {
+			obj.insert(
+				"metadata".to_string(),
+				JsonValue::Object(serde_json::Map::new()),
+			);
+		}
+
+		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
+			// Process annotations from resourceDefaults
+			if let Some(JsonValue::Object(default_annotations)) = defaults.get("annotations") {
+				// Ensure annotations exists
+				if !metadata.contains_key("annotations") {
+					metadata.insert(
+						"annotations".to_string(),
+						JsonValue::Object(serde_json::Map::new()),
+					);
+				}
+
+				// Merge default annotations into manifest annotations
+				// Don't override existing annotations
+				if let Some(JsonValue::Object(ref mut annotations)) =
+					metadata.get_mut("annotations")
+				{
+					for (key, value) in default_annotations {
+						if !annotations.contains_key(key) {
+							annotations.insert(key.clone(), value.clone());
+						}
+					}
+				}
+			}
+
+			// Process labels from resourceDefaults
+			if let Some(JsonValue::Object(default_labels)) = defaults.get("labels") {
+				// Ensure labels exists
+				if !metadata.contains_key("labels") {
+					metadata.insert(
+						"labels".to_string(),
+						JsonValue::Object(serde_json::Map::new()),
+					);
+				}
+
+				// Merge default labels into manifest labels
+				// Don't override existing labels
+				if let Some(JsonValue::Object(ref mut labels)) = metadata.get_mut("labels") {
+					for (key, value) in default_labels {
+						if !labels.contains_key(key) {
+							labels.insert(key.clone(), value.clone());
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 /// Sanitize a string for use as a path component

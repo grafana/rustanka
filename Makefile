@@ -1,4 +1,4 @@
-.PHONY: build-rtk build-tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help
+.PHONY: build-rtk build-tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures
 
 .DEFAULT_GOAL := help
 
@@ -17,6 +17,8 @@ help:
 	@echo "  check-rtk              - Run rtk checks only (fmt-check, lint, test-rtk)"
 	@echo "  ci                     - Run CI checks locally (fmt, lint-ci, test-rtk)"
 	@echo "  ci-full                - Run full CI checks (fmt, lint-ci, all tests)"
+	@echo "  update-golden-fixtures - Regenerate golden files in test_fixtures using tk export"
+	@echo "  check-golden-fixtures  - Check that golden files are up to date (requires tk)"
 	@echo "  tk-compare-grafana     - Run tk-compare against Grafana deployment_tools"
 	@echo "                           (includes env list, eval, and export comparisons)"
 	@echo ""
@@ -91,3 +93,33 @@ ci: fmt-check lint-ci test-rtk
 
 ci-full: fmt-check lint-ci test
 	@echo "All CI checks passed (full)!"
+
+# Generate golden files for test_fixtures using tk export
+# Uses .golden extension to prevent accidental reformatting
+GOLDEN_FIXTURES_DIR := test_fixtures/golden_envs
+
+update-golden-fixtures:
+	@echo "Generating golden files for $(GOLDEN_FIXTURES_DIR)..."
+	@for dir in $(GOLDEN_FIXTURES_DIR)/*/; do \
+		rm -rf "$$dir/golden"; \
+		mkdir -p "$$dir/golden"; \
+		(cd "$$dir" && tk export golden . --format '{{.metadata.namespace}}/{{.metadata.name}}' --extension golden); \
+		echo "Golden files generated in $${dir}golden/"; \
+	done
+
+# Check that golden files are up to date (for CI)
+check-golden-fixtures:
+	@echo "Checking golden files are up to date..."
+	@for dir in $(GOLDEN_FIXTURES_DIR)/*/; do \
+		TEMP_DIR=$$(mktemp -d) && \
+		(cd "$$dir" && tk export $$TEMP_DIR . --format '{{.metadata.namespace}}/{{.metadata.name}}' --extension golden) && \
+		if ! diff -r --exclude=manifest.json "$$dir/golden" $$TEMP_DIR > /dev/null 2>&1; then \
+			echo "ERROR: Golden files are out of date in $$dir!"; \
+			echo "Run 'make update-golden-fixtures' to regenerate them."; \
+			diff -r --exclude=manifest.json "$$dir/golden" $$TEMP_DIR || true; \
+			rm -rf $$TEMP_DIR; \
+			exit 1; \
+		fi && \
+		rm -rf $$TEMP_DIR; \
+	done
+	@echo "Golden files are up to date."

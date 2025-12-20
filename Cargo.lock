@@ -695,6 +695,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "serde_yaml_with_quirks",
  "sha1",
@@ -1102,6 +1103,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "sha2",
+ "similar",
  "tabwriter",
  "tempfile",
  "walkdir",
@@ -1164,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#185fdb12bb0eed7c597efa57341314f38365d74b"
+source = "git+https://github.com/grafana/serde-saphyr?branch=master#4ac03f24bfbdd4f0b9a832ef6b34dc91d5c98416"
 dependencies = [
  "ahash",
  "base64",
@@ -1204,6 +1206,7 @@ version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
+ "indexmap 2.10.0",
  "itoa",
  "memchr",
  "ryu",

@@ -554,7 +554,15 @@ impl ObjValue {
 			.filter(|(_, (visible, _))| include_hidden || *visible)
 			.map(|(k, _)| k)
 			.collect();
-		fields.sort_unstable();
+		// Sort keys, treating numeric strings as numbers for compatibility with tk
+		fields.sort_unstable_by(|a, b| {
+			let a_numeric = a.as_str().parse::<u64>().ok();
+			let b_numeric = b.as_str().parse::<u64>().ok();
+			match (a_numeric, b_numeric) {
+				(Some(a_num), Some(b_num)) => a_num.cmp(&b_num),
+				_ => a.cmp(b),
+			}
+		});
 		fields
 	}
 	pub fn fields(&self, #[cfg(feature = "exp-preserve-order")] preserve_order: bool) -> Vec<IStr> {

@@ -235,29 +235,72 @@ pub fn builtin_tanka_manifest_json_from_json(json: String, indent: usize) -> Res
 		.map_err(|e| RuntimeError(format!("failed to convert to utf8: {e}").into()).into())
 }
 
+/// Recursively sort JSON object keys numerically (treating numeric strings as numbers)
+/// This matches Go yaml.v3 behavior where numeric string keys are sorted numerically
+fn sort_json_keys_numerically(value: serde_json::Value) -> serde_json::Value {
+	match value {
+		serde_json::Value::Object(map) => {
+			// Collect keys and sort them numerically
+			let mut keys: Vec<String> = map.keys().cloned().collect();
+			keys.sort_by(|a, b| {
+				let a_numeric = a.parse::<u64>().ok();
+				let b_numeric = b.parse::<u64>().ok();
+				match (a_numeric, b_numeric) {
+					(Some(a_num), Some(b_num)) => a_num.cmp(&b_num),
+					_ => a.cmp(b),
+				}
+			});
+
+			// Rebuild the map with sorted keys
+			let mut sorted = serde_json::Map::new();
+			for key in keys {
+				if let Some(val) = map.get(&key) {
+					sorted.insert(key, sort_json_keys_numerically(val.clone()));
+				}
+			}
+			serde_json::Value::Object(sorted)
+		}
+		serde_json::Value::Array(arr) => {
+			serde_json::Value::Array(arr.into_iter().map(sort_json_keys_numerically).collect())
+		}
+		other => other,
+	}
+}
+
 /// Tanka-compatible manifestYamlFromJson
-/// Converts JSON string to YAML
+/// Converts JSON string to YAML using Go yaml.v3 compatible settings
 #[builtin]
 pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
-	let parsed: Val = serde_json::from_str(&json)
+	let parsed: serde_json::Value = serde_json::from_str(&json)
 		.map_err(|e| RuntimeError(format!("failed to parse json: {e}").into()))?;
 
-	// Use jrsonnet's custom YAML formatter with Go-compatible settings:
-	// - 4 space indentation (matching Go's default)
-	// - No quotes on keys when possible
-	use crate::manifest::YamlFormat;
-	use jrsonnet_evaluator::manifest::ManifestFormat;
+	// Sort keys numerically to match Go yaml.v3 behavior
+	let sorted = sort_json_keys_numerically(parsed);
 
-	let formatter = YamlFormat::cli(
-		4, // 4-space indentation like Go
-		#[cfg(feature = "exp-preserve-order")]
-		false,
-	);
-
+	// Use serde-saphyr with Go yaml.v3 compatible settings
+	// This matches tk's manifestYamlFromJson which uses go-yaml v3
+	let options = serde_saphyr::SerializerOptions {
+		indent_step: 4,        // go-yaml v3 uses 4-space indentation
+		indent_array: Some(4), // arrays also use 4-space indentation
+		prefer_block_scalars: true,
+		empty_map_as_braces: true,
+		empty_array_as_brackets: true,
+		line_width: Some(80),
+		use_scientific_notation: true,
+		quote_numeric_strings: true, // Quote numeric string keys like "12345"
+		..Default::default()
+	};
 	let mut output = String::new();
-	formatter.manifest_buf(parsed, &mut output)?;
+	serde_saphyr::to_fmt_writer_with_options(&mut output, &sorted, options)
+		.map_err(|e| RuntimeError(format!("failed to serialize yaml: {e}").into()))?;
 
-	Ok(output + "\n")
+	// Add trailing newline to match Go's yaml.v3 behavior
+	// This ensures the outer YAML serializer uses | instead of |-
+	if !output.ends_with('\n') {
+		output.push('\n');
+	}
+
+	Ok(output)
 }
 
 /// Tanka-compatible sha256

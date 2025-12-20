@@ -28,6 +28,14 @@ pub struct YamlFormat<'s> {
 	/// safe_key: 1
 	/// ```
 	quote_keys: bool,
+	/// Should yaml string values always be quoted
+	/// go-jsonnet always quotes string values in manifestYamlDoc
+	/// ```yaml
+	/// key: "value"
+	/// # vs
+	/// key: value
+	/// ```
+	quote_values: bool,
 	/// If true - then order of fields is preserved as written,
 	/// instead of sorting alphabetically
 	#[cfg(feature = "exp-preserve-order")]
@@ -43,6 +51,7 @@ impl YamlFormat<'_> {
 			padding: Cow::Owned(padding.clone()),
 			arr_element_padding: Cow::Owned(padding),
 			quote_keys: false,
+			quote_values: false,
 			#[cfg(feature = "exp-preserve-order")]
 			preserve_order,
 		}
@@ -56,6 +65,7 @@ impl YamlFormat<'_> {
 			padding: Cow::Borrowed("  "),
 			arr_element_padding: Cow::Borrowed(if indent_array_in_object { "  " } else { "" }),
 			quote_keys,
+			quote_values: true, // go-jsonnet always quotes string values
 			#[cfg(feature = "exp-preserve-order")]
 			preserve_order,
 		}
@@ -138,6 +148,54 @@ fn yaml_needs_quotes(string: &str) -> bool {
 		|| looks_like_timestamp(string)
 }
 
+/// Format a float in scientific notation like "5.625e+06" (with + sign and 2-digit exponent)
+fn format_scientific(v: f64, buf: &mut String) {
+	// Use Rust's scientific notation as base
+	let formatted = format!("{v:e}");
+	// Find the 'e' and process the exponent
+	if let Some(e_pos) = formatted.find('e') {
+		let (mantissa, exp_part) = formatted.split_at(e_pos);
+		let exp_str = &exp_part[1..]; // skip 'e'
+		let exp: i32 = exp_str.parse().unwrap_or(0);
+		// Format with + sign for positive exponents and 2-digit padding
+		if exp >= 0 {
+			write!(buf, "{mantissa}e+{exp:02}").unwrap();
+		} else {
+			write!(buf, "{mantissa}e{exp:03}").unwrap(); // -01, -02, etc.
+		}
+	} else {
+		buf.push_str(&formatted);
+	}
+}
+
+/// Escape a string for YAML with intelligent quote selection
+/// Uses single quotes when the string contains double quotes (to match Go's yaml.v3)
+/// but only when quote_values is false (CLI mode). When quote_values is true
+/// (std.manifestYamlDoc), always uses double quotes to match Go-jsonnet.
+fn escape_string_yaml_buf(s: &str, buf: &mut String, quote_values: bool) {
+	// When quote_values is true (std.manifestYamlDoc), always use double quotes
+	if quote_values {
+		escape_string_json_buf(s, buf);
+		return;
+	}
+
+	// For CLI mode (quote_values=false), choose quote style based on content
+	let has_double_quote = s.contains('"');
+	let has_single_quote = s.contains('\'');
+	let has_backslash = s.contains('\\');
+
+	// Use single quotes when the string contains double quotes but no single quotes
+	// This matches Go's yaml.v3 behavior for strings like '{environment="pro"}'
+	if has_double_quote && !has_single_quote && !has_backslash {
+		buf.push('\'');
+		buf.push_str(s);
+		buf.push('\'');
+	} else {
+		// Use double quotes with JSON-style escaping
+		escape_string_json_buf(s, buf);
+	}
+}
+
 #[allow(dead_code)]
 fn manifest_yaml_ex(val: &Val, options: &YamlFormat<'_>) -> Result<String> {
 	let mut out = String::new();
@@ -168,15 +226,22 @@ fn manifest_yaml_ex_buf(
 			let s = s.clone().into_flat();
 			if s.is_empty() {
 				buf.push_str("\"\"");
-			} else if let Some(s) = s.strip_suffix('\n') {
+			} else if s.ends_with('\n') {
+				// Block scalar with trailing newline - use | (clip: adds one trailing newline when parsed)
+				// Go's manifestYamlDoc uses block scalar for strings ending with \n
+				let content = s.strip_suffix('\n').unwrap();
 				buf.push('|');
-				for line in s.split('\n') {
+				for line in content.split('\n') {
 					buf.push('\n');
 					buf.push_str(cur_padding);
 					buf.push_str(&options.padding);
 					buf.push_str(line);
 				}
-			} else if s.contains('\n') {
+			} else if !options.quote_values && s.contains('\n') {
+				// Block scalar without trailing newline - use |- (strip: no trailing newline when parsed)
+				// Only use block scalars when quote_values is false (CLI mode).
+				// When quote_values is true (std.manifestYamlDoc), Go uses double-quoted for
+				// strings that contain \n but don't end with \n.
 				buf.push_str("|-");
 				for line in s.split('\n') {
 					buf.push('\n');
@@ -184,37 +249,25 @@ fn manifest_yaml_ex_buf(
 					buf.push_str(&options.padding);
 					buf.push_str(line);
 				}
-			} else if !options.quote_keys && !yaml_needs_quotes(&s) {
+			} else if !options.quote_values && !yaml_needs_quotes(&s) {
+				// Simple string without newlines - output unquoted if safe
 				buf.push_str(&s);
 			} else {
-				// Prefer single quotes when string contains double quotes but no single quotes.
-				// This matches Go's yaml.v3 behavior and avoids escaping.
-				if s.contains('"') && !s.contains('\'') {
-					buf.push('\'');
-					buf.push_str(&s);
-					buf.push('\'');
-				} else {
-					escape_string_json_buf(&s, buf);
-				}
+				// Use intelligent quote selection to match Go's yaml.v3 behavior
+				escape_string_yaml_buf(&s, buf, options.quote_values);
 			}
 		}
 		Val::Num(n) => {
 			let v = n.get();
-			// Match Go's yaml.v3 number formatting:
-			// - Use scientific notation for very large (>= 1e6) or very small numbers
-			// - Format like "1e+07" with explicit + sign for positive exponents
-			if v != 0.0 && (v.abs() >= 1_000_000.0 || v.abs() < 0.0001) && v.fract() == 0.0 {
-				// Format with scientific notation matching Go's style
-				let exp = v.abs().log10().floor() as i32;
-				let mantissa = v / 10_f64.powi(exp);
-				if exp >= 0 {
-					write!(buf, "{mantissa}e+{exp:02}").unwrap();
+			if v.fract() == 0.0 {
+				let int_val = v as i64;
+				if int_val.abs() >= 1_000_000 {
+					// Large integers: use scientific notation like "5.625e+06"
+					format_scientific(v, buf);
 				} else {
-					write!(buf, "{mantissa}e{exp:03}").unwrap();
+					// Small integers: write without decimal point
+					write!(buf, "{int_val}").unwrap();
 				}
-			} else if v.fract() == 0.0 {
-				// Integer: write without decimal point
-				write!(buf, "{}", v as i64).unwrap();
 			} else {
 				// Regular float
 				write!(buf, "{v}").unwrap();
@@ -298,31 +351,57 @@ fn manifest_yaml_ex_buf(
 				}
 				buf.push(':');
 
-				// For nested content (arrays/objects as values), we use the current
-				// key position (key_padding) as the base for nested content.
-				// The key_padding already includes any in_array_context offset,
-				// so we just need to add the structure-specific indentation.
+				// For nested content (arrays/objects as values), we need to account for
+				// whether this object is an array element. If so, the first field starts
+				// at cur_padding + 2 (after "- "), so nested content should be relative
+				// to that position.
+				//
+				// When in_array_context, we add +2 to account for the "- " prefix, but we
+				// DON'T add arr_element_padding for arrays - the +2 offset already provides
+				// the correct indentation. For non-array context, we DO add arr_element_padding.
+				let content_base = if in_array_context {
+					let mut base = cur_padding.clone();
+					base.push_str("  ");
+					base
+				} else {
+					cur_padding.clone()
+				};
+
 				let prev_len = cur_padding.len();
 				match &value {
 					Val::Arr(a) if !a.is_empty() => {
 						buf.push('\n');
-						buf.push_str(&key_padding);
-						buf.push_str(&options.arr_element_padding);
-						// Set cur_padding to key_padding + arr_element_padding for nested content
+						buf.push_str(&content_base);
+						// Only add arr_element_padding when NOT in array context
+						// (in array context, content_base already has the +2 offset)
+						if !in_array_context {
+							buf.push_str(&options.arr_element_padding);
+						}
+						// Set cur_padding for nested content
 						cur_padding.clear();
-						cur_padding.push_str(&key_padding);
-						cur_padding.push_str(&options.arr_element_padding);
+						cur_padding.push_str(&content_base);
+						if !in_array_context {
+							cur_padding.push_str(&options.arr_element_padding);
+						}
 					}
 					Val::Obj(o) if !o.is_empty() => {
 						buf.push('\n');
-						buf.push_str(&key_padding);
+						buf.push_str(&content_base);
 						buf.push_str(&options.padding);
-						// Set cur_padding to key_padding + padding for nested content
+						// Set cur_padding for nested content
 						cur_padding.clear();
-						cur_padding.push_str(&key_padding);
+						cur_padding.push_str(&content_base);
 						cur_padding.push_str(&options.padding);
 					}
-					_ => buf.push(' '),
+					_ => {
+						buf.push(' ');
+						// Set cur_padding for block scalar indentation in array context
+						// This ensures block scalar content is indented relative to key position
+						if in_array_context {
+							cur_padding.clear();
+							cur_padding.push_str(&content_base);
+						}
+					}
 				}
 				in_description_frame(
 					|| format!("field <{key}> manifestification"),
@@ -367,6 +446,19 @@ mod tests {
 		let options = YamlFormat::std_to_yaml(
 			false, // indent_array_in_object
 			false, // quote_keys - false to not quote keys unnecessarily
+			#[cfg(feature = "exp-preserve-order")]
+			false,
+		);
+		let mut out = String::new();
+		manifest_yaml_ex_buf(val, &mut out, &mut String::new(), &options, false).unwrap();
+		out
+	}
+
+	/// Helper to manifest with indent_array_in_object: true
+	fn manifest_yaml_indented(val: &Val) -> String {
+		let options = YamlFormat::std_to_yaml(
+			true,  // indent_array_in_object
+			false, // quote_keys
 			#[cfg(feature = "exp-preserve-order")]
 			false,
 		);
@@ -479,25 +571,26 @@ mod tests {
 	}
 
 	// ==========================================================================
-	// Tests for number formatting (scientific notation)
-	// These tests verify Go yaml.v3 compatibility for large number formatting
+	// Tests for number formatting
 	// ==========================================================================
 
 	#[test]
-	fn test_number_scientific_notation_large() {
-		// Large integers should use scientific notation to match Go's yaml.v3
+	fn test_number_large_integers() {
+		// Large integers (> 1 million) use scientific notation like "5.625e+06"
 		assert_eq!(manifest_yaml(&num(10_000_000.0)), "1e+07");
-		assert_eq!(manifest_yaml(&num(1_000_000.0)), "1e+06");
-		assert_eq!(manifest_yaml(&num(100_000_000.0)), "1e+08");
+		assert_eq!(manifest_yaml(&num(5_625_000.0)), "5.625e+06");
+		assert_eq!(manifest_yaml(&num(536_870_912.0)), "5.36870912e+08");
+		assert_eq!(manifest_yaml(&num(100_000_000_000.0)), "1e+11");
 	}
 
 	#[test]
-	fn test_number_decimal_for_smaller_values() {
-		// Smaller integers should use decimal notation
+	fn test_number_smaller_values() {
+		// Numbers <= 1 million use plain integer format
 		assert_eq!(manifest_yaml(&num(50000.0)), "50000");
 		assert_eq!(manifest_yaml(&num(999999.0)), "999999");
 		assert_eq!(manifest_yaml(&num(100.0)), "100");
 		assert_eq!(manifest_yaml(&num(0.0)), "0");
+		assert_eq!(manifest_yaml(&num(1_000_000.0)), "1e+06"); // exactly 1 million, not scientific
 	}
 
 	#[test]
@@ -510,6 +603,7 @@ mod tests {
 	#[test]
 	fn test_number_negative() {
 		assert_eq!(manifest_yaml(&num(-100.0)), "-100");
+		assert_eq!(manifest_yaml(&num(-10_000_000.0)), "-1e+07");
 	}
 
 	// ==========================================================================
@@ -561,11 +655,12 @@ mod tests {
 		let val = arr(vec![str_val("a"), str_val("b"), str_val("c")]);
 		let result = manifest_yaml(&val);
 
+		// go-jsonnet always quotes string values in manifestYamlDoc
 		let lines: Vec<&str> = result.lines().collect();
 		assert_eq!(lines.len(), 3);
-		assert_eq!(lines[0], "- a");
-		assert_eq!(lines[1], "- b");
-		assert_eq!(lines[2], "- c");
+		assert_eq!(lines[0], "- \"a\"");
+		assert_eq!(lines[1], "- \"b\"");
+		assert_eq!(lines[2], "- \"c\"");
 	}
 
 	#[test]
@@ -576,9 +671,10 @@ mod tests {
 		let val = Val::Obj(builder.build());
 		let result = manifest_yaml(&val);
 
+		// go-jsonnet always quotes string values in manifestYamlDoc
 		// Object fields are sorted alphabetically by default
-		assert!(result.contains("key1: value1"));
-		assert!(result.contains("key2: value2"));
+		assert!(result.contains("key1: \"value1\""));
+		assert!(result.contains("key2: \"value2\""));
 	}
 
 	#[test]
@@ -592,10 +688,11 @@ mod tests {
 		let val = Val::Obj(outer_builder.build());
 		let result = manifest_yaml(&val);
 
+		// go-jsonnet always quotes string values in manifestYamlDoc
 		let lines: Vec<&str> = result.lines().collect();
 		assert_eq!(lines.len(), 2);
 		assert_eq!(lines[0], "outer:");
-		assert_eq!(lines[1], "  inner: value");
+		assert_eq!(lines[1], "  inner: \"value\"");
 	}
 
 	#[test]
@@ -607,11 +704,12 @@ mod tests {
 		let val = Val::Obj(builder.build());
 		let result = manifest_yaml(&val);
 
+		// go-jsonnet always quotes string values in manifestYamlDoc
 		let lines: Vec<&str> = result.lines().collect();
 		assert_eq!(lines.len(), 3);
 		assert_eq!(lines[0], "items:");
-		assert_eq!(lines[1], "- a");
-		assert_eq!(lines[2], "- b");
+		assert_eq!(lines[1], "- \"a\"");
+		assert_eq!(lines[2], "- \"b\"");
 	}
 
 	#[test]
@@ -649,10 +747,10 @@ mod tests {
 		let val = str_val("line1\nline2");
 		let result = manifest_yaml(&val);
 
-		// Should use |- indicator for strings not ending with newline
-		assert!(result.starts_with("|-"));
-		assert!(result.contains("line1"));
-		assert!(result.contains("line2"));
+		// Go's manifestYamlDoc uses double-quoted strings with \n escapes for
+		// strings that contain newlines but don't end with a newline.
+		// Block scalar |- is only used when quote_values is false (CLI mode).
+		assert_eq!(result, "\"line1\\nline2\"");
 	}
 
 	// ==========================================================================
@@ -679,7 +777,7 @@ mod tests {
 		let val = Val::Obj(root_builder.build());
 		let result = manifest_yaml(&val);
 
-		// Check scientific notation
+		// Check large number formatting (scientific notation for > 1 million)
 		assert!(result.contains("count: 1e+07"));
 
 		// Check timestamp is quoted
@@ -687,5 +785,94 @@ mod tests {
 
 		// Check object-in-array structure (first field after "- ")
 		assert!(result.contains("- enabled: true"));
+	}
+
+	#[test]
+	fn test_array_in_array() {
+		// Nested array: [[a, b], [c, d]]
+		let val = arr(vec![
+			arr(vec![str_val("a"), str_val("b")]),
+			arr(vec![str_val("c"), str_val("d")]),
+		]);
+		let result = manifest_yaml(&val);
+
+		// Expected format (Go yaml.v3 style):
+		// -
+		//   - "a"
+		//   - "b"
+		// -
+		//   - "c"
+		//   - "d"
+		let expected = r#"-
+  - "a"
+  - "b"
+-
+  - "c"
+  - "d""#;
+		assert_eq!(result, expected, "Nested array format mismatch:\n{result}");
+	}
+
+	#[test]
+	fn test_object_in_array_with_array_value() {
+		// Object in array where object has an array field
+		// This is the "ranked_choice" pattern from the user's diff
+		let mut builder = ObjValueBuilder::new();
+		builder.field("ranked_choice").value(arr(vec![
+			str_val("k8s_namespace_name"),
+			str_val("service_namespace"),
+		]));
+		let val = arr(vec![Val::Obj(builder.build())]);
+		let result = manifest_yaml(&val);
+
+		// Expected format (Go yaml.v3 style):
+		// - ranked_choice:
+		//   - "k8s_namespace_name"
+		//   - "service_namespace"
+		let expected = r#"- ranked_choice:
+  - "k8s_namespace_name"
+  - "service_namespace""#;
+		assert_eq!(
+			result, expected,
+			"Object-in-array with array value format mismatch:\n{result}"
+		);
+	}
+
+	#[test]
+	fn test_deeply_nested_object_array_with_array_value() {
+		// Simulates the structure with indent_array_in_object: true
+		// asserts:
+		//   gated_rules:
+		//     - ranked_choice:
+		//       - k8s_namespace_name
+		//       - service_namespace
+		let mut ranked_choice_obj = ObjValueBuilder::new();
+		ranked_choice_obj.field("ranked_choice").value(arr(vec![
+			str_val("k8s_namespace_name"),
+			str_val("service_namespace"),
+		]));
+
+		let mut gated_rules_obj = ObjValueBuilder::new();
+		gated_rules_obj
+			.field("gated_rules")
+			.value(arr(vec![Val::Obj(ranked_choice_obj.build())]));
+
+		let mut asserts_obj = ObjValueBuilder::new();
+		asserts_obj
+			.field("asserts")
+			.value(Val::Obj(gated_rules_obj.build()));
+
+		let val = Val::Obj(asserts_obj.build());
+		let result = manifest_yaml_indented(&val);
+
+		// With indent_array_in_object: true, arrays are indented under their parent key
+		let expected = r#"asserts:
+  gated_rules:
+    - ranked_choice:
+      - "k8s_namespace_name"
+      - "service_namespace""#;
+		assert_eq!(
+			result, expected,
+			"Deeply nested structure format mismatch:\n{result}"
+		);
 	}
 }

@@ -1,0 +1,43 @@
+apiVersion: v1
+data:
+  plugins.yml: |
+    apiVersion: 1
+    apps:
+        - disabled: false
+          jsonData:
+            backendUrl: https://ge-logs-enterprise-logs-gateway.ge-logs.svc.cluster.local:80
+            policiesOnly: false
+            remoteWriteUrl: https://grafana.gov.grafana-dev.net/grafanalabs/logs
+          org_id: 1
+          org_name: Main Org.
+          secureJsonData:
+            accessToken: $GEL_PLUGIN_ACCESS_TOKEN
+          type: grafana-enterprise-logs-app
+        - disabled: false
+          jsonData:
+            backendUrl: https://ge-traces-tempo-enterprise-gateway.ge-traces.svc.cluster.local:3100
+            policiesOnly: false
+            remoteWriteUrl: https://grafana.gov.grafana-dev.net/grafanalabs/traces
+          org_id: 1
+          org_name: Main Org.
+          secureJsonData:
+            accessToken: $GET_PLUGIN_ACCESS_TOKEN
+          type: grafana-enterprise-traces-app
+        - disabled: false
+          jsonData:
+            backendUrl: https://ge-metrics-mimir-gateway.ge-metrics.svc.cluster.local:80
+            policiesOnly: false
+            remoteWriteUrl: https://grafana.gov.grafana-dev.net/grafanalabs/metrics
+          org_id: 1
+          org_name: Main Org.
+          secureJsonData:
+            accessToken: $GEM_PLUGIN_ACCESS_TOKEN
+          type: grafana-metrics-enterprise-app
+kind: ConfigMap
+metadata:
+  annotations:
+    my-annotation: my-value
+  labels:
+    tanka.dev/environment: 9c16e63ab7c3331e498a406bf3dfa6f130b20fbe34d8d09d
+  name: ge-grafana-plugins-config
+  namespace: ge-grafana

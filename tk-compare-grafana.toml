@@ -131,7 +131,7 @@ dir_compare = true
 
 [[commands]]
 name = "export: cd environments (tk runs jrsonnet)"
-args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/mimir-ops-03", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cd-envs", "environments/loki-cd", "environments/mimir-cd", "environments/tempo-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
 dir_compare = true
 

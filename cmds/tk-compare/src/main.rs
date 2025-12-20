@@ -58,7 +58,7 @@ struct Cli {
 	/// Path to the config file
 	config: String,
 
-	/// Keep workspace directory after tests complete
+	/// Keep workspace directory after tests complete (also settable via KEEP_WORKSPACE=true)
 	#[arg(long)]
 	keep_workspace: bool,
 }
@@ -469,8 +469,10 @@ fn main() -> Result<()> {
 	// Generate GitHub comment
 	report::generate_github_comment(&reports, &config.tk_exec_1_name, &config.tk_exec_2_name);
 
-	// Clean up workspace unless --keep-workspace is specified
-	if !cli.keep_workspace {
+	// Clean up workspace unless --keep-workspace is specified or KEEP_WORKSPACE=true
+	let keep_workspace =
+		cli.keep_workspace || std::env::var("KEEP_WORKSPACE").unwrap_or_default() == "true";
+	if !keep_workspace {
 		if std::path::Path::new(".tk-compare-workspace").exists() {
 			std::fs::remove_dir_all(".tk-compare-workspace")?;
 		}
