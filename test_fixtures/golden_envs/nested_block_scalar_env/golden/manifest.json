@@ -5,5 +5,6 @@
     "mimir-cd/patch-test-patch.golden": "main.jsonnet",
     "mimir-ops-03/ingester-zone-a.golden": "main.jsonnet",
     "mimir-ops-03/k8s-monitoring-static-usages.golden": "main.jsonnet",
+    "mimir-ops-03/overrides.golden": "main.jsonnet",
     "tempo-cd/tempo-create-deployment-thursday-prod.golden": "main.jsonnet"
 }

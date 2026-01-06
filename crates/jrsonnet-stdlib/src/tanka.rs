@@ -279,15 +279,17 @@ pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
 
 	// Use serde-saphyr with Go yaml.v3 compatible settings
 	// This matches tk's manifestYamlFromJson which uses go-yaml v3
+	// Go yaml.v3's yaml.Marshal() defaults to best_width = 2^31-1 (no wrapping)
 	let options = serde_saphyr::SerializerOptions {
-		indent_step: 4,        // go-yaml v3 uses 4-space indentation
-		indent_array: Some(4), // arrays also use 4-space indentation
+		indent_step: 4,     // go-yaml v3 uses 4-space indentation
+		indent_array: None, // use indent_step for arrays too
 		prefer_block_scalars: true,
 		empty_map_as_braces: true,
 		empty_array_as_brackets: true,
-		line_width: Some(80),
-		use_scientific_notation: true,
-		quote_numeric_strings: true, // Quote numeric string keys like "12345"
+		block_scalar_indent_in_seq: Some(2), // 2 spaces absolute for block scalar body in arrays
+		line_width: None,                    // go-yaml v3's Marshal() doesn't wrap lines by default
+		scientific_notation_threshold: Some(1000000), // 1 million
+		quote_numeric_strings: true,         // Quote numeric string keys like "12345"
 		..Default::default()
 	};
 	let mut output = String::new();

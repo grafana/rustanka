@@ -171,6 +171,7 @@ local queriesData = [
       'yaml-list-empty-lines.yaml': yamlListWithEmptyLines,
       roundtrip: std.manifestYamlDoc(std.parseYaml(std.parseYaml(importstr 'ConfigMap-k8s-monitoring-static-usages.yaml').data['queries.yaml'])),
       manifest_yaml_from_json: std.native('manifestYamlFromJson')(std.manifestJson(std.parseYaml(std.parseYaml(importstr 'ConfigMap-parallel-read-path-overrides.yaml').data['overrides.yaml']))),
+      manifest_yaml_from_json_k8s_static_usages: std.native('manifestYamlFromJson')(std.manifestJson(std.parseYaml(std.parseYaml(importstr 'ConfigMap-k8s-monitoring-static-usages.yaml').data['queries.yaml']))),
     },
   },
   scaledobject: std.parseYaml(importstr 'ScaledObject-ingester-zone-a.yaml'),
@@ -179,4 +180,5 @@ local queriesData = [
   workflow_patch_test_patch: std.parseYaml(importstr 'Workflow-patch-test-patch.yaml'),
   ge_grafana_plugins_config: std.parseYaml(importstr 'ConfigMap-ge-grafana-plugins-config.yaml'),
   parallel_read_path_overrides: std.parseYaml(importstr 'ConfigMap-parallel-read-path-overrides.yaml'),
+  overrides_configmap: std.parseYaml(importstr 'ConfigMap-overrides.yaml'),
 }

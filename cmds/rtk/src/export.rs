@@ -758,7 +758,7 @@ fn export_single_env(
 						empty_map_as_braces: true,
 						empty_array_as_brackets: true,
 						line_width: Some(80),
-						use_scientific_notation: true,
+						scientific_notation_threshold: Some(1000000), // 1 million
 						..Default::default()
 					};
 					let mut output = String::new();
