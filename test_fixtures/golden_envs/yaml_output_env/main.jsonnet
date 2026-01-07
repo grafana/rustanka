@@ -39,6 +39,14 @@ local nestedYamlData = {
         partition: '$5',
         topic: '$4',
       },
+      nested_again: [
+        {
+          hello: 'world',
+        },
+        {
+          hello: 'world',
+        },
+      ],
       name: 'test_rule_1',
       // String with angle brackets and colon - tk quotes, rtk doesn't
       pattern: 'server<type=metrics, listener=(.+), processor=(.+)><>(.+):',
@@ -173,7 +181,9 @@ local htmlContent = |||
       namespace: 'default',
     },
     data: {
-      'rules.yml': std.manifestYamlDoc(nestedYamlData),
+      'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
+      'rules.yml.quoted': std.manifestYamlDoc(nestedYamlData, quote_keys=true),
+      'rules.yml.quoted.indented': std.manifestYamlDoc(nestedYamlData, quote_keys=true, indent_array_in_object=true),
     },
   },
   // Test nested YAML indentation in literal block strings

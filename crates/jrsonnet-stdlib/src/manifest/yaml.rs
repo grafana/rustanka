@@ -371,18 +371,14 @@ fn manifest_yaml_ex_buf(
 				match &value {
 					Val::Arr(a) if !a.is_empty() => {
 						buf.push('\n');
+						// For arrays in object fields, use content_base (which includes the
+						// in_array_context alignment) plus arr_element_padding.
 						buf.push_str(&content_base);
-						// Only add arr_element_padding when NOT in array context
-						// (in array context, content_base already has the +2 offset)
-						if !in_array_context {
-							buf.push_str(&options.arr_element_padding);
-						}
+						buf.push_str(&options.arr_element_padding);
 						// Set cur_padding for nested content
 						cur_padding.clear();
 						cur_padding.push_str(&content_base);
-						if !in_array_context {
-							cur_padding.push_str(&options.arr_element_padding);
-						}
+						cur_padding.push_str(&options.arr_element_padding);
 					}
 					Val::Obj(o) if !o.is_empty() => {
 						buf.push('\n');
@@ -865,11 +861,12 @@ mod tests {
 		let result = manifest_yaml_indented(&val);
 
 		// With indent_array_in_object: true, arrays are indented under their parent key
+		// Arrays inside objects get content_base (alignment after "- ") + arr_element_padding
 		let expected = r#"asserts:
   gated_rules:
     - ranked_choice:
-      - "k8s_namespace_name"
-      - "service_namespace""#;
+        - "k8s_namespace_name"
+        - "service_namespace""#;
 		assert_eq!(
 			result, expected,
 			"Deeply nested structure format mismatch:\n{result}"

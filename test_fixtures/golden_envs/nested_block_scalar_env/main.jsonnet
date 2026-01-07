@@ -143,6 +143,12 @@ local queriesData = [
       namespace: 'default',
     },
     data: {
+      'customdata.yaml': [
+        {
+          ['float-%s' % i]: 'test=%s' % (0.1 + 0.1 * i),
+        }
+        for i in std.range(0, 1000)
+      ],
       // This YAML string contains block scalars (|-) for the multi-line queries
       // When the outer ConfigMap is serialized to YAML, the inner block scalar
       // indentation affects the raw string value stored in queries.yaml
@@ -172,6 +178,22 @@ local queriesData = [
       roundtrip: std.manifestYamlDoc(std.parseYaml(std.parseYaml(importstr 'ConfigMap-k8s-monitoring-static-usages.yaml').data['queries.yaml'])),
       manifest_yaml_from_json: std.native('manifestYamlFromJson')(std.manifestJson(std.parseYaml(std.parseYaml(importstr 'ConfigMap-parallel-read-path-overrides.yaml').data['overrides.yaml']))),
       manifest_yaml_from_json_k8s_static_usages: std.native('manifestYamlFromJson')(std.manifestJson(std.parseYaml(std.parseYaml(importstr 'ConfigMap-k8s-monitoring-static-usages.yaml').data['queries.yaml']))),
+      manifest_yaml_automation_prometheus_mimir_mixin: std.native('manifestYamlFromJson')(std.toString({
+        objs: [{
+          array: [
+            {
+              hello: |||
+                my mu
+                lti
+                line
+                string
+              |||,
+              otherattr: 'infinity',
+              record: 'namespace_user:cortex_ingester_owned_target_info_series:sum_filtered_max_over_time_1d',
+            },
+          ],
+        }],
+      })),
     },
   },
   scaledobject: std.parseYaml(importstr 'ScaledObject-ingester-zone-a.yaml'),
@@ -181,4 +203,5 @@ local queriesData = [
   ge_grafana_plugins_config: std.parseYaml(importstr 'ConfigMap-ge-grafana-plugins-config.yaml'),
   parallel_read_path_overrides: std.parseYaml(importstr 'ConfigMap-parallel-read-path-overrides.yaml'),
   overrides_configmap: std.parseYaml(importstr 'ConfigMap-overrides.yaml'),
+  mimir_emojis: std.parseYaml(importstr 'ConfigMap-emojis.yaml'),
 }

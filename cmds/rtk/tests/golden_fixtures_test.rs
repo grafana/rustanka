@@ -97,13 +97,22 @@ fn run_golden_test(fixture_name: &str, format: &str) {
 		if golden_content != output_content {
 			let diff = TextDiff::from_lines(golden_content, output_content);
 			let mut diff_output = String::new();
-			for change in diff.iter_all_changes() {
-				let sign = match change.tag() {
-					ChangeTag::Delete => "-",
-					ChangeTag::Insert => "+",
-					ChangeTag::Equal => " ",
-				};
-				diff_output.push_str(&format!("{}{}", sign, change));
+			// Only show changed lines with line numbers
+			for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
+				if idx > 0 {
+					diff_output.push_str("...\n");
+				}
+				for op in group {
+					for change in diff.iter_changes(op) {
+						let (sign, line_num) = match change.tag() {
+							ChangeTag::Delete => ("-", change.old_index().map(|i| i + 1)),
+							ChangeTag::Insert => ("+", change.new_index().map(|i| i + 1)),
+							ChangeTag::Equal => continue, // Skip unchanged lines
+						};
+						let line_str = line_num.map(|n| format!("{:>5}", n)).unwrap_or_default();
+						diff_output.push_str(&format!("{} {}| {}", sign, line_str, change));
+					}
+				}
 			}
 			all_failures.push(format!(
 				"=== {} ===\n--- golden (expected)\n+++ output (actual)\n\n{}",

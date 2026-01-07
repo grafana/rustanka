@@ -750,7 +750,7 @@ fn export_single_env(
 					// Sort all object keys to match Go's yaml.v3 output order
 					let sorted_manifest = sort_json_keys(manifest);
 
-					// Use serializer options to match Go's yaml.v3 output
+					// Use serializer options to match Go's yaml.v2 output
 					let options = serde_saphyr::SerializerOptions {
 						indent_step: 2,
 						indent_array: Some(0),

@@ -8,6 +8,9 @@ data:
             partition: $5
             topic: $4
           name: test_rule_1
+          nested_again:
+            - hello: world
+            - hello: world
           pattern: 'server<type=metrics, listener=(.+), processor=(.+)><>(.+):'
 kind: ConfigMap
 metadata:

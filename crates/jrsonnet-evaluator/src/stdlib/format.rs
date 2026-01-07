@@ -505,7 +505,68 @@ pub fn format_code(
 	let mut tmp_out = String::new();
 
 	match code.convtype {
-		ConvTypeV::String => tmp_out.push_str(&value.clone().to_string()?),
+		ConvTypeV::String => {
+			// For numbers, match Go's unparseNumber behavior from go-jsonnet:
+			// if v == math.Floor(v) { return fmt.Sprintf("%.0f", v) }
+			// return fmt.Sprintf("%.17g", v)
+			if let Some(n) = value.as_num() {
+				// Check if it's an integer (no fractional part)
+				if n.fract() == 0.0 && n.abs() < 1e15 {
+					// Format as integer without decimal point
+					tmp_out.push_str(&format!("{:.0}", n));
+				} else {
+					// Use %.17g equivalent - 17 significant digits with 'g' format
+					// Rust's {:.16e} gives 17 significant digits (1 before + 16 after decimal)
+					let formatted = format!("{:.16e}", n);
+					// Parse scientific notation and convert to shortest form
+					if let Some((mantissa, exp)) = formatted.split_once('e') {
+						let exp: i32 = exp.parse().unwrap_or(0);
+						// Remove the decimal point and trim trailing zeros
+						let digits: String = mantissa.replace('.', "");
+						let digits = digits.trim_end_matches('0');
+						// If all digits were zeros (shouldn't happen), keep at least "0"
+						let digits = if digits.is_empty() { "0" } else { digits };
+						// Convert to 'g' style output
+						if exp >= -4 && exp < 17 {
+							// Use fixed point notation
+							let decimal_pos = 1 + exp; // Position of decimal after first digit
+							if decimal_pos <= 0 {
+								// Need leading zeros: 0.00123
+								let zeros = (-decimal_pos) as usize;
+								tmp_out.push_str("0.");
+								for _ in 0..zeros {
+									tmp_out.push('0');
+								}
+								tmp_out.push_str(&digits);
+							} else if decimal_pos as usize >= digits.len() {
+								// Integer (shouldn't happen due to fract check)
+								tmp_out.push_str(&digits);
+							} else {
+								// Normal decimal: 12.345
+								let (int_part, frac_part) = digits.split_at(decimal_pos as usize);
+								tmp_out.push_str(int_part);
+								if !frac_part.is_empty() {
+									tmp_out.push('.');
+									tmp_out.push_str(frac_part);
+								}
+							}
+						} else {
+							// Use scientific notation - rebuild mantissa from digits
+							let sci_mantissa = if digits.len() == 1 {
+								digits.to_string()
+							} else {
+								format!("{}.{}", &digits[..1], &digits[1..])
+							};
+							tmp_out.push_str(&format!("{}e{:+}", sci_mantissa, exp));
+						}
+					} else {
+						tmp_out.push_str(&formatted);
+					}
+				}
+			} else {
+				tmp_out.push_str(&value.clone().to_string()?);
+			}
+		}
 		ConvTypeV::Decimal => {
 			let value = f64::from_untyped(value.clone())?;
 			render_decimal(
