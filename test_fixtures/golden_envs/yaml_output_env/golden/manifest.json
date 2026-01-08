@@ -2,9 +2,12 @@
     "default/alerting-rules-unquoted.golden": "main.jsonnet",
     "default/alerting-rules.golden": "main.jsonnet",
     "default/app-config.golden": "main.jsonnet",
+    "default/envoy-config.golden": "main.jsonnet",
     "default/html-content.golden": "main.jsonnet",
     "default/nested-yaml-config.golden": "main.jsonnet",
     "default/nested-yaml-manifest-yaml-from-json-config.golden": "main.jsonnet",
+    "default/overrides.golden": "main.jsonnet",
+    "default/remove-flux-ignores-before-rollout.golden": "main.jsonnet",
     "default/test-deployment.golden": "main.jsonnet",
     "default/test-scaled.golden": "main.jsonnet",
     "default/wildcard-test.golden": "main.jsonnet"

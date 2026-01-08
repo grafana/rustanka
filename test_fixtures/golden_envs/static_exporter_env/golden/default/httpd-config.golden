@@ -1,5 +1,8 @@
 apiVersion: v1
 data:
+  HELLO_WORLD: hello
+  HELLOAWORLD: hello
+  grafanacloud_usage_group/spanmetrics_service_unknown_service:java: hello
   httpd.conf: "#\n# This is the main Apache HTTP server configuration file.  It contains
     the\n# configuration directives that give the server its instructions.\n# See
     <URL:http://httpd.apache.org/docs/2.4/> for detailed information.\n# In particular,
@@ -245,6 +248,9 @@ data:
     \      starting without SSL on platforms with no /dev/random equivalent\n#       but
     a statically compiled-in mod_ssl.\n#\n<IfModule ssl_module>\nSSLRandomSeed startup
     builtin\nSSLRandomSeed connect builtin\n</IfModule>\n\n"
+data2:
+  HELLO_WORLD: hello
+  HELLOAWORLD: hello
 kind: ConfigMap
 metadata:
   name: httpd-config

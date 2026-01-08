@@ -63,6 +63,9 @@ local configData = {
   features: {
     enableCache: true,
     float: 8.1,
+    // Test large float formatting: tk uses scientific notation for large numbers,
+    // rtk may not. 3333333.333333333 vs 3.333333333333333e+06
+    max_series: 10000000 / 3,
   },
   servers: [
     {
@@ -108,6 +111,27 @@ local configData = {
       ip: '10.0.0.2',
     },
   ],
+};
+
+// Test for @-prefixed keys quote style: tk uses single quotes '@type':, rtk uses double quotes "@type":
+// This is common in Envoy configuration
+local envoyConfig = {
+  static_resources: {
+    listeners: [{
+      filter_chains: [{
+        filters: [{
+          typed_config: {
+            '@type': 'type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager',
+            http_filters: [{
+              typed_config: {
+                '@type': 'type.googleapis.com/envoy.extensions.filters.http.router.v3.Router',
+              },
+            }],
+          },
+        }],
+      }],
+    }],
+  },
 };
 
 // Multi-line HTML content for testing string style (inline quoted with \n vs literal block)
@@ -222,6 +246,70 @@ local htmlContent = |||
     },
     data: {
       'index.html': htmlContent,
+    },
+  },
+  // Test @-prefixed keys quote style: tk uses single quotes, rtk uses double quotes
+  'envoy-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'envoy-config',
+      namespace: 'default',
+    },
+    data: {
+      'envoy.yaml': std.native('manifestYamlFromJson')(std.manifestJson(envoyConfig)),
+    },
+  },
+  // Test long string line wrapping in array context
+  // tk wraps long strings like "--reason=Removing Flux ignores before scheduled rollout of this cell"
+  // to multiple lines, rtk may not wrap the same way
+  // Test large float scientific notation: tk uses 3.333333333333333e+06, rtk uses 3333333.333333333
+  // This tests the outer YAML serializer (Tanka's manifestYamlFromJson path)
+  'overrides-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'overrides',
+      namespace: 'default',
+    },
+    data: {
+      // Uses manifestYamlFromJson (Tanka's YAML path with scientific notation threshold)
+      'overrides.yaml': std.native('manifestYamlFromJson')(std.manifestJson({
+        tenant_limits: {
+          max_series: 10000000 / 3,  // ~3.33 million - above threshold
+          max_samples: 1500000,  // 1.5 million - above threshold
+          small_value: 999999,  // below 1 million threshold
+        },
+      })),
+    },
+  },
+  cronjob: {
+    apiVersion: 'batch/v1',
+    kind: 'CronJob',
+    metadata: {
+      name: 'remove-flux-ignores-before-rollout',
+      namespace: 'default',
+    },
+    spec: {
+      schedule: '0 9 * * 1-5',
+      jobTemplate: {
+        spec: {
+          template: {
+            spec: {
+              containers: [{
+                name: 'kubectl',
+                image: 'bitnami/kubectl:1.25',
+                args: [
+                  // This long string triggers different wrapping behavior between tk and rtk
+                  '--reason=Removing Flux ignores before scheduled rollout of this cell',
+                  '--namespace=mimir-ops-03',
+                  '--selector=app.kubernetes.io/name=mimir',
+                ],
+              }],
+            },
+          },
+        },
+      },
     },
   },
   // Test long string wrapping and continuation line indentation

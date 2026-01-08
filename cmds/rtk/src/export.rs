@@ -702,6 +702,10 @@ fn export_single_env(
 				// Inject resourceDefaults annotations if present (matching Tanka's behavior)
 				inject_resource_defaults(&mut manifest, &env_data.spec);
 
+				// Strip null values from metadata.annotations and metadata.labels
+				// (standard Kubernetes YAML behavior - null fields should be omitted)
+				strip_null_metadata_fields(&mut manifest);
+
 				let rendered_filename = render_filename_simple(&tmpl, &manifest, &env_data.spec)
 					.map_err(|e| {
 						// Template errors after validation are fatal (something very wrong)
@@ -750,7 +754,7 @@ fn export_single_env(
 					// Sort all object keys to match Go's yaml.v3 output order
 					let sorted_manifest = sort_json_keys(manifest);
 
-					// Use serializer options to match Go's yaml.v2 output
+					// Use serializer options to match Go's yaml.v3 output (used by tk)
 					let options = serde_saphyr::SerializerOptions {
 						indent_step: 2,
 						indent_array: Some(0),
@@ -1159,17 +1163,20 @@ fn generate_environment_label(env: &crate::spec::Environment) -> String {
 }
 
 /// Sort all JSON object keys recursively to match Go's yaml.v3 output order
-/// Go's yaml.v3 sorts map keys lexicographically when serializing
+/// Go's yaml.v3 uses a "natural sort" algorithm (see sorter.go in gopkg.in/yaml.v3)
 fn sort_json_keys(value: JsonValue) -> JsonValue {
 	match value {
 		JsonValue::Object(map) => {
-			// Convert to BTreeMap which maintains sorted order
-			let mut sorted: BTreeMap<String, JsonValue> = BTreeMap::new();
-			for (key, val) in map {
-				sorted.insert(key, sort_json_keys(val));
-			}
-			// Convert back to serde_json::Value with sorted keys
-			JsonValue::Object(sorted.into_iter().collect())
+			// Collect and sort keys using go-yaml v3's natural sort algorithm
+			let mut entries: Vec<(String, JsonValue)> = map.into_iter().collect();
+			entries.sort_by(|(a, _), (b, _)| yaml_v3_key_compare(a, b));
+
+			// Rebuild with sorted keys, recursively sorting nested values
+			let sorted: serde_json::Map<String, JsonValue> = entries
+				.into_iter()
+				.map(|(k, v)| (k, sort_json_keys(v)))
+				.collect();
+			JsonValue::Object(sorted)
 		}
 		JsonValue::Array(arr) => {
 			// Recursively sort keys in array elements
@@ -1178,6 +1185,92 @@ fn sort_json_keys(value: JsonValue) -> JsonValue {
 		// Primitive values remain unchanged
 		other => other,
 	}
+}
+
+/// Implements go-yaml v3's key comparison algorithm (from sorter.go)
+/// This is a "natural sort" where:
+/// - Numbers are sorted numerically
+/// - Letters are sorted before non-letters when transitioning from digits
+/// - Non-letters (like '_') are sorted before letters when not in digit context
+fn yaml_v3_key_compare(a: &str, b: &str) -> std::cmp::Ordering {
+	let ar: Vec<char> = a.chars().collect();
+	let br: Vec<char> = b.chars().collect();
+	let mut digits = false;
+
+	let min_len = ar.len().min(br.len());
+	for i in 0..min_len {
+		if ar[i] == br[i] {
+			digits = ar[i].is_ascii_digit();
+			continue;
+		}
+
+		let al = ar[i].is_alphabetic();
+		let bl = br[i].is_alphabetic();
+
+		if al && bl {
+			return ar[i].cmp(&br[i]);
+		}
+
+		if al || bl {
+			// One is a letter, one is not
+			if digits {
+				// After digits: letters come first
+				return if al {
+					std::cmp::Ordering::Less
+				} else {
+					std::cmp::Ordering::Greater
+				};
+			} else {
+				// Not after digits: non-letters come first
+				return if bl {
+					std::cmp::Ordering::Less
+				} else {
+					std::cmp::Ordering::Greater
+				};
+			}
+		}
+
+		// Both are non-letters - check for numeric sequences
+		// Handle leading zeros
+		let mut an: i64 = 0;
+		let mut bn: i64 = 0;
+
+		if ar[i] == '0' || br[i] == '0' {
+			// Check if previous chars were non-zero digits
+			let mut j = i;
+			while j > 0 && ar[j - 1].is_ascii_digit() {
+				j -= 1;
+				if ar[j] != '0' {
+					an = 1;
+					bn = 1;
+					break;
+				}
+			}
+		}
+
+		// Parse numeric sequences
+		let mut ai = i;
+		while ai < ar.len() && ar[ai].is_ascii_digit() {
+			an = an * 10 + (ar[ai] as i64 - '0' as i64);
+			ai += 1;
+		}
+
+		let mut bi = i;
+		while bi < br.len() && br[bi].is_ascii_digit() {
+			bn = bn * 10 + (br[bi] as i64 - '0' as i64);
+			bi += 1;
+		}
+
+		if an != bn {
+			return an.cmp(&bn);
+		}
+		if ai != bi {
+			return ai.cmp(&bi);
+		}
+		return ar[i].cmp(&br[i]);
+	}
+
+	ar.len().cmp(&br.len())
 }
 
 /// Inject resourceDefaults (annotations, labels, etc.) into manifest metadata
@@ -1245,6 +1338,23 @@ fn inject_resource_defaults(manifest: &mut JsonValue, env_spec: &Option<crate::s
 						}
 					}
 				}
+			}
+		}
+	}
+}
+
+/// Strip null values from metadata.annotations and metadata.labels
+/// This matches Tanka/Kubernetes behavior where null fields are omitted from output
+fn strip_null_metadata_fields(manifest: &mut JsonValue) {
+	if let JsonValue::Object(ref mut obj) = manifest {
+		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
+			// Remove annotations if it's null
+			if matches!(metadata.get("annotations"), Some(JsonValue::Null)) {
+				metadata.remove("annotations");
+			}
+			// Remove labels if it's null
+			if matches!(metadata.get("labels"), Some(JsonValue::Null)) {
+				metadata.remove("labels");
 			}
 		}
 	}

@@ -99,8 +99,12 @@ fn generate_manifest_key_from_val(val: &Val, name_format: Option<&str>) -> Resul
 /// Parse YAML output from helm into a Val object
 fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Result<Val> {
 	use jrsonnet_evaluator::ObjValueBuilder;
+	use serde_yaml::DeserializingQuirks;
 	let mut builder = ObjValueBuilder::new();
-	let deserializer = serde_yaml::Deserializer::from_str(yaml_content);
+	let deserializer = serde_yaml::Deserializer::from_str_with_quirks(
+		yaml_content,
+		DeserializingQuirks { old_octals: true },
+	);
 	let mut seen_keys = HashMap::new();
 
 	for document in deserializer {
@@ -203,8 +207,12 @@ pub fn builtin_tanka_parse_json(json: String) -> Result<Val> {
 /// Parses a YAML string (potentially multiple documents) into an array of values
 #[builtin]
 pub fn builtin_tanka_parse_yaml(yaml: String) -> Result<Val> {
+	use serde_yaml::DeserializingQuirks;
 	let mut ret = Vec::new();
-	let deserializer = serde_yaml::Deserializer::from_str(&yaml);
+	let deserializer = serde_yaml::Deserializer::from_str_with_quirks(
+		&yaml,
+		DeserializingQuirks { old_octals: true },
+	);
 
 	for document in deserializer {
 		let val: Val = Val::deserialize(document)
@@ -235,29 +243,20 @@ pub fn builtin_tanka_manifest_json_from_json(json: String, indent: usize) -> Res
 		.map_err(|e| RuntimeError(format!("failed to convert to utf8: {e}").into()).into())
 }
 
-/// Recursively sort JSON object keys numerically (treating numeric strings as numbers)
-/// This matches Go yaml.v3 behavior where numeric string keys are sorted numerically
+/// Recursively sort JSON object keys using go-yaml v3's natural sort algorithm
+/// This matches Go yaml.v3 behavior from sorter.go
 fn sort_json_keys_numerically(value: serde_json::Value) -> serde_json::Value {
 	match value {
 		serde_json::Value::Object(map) => {
-			// Collect keys and sort them numerically
-			let mut keys: Vec<String> = map.keys().cloned().collect();
-			keys.sort_by(|a, b| {
-				let a_numeric = a.parse::<u64>().ok();
-				let b_numeric = b.parse::<u64>().ok();
-				match (a_numeric, b_numeric) {
-					(Some(a_num), Some(b_num)) => a_num.cmp(&b_num),
-					_ => a.cmp(b),
-				}
-			});
+			// Collect and sort using go-yaml v3's natural sort
+			let mut entries: Vec<(String, serde_json::Value)> = map.into_iter().collect();
+			entries.sort_by(|(a, _), (b, _)| yaml_v3_key_compare(a, b));
 
 			// Rebuild the map with sorted keys
-			let mut sorted = serde_json::Map::new();
-			for key in keys {
-				if let Some(val) = map.get(&key) {
-					sorted.insert(key, sort_json_keys_numerically(val.clone()));
-				}
-			}
+			let sorted: serde_json::Map<String, serde_json::Value> = entries
+				.into_iter()
+				.map(|(k, v)| (k, sort_json_keys_numerically(v)))
+				.collect();
 			serde_json::Value::Object(sorted)
 		}
 		serde_json::Value::Array(arr) => {
@@ -265,6 +264,92 @@ fn sort_json_keys_numerically(value: serde_json::Value) -> serde_json::Value {
 		}
 		other => other,
 	}
+}
+
+/// Implements go-yaml v3's key comparison algorithm (from sorter.go)
+/// This is a "natural sort" where:
+/// - Numbers are sorted numerically
+/// - Letters are sorted before non-letters when transitioning from digits
+/// - Non-letters (like '_') are sorted before letters when not in digit context
+fn yaml_v3_key_compare(a: &str, b: &str) -> std::cmp::Ordering {
+	let ar: Vec<char> = a.chars().collect();
+	let br: Vec<char> = b.chars().collect();
+	let mut digits = false;
+
+	let min_len = ar.len().min(br.len());
+	for i in 0..min_len {
+		if ar[i] == br[i] {
+			digits = ar[i].is_ascii_digit();
+			continue;
+		}
+
+		let al = ar[i].is_alphabetic();
+		let bl = br[i].is_alphabetic();
+
+		if al && bl {
+			return ar[i].cmp(&br[i]);
+		}
+
+		if al || bl {
+			// One is a letter, one is not
+			if digits {
+				// After digits: letters come first
+				return if al {
+					std::cmp::Ordering::Less
+				} else {
+					std::cmp::Ordering::Greater
+				};
+			} else {
+				// Not after digits: non-letters come first
+				return if bl {
+					std::cmp::Ordering::Less
+				} else {
+					std::cmp::Ordering::Greater
+				};
+			}
+		}
+
+		// Both are non-letters - check for numeric sequences
+		// Handle leading zeros
+		let mut an: i64 = 0;
+		let mut bn: i64 = 0;
+
+		if ar[i] == '0' || br[i] == '0' {
+			// Check if previous chars were non-zero digits
+			let mut j = i;
+			while j > 0 && ar[j - 1].is_ascii_digit() {
+				j -= 1;
+				if ar[j] != '0' {
+					an = 1;
+					bn = 1;
+					break;
+				}
+			}
+		}
+
+		// Parse numeric sequences
+		let mut ai = i;
+		while ai < ar.len() && ar[ai].is_ascii_digit() {
+			an = an * 10 + (ar[ai] as i64 - '0' as i64);
+			ai += 1;
+		}
+
+		let mut bi = i;
+		while bi < br.len() && br[bi].is_ascii_digit() {
+			bn = bn * 10 + (br[bi] as i64 - '0' as i64);
+			bi += 1;
+		}
+
+		if an != bn {
+			return an.cmp(&bn);
+		}
+		if ai != bi {
+			return ai.cmp(&bi);
+		}
+		return ar[i].cmp(&br[i]);
+	}
+
+	ar.len().cmp(&br.len())
 }
 
 /// Tanka-compatible manifestYamlFromJson
@@ -750,4 +835,31 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 	}
 
 	Ok(Val::Obj(builder.build()))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_yaml_octal_parsing() {
+		// YAML 1.1 treats 0755 as octal, which should be 493 in decimal
+		let yaml = "myval: 0755";
+		let result = builtin_tanka_parse_yaml(yaml.to_string()).unwrap();
+		if let Val::Arr(arr) = result {
+			let val = arr.get(0).unwrap().unwrap();
+			if let Val::Obj(obj) = val {
+				let myval = obj.get("myval".into()).unwrap().unwrap();
+				if let Val::Num(n) = myval {
+					assert_eq!(n.get(), 493.0);
+				} else {
+					panic!("Expected number, got {:?}", myval);
+				}
+			} else {
+				panic!("Expected object");
+			}
+		} else {
+			panic!("Expected array");
+		}
+	}
 }
