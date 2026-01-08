@@ -2,6 +2,50 @@ use std::{borrow::Cow, fmt::Write, ptr};
 
 use crate::{bail, in_description_frame, Result, ResultExt, Val};
 
+/// Format a float like Go's %.17g format
+/// This matches go-jsonnet's unparseNumber function for non-integer values
+fn format_float_go_g17(v: f64) -> String {
+	// Go's %.17g format:
+	// - Uses 17 significant digits maximum
+	// - Chooses %e or %f based on exponent (uses %e if exp < -4 or exp >= precision)
+	// - Trims trailing zeros and unnecessary decimal point
+	// - Uses 2-digit exponent padding (e-05 not e-5)
+
+	// Get the exponent to decide format
+	let exp = if v == 0.0 {
+		0
+	} else {
+		v.abs().log10().floor() as i32
+	};
+
+	if exp < -4 || exp >= 17 {
+		// Use scientific notation like %e
+		let formatted = format!("{:.16e}", v);
+		// Parse and clean up: "3.1415926535897930e0" -> "3.141592653589793e0"
+		if let Some((mantissa, exp_str)) = formatted.split_once('e') {
+			let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+			let exp_val: i32 = exp_str.parse().unwrap_or(0);
+			if exp_val == 0 {
+				mantissa.to_string()
+			} else {
+				// Go uses 2-digit minimum exponent: e-05 not e-5
+				format!("{}e{:+03}", mantissa, exp_val)
+			}
+		} else {
+			formatted
+		}
+	} else {
+		// Use decimal notation like %f but with 17 significant digits
+		// Calculate digits after decimal point needed for 17 sig figs
+		let digits_after_decimal = (16 - exp).max(0) as usize;
+		let formatted = format!("{:.prec$}", v, prec = digits_after_decimal);
+		// Trim trailing zeros but keep at least one digit after decimal if there was one
+		let trimmed = formatted.trim_end_matches('0');
+		let trimmed = trimmed.trim_end_matches('.');
+		trimmed.to_string()
+	}
+}
+
 pub trait ManifestFormat {
 	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()>;
 	fn manifest(&self, val: Val) -> Result<String> {
@@ -210,7 +254,25 @@ fn manifest_json_ex_buf(
 				escape_string_json_buf(&flat, buf);
 			}
 		}
-		Val::Num(n) => write!(buf, "{n}").unwrap(),
+		Val::Num(n) => {
+			let v = n.get();
+			match mtype {
+				// std.toString uses Go's unparseNumber: %.0f for integers, %.17g for floats
+				// This is critical for config_hash compatibility (std.md5(std.toString(...)))
+				ToString => {
+					if v == v.floor() {
+						write!(buf, "{:.0}", v).unwrap();
+					} else {
+						buf.push_str(&format_float_go_g17(v));
+					}
+				}
+				// std.manifestJson uses strconv.FormatFloat('f', -1) - shortest decimal
+				// Rust's default Display is similar (uses ryu algorithm)
+				Manifest | Std | Minify => {
+					write!(buf, "{}", v).unwrap();
+				}
+			}
+		}
 		#[cfg(feature = "exp-bigint")]
 		Val::BigInt(n) => {
 			if options.preserve_bigints {

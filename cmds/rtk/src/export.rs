@@ -1343,17 +1343,26 @@ fn inject_resource_defaults(manifest: &mut JsonValue, env_spec: &Option<crate::s
 	}
 }
 
-/// Strip null values from metadata.annotations and metadata.labels
-/// This matches Tanka/Kubernetes behavior where null fields are omitted from output
+/// Check if a JSON value is null or an empty object
+fn is_null_or_empty_object(value: Option<&JsonValue>) -> bool {
+	match value {
+		Some(JsonValue::Null) => true,
+		Some(JsonValue::Object(m)) if m.is_empty() => true,
+		_ => false,
+	}
+}
+
+/// Strip null or empty values from metadata.annotations and metadata.labels
+/// This matches Tanka/Kubernetes behavior where null and empty fields are omitted from output
 fn strip_null_metadata_fields(manifest: &mut JsonValue) {
 	if let JsonValue::Object(ref mut obj) = manifest {
 		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
-			// Remove annotations if it's null
-			if matches!(metadata.get("annotations"), Some(JsonValue::Null)) {
+			// Remove annotations if it's null or empty
+			if is_null_or_empty_object(metadata.get("annotations")) {
 				metadata.remove("annotations");
 			}
-			// Remove labels if it's null
-			if matches!(metadata.get("labels"), Some(JsonValue::Null)) {
+			// Remove labels if it's null or empty
+			if is_null_or_empty_object(metadata.get("labels")) {
 				metadata.remove("labels");
 			}
 		}

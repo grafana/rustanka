@@ -1,0 +1,23 @@
+apiVersion: v1
+data:
+  config.yaml: |-
+    "routes":
+      "/api/v1":
+        "handler": "v1"
+      "/api/v10":
+        "handler": "v10"
+      "/api/v2":
+        "handler": "v2"
+    "servers":
+      "server-200":
+        "port": 8080
+      "server-30":
+        "port": 8081
+      "server-5":
+        "port": 8082
+  endpoints.txt: 10:http://service-10.local/push,100:http://service-100.local/push,105:http://service-105.local/push,132:http://service-132.local/push,188:http://service-188.local/push,67:http://service-67.local/push
+  ids.txt: 10,100,105,132,188,67
+kind: ConfigMap
+metadata:
+  name: config-ordering-test
+  namespace: default

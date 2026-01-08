@@ -195,17 +195,41 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 
 	let mut out = ObjValueBuilder::new();
 	for field in target_fields.union(&patch_fields) {
-		let Some(field_patch) = patch.get(field.clone())? else {
-			out.field(field.clone()).value(target.get(field.clone())?.expect("we're iterating over fields union, if field is missing in patch - it exists in target"));
-			continue;
-		};
-		if matches!(field_patch, Val::Null) {
+		// Check if patch has this field
+		let patch_has_field = patch_fields.contains(field);
+
+		if !patch_has_field {
+			// Field only in target - copy lazily to avoid triggering errors.
+			// This preserves Jsonnet's lazy evaluation semantics: errors in fields
+			// that are never accessed should not be triggered.
+			if let Some(thunk) = target.get_lazy(field.clone()) {
+				out.field(field.clone()).try_thunk(thunk)?;
+			}
 			continue;
 		}
-		let Some(field_target) = target.get(field.clone())? else {
+
+		// Patch has this field - we need to evaluate it
+		let field_patch = patch.get(field.clone())?.expect("field is in patch_fields");
+
+		if matches!(field_patch, Val::Null) {
+			// Field is being deleted
+			continue;
+		}
+
+		// Check if target has this field
+		let target_has_field = target_fields.contains(field);
+
+		if !target_has_field {
+			// Field only in patch - copy patch value
 			out.field(field.clone()).value(field_patch);
 			continue;
-		};
+		}
+
+		// Both have the field - need recursive merge
+		// We must evaluate target here for the recursive call
+		let field_target = target
+			.get(field.clone())?
+			.expect("field is in target_fields");
 		out.field(field.clone())
 			.value(builtin_merge_patch(field_target, field_patch)?);
 	}

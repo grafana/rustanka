@@ -158,3 +158,105 @@ fn test_nested_block_scalar_env_export_matches_golden() {
 		"{{.metadata.namespace}}/{{.metadata.name}}",
 	);
 }
+
+/// Test case for object key ordering differences between tk and rtk
+/// This reproduces the issue where object keys with numeric strings sort
+/// differently: tk sorts as strings ("67" > "100"), rtk may sort numerically
+/// This affects:
+/// - Command-line arguments built from object fields
+/// - Config hashes (since underlying content order differs)
+#[test]
+fn test_object_ordering_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/object_ordering_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for empty/null field handling differences between tk and rtk
+/// This reproduces issues where:
+/// - PodDisruptionBudget matchLabels: tk has {name: x}, rtk has {}
+/// - Ingress annotations may be empty vs populated differently
+/// - Service selectors may be missing fields
+#[test]
+fn test_empty_fields_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/empty_fields_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for multiline string wrapping differences between tk and rtk
+/// This reproduces issues where:
+/// - Long shell commands break at different positions (e.g., before |)
+/// - ScaledObject PromQL queries have different line breaks
+/// - Long command-line args wrap differently in YAML output
+#[test]
+fn test_multiline_strings_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/multiline_strings_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for conditional evaluation and null handling differences
+/// This reproduces issues where:
+/// - Resources get "--no-value-" in filename when metadata.name evaluates to null/empty
+/// - PodDisruptionBudget matchLabels are empty when they should have values
+/// - Service selector/ports are missing when they should be present
+/// These issues suggest differences in how conditionals or null values are evaluated
+#[test]
+fn test_conditional_eval_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/conditional_eval_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for YAML line wrapping at specific character positions
+/// This reproduces issues where:
+/// - Shell commands like 'du -sh /data/wal/ | cut' wrap before '|' in rtk but after space in tk
+/// - PromQL queries have ') * 100' on different lines between tk and rtk
+/// - Complex nested structures wrap at different points
+#[test]
+fn test_yaml_line_wrapping_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/yaml_line_wrapping_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for conditional config generation patterns
+/// This reproduces issues where ConfigMap data is empty in rtk but populated in tk
+/// Tests various patterns:
+/// - Hidden field (::) exposure and access
+/// - Conditional object field inclusion
+/// - Self-referential config with hidden fields
+/// - Mixin patterns common in Grafana jsonnet
+/// - Object merging with hidden fields (like the -gf Loki configs)
+#[test]
+fn test_conditional_config_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/conditional_config_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+/// Test case for eager error evaluation in nested std.mergePatch calls
+/// This reproduces the issue where rtk evaluates error statements too eagerly
+/// when using nested std.mergePatch patterns. The exact pattern is:
+/// 1. thor-query-engine.libsonnet defines: loki.querier.storage_start: error '...'
+/// 2. loki-overrides.libsonnet does: querier: std.mergePatch(super.querier + {...}, {...})
+///    but does NOT null out the error field
+/// 3. dev-overrides.libsonnet does: loki:: std.mergePatch(super.loki + {...}, {...})
+/// 4. global-release-configs.libsonnet nulls the error field, but AFTER dev-overrides
+///
+/// tk lazily evaluates and only triggers the error if the field is accessed.
+/// rtk eagerly evaluates during std.mergePatch, causing the error to trigger.
+#[test]
+fn test_eager_error_eval_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/eager_error_eval_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}

@@ -554,15 +554,9 @@ impl ObjValue {
 			.filter(|(_, (visible, _))| include_hidden || *visible)
 			.map(|(k, _)| k)
 			.collect();
-		// Sort keys, treating numeric strings as numbers for compatibility with tk
-		fields.sort_unstable_by(|a, b| {
-			let a_numeric = a.as_str().parse::<u64>().ok();
-			let b_numeric = b.as_str().parse::<u64>().ok();
-			match (a_numeric, b_numeric) {
-				(Some(a_num), Some(b_num)) => a_num.cmp(&b_num),
-				_ => a.cmp(b),
-			}
-		});
+		// Sort keys lexicographically to match Go/tk behavior
+		// Note: Go sorts strings lexicographically, so "100" < "67" because '1' < '6'
+		fields.sort_unstable();
 		fields
 	}
 	pub fn fields(&self, #[cfg(feature = "exp-preserve-order")] preserve_order: bool) -> Vec<IStr> {

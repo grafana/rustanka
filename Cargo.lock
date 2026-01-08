@@ -775,9 +775,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.179"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a2d376baa530d1238d133232d15e239abad80d05838b4b59354e5268af431f"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libjsonnet"
@@ -1218,7 +1218,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#7317dd12265f29026970190bc87b4b613bf0899e"
+source = "git+https://github.com/grafana/serde-saphyr?branch=master#48216b8eb281bb69ccc8d449a42d7441f4502d33"
 dependencies = [
  "ahash",
  "base64",

@@ -1,0 +1,7 @@
+{
+    "default/memcached-extstore.golden": "main.jsonnet",
+    "default/partition-ingester-a.golden": "main.jsonnet",
+    "default/partition-ingester-b.golden": "main.jsonnet",
+    "default/query-tee.golden": "main.jsonnet",
+    "default/ruler.golden": "main.jsonnet"
+}

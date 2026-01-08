@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-instance-mapper
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - args:
+        - -proxy.metrics-endpoint-list=10:http://service-10.local/push,100:http://service-100.local/push,105:http://service-105.local/push,132:http://service-132.local/push,188:http://service-188.local/push,67:http://service-67.local/push
+        - -proxy.valid-metrics-cluster-id=10,100,105,132,188,67
+        image: mapper:latest
+        name: mapper

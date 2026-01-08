@@ -1,0 +1,5 @@
+{
+    "default/array-ordering.golden": "main.jsonnet",
+    "default/config-ordering-test.golden": "main.jsonnet",
+    "default/metrics-instance-mapper.golden": "main.jsonnet"
+}
