@@ -139,6 +139,14 @@ fn test_yaml_output_env_export_matches_golden() {
 }
 
 #[test]
+fn test_yaml_output_env_jrsonnet_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/yaml_output_env_jrsonnet",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}
+
+#[test]
 fn test_static_exporter_env_export_matches_golden() {
 	run_golden_test(
 		"golden_envs/static_exporter_env",

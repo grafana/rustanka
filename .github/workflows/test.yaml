@@ -13,6 +13,15 @@ jobs:
           curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
           chmod +x /usr/local/bin/tk
           tk --version
+      - name: Install jrsonnet
+        run: |
+          git clone https://github.com/CertainLach/jrsonnet.git /tmp/jrsonnet
+          cd /tmp/jrsonnet
+          git checkout 6baa18de6571b015cd2cf1eaac93030250a136a3
+          cargo build --release
+          sudo cp target/release/jrsonnet /usr/local/bin/jrsonnet
+          sudo chmod +x /usr/local/bin/jrsonnet
+          jrsonnet --version
       - name: Check golden files are up to date
         run: make check-golden-fixtures
       - run: cargo test --all

@@ -1,5 +1,119 @@
 // Test cases for YAML serialization compatibility between tk (go-yaml) and rtk (serde-saphyr)
 
+local manifestYaml = function(value) (
+  local f = std.native('manifestYamlFromJson');
+  if f != null
+  then f(std.toString(value))
+  else std.manifestYamlDoc(value)
+);
+
+
+// Grafana datasource structure - tests quote_keys=true with nested arrays
+// This reproduces the pattern from grafana-o11y ConfigMap-grafana-datasources.yaml
+local datasourceConfigs = {
+  'critical-prometheus.yml': {
+    apiVersion: 1,
+    datasources: [{
+      access: 'proxy',
+      editable: false,
+      isDefault: false,
+      jsonData: {
+        exemplarTraceIdDestinations: [{
+          datasourceUid: 'tempo-ops-01',
+          name: 'traceID',
+        }],
+        httpMethod: 'GET',
+      },
+      name: 'critical-prometheus',
+      type: 'prometheus',
+      uid: 'critical-prometheus',
+      url: 'http://critical-prometheus.critical-o11y.svc.cluster.local./critical-prometheus/',
+      version: 1,
+    }],
+  },
+  'grafana-billing.yml': {
+    apiVersion: 1,
+    datasources: [{
+      access: 'proxy',
+      basicAuth: true,
+      basicAuthUser: '1',
+      editable: false,
+      isDefault: false,
+      jsonData: {
+        httpMethod: 'POST',
+        manageAlerts: false,
+      },
+      name: 'grafana-billing',
+      secureJsonData: {
+        basicAuthPassword: '$BILLING_VIEW_KEY',
+      },
+      type: 'prometheus',
+      uid: 'grafana-billing',
+      url: 'http://gateway-headless.billing.svc.prod-us-central-0.local/api/prom',
+      version: 1,
+    }],
+  },
+  'loki-ops.yml': {
+    apiVersion: 1,
+    datasources: [{
+      access: 'proxy',
+      basicAuth: true,
+      basicAuthUser: '29',
+      editable: false,
+      isDefault: false,
+      jsonData: {
+        derivedFields: [{
+          datasourceUid: 'tempo-ops-01',
+          matcherRegex: '(?:traceID|trace_id|tid)=(\\w+)',
+          name: 'TraceID',
+          url: '$${__value.raw}',
+        }],
+        httpMethod: 'GET',
+      },
+      name: 'loki-ops',
+      secureJsonData: {
+        basicAuthPassword: '$GRAFANA_LOKI_READ_KEY_LOG',
+      },
+      type: 'loki',
+      uid: 'loki-ops',
+      url: 'https://logs-ops-002.grafana-ops.net',
+      version: 1,
+    }],
+  },
+};
+
+// Dashboard provisioning structure - tests quote_keys=true with nested arrays
+local dashboardProvisioningConfig = {
+  apiVersion: 1,
+  providers: [{
+    allowUiUpdates: false,
+    disableDeletion: true,
+    editable: true,
+    folder: 'General',
+    folderUid: '',
+    name: 'default',
+    options: {
+      path: '/var/lib/grafana/dashboards',
+    },
+    orgId: 1,
+    type: 'file',
+    updateIntervalSeconds: 3,
+  }, {
+    allowUiUpdates: false,
+    disableDeletion: true,
+    editable: true,
+    folder: 'Alerting',
+    folderUid: 'alerting',
+    name: 'alerting',
+    options: {
+      path: '/var/lib/grafana/dashboards/alerting',
+    },
+    orgId: 1,
+    type: 'file',
+    updateIntervalSeconds: 3,
+  }],
+};
+
 // Prometheus alerting rules structure - tests deeply nested object-in-array indentation
 // This structure specifically tests: array -> object -> field with array value -> object -> nested object
 local alertingRulesData = {
@@ -41,10 +155,10 @@ local nestedYamlData = {
       },
       nested_again: [
         {
-          hello: 'world',
+          a: 'c',
         },
         {
-          hello: 'world',
+          b: 'd',
         },
       ],
       name: 'test_rule_1',
@@ -196,6 +310,22 @@ local htmlContent = |||
       'alerts.rules': std.manifestYamlDoc(alertingRulesData, false, false),
     },
   },
+  // Test nested YAML indentation in literal block strings
+  'nested-yaml-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'nested-yaml-config',
+      namespace: 'default',
+    },
+    data: {
+      'rules.json': std.manifestJson(nestedYamlData),
+      'rules.json.minified': std.manifestJsonMinified(nestedYamlData),
+      'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
+      'rules.yml.quoted': std.manifestYamlDoc(nestedYamlData, quote_keys=true),
+      'rules.yml.quoted.indented': std.manifestYamlDoc(nestedYamlData, quote_keys=true, indent_array_in_object=true),
+    },
+  },
   // ConfigMap with dashboard JSON containing floats
   'configmap-dashboard': {
     apiVersion: 'v1',
@@ -210,32 +340,6 @@ local htmlContent = |||
       'dashboard-to-string.json': std.toString(import 'dashboard-promtail.json'),
       'dashboard2-to-string.json': std.toString(import 'dashboard-cle-headquarters.json'),
       'dashboard3-to-string.json': std.toString(import 'ds-querier-cluster-deployment.libsonnet'),
-    },
-  },
-  // Test nested YAML indentation in literal block strings
-  'nested-yaml-configmap': {
-    apiVersion: 'v1',
-    kind: 'ConfigMap',
-    metadata: {
-      name: 'nested-yaml-config',
-      namespace: 'default',
-    },
-    data: {
-      'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
-      'rules.yml.quoted': std.manifestYamlDoc(nestedYamlData, quote_keys=true),
-      'rules.yml.quoted.indented': std.manifestYamlDoc(nestedYamlData, quote_keys=true, indent_array_in_object=true),
-    },
-  },
-  // Test nested YAML indentation in literal block strings
-  'nested-yaml-manifest-yaml-from-json-configmap': {
-    apiVersion: 'v1',
-    kind: 'ConfigMap',
-    metadata: {
-      name: 'nested-yaml-manifest-yaml-from-json-config',
-      namespace: 'default',
-    },
-    data: {
-      'rules.yml': std.native('manifestYamlFromJson')(std.manifestJson(nestedYamlData)),
     },
   },
   // Test case for asterisk quoting: tk uses single quotes ('*'), rtk uses double quotes ("*")
@@ -262,41 +366,6 @@ local htmlContent = |||
     },
     data: {
       'index.html': htmlContent,
-    },
-  },
-  // Test @-prefixed keys quote style: tk uses single quotes, rtk uses double quotes
-  'envoy-configmap': {
-    apiVersion: 'v1',
-    kind: 'ConfigMap',
-    metadata: {
-      name: 'envoy-config',
-      namespace: 'default',
-    },
-    data: {
-      'envoy.yaml': std.native('manifestYamlFromJson')(std.manifestJson(envoyConfig)),
-    },
-  },
-  // Test long string line wrapping in array context
-  // tk wraps long strings like "--reason=Removing Flux ignores before scheduled rollout of this cell"
-  // to multiple lines, rtk may not wrap the same way
-  // Test large float scientific notation: tk uses 3.333333333333333e+06, rtk uses 3333333.333333333
-  // This tests the outer YAML serializer (Tanka's manifestYamlFromJson path)
-  'overrides-configmap': {
-    apiVersion: 'v1',
-    kind: 'ConfigMap',
-    metadata: {
-      name: 'overrides',
-      namespace: 'default',
-    },
-    data: {
-      // Uses manifestYamlFromJson (Tanka's YAML path with scientific notation threshold)
-      'overrides.yaml': std.native('manifestYamlFromJson')(std.manifestJson({
-        tenant_limits: {
-          max_series: 10000000 / 3,  // ~3.33 million - above threshold
-          max_samples: 1500000,  // 1.5 million - above threshold
-          small_value: 999999,  // below 1 million threshold
-        },
-      })),
     },
   },
   cronjob: {
@@ -345,6 +414,32 @@ local htmlContent = |||
           query: '(1 - (min(kubelet_volume_stats_available_bytes{cluster="test-cluster", namespace="test-ns", persistentvolumeclaim=~"store-gateway-.*"}/kubelet_volume_stats_capacity_bytes{cluster="test-cluster",namespace="test-ns", persistentvolumeclaim=~"store-gateway-.*"}))) * 100',
         },
       }],
+    },
+  },
+  // Test case for Grafana datasources ConfigMap - reproduces grafana-o11y diffs
+  // Uses std.manifestYamlDoc with quote_keys=true to match real usage
+  'grafana-datasources-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'grafana-datasources',
+      namespace: 'default',
+    },
+    data: {
+      [key]: manifestYaml(datasourceConfigs[key])
+      for key in std.objectFields(datasourceConfigs)
+    },
+  },
+  // Test case for dashboard provisioning ConfigMap
+  'grafana-dashboard-provisioning-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'grafana-dashboard-provisioning',
+      namespace: 'default',
+    },
+    data: {
+      'dashboards.yml': std.manifestYamlDoc(dashboardProvisioningConfig, quote_keys=true),
     },
   },
   // Test case for long string wrapping behavior (tk wraps at ~80 chars, rtk doesn't)

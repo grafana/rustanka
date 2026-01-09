@@ -2,6 +2,10 @@
 
 Project-specific context for AI agents working on rustanka (rtk).
 
+## Agent Behavior
+
+- **Never run git commands** unless explicitly requested by the user
+
 ## Project Overview
 
 rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Tanka](https://github.com/grafana/tanka) (tk). The primary goal is **exact output compatibility with Tanka**.
@@ -15,9 +19,29 @@ rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Ta
 - Workspace `Cargo.toml` is the source of truth for this dependency
 - If adding serde-saphyr to a new crate, use `serde-saphyr.workspace = true`
 
+## YAML Libraries in Tanka
+
+**CRITICAL**: Tanka uses different YAML libraries for different operations:
+
+| Operation | Go Library | Notes |
+|-----------|-----------|-------|
+| `std.native('manifestYamlFromJson')` | gopkg.in/yaml.v3 | |
+| `std.manifestYamlDoc` | go-jsonnet built-in | Custom serializer in [builtins.go](https://github.com/google/go-jsonnet/blob/master/builtins.go) |
+| **Manifest export** | gopkg.in/yaml.v2 | Main export output |
+| `std.native('helmTemplate')` | gopkg.in/yaml.v3 | |
+
+When implementing YAML serialization in serde-saphyr, **add parameters as needed** to support the different formatting behaviors required by each use case.
+
 ## YAML Export Behavior
 
 The rtk export should produce **byte-for-byte identical output** to Tanka where possible. When debugging mismatches, compare against actual Tanka output to identify the difference.
+
+### go-yaml v2 Line Wrapping (for exports)
+
+- go-yaml v2.4.0 has line wrapping behavior controlled by `best_width`
+- Line wrapping happens at space characters when `column > best_width`
+- The condition also requires `!spaces` (previous char was not a space)
+- This affects flow-style quoted scalars in YAML output
 
 ## Testing
 
@@ -52,6 +76,14 @@ When investigating rtk vs tk differences:
 ```bash
 make test
 ```
+
+## spec.json Configuration
+
+### exportJsonnetImplementation
+
+In tk's `spec.json`, `exportJsonnetImplementation: binary:/usr/local/bin/jrsonnet` configures tk to use jrsonnet for Jsonnet evaluation instead of go-jsonnet. tk still handles manifest exporting.
+
+**This is a no-op in rtk** - not implemented and won't be. rtk always uses its built-in jrsonnet evaluator.
 
 ## Common Issues
 

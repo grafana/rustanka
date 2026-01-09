@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::config::{uses_jrsonnet_binary, RtkConfig};
 use crate::jpath::{self, JpathResult};
 use crate::spec::Environment;
 
@@ -149,6 +150,23 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 	let resolver = PathResolver::new_cwd_fallback();
 	let context_init = ContextInitializer::new(resolver);
 
+	// Build config: start with defaults based on spec, then merge .rtk-config.yaml if present
+	let export_impl = spec
+		.as_ref()
+		.and_then(|e| e.spec.export_jsonnet_implementation.as_deref());
+	let mut config = if uses_jrsonnet_binary(export_impl) {
+		RtkConfig::jrsonnet_defaults()
+	} else {
+		RtkConfig::default()
+	};
+
+	// Load .rtk-config.yaml if present and merge over defaults
+	if let Some(file_config) = RtkConfig::load_from_directory(&jpath.base)? {
+		config.merge_from(&file_config);
+	}
+
+	apply_rtk_config(&context_init, &config);
+
 	// Add external variables from spec (environment config)
 	if let Some(env) = spec {
 		// Serialize the environment spec as JSON and inject it
@@ -170,8 +188,10 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 			.map_err(|e| anyhow::anyhow!("failed to add ext code '{}': {:?}", key, e))?;
 	}
 
-	// Register native functions for Tanka compatibility
-	register_native_functions(&context_init);
+	// Register native functions for Tanka compatibility (unless disabled)
+	if !config.disable_tanka_native_functions {
+		register_native_functions(&context_init);
+	}
 
 	// Build the state
 	let mut builder = State::builder();
@@ -187,6 +207,32 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 	let state = builder.build();
 
 	Ok(state)
+}
+
+/// Apply settings from .rtk-config.yaml to the context initializer
+fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
+	use crate::config::JsonnetImplementation;
+	use jrsonnet_evaluator::manifest::set_use_go_style_floats;
+	use jrsonnet_stdlib::{ManifestYamlDocFormatting, QuoteValuesBehavior};
+
+	// Apply std.manifestYamlDoc format setting
+	let quote_values_behavior = match config.output_format.std_manifest_yaml_doc {
+		Some(JsonnetImplementation::Jrsonnet) => QuoteValuesBehavior::Jrsonnet,
+		Some(JsonnetImplementation::GoJsonnet) | None => QuoteValuesBehavior::GoJsonnet,
+	};
+
+	let formatting = ManifestYamlDocFormatting {
+		quote_values_behavior,
+	};
+	context_init.set_manifest_yaml_doc_formatting(formatting);
+
+	// Apply float format setting
+	// Default is Go-style (true), set to false for jrsonnet-style
+	let use_go_style = match config.output_format.floats {
+		Some(JsonnetImplementation::Jrsonnet) => false,
+		Some(JsonnetImplementation::GoJsonnet) | None => true,
+	};
+	set_use_go_style_floats(use_go_style);
 }
 
 /// Register Tanka-compatible native functions

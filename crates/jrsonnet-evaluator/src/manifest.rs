@@ -1,6 +1,25 @@
-use std::{borrow::Cow, fmt::Write, ptr};
+use std::{borrow::Cow, cell::Cell, fmt::Write, ptr};
 
 use crate::{bail, in_description_frame, Result, ResultExt, Val};
+
+// Thread-local flag to control float formatting style in std.toString
+// When true (default), uses Go's %.17g format (e.g., 0.59999999999999998)
+// When false, uses Rust's shortest representation (e.g., 0.6)
+thread_local! {
+	static USE_GO_STYLE_FLOATS: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Set whether to use Go-style float formatting in std.toString
+/// - true (default): Use Go's %.17g format (matches go-jsonnet)
+/// - false: Use Rust's Display (shortest representation, matches jrsonnet binary)
+pub fn set_use_go_style_floats(use_go_style: bool) {
+	USE_GO_STYLE_FLOATS.with(|s| s.set(use_go_style));
+}
+
+/// Check if Go-style float formatting is enabled
+fn should_use_go_style_floats() -> bool {
+	USE_GO_STYLE_FLOATS.with(Cell::get)
+}
 
 /// Format a float like Go's %.17g format
 /// This matches go-jsonnet's unparseNumber function for non-integer values
@@ -259,11 +278,16 @@ fn manifest_json_ex_buf(
 			match mtype {
 				// std.toString uses Go's unparseNumber: %.0f for integers, %.17g for floats
 				// This is critical for config_hash compatibility (std.md5(std.toString(...)))
+				// The go-style formatting can be disabled via set_use_go_style_floats(false)
+				// to match upstream jrsonnet binary behavior
 				ToString => {
 					if v == v.floor() {
 						write!(buf, "{:.0}", v).unwrap();
-					} else {
+					} else if should_use_go_style_floats() {
 						buf.push_str(&format_float_go_g17(v));
+					} else {
+						// Use Rust's shortest representation (matches jrsonnet binary)
+						write!(buf, "{}", v).unwrap();
 					}
 				}
 				// std.manifestJson uses strconv.FormatFloat('f', -1) - shortest decimal

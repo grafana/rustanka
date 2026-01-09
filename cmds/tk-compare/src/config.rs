@@ -37,6 +37,10 @@ pub struct Command {
 	/// Expect both commands to fail - if false (default) and both commands fail, it's a test failure
 	#[serde(default)]
 	pub expect_error: bool,
+	/// Optional .rtk-config.yaml content to write before running rtk (exec2)
+	/// This allows configuring rtk-specific settings like manifestYamlDocFormatting
+	#[serde(default)]
+	pub rtk_config: Option<String>,
 }
 
 fn default_runs() -> usize {
@@ -142,6 +146,9 @@ fn expand_env_vars(s: &str) -> String {
 	new_result
 }
 
+/// Path to the .rtk-config.yaml file
+pub const RTK_CONFIG_FILENAME: &str = ".rtk-config.yaml";
+
 impl Command {
 	pub fn as_string(&self) -> String {
 		self.args.join(" ")
@@ -149,6 +156,33 @@ impl Command {
 
 	pub fn display_name(&self) -> String {
 		self.name.clone().unwrap_or_else(|| self.as_string())
+	}
+
+	/// Write .rtk-config.yaml to the working directory if rtk_config is set
+	/// Returns the path to the config file if written
+	pub fn write_rtk_config(&self, working_dir: Option<&str>) -> Option<std::path::PathBuf> {
+		let config_content = self.rtk_config.as_ref()?;
+		let dir = working_dir?;
+		let config_path = std::path::Path::new(dir).join(RTK_CONFIG_FILENAME);
+		if std::fs::write(&config_path, config_content).is_ok() {
+			Some(config_path)
+		} else {
+			eprintln!(
+				"Warning: Failed to write rtk config to {}",
+				config_path.display()
+			);
+			None
+		}
+	}
+
+	/// Remove .rtk-config.yaml from the working directory
+	pub fn cleanup_rtk_config(working_dir: Option<&str>) {
+		if let Some(dir) = working_dir {
+			let config_path = std::path::Path::new(dir).join(RTK_CONFIG_FILENAME);
+			if config_path.exists() {
+				let _ = std::fs::remove_file(&config_path);
+			}
+		}
 	}
 
 	/// Get args with placeholders substituted for a specific executable
@@ -203,6 +237,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: true,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		let args = cmd.args_for_exec("rtk", None);
@@ -218,6 +253,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		let args = cmd.args_for_exec("test", None);
@@ -233,6 +269,7 @@ mod tests {
 			json_compare: true,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		let args = cmd.args_for_exec("rtk", None);
@@ -253,6 +290,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: true,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		let args = cmd.args_for_exec("rtk", None);
@@ -273,6 +311,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		assert_eq!(cmd.as_string(), "env list --json");
@@ -287,6 +326,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		assert_eq!(cmd.display_name(), "Test Command");
@@ -301,6 +341,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		assert_eq!(cmd.display_name(), "eval path");
@@ -339,6 +380,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		let args = cmd.args_for_exec("rtk", Some(temp_dir.to_str().unwrap()));
@@ -380,6 +422,7 @@ mod tests {
 			json_compare: false,
 			dir_compare: false,
 			expect_error: false,
+			rtk_config: None,
 		};
 
 		// When no working_dir is provided, {{LIST_MAIN_FILES}} should expand to nothing

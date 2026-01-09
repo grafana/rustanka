@@ -61,11 +61,26 @@ impl YamlFormat<'_> {
 		quote_keys: bool,
 		#[cfg(feature = "exp-preserve-order")] preserve_order: bool,
 	) -> Self {
+		Self::std_to_yaml_with_settings(
+			indent_array_in_object,
+			quote_keys,
+			true, // go-jsonnet always quotes string values
+			#[cfg(feature = "exp-preserve-order")]
+			preserve_order,
+		)
+	}
+
+	pub fn std_to_yaml_with_settings(
+		indent_array_in_object: bool,
+		quote_keys: bool,
+		quote_values: bool,
+		#[cfg(feature = "exp-preserve-order")] preserve_order: bool,
+	) -> Self {
 		Self {
 			padding: Cow::Borrowed("  "),
 			arr_element_padding: Cow::Borrowed(if indent_array_in_object { "  " } else { "" }),
 			quote_keys,
-			quote_values: true, // go-jsonnet always quotes string values
+			quote_values,
 			#[cfg(feature = "exp-preserve-order")]
 			preserve_order,
 		}
@@ -106,7 +121,7 @@ fn looks_like_timestamp(string: &str) -> bool {
 }
 
 /// From <https://github.com/chyh1990/yaml-rust/blob/da52a68615f2ecdd6b7e4567019f280c433c1521/src/emitter.rs#L289>
-/// With added date check
+/// With added date check and go-jsonnet compatibility
 fn yaml_needs_quotes(string: &str) -> bool {
 	fn need_quotes_spaces(string: &str) -> bool {
 		string.starts_with(' ') || string.ends_with(' ')
@@ -118,9 +133,15 @@ fn yaml_needs_quotes(string: &str) -> bool {
 		|| string.starts_with(['&', '*', '?', '|', '-', '!', '%', '@', '{', '[', '"', '\''])
 		// Go's YAML library only quotes colons when followed by space (creates ambiguity)
 		|| string.contains(": ")
-		// Note: {, }, [, ], ", ' are only special in YAML flow context or at start.
-		// Since jrsonnet only generates block-style YAML, we don't need to quote them
-		// when they appear in the middle of a string.
+		// Flow indicators anywhere in string need quoting to match go-jsonnet behavior
+		// This includes { } [ ] which could be interpreted as flow sequences/mappings
+		// Also < > which go-jsonnet and jrsonnet quote conservatively
+		|| string.contains('{')
+		|| string.contains('}')
+		|| string.contains('[')
+		|| string.contains(']')
+		|| string.contains('<')
+		|| string.contains('>')
 		// # is only a comment when preceded by whitespace, so we check for " #" instead.
 		|| string.contains(" #")
 		|| string.contains(|c| matches!(c, '`' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
@@ -547,9 +568,9 @@ mod tests {
 		assert!(!yaml_needs_quotes("hello#world")); // hash NOT preceded by space is safe
 		assert!(yaml_needs_quotes("{json}")); // starts with brace
 		assert!(yaml_needs_quotes("[array]")); // starts with bracket
-										 // Braces/brackets in middle are OK in block context YAML
-		assert!(!yaml_needs_quotes("hello{world}"));
-		assert!(!yaml_needs_quotes("hello[world]"));
+										 // Braces/brackets anywhere require quoting to match go-jsonnet behavior
+		assert!(yaml_needs_quotes("hello{world}"));
+		assert!(yaml_needs_quotes("hello[world]"));
 		// Quotes at start need quoting, quotes in middle are OK
 		assert!(yaml_needs_quotes("\"quoted\"")); // starts with double quote
 		assert!(yaml_needs_quotes("'quoted'")); // starts with single quote

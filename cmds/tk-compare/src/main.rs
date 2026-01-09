@@ -268,13 +268,16 @@ fn main() -> Result<()> {
 			let args2 =
 				command.args_for_exec(&config.tk_exec_2_name, config.working_dir.as_deref());
 
-			// Run with exec1 in its workspace
+			// Run with exec1 in its workspace (no rtk config needed for tk)
 			let result1 = runner::run_command(
 				&exec1_str,
 				&args1,
 				workspace1.as_deref(),
 				config.working_dir.as_deref(),
 			)?;
+
+			// Write .rtk-config.yaml before running rtk (exec2) if configured
+			let rtk_config_written = command.write_rtk_config(config.working_dir.as_deref());
 
 			// Run with exec2 in its workspace
 			let result2 = runner::run_command(
@@ -283,6 +286,11 @@ fn main() -> Result<()> {
 				workspace2.as_deref(),
 				config.working_dir.as_deref(),
 			)?;
+
+			// Clean up rtk config after running
+			if rtk_config_written.is_some() {
+				config::Command::cleanup_rtk_config(config.working_dir.as_deref());
+			}
 
 			exec1_durations.push(result1.duration);
 			exec2_durations.push(result2.duration);

@@ -165,7 +165,7 @@ pub fn stdlib_uncached(settings: Rc<RefCell<Settings>>) -> ObjValue {
 		("manifestJsonEx", builtin_manifest_json_ex::INST),
 		("manifestJson", builtin_manifest_json::INST),
 		("manifestJsonMinified", builtin_manifest_json_minified::INST),
-		("manifestYamlDoc", builtin_manifest_yaml_doc::INST),
+		// manifestYamlDoc is registered separately below because it needs settings
 		("manifestYamlStream", builtin_manifest_yaml_stream::INST),
 		("manifestTomlEx", builtin_manifest_toml_ex::INST),
 		("manifestToml", builtin_manifest_toml::INST),
@@ -244,6 +244,12 @@ pub fn stdlib_uncached(settings: Rc<RefCell<Settings>>) -> ObjValue {
 			settings: settings.clone(),
 		},
 	);
+	builder.method(
+		"manifestYamlDoc",
+		builtin_manifest_yaml_doc {
+			settings: settings.clone(),
+		},
+	);
 	builder.method("trace", builtin_trace { settings });
 	builder.method("id", FuncVal::Id);
 
@@ -305,6 +311,27 @@ impl TracePrinter for StdTracePrinter {
 	}
 }
 
+/// Controls how quote_values is determined in manifestYamlDoc
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum QuoteValuesBehavior {
+	/// Values are always quoted regardless of quote_keys (matches go-jsonnet)
+	#[default]
+	GoJsonnet,
+	/// quote_values follows quote_keys: when quote_keys=false, quote_values=false
+	/// This matches the jrsonnet binary behavior
+	Jrsonnet,
+}
+
+/// Settings for std.manifestYamlDoc formatting
+/// These settings control how YAML is formatted when using std.manifestYamlDoc
+#[derive(Debug, Clone, Default)]
+pub struct ManifestYamlDocFormatting {
+	/// Controls how quote_values is determined.
+	/// - GoJsonnet (default): values are always quoted
+	/// - Jrsonnet: quote_values follows quote_keys
+	pub quote_values_behavior: QuoteValuesBehavior,
+}
+
 pub struct Settings {
 	/// Used for `std.extVar`
 	pub ext_vars: HashMap<IStr, TlaArg>,
@@ -314,6 +341,8 @@ pub struct Settings {
 	pub trace_printer: Box<dyn TracePrinter>,
 	/// Used for `std.thisFile`
 	pub path_resolver: PathResolver,
+	/// Used for `std.manifestYamlDoc` formatting options
+	pub manifest_yaml_doc_formatting: ManifestYamlDocFormatting,
 }
 
 fn extvar_source(name: &str, code: impl Into<IStr>) -> Source {
@@ -334,6 +363,7 @@ impl ContextInitializer {
 			ext_natives: HashMap::new(),
 			trace_printer: Box::new(StdTracePrinter::new(resolver.clone())),
 			path_resolver: resolver,
+			manifest_yaml_doc_formatting: ManifestYamlDocFormatting::default(),
 		};
 		let settings = Rc::new(RefCell::new(settings));
 		let stdlib_obj = stdlib_uncached(settings.clone());
@@ -381,6 +411,10 @@ impl ContextInitializer {
 		self.settings_mut()
 			.ext_natives
 			.insert(name.into(), cb.into());
+	}
+	/// Set the manifest YAML doc formatting options
+	pub fn set_manifest_yaml_doc_formatting(&self, formatting: ManifestYamlDocFormatting) {
+		self.settings_mut().manifest_yaml_doc_formatting = formatting;
 	}
 }
 impl jrsonnet_evaluator::ContextInitializer for ContextInitializer {
