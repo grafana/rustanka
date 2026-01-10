@@ -1,5 +1,8 @@
 apiVersion: v1
 data:
+  RATE_LIMIT_ORG_OVERRIDES2: test
+  description: Cell of type alert-manager on cluster prod-us-east-3 and namespace
+    alertmanager
   rules.yml: |-
     enabled: true
     rules:
@@ -36,6 +39,7 @@ data:
           - "hello": "world"
           - "hello": "world"
         "pattern": "server<type=metrics, listener=(.+), processor=(.+)><>(.+):"
+  test_quoting: :9121
 kind: ConfigMap
 metadata:
   name: nested-yaml-config

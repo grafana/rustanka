@@ -2,6 +2,7 @@
     "default/alerting-rules-unquoted.golden": "main.jsonnet",
     "default/alerting-rules.golden": "main.jsonnet",
     "default/app-config.golden": "main.jsonnet",
+    "default/csp-test.golden": "main.jsonnet",
     "default/dashboards.golden": "main.jsonnet",
     "default/envoy-config.golden": "main.jsonnet",
     "default/html-content.golden": "main.jsonnet",

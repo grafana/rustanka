@@ -221,6 +221,10 @@ local htmlContent = |||
       namespace: 'default',
     },
     data: {
+      [if false then 'RATE_LIMIT_ORG_OVERRIDES' else null]: 'test',
+      [if true then 'RATE_LIMIT_ORG_OVERRIDES2' else null]: 'test',
+      test_quoting: ':9121',
+      description: 'Cell of type alert-manager on cluster prod-us-east-3 and namespace alertmanager',
       'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
       'rules.yml.quoted': std.manifestYamlDoc(nestedYamlData, quote_keys=true),
       'rules.yml.quoted.indented': std.manifestYamlDoc(nestedYamlData, quote_keys=true, indent_array_in_object=true),
@@ -345,6 +349,29 @@ local htmlContent = |||
           query: '(1 - (min(kubelet_volume_stats_available_bytes{cluster="test-cluster", namespace="test-ns", persistentvolumeclaim=~"store-gateway-.*"}/kubelet_volume_stats_capacity_bytes{cluster="test-cluster",namespace="test-ns", persistentvolumeclaim=~"store-gateway-.*"}))) * 100',
         },
       }],
+    },
+  },
+  // Test CSP header with embedded single quotes - tk preserves quotes, rtk may not
+  'csp-deployment': {
+    apiVersion: 'apps/v1',
+    kind: 'Deployment',
+    metadata: {
+      name: 'csp-test',
+      namespace: 'default',
+    },
+    spec: {
+      template: {
+        spec: {
+          containers: [{
+            name: 'nginx',
+            env: [{
+              name: 'CSP_HEADER',
+              // CSP value with embedded single quotes - tests quote preservation and line wrapping
+              value: "frame-ancestors https://labclient.labondemand.com https://university.grafana.com; script-src 'self' 'strict-dynamic' 'unsafe-eval' 'report-sample' *.googleadservices.com *.marketo.net *.facebook.net *.google-analytics.com https://*.clearbitjs.com https://app.clearbit.com https://snap.licdn.com https://www.google-analytics.com/analytics.js https://px.ads.linkedin.com https://www.linkedin.com https://fresnel.vimeocdn.com https://f.vimeocdn.com https://vimeo.com https://player.vimeo.com https://platform.twitter.com object-src 'none'; upgrade-insecure-requests; report-to csp-endpoint; report-uri /api/csp-reports; ",
+            }],
+          }],
+        },
+      },
     },
   },
   // Test case for long string wrapping behavior (tk wraps at ~80 chars, rtk doesn't)
