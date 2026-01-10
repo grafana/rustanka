@@ -268,3 +268,16 @@ fn test_eager_error_eval_env_export_matches_golden() {
 		"{{.metadata.namespace}}/{{.metadata.name}}",
 	);
 }
+
+/// Test case for inline environment discovery and export
+/// Inline environments define Tanka Environment objects directly in Jsonnet
+/// without a separate spec.json file. This tests:
+/// - Inline environment discovery (finding Environment objects in Jsonnet output)
+/// - Export of inline environments with nested YAML/JSON in ConfigMaps
+#[test]
+fn test_inline_env_export_matches_golden() {
+	run_golden_test(
+		"golden_envs/inline_env",
+		"{{.metadata.namespace}}/{{.metadata.name}}",
+	);
+}

@@ -556,6 +556,8 @@ fn export_single_env(
 	// Evaluate the environment, passing the env_name if this is a sub-environment
 	let mut eval_opts = opts.eval_opts.clone();
 	eval_opts.env_name = env.env_name.clone();
+	// Pass exportJsonnetImplementation from discovery so eval can use jrsonnet-compatible formatting
+	eval_opts.export_jsonnet_implementation = env.export_jsonnet_implementation.clone();
 
 	let eval_start = Instant::now();
 	let result = eval(env.path.to_string_lossy().as_ref(), eval_opts)

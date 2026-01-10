@@ -3,6 +3,7 @@ data:
   RATE_LIMIT_ORG_OVERRIDES2: test
   description: Cell of type alert-manager on cluster prod-us-east-3 and namespace
     alertmanager
+  pruneTest: {}
   rules.yml: |-
     enabled: true
     rules:

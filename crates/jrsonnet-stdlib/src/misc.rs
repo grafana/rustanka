@@ -166,7 +166,9 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 		return Ok(patch);
 	};
 	let Some(target) = target.as_obj() else {
-		return Ok(Val::Obj(patch));
+		// Per RFC 7396, if target is not an object, treat it as empty object
+		// and recursively process to strip null values from patch
+		return builtin_merge_patch(Val::Obj(ObjValue::new_empty()), Val::Obj(patch));
 	};
 	let target_fields = target
 		.fields(
@@ -220,8 +222,12 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 		let target_has_field = target_fields.contains(field);
 
 		if !target_has_field {
-			// Field only in patch - copy patch value
-			out.field(field.clone()).value(field_patch);
+			// Field only in patch - recursive merge with empty object per RFC 7396
+			// This ensures null values in nested objects are properly removed
+			out.field(field.clone()).value(builtin_merge_patch(
+				Val::Obj(ObjValue::new_empty()),
+				field_patch,
+			)?);
 			continue;
 		}
 

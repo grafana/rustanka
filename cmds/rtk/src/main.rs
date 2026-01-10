@@ -692,6 +692,7 @@ fn main() -> Result<()> {
 				max_stack: Some(max_stack as usize),
 				eval_expr: None,
 				env_name: None,
+				export_jsonnet_implementation: None,
 			};
 
 			// Parse merge strategy
@@ -828,6 +829,7 @@ fn main() -> Result<()> {
 				max_stack: Some(max_stack as usize),
 				eval_expr,
 				env_name: None,
+				export_jsonnet_implementation: None,
 			};
 
 			let result = eval::eval(&path, opts)?;

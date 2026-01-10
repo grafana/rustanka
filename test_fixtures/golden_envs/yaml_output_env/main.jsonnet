@@ -223,6 +223,12 @@ local htmlContent = |||
     data: {
       [if false then 'RATE_LIMIT_ORG_OVERRIDES' else null]: 'test',
       [if true then 'RATE_LIMIT_ORG_OVERRIDES2' else null]: 'test',
+      pruneTest: std.prune({
+        nested: {
+          test: null,
+        },
+        test: null,
+      }),
       test_quoting: ':9121',
       description: 'Cell of type alert-manager on cluster prod-us-east-3 and namespace alertmanager',
       'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),

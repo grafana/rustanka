@@ -69,6 +69,9 @@ pub struct EvalOpts {
 	pub eval_expr: Option<String>,
 	/// For inline environments with multiple sub-environments, the name of the specific environment to evaluate
 	pub env_name: Option<String>,
+	/// exportJsonnetImplementation from the environment spec (discovered from inline env metadata)
+	/// Used to determine whether to use jrsonnet-compatible output formatting
+	pub export_jsonnet_implementation: Option<String>,
 }
 
 /// Result of jsonnet evaluation
@@ -151,9 +154,12 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 	let context_init = ContextInitializer::new(resolver);
 
 	// Build config: start with defaults based on spec, then merge .rtk-config.yaml if present
-	let export_impl = spec
-		.as_ref()
-		.and_then(|e| e.spec.export_jsonnet_implementation.as_deref());
+	// First check opts.export_jsonnet_implementation (from inline env discovery),
+	// then fall back to spec.json (for static environments)
+	let export_impl = opts.export_jsonnet_implementation.as_deref().or_else(|| {
+		spec.as_ref()
+			.and_then(|e| e.spec.export_jsonnet_implementation.as_deref())
+	});
 	let mut config = if uses_jrsonnet_binary(export_impl) {
 		RtkConfig::jrsonnet_defaults()
 	} else {

@@ -59,6 +59,9 @@ pub struct DiscoveredEnv {
 	/// For inline environments with multiple sub-environments, this is the name of the specific environment
 	/// For static environments or single inline environments, this is None
 	pub env_name: Option<String>,
+	/// The exportJsonnetImplementation from the inline environment spec, if present
+	/// This is used to determine whether to use jrsonnet-compatible output formatting
+	pub export_jsonnet_implementation: Option<String>,
 }
 
 /// Find all Tanka environments in the given paths
@@ -82,11 +85,13 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 			if seen_dirs.insert(abs_path.clone()) {
 				let is_static = abs_path.join("spec.json").exists();
 				if is_static {
-					// Static environment
+					// Static environment - read exportJsonnetImplementation from spec.json
+					let export_impl = read_export_impl_from_spec(&abs_path);
 					envs.push(DiscoveredEnv {
 						is_static: true,
 						path: abs_path,
 						env_name: None,
+						export_jsonnet_implementation: export_impl,
 					});
 				} else {
 					// Inline environment(s) - discover sub-environments
@@ -98,6 +103,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 								is_static: false,
 								path: abs_path,
 								env_name: None,
+								export_jsonnet_implementation: None,
 							});
 						}
 					}
@@ -137,11 +143,13 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 				if seen_dirs.insert(canonical.clone()) {
 					let is_static = canonical.join("spec.json").exists();
 					if is_static {
-						// Static environment
+						// Static environment - read exportJsonnetImplementation from spec.json
+						let export_impl = read_export_impl_from_spec(&canonical);
 						envs.push(DiscoveredEnv {
 							is_static: true,
 							path: canonical,
 							env_name: None,
+							export_jsonnet_implementation: export_impl,
 						});
 					} else {
 						// Inline environment(s) - discover sub-environments
@@ -153,6 +161,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 									is_static: false,
 									path: canonical,
 									env_name: None,
+									export_jsonnet_implementation: None,
 								});
 							}
 						}
@@ -181,6 +190,21 @@ fn is_environment(path: &Path) -> bool {
 	false
 }
 
+/// Read exportJsonnetImplementation from spec.json if it exists
+fn read_export_impl_from_spec(path: &Path) -> Option<String> {
+	let spec_path = path.join("spec.json");
+	if !spec_path.exists() {
+		return None;
+	}
+
+	let content = std::fs::read_to_string(&spec_path).ok()?;
+	let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+	json.get("spec")?
+		.get("exportJsonnetImplementation")?
+		.as_str()
+		.map(|s| s.to_string())
+}
+
 /// Discover inline environments within a main.jsonnet file
 /// Returns a list of DiscoveredEnv, one for each sub-environment found
 fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
@@ -193,6 +217,7 @@ fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
 			is_static: false,
 			path: path.to_path_buf(),
 			env_name: None,
+			export_jsonnet_implementation: None,
 		}]);
 	}
 
@@ -238,62 +263,77 @@ fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
 	let json_value: serde_json::Value =
 		serde_json::from_str(&json_str).context("parsing manifested JSON")?;
 
-	// Extract environment names
-	let env_names = extract_environment_names(&json_value);
+	// Extract environment metadata (names and exportJsonnetImplementation)
+	let env_metadata = extract_environment_metadata(&json_value);
 
-	if env_names.is_empty() {
+	if env_metadata.is_empty() {
 		// No valid Tanka environments found - return empty list
 		return Ok(vec![]);
 	}
 
-	if env_names.len() == 1 {
+	// Get shared exportJsonnetImplementation (use first non-None value found)
+	let shared_export_impl = env_metadata
+		.iter()
+		.find_map(|(_, impl_opt)| impl_opt.clone());
+
+	if env_metadata.len() == 1 {
 		// Single environment - no need to specify name
 		return Ok(vec![DiscoveredEnv {
 			is_static: false,
 			path: path.to_path_buf(),
 			env_name: None,
+			export_jsonnet_implementation: shared_export_impl,
 		}]);
 	}
 
 	// Multiple environments - create one DiscoveredEnv per sub-environment
-	Ok(env_names
+	Ok(env_metadata
 		.into_iter()
-		.map(|name| DiscoveredEnv {
+		.map(|(name, export_impl)| DiscoveredEnv {
 			is_static: false,
 			path: path.to_path_buf(),
 			env_name: Some(name),
+			// Use per-env export_impl if set, otherwise fall back to shared
+			export_jsonnet_implementation: export_impl.or_else(|| shared_export_impl.clone()),
 		})
 		.collect())
 }
 
-/// Extract environment names from a JSON value
-fn extract_environment_names(value: &serde_json::Value) -> Vec<String> {
-	let mut names = Vec::new();
+/// Extract environment metadata (name, exportJsonnetImplementation) from a JSON value
+/// Returns a list of (name, Option<exportJsonnetImplementation>) tuples
+fn extract_environment_metadata(value: &serde_json::Value) -> Vec<(String, Option<String>)> {
+	let mut metadata = Vec::new();
 
 	match value {
 		serde_json::Value::Object(obj) => {
 			// Check if this is an Environment object
 			if obj.get("kind").and_then(|v| v.as_str()) == Some("Environment") {
-				if let Some(metadata) = obj.get("metadata") {
-					if let Some(name) = metadata.get("name").and_then(|v| v.as_str()) {
-						names.push(name.to_string());
+				if let Some(meta) = obj.get("metadata") {
+					if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
+						// Extract exportJsonnetImplementation from spec if present
+						let export_impl = obj
+							.get("spec")
+							.and_then(|s| s.get("exportJsonnetImplementation"))
+							.and_then(|v| v.as_str())
+							.map(|s| s.to_string());
+						metadata.push((name.to_string(), export_impl));
 					}
 				}
 			}
 			// Recurse into object values
 			for v in obj.values() {
-				names.extend(extract_environment_names(v));
+				metadata.extend(extract_environment_metadata(v));
 			}
 		}
 		serde_json::Value::Array(arr) => {
 			for v in arr {
-				names.extend(extract_environment_names(v));
+				metadata.extend(extract_environment_metadata(v));
 			}
 		}
 		_ => {}
 	}
 
-	names
+	metadata
 }
 
 #[cfg(test)]
@@ -321,6 +361,7 @@ mod tests {
 		assert_eq!(envs.len(), 1);
 		assert!(envs[0].is_static);
 		assert!(envs[0].env_name.is_none());
+		assert!(envs[0].export_jsonnet_implementation.is_none());
 	}
 
 	#[test]
