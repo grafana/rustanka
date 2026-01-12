@@ -117,6 +117,12 @@ runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: federal-ge-metrics"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-metrics", "environments/federal-ge-metrics", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
 name = "export: federal-ge-traces"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-traces", "environments/federal-ge-traces", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3
