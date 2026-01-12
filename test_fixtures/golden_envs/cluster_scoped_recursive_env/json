@@ -1,0 +1,30 @@
+{
+   "env-dev-us-east-0": {
+      "apiVersion": "tanka.dev/v1alpha1",
+      "kind": "Environment",
+      "metadata": {
+         "labels": {
+            "cluster": "dev-us-east-0"
+         },
+         "name": "flagger-dev-us-east-0"
+      },
+      "spec": {
+         "apiServer": "https://dev-us-east-0.example.com:6443",
+         "namespace": "flagger"
+      }
+   },
+   "env-prod-us-east-0": {
+      "apiVersion": "tanka.dev/v1alpha1",
+      "kind": "Environment",
+      "metadata": {
+         "labels": {
+            "cluster": "prod-us-east-0"
+         },
+         "name": "flagger-prod-us-east-0"
+      },
+      "spec": {
+         "apiServer": "https://prod-us-east-0.example.com:6443",
+         "namespace": "flagger"
+      }
+   }
+}

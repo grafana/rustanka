@@ -263,7 +263,8 @@ fn load_inline_envs(dir: &Path) -> Result<Vec<Environment>> {
 	builder.import_resolver(import_resolver);
 
 	use jrsonnet_evaluator::trace::PathResolver;
-	let ctx_init = jrsonnet_stdlib::ContextInitializer::new(PathResolver::new_cwd_fallback());
+	// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
+	let ctx_init = jrsonnet_stdlib::ContextInitializer::new(PathResolver::Absolute);
 	builder.context_initializer(ctx_init);
 
 	let state = builder.build();

@@ -98,14 +98,14 @@ ci-full: fmt-check lint-ci test
 # Uses .golden extension to prevent accidental reformatting
 GOLDEN_FIXTURES_DIR := test_fixtures/golden_envs
 # Simple format for test fixtures (they don't have the complex labels that deployment_tools uses)
-GOLDEN_EXPORT_FORMAT := {{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}
+GOLDEN_EXPORT_FORMAT := {{ .metadata.namespace | default "_cluster" }}/{{.kind}}-{{.metadata.name}}
 
 update-golden-fixtures:
 	@echo "Generating golden files for $(GOLDEN_FIXTURES_DIR)..."
 	@for dir in $(GOLDEN_FIXTURES_DIR)/*/; do \
 		rm -rf "$$dir/golden"; \
 		mkdir -p "$$dir/golden"; \
-		(cd "$$dir" && tk export golden . --format '$(GOLDEN_EXPORT_FORMAT)' --extension golden); \
+		(cd "$$dir" && tk export golden . --format '$(GOLDEN_EXPORT_FORMAT)' --extension golden --recursive); \
 		echo "Golden files generated in $${dir}golden/"; \
 	done
 
@@ -114,7 +114,7 @@ check-golden-fixtures:
 	@echo "Checking golden files are up to date..."
 	@for dir in $(GOLDEN_FIXTURES_DIR)/*/; do \
 		TEMP_DIR=$$(mktemp -d) && \
-		(cd "$$dir" && tk export $$TEMP_DIR . --format '$(GOLDEN_EXPORT_FORMAT)' --extension golden) && \
+		(cd "$$dir" && tk export $$TEMP_DIR . --format '$(GOLDEN_EXPORT_FORMAT)' --extension golden --recursive) && \
 		if ! diff -r --exclude=manifest.json "$$dir/golden" $$TEMP_DIR > /dev/null 2>&1; then \
 			echo "ERROR: Golden files are out of date in $$dir!"; \
 			echo "Run 'make update-golden-fixtures' to regenerate them."; \

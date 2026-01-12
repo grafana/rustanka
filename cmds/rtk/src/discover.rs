@@ -240,7 +240,12 @@ fn discover_inline_environments(path: &Path) -> Result<Vec<DiscoveredEnv>> {
 	builder.import_resolver(import_resolver);
 
 	use jrsonnet_evaluator::trace::PathResolver;
-	let ctx_init = ContextInitializer::new(PathResolver::new_cwd_fallback());
+	// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
+	let ctx_init = ContextInitializer::new(PathResolver::Absolute);
+
+	// Register native functions (helmTemplate, parseYaml, etc.) for discovery
+	crate::eval::register_native_functions(&ctx_init);
+
 	builder.context_initializer(ctx_init);
 
 	let state = builder.build();

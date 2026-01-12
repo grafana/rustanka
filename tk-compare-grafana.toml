@@ -111,6 +111,12 @@ runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: billing-prometheus"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-billing-prometheus", "environments/billing-prometheus", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
 name = "export: federal-ge-grafana"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}-federal-ge-grafana", "environments/federal-ge-grafana", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3

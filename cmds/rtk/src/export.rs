@@ -720,11 +720,11 @@ fn export_single_env(
 				let filename = apply_template_path_processing(&rendered_filename);
 
 				// Split by / (now only intentional separators) and sanitize each path component
-				// Filter out empty components and <no value> placeholders
+				// Filter out empty components but keep <no value> (matches tk behavior for cluster-scoped resources)
 				let path_parts: Vec<String> = filename
 					.split('/')
 					.map(|part| part.trim())
-					.filter(|part| !part.is_empty() && *part != "<no value>")
+					.filter(|part| !part.is_empty())
 					.map(|part| sanitize_path_component(part))
 					.filter(|part| !part.is_empty())
 					.collect();
@@ -1301,8 +1301,16 @@ fn inject_resource_defaults(manifest: &mut JsonValue, env_spec: &Option<crate::s
 		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
 			// Process annotations from resourceDefaults
 			if let Some(JsonValue::Object(default_annotations)) = defaults.get("annotations") {
-				// Ensure annotations exists
-				if !metadata.contains_key("annotations") {
+				// Ensure annotations exists and is an object (not null)
+				// Helm templates can produce `annotations:` with no value, which becomes null
+				let needs_annotations = match metadata.get("annotations") {
+					None => true,
+					Some(JsonValue::Null) => true,
+					Some(JsonValue::Object(m)) if m.is_empty() => false, // empty object is fine
+					Some(JsonValue::Object(_)) => false,                 // existing object is fine
+					_ => true,                                           // any other type, replace with object
+				};
+				if needs_annotations {
 					metadata.insert(
 						"annotations".to_string(),
 						JsonValue::Object(serde_json::Map::new()),
@@ -1324,8 +1332,16 @@ fn inject_resource_defaults(manifest: &mut JsonValue, env_spec: &Option<crate::s
 
 			// Process labels from resourceDefaults
 			if let Some(JsonValue::Object(default_labels)) = defaults.get("labels") {
-				// Ensure labels exists
-				if !metadata.contains_key("labels") {
+				// Ensure labels exists and is an object (not null)
+				// Helm templates can produce `labels:` with no value, which becomes null
+				let needs_labels = match metadata.get("labels") {
+					None => true,
+					Some(JsonValue::Null) => true,
+					Some(JsonValue::Object(m)) if m.is_empty() => false, // empty object is fine
+					Some(JsonValue::Object(_)) => false,                 // existing object is fine
+					_ => true,                                           // any other type, replace with object
+				};
+				if needs_labels {
 					metadata.insert(
 						"labels".to_string(),
 						JsonValue::Object(serde_json::Map::new()),
@@ -1374,6 +1390,10 @@ fn strip_null_metadata_fields(manifest: &mut JsonValue) {
 
 /// Sanitize a string for use as a path component
 fn sanitize_path_component(s: &str) -> String {
+	// Preserve <no value> exactly as tk outputs it for cluster-scoped resources
+	if s == "<no value>" {
+		return s.to_string();
+	}
 	s.chars()
 		.map(|c| {
 			if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' {
@@ -1626,9 +1646,10 @@ fn render_filename_simple(
 		.map_err(|e| anyhow::anyhow!("Template error: {:?}", e))?;
 
 	// Clean up empty segments (from missing optional fields)
+	// Keep <no value> to match tk behavior for cluster-scoped resources
 	let cleaned: String = result
 		.split('/')
-		.filter(|s| !s.is_empty() && *s != "<no value>")
+		.filter(|s| !s.is_empty())
 		.collect::<Vec<_>>()
 		.join("/");
 

@@ -852,9 +852,26 @@ mod tests {
 
 	#[test]
 	fn test_yaml_octal_parsing() {
-		// serde-saphyr's legacy_octal_numbers only handles 00-prefix (e.g., 00755)
-		// Full YAML 1.1 octal support (0755 as octal) requires serde-saphyr modification
-		// For now, test the 00-prefix which is what serde-saphyr supports
+		// YAML 1.1 octal: 0755 -> 493 decimal
+		let yaml = "myval: 0755";
+		let result = builtin_tanka_parse_yaml(yaml.to_string()).unwrap();
+		if let Val::Arr(arr) = result {
+			let val = arr.get(0).unwrap().unwrap();
+			if let Val::Obj(obj) = val {
+				let myval = obj.get("myval".into()).unwrap().unwrap();
+				if let Val::Num(n) = myval {
+					assert_eq!(n.get(), 493.0);
+				} else {
+					panic!("Expected number, got {:?}", myval);
+				}
+			} else {
+				panic!("Expected object");
+			}
+		} else {
+			panic!("Expected array");
+		}
+
+		// Also test double-zero prefix (00755)
 		let yaml = "myval: 00755";
 		let result = builtin_tanka_parse_yaml(yaml.to_string()).unwrap();
 		if let Val::Arr(arr) = result {

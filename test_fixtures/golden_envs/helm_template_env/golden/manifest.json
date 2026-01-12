@@ -1,4 +1,5 @@
 {
+    "_cluster/CustomResourceDefinition-testresources.example.com.golden": "main.jsonnet",
     "default/Deployment-myrelease-deployment.golden": "main.jsonnet",
     "default/Service-myrelease-service.golden": "main.jsonnet"
 }

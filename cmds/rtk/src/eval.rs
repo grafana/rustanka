@@ -150,8 +150,8 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 	let import_resolver = FileImportResolver::new(jpath.import_paths.clone());
 
 	// Create context initializer with stdlib and native functions
-	let resolver = PathResolver::new_cwd_fallback();
-	let context_init = ContextInitializer::new(resolver);
+	// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
+	let context_init = ContextInitializer::new(PathResolver::Absolute);
 
 	// Build config: start with defaults based on spec, then merge .rtk-config.yaml if present
 	// First check opts.export_jsonnet_implementation (from inline env discovery),
@@ -242,7 +242,7 @@ fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
 }
 
 /// Register Tanka-compatible native functions
-fn register_native_functions(context: &ContextInitializer) {
+pub fn register_native_functions(context: &ContextInitializer) {
 	use jrsonnet_stdlib::{
 		builtin_escape_string_regex, builtin_tanka_helm_template, builtin_tanka_kustomize_build,
 		builtin_tanka_manifest_json_from_json, builtin_tanka_manifest_yaml_from_json,
@@ -301,9 +301,10 @@ fn evaluate_file(state: &State, entrypoint: &Path, opts: &EvalOpts) -> Result<St
 	// Determine if we need to apply a filter script
 	let result = if let Some(env_name) = &opts.env_name {
 		// Use SingleEnvEvalScript to filter to a specific inline environment
+		// Use full path so std.thisFile works correctly for helmTemplate/kustomizeBuild
 		let eval_script = format!(
 			"local main = (import '{}');\n{}",
-			entrypoint_filename,
+			entrypoint_str,
 			SINGLE_ENV_EVAL_SCRIPT.replace("%s", env_name)
 		);
 		state

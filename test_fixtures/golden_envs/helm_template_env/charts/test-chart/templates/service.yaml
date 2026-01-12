@@ -4,6 +4,7 @@ metadata:
   name: {{ .Release.Name }}-service
   labels:
     app: {{ .Release.Name }}
+  annotations: null
 spec:
   type: {{ .Values.service.type }}
   ports:

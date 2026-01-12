@@ -6,8 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The export format for golden fixtures - matches GOLDEN_EXPORT_FORMAT in Makefile
-/// Simple format for test fixtures (they don't have the complex labels that deployment_tools uses)
-const EXPORT_FORMAT: &str = "{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}";
+/// Uses default for namespace to handle cluster-scoped resources (CRDs, ClusterRoles, etc.)
+const EXPORT_FORMAT: &str =
+	"{{ .metadata.namespace | default \"_cluster\" }}/{{.kind}}-{{.metadata.name}}";
 
 /// Helper function to get absolute path to test_fixtures
 fn fixtures_path(subpath: &str) -> PathBuf {
@@ -84,7 +85,8 @@ fn run_golden_test(env_path: &Path) {
 	);
 
 	let envs = find_environments(&[env_path.to_string_lossy().to_string()]).unwrap();
-	assert_eq!(envs.len(), 1, "Should find exactly 1 environment");
+	let env_count = envs.len();
+	let recursive = env_count > 1;
 
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
@@ -93,14 +95,18 @@ fn run_golden_test(env_path: &Path) {
 		parallelism: 1,
 		eval_opts: EvalOpts::default(),
 		name: None,
-		recursive: false,
+		recursive,
 		skip_manifest: true,
 		..Default::default()
 	};
 
 	let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
 
-	assert_eq!(result.successful, 1, "Should export 1 environment");
+	assert_eq!(
+		result.successful, env_count,
+		"Should export {} environment(s)",
+		env_count
+	);
 	assert_eq!(result.failed, 0, "Should have no failures");
 
 	let golden_files: std::collections::HashMap<_, _> = collect_files(&golden_dir)

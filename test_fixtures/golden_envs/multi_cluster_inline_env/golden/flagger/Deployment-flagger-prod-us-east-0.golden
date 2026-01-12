@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    tanka.dev/environment: a748de550de7b212a012d636190fe890f3598286847dffdf
+  name: flagger-prod-us-east-0
+  namespace: flagger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flagger
+  template:
+    metadata:
+      labels:
+        app: flagger
+    spec:
+      containers:
+      - image: flagger:latest
+        name: flagger

@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flagger-dev-us-east-0
+rules:
+- apiGroups:
+  - flagger.app
+  resources:
+  - canaries
+  verbs:
+  - get
+  - list
+  - watch
