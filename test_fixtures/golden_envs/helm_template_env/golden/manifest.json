@@ -1,0 +1,4 @@
+{
+    "default/Deployment-myrelease-deployment.golden": "main.jsonnet",
+    "default/Service-myrelease-service.golden": "main.jsonnet"
+}

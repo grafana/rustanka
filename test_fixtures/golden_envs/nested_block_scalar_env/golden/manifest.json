@@ -1,11 +1,11 @@
 {
-    "default/k8s-monitoring-static-usages.golden": "main.jsonnet",
-    "ge-grafana/ge-grafana-plugins-config.golden": "main.jsonnet",
-    "loki-prod/parallel-read-path-overrides.golden": "main.jsonnet",
-    "mimir-cd/patch-test-patch.golden": "main.jsonnet",
-    "mimir-ops-03/ingester-zone-a.golden": "main.jsonnet",
-    "mimir-ops-03/k8s-monitoring-static-usages.golden": "main.jsonnet",
-    "mimir-ops-03/mimir-emojis.golden": "main.jsonnet",
-    "mimir-ops-03/overrides.golden": "main.jsonnet",
-    "tempo-cd/tempo-create-deployment-thursday-prod.golden": "main.jsonnet"
+    "default/ConfigMap-k8s-monitoring-static-usages.golden": "main.jsonnet",
+    "ge-grafana/ConfigMap-ge-grafana-plugins-config.golden": "main.jsonnet",
+    "loki-prod/ConfigMap-parallel-read-path-overrides.golden": "main.jsonnet",
+    "mimir-cd/Workflow-patch-test-patch.golden": "main.jsonnet",
+    "mimir-ops-03/ConfigMap-k8s-monitoring-static-usages.golden": "main.jsonnet",
+    "mimir-ops-03/ConfigMap-mimir-emojis.golden": "main.jsonnet",
+    "mimir-ops-03/ConfigMap-overrides.golden": "main.jsonnet",
+    "mimir-ops-03/ScaledObject-ingester-zone-a.golden": "main.jsonnet",
+    "tempo-cd/CronWorkflow-tempo-create-deployment-thursday-prod.golden": "main.jsonnet"
 }

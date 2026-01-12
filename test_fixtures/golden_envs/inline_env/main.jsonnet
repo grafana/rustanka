@@ -1,6 +1,18 @@
 // Test inline environment - defines Tanka Environment objects directly in Jsonnet
 // This tests the inline environment discovery and export code paths
 
+local withFluxIgnore(ignoredBy, ignoredReason='') = {
+  spec+: {
+    resourceDefaults+: {
+      annotations+: {
+        'kustomize.toolkit.fluxcd.io/reconcile': 'disabled',
+        'kustomize.toolkit.fluxcd.io/reconcile-disabled-by': ignoredBy,
+        'kustomize.toolkit.fluxcd.io/reconcile-disabled-reason': 'Ignored with the withFluxIgnore jsonnet utility. ' + ignoredReason,
+      },
+    },
+  },
+};
+
 local makeConfigMap(name, data) = {
   apiVersion: 'v1',
   kind: 'ConfigMap',
@@ -42,7 +54,7 @@ local makeDeployment(name, image) = {
 };
 
 // Single inline environment
-{
+local env = {
   apiVersion: 'tanka.dev/v1alpha1',
   kind: 'Environment',
   metadata: {
@@ -50,6 +62,8 @@ local makeDeployment(name, image) = {
     labels: {
       type: 'inline',
       cluster: 'test-cluster',
+      fluxExport: 'false',
+      inline: 'true',
     },
   },
   spec: {
@@ -76,5 +90,11 @@ local makeDeployment(name, image) = {
       }),
     }),
     'app-deployment': makeDeployment('app', 'nginx:1.25'),
+  },
+} + withFluxIgnore('platform-federal', 'Flux not running in federal clusters');
+
+{
+  nested: {
+    nestedAgain: env,
   },
 }

@@ -142,8 +142,9 @@ fn yaml_needs_quotes(string: &str) -> bool {
 		|| string.contains(']')
 		|| string.contains('<')
 		|| string.contains('>')
-		// # is only a comment when preceded by whitespace, so we check for " #" instead.
-		|| string.contains(" #")
+		// # starts a comment in YAML - jrsonnet quotes any string containing #
+		// to avoid potential parsing issues even mid-string (e.g., URLs with anchors)
+		|| string.contains('#')
 		|| string.contains(|c| matches!(c, '`' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
 		|| [
 			// http://yaml.org/type/bool.html
@@ -564,8 +565,8 @@ mod tests {
 	#[test]
 	fn test_yaml_needs_quotes_for_special_chars() {
 		assert!(yaml_needs_quotes("key: value")); // colon followed by space
-		assert!(yaml_needs_quotes("hello #world")); // hash preceded by space (comment)
-		assert!(!yaml_needs_quotes("hello#world")); // hash NOT preceded by space is safe
+		assert!(yaml_needs_quotes("hello #world")); // hash anywhere requires quoting
+		assert!(yaml_needs_quotes("hello#world")); // hash anywhere requires quoting (matches jrsonnet)
 		assert!(yaml_needs_quotes("{json}")); // starts with brace
 		assert!(yaml_needs_quotes("[array]")); // starts with bracket
 										 // Braces/brackets anywhere require quoting to match go-jsonnet behavior

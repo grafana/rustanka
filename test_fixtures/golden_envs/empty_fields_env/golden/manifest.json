@@ -1,8 +1,8 @@
 {
-    "default/cortex-gw.golden": "main.jsonnet",
-    "default/index-gateway-headless.golden": "main.jsonnet",
-    "default/index-gateway-pdb.golden": "main.jsonnet",
-    "default/index-gateway.golden": "main.jsonnet",
-    "default/logs-ingress.golden": "main.jsonnet",
-    "default/test-deployment.golden": "main.jsonnet"
+    "default/Deployment-test-deployment.golden": "main.jsonnet",
+    "default/Ingress-cortex-gw.golden": "main.jsonnet",
+    "default/Ingress-logs-ingress.golden": "main.jsonnet",
+    "default/PodDisruptionBudget-index-gateway-pdb.golden": "main.jsonnet",
+    "default/Service-index-gateway-headless.golden": "main.jsonnet",
+    "default/Service-index-gateway.golden": "main.jsonnet"
 }

@@ -123,6 +123,7 @@ local alertingRulesData = {
       alert: 'PromScrapeFailed',
       annotations: {
         message: 'Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}',
+        runbook_url: 'https://github.com/grafana/deployment_tools/blob/master/docs/cortex/runbooks.md#BillingPromCrashlooping',
       },
       expr: 'up != 1',
       'for': '15m',

@@ -5,6 +5,10 @@ use similar::{ChangeTag, TextDiff};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The export format for golden fixtures - matches GOLDEN_EXPORT_FORMAT in Makefile
+/// Simple format for test fixtures (they don't have the complex labels that deployment_tools uses)
+const EXPORT_FORMAT: &str = "{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}";
+
 /// Helper function to get absolute path to test_fixtures
 fn fixtures_path(subpath: &str) -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,12 +42,39 @@ fn collect_files(dir: &Path) -> std::collections::HashMap<String, String> {
 	files
 }
 
+/// Discover all golden test environments in test_fixtures/golden_envs/
+/// Returns a list of (env_name, env_path) tuples
+fn discover_golden_envs() -> Vec<(String, PathBuf)> {
+	let golden_envs_dir = fixtures_path("golden_envs");
+	let mut envs = Vec::new();
+
+	if !golden_envs_dir.exists() {
+		return envs;
+	}
+
+	for entry in fs::read_dir(&golden_envs_dir).unwrap() {
+		let entry = entry.unwrap();
+		let path = entry.path();
+		if path.is_dir() {
+			let golden_dir = path.join("golden");
+			// Only include directories that have a golden/ subdirectory
+			if golden_dir.exists() && golden_dir.is_dir() {
+				let name = path.file_name().unwrap().to_string_lossy().to_string();
+				envs.push((name, path));
+			}
+		}
+	}
+
+	// Sort by name for consistent test ordering
+	envs.sort_by(|a, b| a.0.cmp(&b.0));
+	envs
+}
+
 /// Run a golden test comparing rtk export output against tk-generated golden files
-fn run_golden_test(fixture_name: &str, format: &str) {
+fn run_golden_test(env_path: &Path) {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
-	let env_path = fixtures_path(fixture_name);
 	let golden_dir = env_path.join("golden");
 
 	assert!(
@@ -58,7 +89,7 @@ fn run_golden_test(fixture_name: &str, format: &str) {
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "golden".to_string(),
-		format: format.to_string(),
+		format: EXPORT_FORMAT.to_string(),
 		parallelism: 1,
 		eval_opts: EvalOpts::default(),
 		name: None,
@@ -130,154 +161,50 @@ fn run_golden_test(fixture_name: &str, format: &str) {
 	}
 }
 
+/// Main test that discovers and runs all golden fixture tests
 #[test]
-fn test_yaml_output_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/yaml_output_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
+fn test_all_golden_fixtures() {
+	let envs = discover_golden_envs();
 
-#[test]
-fn test_yaml_output_env_jrsonnet_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/yaml_output_env_jrsonnet",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
+	assert!(
+		!envs.is_empty(),
+		"No golden test environments found in test_fixtures/golden_envs/"
 	);
-}
 
-#[test]
-fn test_static_exporter_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/static_exporter_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
+	println!("Discovered {} golden test environments:", envs.len());
+	for (name, _) in &envs {
+		println!("  - {}", name);
+	}
 
-/// Test case for nested YAML block scalar indentation/chomping
-/// This reproduces the issue where rtk uses different block scalar formatting
-/// than tk (Go's yaml.v3), specifically:
-/// - rtk uses `|` (keep final newline) while tk uses `|-` (strip final newline)
-/// - This affects ConfigMaps with nested YAML content like queries.yaml
-#[test]
-fn test_nested_block_scalar_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/nested_block_scalar_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
+	let mut failures = Vec::new();
 
-/// Test case for object key ordering differences between tk and rtk
-/// This reproduces the issue where object keys with numeric strings sort
-/// differently: tk sorts as strings ("67" > "100"), rtk may sort numerically
-/// This affects:
-/// - Command-line arguments built from object fields
-/// - Config hashes (since underlying content order differs)
-#[test]
-fn test_object_ordering_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/object_ordering_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
+	for (name, path) in &envs {
+		println!("\n=== Testing {} ===", name);
+		let result = std::panic::catch_unwind(|| {
+			run_golden_test(path);
+		});
 
-/// Test case for empty/null field handling differences between tk and rtk
-/// This reproduces issues where:
-/// - PodDisruptionBudget matchLabels: tk has {name: x}, rtk has {}
-/// - Ingress annotations may be empty vs populated differently
-/// - Service selectors may be missing fields
-#[test]
-fn test_empty_fields_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/empty_fields_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
+		match result {
+			Ok(()) => println!("✓ {} passed", name),
+			Err(e) => {
+				let msg = if let Some(s) = e.downcast_ref::<&str>() {
+					s.to_string()
+				} else if let Some(s) = e.downcast_ref::<String>() {
+					s.clone()
+				} else {
+					"Unknown panic".to_string()
+				};
+				println!("✗ {} failed", name);
+				failures.push((name.clone(), msg));
+			}
+		}
+	}
 
-/// Test case for multiline string wrapping differences between tk and rtk
-/// This reproduces issues where:
-/// - Long shell commands break at different positions (e.g., before |)
-/// - ScaledObject PromQL queries have different line breaks
-/// - Long command-line args wrap differently in YAML output
-#[test]
-fn test_multiline_strings_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/multiline_strings_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
-
-/// Test case for conditional evaluation and null handling differences
-/// This reproduces issues where:
-/// - Resources get "--no-value-" in filename when metadata.name evaluates to null/empty
-/// - PodDisruptionBudget matchLabels are empty when they should have values
-/// - Service selector/ports are missing when they should be present
-/// These issues suggest differences in how conditionals or null values are evaluated
-#[test]
-fn test_conditional_eval_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/conditional_eval_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
-
-/// Test case for YAML line wrapping at specific character positions
-/// This reproduces issues where:
-/// - Shell commands like 'du -sh /data/wal/ | cut' wrap before '|' in rtk but after space in tk
-/// - PromQL queries have ') * 100' on different lines between tk and rtk
-/// - Complex nested structures wrap at different points
-#[test]
-fn test_yaml_line_wrapping_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/yaml_line_wrapping_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
-
-/// Test case for conditional config generation patterns
-/// This reproduces issues where ConfigMap data is empty in rtk but populated in tk
-/// Tests various patterns:
-/// - Hidden field (::) exposure and access
-/// - Conditional object field inclusion
-/// - Self-referential config with hidden fields
-/// - Mixin patterns common in Grafana jsonnet
-/// - Object merging with hidden fields (like the -gf Loki configs)
-#[test]
-fn test_conditional_config_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/conditional_config_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
-
-/// Test case for eager error evaluation in nested std.mergePatch calls
-/// This reproduces the issue where rtk evaluates error statements too eagerly
-/// when using nested std.mergePatch patterns. The exact pattern is:
-/// 1. thor-query-engine.libsonnet defines: loki.querier.storage_start: error '...'
-/// 2. loki-overrides.libsonnet does: querier: std.mergePatch(super.querier + {...}, {...})
-///    but does NOT null out the error field
-/// 3. dev-overrides.libsonnet does: loki:: std.mergePatch(super.loki + {...}, {...})
-/// 4. global-release-configs.libsonnet nulls the error field, but AFTER dev-overrides
-///
-/// tk lazily evaluates and only triggers the error if the field is accessed.
-/// rtk eagerly evaluates during std.mergePatch, causing the error to trigger.
-#[test]
-fn test_eager_error_eval_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/eager_error_eval_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
-}
-
-/// Test case for inline environment discovery and export
-/// Inline environments define Tanka Environment objects directly in Jsonnet
-/// without a separate spec.json file. This tests:
-/// - Inline environment discovery (finding Environment objects in Jsonnet output)
-/// - Export of inline environments with nested YAML/JSON in ConfigMaps
-#[test]
-fn test_inline_env_export_matches_golden() {
-	run_golden_test(
-		"golden_envs/inline_env",
-		"{{.metadata.namespace}}/{{.metadata.name}}",
-	);
+	if !failures.is_empty() {
+		let mut error_msg = format!("\n{} golden fixture test(s) failed:\n", failures.len());
+		for (name, msg) in &failures {
+			error_msg.push_str(&format!("\n=== {} ===\n{}\n", name, msg));
+		}
+		panic!("{}", error_msg);
+	}
 }

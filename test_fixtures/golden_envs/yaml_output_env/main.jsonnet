@@ -19,6 +19,7 @@ local alertingRulesData = {
       alert: 'PromScrapeFlapping',
       annotations: {
         message: 'Prometheus target flapping {{ $labels.job }} / {{ $labels.instance }}',
+        runbook_url: 'https://github.com/grafana/deployment_tools/blob/master/docs/cortex/runbooks.md#BillingPromCrashlooping',
       },
       expr: 'avg_over_time(up[5m]) < 1',
       'for': '15m',

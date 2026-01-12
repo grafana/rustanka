@@ -2,6 +2,7 @@
 // These are wrappers around the existing stdlib functions to provide
 // Tanka-compatible API accessible via std.native()
 
+use crate::parse::expand_merge_keys;
 use jrsonnet_evaluator::IStr;
 use jrsonnet_evaluator::{
 	error::{ErrorKind::*, Result},
@@ -115,6 +116,9 @@ fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Resu
 			continue;
 		}
 
+		// Expand YAML merge keys (<<) which serde_yaml_with_quirks doesn't handle
+		let val = expand_merge_keys(val)?;
+
 		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
 		// Skip resources that don't have proper structure (like Lists)
 		if let Val::Obj(ref obj) = val {
@@ -217,7 +221,9 @@ pub fn builtin_tanka_parse_yaml(yaml: String) -> Result<Val> {
 	for document in deserializer {
 		let val: Val = Val::deserialize(document)
 			.map_err(|e| RuntimeError(format!("failed to parse yaml: {e}").into()))?;
-		ret.push(val);
+		// Expand YAML merge keys (<<) which serde_yaml_with_quirks doesn't handle
+		let expanded = expand_merge_keys(val)?;
+		ret.push(expanded);
 	}
 
 	Ok(Val::Arr(ret.into()))

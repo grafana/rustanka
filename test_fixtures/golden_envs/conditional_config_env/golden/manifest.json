@@ -1,13 +1,13 @@
 {
-    "default/array-hidden-test.golden": "main.jsonnet",
-    "default/comprehension-test.golden": "main.jsonnet",
-    "default/deep-hidden-test.golden": "main.jsonnet",
-    "default/dollar-access-test.golden": "main.jsonnet",
-    "default/gf-simulation-test.golden": "main.jsonnet",
-    "default/has-all-test.golden": "main.jsonnet",
-    "default/index-gateway-pdb.golden": "main.jsonnet",
-    "default/merged-hidden-test.golden": "main.jsonnet",
-    "default/native-test.golden": "main.jsonnet",
-    "default/recursive-test.golden": "main.jsonnet",
-    "default/super-binding-test.golden": "main.jsonnet"
+    "default/ConfigMap-array-hidden-test.golden": "main.jsonnet",
+    "default/ConfigMap-comprehension-test.golden": "main.jsonnet",
+    "default/ConfigMap-deep-hidden-test.golden": "main.jsonnet",
+    "default/ConfigMap-dollar-access-test.golden": "main.jsonnet",
+    "default/ConfigMap-gf-simulation-test.golden": "main.jsonnet",
+    "default/ConfigMap-has-all-test.golden": "main.jsonnet",
+    "default/ConfigMap-merged-hidden-test.golden": "main.jsonnet",
+    "default/ConfigMap-native-test.golden": "main.jsonnet",
+    "default/ConfigMap-recursive-test.golden": "main.jsonnet",
+    "default/ConfigMap-super-binding-test.golden": "main.jsonnet",
+    "default/PodDisruptionBudget-index-gateway-pdb.golden": "main.jsonnet"
 }

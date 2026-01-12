@@ -1,8 +1,8 @@
 {
-    "default/limit-updater-deny-lists.golden": "main.jsonnet",
-    "default/loki-autoscaler-metrics.golden": "main.jsonnet",
-    "default/partition-ingester-a.golden": "main.jsonnet",
-    "default/query-engine-worker.golden": "main.jsonnet",
-    "default/query-tee.golden": "main.jsonnet",
-    "default/ruler.golden": "main.jsonnet"
+    "default/ConfigMap-limit-updater-deny-lists.golden": "main.jsonnet",
+    "default/ConfigMap-loki-autoscaler-metrics.golden": "main.jsonnet",
+    "default/Deployment-query-tee.golden": "main.jsonnet",
+    "default/ScaledObject-partition-ingester-a.golden": "main.jsonnet",
+    "default/ScaledObject-query-engine-worker.golden": "main.jsonnet",
+    "default/StatefulSet-ruler.golden": "main.jsonnet"
 }
