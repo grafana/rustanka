@@ -130,18 +130,17 @@ fn yaml_needs_quotes(string: &str) -> bool {
 	string.is_empty()
 		|| need_quotes_spaces(string)
 		// Characters that are special at the start of a YAML value
-		|| string.starts_with(['&', '*', '?', '|', '-', '!', '%', '@', '{', '[', '"', '\''])
-		// Go's YAML library only quotes colons when followed by space (creates ambiguity)
-		|| string.contains(": ")
-		// Flow indicators anywhere in string need quoting to match go-jsonnet behavior
+		|| string.starts_with(['&', '*', '?', '|', '-', '!', '%', '@', '{', '[', '"', '\'', '<', '>'])
+		// Colon anywhere creates key-value ambiguity - jrsonnet quotes any string with colon
+		|| string.contains(':')
+		// Comma anywhere - jrsonnet quotes any string with comma
+		|| string.contains(',')
+		// Flow indicators anywhere in string need quoting
 		// This includes { } [ ] which could be interpreted as flow sequences/mappings
-		// Also < > which go-jsonnet and jrsonnet quote conservatively
 		|| string.contains('{')
 		|| string.contains('}')
 		|| string.contains('[')
 		|| string.contains(']')
-		|| string.contains('<')
-		|| string.contains('>')
 		// # starts a comment in YAML - jrsonnet quotes any string containing #
 		// to avoid potential parsing issues even mid-string (e.g., URLs with anchors)
 		|| string.contains('#')
@@ -168,54 +167,18 @@ fn yaml_needs_quotes(string: &str) -> bool {
 		// ISO8601 timestamps should be quoted to prevent YAML parsers from
 		// interpreting them as dates (matches Go's yaml.v3 behavior)
 		|| looks_like_timestamp(string)
-}
-
-/// Format a float in scientific notation like "5.625e+06" (with + sign and 2-digit exponent)
-fn format_scientific(v: f64, buf: &mut String) {
-	// Use Rust's scientific notation as base
-	let formatted = format!("{v:e}");
-	// Find the 'e' and process the exponent
-	if let Some(e_pos) = formatted.find('e') {
-		let (mantissa, exp_part) = formatted.split_at(e_pos);
-		let exp_str = &exp_part[1..]; // skip 'e'
-		let exp: i32 = exp_str.parse().unwrap_or(0);
-		// Format with + sign for positive exponents and 2-digit padding
-		if exp >= 0 {
-			write!(buf, "{mantissa}e+{exp:02}").unwrap();
-		} else {
-			write!(buf, "{mantissa}e{exp:03}").unwrap(); // -01, -02, etc.
-		}
-	} else {
-		buf.push_str(&formatted);
-	}
+		// Strings containing quotes need quoting
+		|| string.contains('\'')
+		|| string.contains('"')
 }
 
 /// Escape a string for YAML with intelligent quote selection
-/// Uses single quotes when the string contains double quotes (to match Go's yaml.v3)
-/// but only when quote_values is false (CLI mode). When quote_values is true
-/// (std.manifestYamlDoc), always uses double quotes to match Go-jsonnet.
-fn escape_string_yaml_buf(s: &str, buf: &mut String, quote_values: bool) {
-	// When quote_values is true (std.manifestYamlDoc), always use double quotes
-	if quote_values {
-		escape_string_json_buf(s, buf);
-		return;
-	}
-
-	// For CLI mode (quote_values=false), choose quote style based on content
-	let has_double_quote = s.contains('"');
-	let has_single_quote = s.contains('\'');
-	let has_backslash = s.contains('\\');
-
-	// Use single quotes when the string contains double quotes but no single quotes
-	// This matches Go's yaml.v3 behavior for strings like '{environment="pro"}'
-	if has_double_quote && !has_single_quote && !has_backslash {
-		buf.push('\'');
-		buf.push_str(s);
-		buf.push('\'');
-	} else {
-		// Use double quotes with JSON-style escaping
-		escape_string_json_buf(s, buf);
-	}
+/// Always uses double quotes with JSON-style escaping to match both go-jsonnet and jrsonnet behavior.
+/// Go's yaml.v3 uses single quotes when possible, but both go-jsonnet and jrsonnet use double quotes.
+fn escape_string_yaml_buf(s: &str, buf: &mut String, _quote_values: bool) {
+	// Always use double quotes with JSON-style escaping
+	// This matches both go-jsonnet (quote_values=true) and jrsonnet (quote_values=false) behavior
+	escape_string_json_buf(s, buf);
 }
 
 #[allow(dead_code)]
@@ -280,18 +243,14 @@ fn manifest_yaml_ex_buf(
 			}
 		}
 		Val::Num(n) => {
+			// Go-jsonnet uses strconv.FormatFloat(v, 'f', -1, 64) - shortest decimal representation
+			// No scientific notation is used in manifestYamlDoc
 			let v = n.get();
 			if v.fract() == 0.0 {
-				let int_val = v as i64;
-				if int_val.abs() >= 1_000_000 {
-					// Large integers: use scientific notation like "5.625e+06"
-					format_scientific(v, buf);
-				} else {
-					// Small integers: write without decimal point
-					write!(buf, "{int_val}").unwrap();
-				}
+				// Integer: write without decimal point
+				write!(buf, "{}", v as i64).unwrap();
 			} else {
-				// Regular float
+				// Float: use shortest representation (Rust's default)
 				write!(buf, "{v}").unwrap();
 			}
 		}
@@ -572,12 +531,14 @@ mod tests {
 										 // Braces/brackets anywhere require quoting to match go-jsonnet behavior
 		assert!(yaml_needs_quotes("hello{world}"));
 		assert!(yaml_needs_quotes("hello[world]"));
-		// Quotes at start need quoting, quotes in middle are OK
+		// Quotes at start need quoting
 		assert!(yaml_needs_quotes("\"quoted\"")); // starts with double quote
 		assert!(yaml_needs_quotes("'quoted'")); // starts with single quote
-		assert!(!yaml_needs_quotes("hello\"world")); // double quote in middle is OK
-		assert!(!yaml_needs_quotes("hello'world")); // single quote in middle is OK
-		assert!(!yaml_needs_quotes("job=\"api-server\"")); // typical promql/yaml pattern
+										  // Single quotes anywhere need quoting in jrsonnet
+		assert!(yaml_needs_quotes("hello'world")); // single quote in middle
+											 // Double quotes anywhere need quoting in jrsonnet
+		assert!(yaml_needs_quotes("hello\"world")); // double quote in middle
+		assert!(yaml_needs_quotes("job=\"api-server\"")); // typical promql/yaml pattern
 	}
 
 	#[test]
@@ -594,21 +555,21 @@ mod tests {
 
 	#[test]
 	fn test_number_large_integers() {
-		// Large integers (> 1 million) use scientific notation like "5.625e+06"
-		assert_eq!(manifest_yaml(&num(10_000_000.0)), "1e+07");
-		assert_eq!(manifest_yaml(&num(5_625_000.0)), "5.625e+06");
-		assert_eq!(manifest_yaml(&num(536_870_912.0)), "5.36870912e+08");
-		assert_eq!(manifest_yaml(&num(100_000_000_000.0)), "1e+11");
+		// Go-jsonnet uses decimal format for all integers (no scientific notation)
+		assert_eq!(manifest_yaml(&num(10_000_000.0)), "10000000");
+		assert_eq!(manifest_yaml(&num(5_625_000.0)), "5625000");
+		assert_eq!(manifest_yaml(&num(536_870_912.0)), "536870912");
+		assert_eq!(manifest_yaml(&num(100_000_000_000.0)), "100000000000");
 	}
 
 	#[test]
 	fn test_number_smaller_values() {
-		// Numbers <= 1 million use plain integer format
+		// All integers use plain integer format (no scientific notation in go-jsonnet)
 		assert_eq!(manifest_yaml(&num(50000.0)), "50000");
 		assert_eq!(manifest_yaml(&num(999999.0)), "999999");
 		assert_eq!(manifest_yaml(&num(100.0)), "100");
 		assert_eq!(manifest_yaml(&num(0.0)), "0");
-		assert_eq!(manifest_yaml(&num(1_000_000.0)), "1e+06"); // exactly 1 million, not scientific
+		assert_eq!(manifest_yaml(&num(1_000_000.0)), "1000000"); // exactly 1 million, decimal format
 	}
 
 	#[test]
@@ -621,7 +582,7 @@ mod tests {
 	#[test]
 	fn test_number_negative() {
 		assert_eq!(manifest_yaml(&num(-100.0)), "-100");
-		assert_eq!(manifest_yaml(&num(-10_000_000.0)), "-1e+07");
+		assert_eq!(manifest_yaml(&num(-10_000_000.0)), "-10000000");
 	}
 
 	// ==========================================================================
@@ -795,8 +756,8 @@ mod tests {
 		let val = Val::Obj(root_builder.build());
 		let result = manifest_yaml(&val);
 
-		// Check large number formatting (scientific notation for > 1 million)
-		assert!(result.contains("count: 1e+07"));
+		// Check large number formatting (decimal format, no scientific notation)
+		assert!(result.contains("count: 10000000"));
 
 		// Check timestamp is quoted
 		assert!(result.contains("\"2025-07-03T15:30:00Z\""));

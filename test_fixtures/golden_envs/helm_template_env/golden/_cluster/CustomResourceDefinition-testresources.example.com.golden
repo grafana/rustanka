@@ -23,9 +23,24 @@ spec:
           spec:
             properties:
               message:
+                description: 'Selects a field of the pod: supports metadata.name,
+                  metadata.namespace, `metadata.labels[''<KEY>'']`, `metadata.annotations[''<KEY>'']`,
+                  spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP,
+                  status.podIPs.'
                 type: string
               replicas:
+                description: Number of pod's replicas to create
                 type: integer
+              storageInfo:
+                description: 'EmptyDir represents a temporary directory that shares
+                  a pod''s lifetime. More info: https://kubernetes.io/docs/concepts/storage/volumes#emptydir'
+                type: string
+              volumePath:
+                description: 'Required: Path within the container at which the volume
+                  should be mounted. Must not contain the ''..'' path. Must be utf-8
+                  encoded. The first item of the relative path must not start with
+                  ''..'''
+                type: string
             type: object
         type: object
     served: true

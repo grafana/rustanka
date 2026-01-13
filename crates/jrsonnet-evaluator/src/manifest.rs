@@ -17,13 +17,13 @@ pub fn set_use_go_style_floats(use_go_style: bool) {
 }
 
 /// Check if Go-style float formatting is enabled
-fn should_use_go_style_floats() -> bool {
+pub(crate) fn should_use_go_style_floats() -> bool {
 	USE_GO_STYLE_FLOATS.with(Cell::get)
 }
 
 /// Format a float like Go's %.17g format
 /// This matches go-jsonnet's unparseNumber function for non-integer values
-fn format_float_go_g17(v: f64) -> String {
+pub(crate) fn format_float_go_g17(v: f64) -> String {
 	// Go's %.17g format:
 	// - Uses 17 significant digits maximum
 	// - Chooses %e or %f based on exponent (uses %e if exp < -4 or exp >= precision)

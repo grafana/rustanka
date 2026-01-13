@@ -165,8 +165,7 @@ pub fn stdlib_uncached(settings: Rc<RefCell<Settings>>) -> ObjValue {
 		("manifestJsonEx", builtin_manifest_json_ex::INST),
 		("manifestJson", builtin_manifest_json::INST),
 		("manifestJsonMinified", builtin_manifest_json_minified::INST),
-		// manifestYamlDoc is registered separately below because it needs settings
-		("manifestYamlStream", builtin_manifest_yaml_stream::INST),
+		// manifestYamlDoc and manifestYamlStream are registered separately below because they need settings
 		("manifestTomlEx", builtin_manifest_toml_ex::INST),
 		("manifestToml", builtin_manifest_toml::INST),
 		("toString", builtin_to_string::INST),
@@ -247,6 +246,12 @@ pub fn stdlib_uncached(settings: Rc<RefCell<Settings>>) -> ObjValue {
 	builder.method(
 		"manifestYamlDoc",
 		builtin_manifest_yaml_doc {
+			settings: settings.clone(),
+		},
+	);
+	builder.method(
+		"manifestYamlStream",
+		builtin_manifest_yaml_stream {
 			settings: settings.clone(),
 		},
 	);

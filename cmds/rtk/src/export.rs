@@ -766,6 +766,7 @@ fn export_single_env(
 						line_width: Some(80),
 						scientific_notation_threshold: Some(1000000), // 1 million
 						quote_ambiguous_keys: true,                   // Quote y, n, yes, no, etc. to match Go yaml.v3
+						quote_numeric_strings: true, // Quote numeric string keys like "12", "12.5" to match Go yaml.v3
 						..Default::default()
 					};
 					let mut output = String::new();

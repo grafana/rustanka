@@ -1,13 +1,13 @@
 {
-  "apiVersion": "tanka.dev/v1alpha1",
-  "kind": "Environment",
-  "metadata": {
-    "name": "yaml-octal-test",
-    "labels": {
-      "cluster_name": "test-cluster"
+    "apiVersion": "tanka.dev/v1alpha1",
+    "kind": "Environment",
+    "metadata": {
+        "name": "yaml-octal-test",
+        "labels": {
+            "cluster_name": "test-cluster"
+        }
+    },
+    "spec": {
+        "namespace": "default"
     }
-  },
-  "spec": {
-    "namespace": "default"
-  }
 }

@@ -122,20 +122,44 @@ local alertingRulesData = {
     rules: [{
       alert: 'PromScrapeFailed',
       annotations: {
-        message: 'Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}',
+        message2: "hello'",
+        message3: 'hello,',
+        message: "Prometheus failed to scrape a target's job {{ $labels.job }} / {{ $labels.instance }} %s" % 0.8,
         runbook_url: 'https://github.com/grafana/deployment_tools/blob/master/docs/cortex/runbooks.md#BillingPromCrashlooping',
       },
       expr: 'up != 1',
       'for': '15m',
       labels: {
         severity: 'warning',
+        expr: 'max by (namespace, provider, collector) (cloudcost_exporter_collector_last_scrape_duration_seconds) > 50',
+        bytes_threshold: 7500000,
+        message: "There are running tests that don't have any metric rows inserted for 10 minutes",
+        message2: 'No new in-progress runners for over 20m while jobs remain queued. This might indicate rate limiting, scheduling issues, etc.',
+        expr2: 'vector(1)',
+        message3: 'ChatOps proxy experiencing 502,503,504 errors',
+        message4: |||
+          This is a multiline string.
+          This is a second line. It has an intentional trailing space. tk mangles it.
+
+        |||,
+        // Test string with escaped double quotes inside - should be quoted
+        summary: 'PersistentVolume has been in "released" state for more than a week.',
+        // Test multiline string with multiple trailing newlines (|2+ indicator)
+        rules: |||
+          alert: TestAlert
+          expr: up == 1
+
+        |||,
       },
     }, {
       alert: 'PromScrapeFlapping',
       annotations: {
         message: 'Prometheus target flapping {{ $labels.job }} / {{ $labels.instance }}',
+        description: '{{ printf "%.1f" $value }}% minimum errors while sending alerts from any Prometheus server in HA group {{$labels.job}} in {{$labels.cluster}} to any Alertmanager.',
+        description2: 'The 95th percentile of LZ allocation step duration has been >= 290ms for the last 20 minutes.',
       },
       expr: 'avg_over_time(up[5m]) < 1',
+      record: 'cluster_job:adaptive_logs_gateway_request_duration_seconds:50quantile',
       'for': '15m',
       labels: {
         severity: 'warning',
@@ -296,6 +320,46 @@ local htmlContent = |||
     },
     data: {
       'alerts.rules': std.manifestYamlDoc(alertingRulesData),
+      '12': 'test',
+      '12.5': 'test2',
+      local ruleset = alertingRulesData.groups[0],
+      test: {
+        name: ruleset.name,
+        // @pokom: If the recording rule has an interval, preserve it, Otherwise set it to empty string so it uses the Mimir default
+        [if std.objectHas(ruleset, 'interval') then 'interval']: ruleset.interval,
+        rules:
+          std.foldl(
+            function(acc, fn)
+              fn(acc),
+            [
+              // Manifest the rules as a YAML stream
+              function(ruleset)
+                std.manifestYamlStream(
+                  ruleset,
+                  quote_keys=false,
+                  c_document_end=false,
+                ),
+              // TODO(@duologic): enable this after https://github.com/grafana/deployment_tools/pull/252255
+              //// Split into lines
+              //function(manifest)
+              //  std.split(manifest, '\n'),
+              //// When lines have trailing whitespaces, YAML cannot be rendered as a multi-line string. Remove them.
+              //function(lines)
+              //  std.map(
+              //    function(line) std.rstripChars(line, ' '),
+              //    lines,
+              //  ),
+              //// Join lines again
+              //std.lines,
+              function(manifest)
+                std.strReplace(manifest, ' \n', '\n'),
+              // Remove duplicate newlines at the end
+              function(manifest)
+                std.rstripChars(manifest, '\n') + '\n',
+            ],
+            std.get(ruleset, 'rules', [])
+          ),
+      },
     },
   },
   // Test with quote_keys=false (matches real-world usage where keys are unquoted)

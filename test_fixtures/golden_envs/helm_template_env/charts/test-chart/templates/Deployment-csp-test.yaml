@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: csp-test
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - env:
+        - name: CSP_HEADER
+          value: 'frame-ancestors https://labclient.labondemand.com https://university.grafana.com;
+            script-src ''self'' ''strict-dynamic'' ''unsafe-eval'' ''report-sample''
+            *.googleadservices.com *.marketo.net *.facebook.net *.google-analytics.com
+            https://*.clearbitjs.com https://app.clearbit.com https://snap.licdn.com
+            https://www.google-analytics.com/analytics.js https://px.ads.linkedin.com
+            https://www.linkedin.com https://fresnel.vimeocdn.com https://f.vimeocdn.com
+            https://vimeo.com https://player.vimeo.com https://platform.twitter.com
+            object-src ''none''; upgrade-insecure-requests; report-to csp-endpoint;
+            report-uri /api/csp-reports; '
+        name: nginx

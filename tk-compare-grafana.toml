@@ -176,3 +176,21 @@ name = "export: all cortex environments"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/cortex-all", "environments/cortex", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
+
+[[commands]]
+name = "export: ruler-exporter"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/ruler-exporter", "environments/ruler-exporter", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
+name = "export: litmuschaos"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/litmuschaos", "environments/litmuschaos", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
+name = "export: crossplane-compositions"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/crossplane-compositions", "environments/crossplane-compositions", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true

@@ -182,6 +182,15 @@ local htmlContent = |||
     },
     data: {
       'alerts.rules': std.manifestYamlDoc(alertingRulesData),
+      '12': 'test',
+      '12.5': 'test2',
+      test: '00:00',
+      description: "Automatic connection preference. Set to true for 'ACCEPT_AUTOMATIC' or false for 'ACCEPT_MANUAL'",
+      test2: 'externalIPs is a list of IP addresses for which nodes in the cluster will also accept traffic for this service.  These IPs are not managed by Kubernetes.  The user is responsible for ensuring that traffic arrives at a node with this IP.  A common example is external load-balancers that are not part of the Kubernetes system.',
+      expr: 'max by (namespace, provider, collector) (cloudcost_exporter_collector_last_scrape_duration_seconds) > 50',
+      bytes_threshold: 7500000,
+      message: "There are running tests that don't have any metric rows inserted for 10 minutes",
+      message2: 'No new in-progress runners for over 20m while jobs remain queued. This might indicate rate limiting, scheduling issues, etc.',
     },
   },
   // Test with quote_keys=false (matches real-world usage where keys are unquoted)

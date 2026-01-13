@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::{
 	bail,
 	error::{format_found, suggest_object_fields, ErrorKind::*},
+	manifest,
 	typed::Typed,
 	Error, ObjValue, Result, Val,
 };
@@ -515,52 +516,14 @@ pub fn format_code(
 					// Format as integer without decimal point
 					tmp_out.push_str(&format!("{:.0}", n));
 				} else {
-					// Use %.17g equivalent - 17 significant digits with 'g' format
-					// Rust's {:.16e} gives 17 significant digits (1 before + 16 after decimal)
-					let formatted = format!("{:.16e}", n);
-					// Parse scientific notation and convert to shortest form
-					if let Some((mantissa, exp)) = formatted.split_once('e') {
-						let exp: i32 = exp.parse().unwrap_or(0);
-						// Remove the decimal point and trim trailing zeros
-						let digits: String = mantissa.replace('.', "");
-						let digits = digits.trim_end_matches('0');
-						// If all digits were zeros (shouldn't happen), keep at least "0"
-						let digits = if digits.is_empty() { "0" } else { digits };
-						// Convert to 'g' style output
-						if exp >= -4 && exp < 17 {
-							// Use fixed point notation
-							let decimal_pos = 1 + exp; // Position of decimal after first digit
-							if decimal_pos <= 0 {
-								// Need leading zeros: 0.00123
-								let zeros = (-decimal_pos) as usize;
-								tmp_out.push_str("0.");
-								for _ in 0..zeros {
-									tmp_out.push('0');
-								}
-								tmp_out.push_str(&digits);
-							} else if decimal_pos as usize >= digits.len() {
-								// Integer (shouldn't happen due to fract check)
-								tmp_out.push_str(&digits);
-							} else {
-								// Normal decimal: 12.345
-								let (int_part, frac_part) = digits.split_at(decimal_pos as usize);
-								tmp_out.push_str(int_part);
-								if !frac_part.is_empty() {
-									tmp_out.push('.');
-									tmp_out.push_str(frac_part);
-								}
-							}
-						} else {
-							// Use scientific notation - rebuild mantissa from digits
-							let sci_mantissa = if digits.len() == 1 {
-								digits.to_string()
-							} else {
-								format!("{}.{}", &digits[..1], &digits[1..])
-							};
-							tmp_out.push_str(&format!("{}e{:+}", sci_mantissa, exp));
-						}
+					// Use Go-style %.17g format if enabled, otherwise use Rust's Display (shortest)
+					if manifest::should_use_go_style_floats() {
+						tmp_out.push_str(&manifest::format_float_go_g17(n));
 					} else {
-						tmp_out.push_str(&formatted);
+						// Use Rust's Display formatting (ryu algorithm) which produces
+						// the shortest decimal representation, avoiding precision artifacts
+						// like 0.80000000000000004 -> 0.8
+						tmp_out.push_str(&format!("{}", n));
 					}
 				}
 			} else {
