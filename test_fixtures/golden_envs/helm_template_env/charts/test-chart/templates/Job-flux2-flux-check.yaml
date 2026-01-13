@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: flux2-flux-check
+  name: flux2-flux-check-o11y-ingest
   namespace: default
 spec:
   jobTemplate:

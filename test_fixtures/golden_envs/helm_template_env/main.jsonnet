@@ -54,7 +54,7 @@ local env = {
       hello: 'world',
     },
 
-    job_flux2_flux_check+: {
+    job_flux2_flux_check_o_11y_ingest+: {
       hello: 'world',
     },
   },

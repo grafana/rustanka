@@ -146,6 +146,7 @@ fn helm_cache_key(
 	namespace: Option<&str>,
 	values_json: Option<&str>,
 	include_crds: bool,
+	api_versions: &[String],
 ) -> String {
 	let mut hasher = Sha256::new();
 	hasher.update(name.as_bytes());
@@ -161,6 +162,11 @@ fn helm_cache_key(
 	}
 	hasher.update(b"|");
 	hasher.update(if include_crds { b"1" } else { b"0" });
+	hasher.update(b"|");
+	for av in api_versions {
+		hasher.update(av.as_bytes());
+		hasher.update(b",");
+	}
 	format!("{:x}", hasher.finalize())
 }
 
@@ -184,12 +190,23 @@ fn to_snake_case(s: &str) -> String {
 			// Replace hyphens with underscores
 			result.push('_');
 		} else if ch.is_ascii_digit() {
-			// Add underscore between letter and digit ONLY if digit is followed by a letter
-			// This matches Go Tanka: k8s -> k_8s, but flux2 -> flux2
+			// Add underscore between letter and digit ONLY if there's a letter eventually
+			// after the consecutive digits. This matches Go Tanka:
+			// - k8s -> k_8s (letter after digit)
+			// - o11y -> o_11y (letter eventually after digits)
+			// - flux2 -> flux2 (no letter after digit, at end or before hyphen)
 			let prev_is_letter = i > 0 && chars[i - 1].is_ascii_alphabetic();
-			let next_is_letter = i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic();
-			if prev_is_letter && next_is_letter {
-				result.push('_');
+			if prev_is_letter {
+				// Look ahead past all consecutive digits to see if there's a letter
+				let has_letter_after_digits = chars[i..]
+					.iter()
+					.skip_while(|c| c.is_ascii_digit())
+					.next()
+					.map(|c| c.is_ascii_alphabetic())
+					.unwrap_or(false);
+				if has_letter_after_digits {
+					result.push('_');
+				}
 			}
 			result.push(ch);
 		} else {
@@ -544,6 +561,25 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		true
 	};
 
+	// Extract apiVersions if present (array of strings for --api-versions flag)
+	let api_versions: Vec<String> = if let Some(av) = opts.get("apiVersions".into())? {
+		if let Val::Arr(arr) = av {
+			arr.iter()
+				.filter_map(|v| {
+					if let Ok(Val::Str(s)) = v {
+						Some(s.to_string())
+					} else {
+						None
+					}
+				})
+				.collect()
+		} else {
+			Vec::new()
+		}
+	} else {
+		Vec::new()
+	};
+
 	// Check cache first
 	let cache_key = helm_cache_key(
 		&name,
@@ -551,6 +587,7 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 		namespace.as_deref(),
 		values_json.as_deref(),
 		include_crds,
+		&api_versions,
 	);
 	{
 		let cache = get_helm_cache();
@@ -577,6 +614,12 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 	// Add --include-crds if requested
 	if include_crds {
 		cmd.arg("--include-crds");
+	}
+
+	// Add --api-versions for each version specified
+	for av in &api_versions {
+		cmd.arg("--api-versions");
+		cmd.arg(av);
 	}
 
 	// If we have values, configure stdin and add --values=-
@@ -782,8 +825,8 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 			continue;
 		}
 
-		// Generate a key for this manifest: <snake_case_kind>_<snake_case_namespace>_<snake_case_name>
-		// or <snake_case_kind>_<snake_case_name> if no namespace
+		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
+		// Note: tk does NOT include namespace in the key, even when present
 		let key = if let Val::Obj(ref obj) = val {
 			let kind = obj
 				.get("kind".into())?
@@ -794,31 +837,18 @@ pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val
 				.unwrap_or_else(|| "unknown".to_string());
 
 			let metadata = obj.get("metadata".into())?;
-			let (name, namespace) = if let Some(Val::Obj(meta)) = metadata {
-				let name = meta
-					.get("name".into())?
+			let name = if let Some(Val::Obj(meta)) = metadata {
+				meta.get("name".into())?
 					.and_then(|v| match v {
 						Val::Str(s) => Some(to_snake_case(&s.to_string())),
 						_ => None,
 					})
-					.unwrap_or_else(|| "unknown".to_string());
-
-				let namespace = meta.get("namespace".into())?.and_then(|v| match v {
-					Val::Str(s) => Some(to_snake_case(&s.to_string())),
-					_ => None,
-				});
-
-				(name, namespace)
+					.unwrap_or_else(|| "unknown".to_string())
 			} else {
-				("unknown".to_string(), None)
+				"unknown".to_string()
 			};
 
-			// Include namespace in key if present, otherwise just kind_name
-			if let Some(ns) = namespace {
-				format!("{}_{}_{}", kind, ns, name)
-			} else {
-				format!("{}_{}", kind, name)
-			}
+			format!("{}_{}", kind, name)
 		} else {
 			"unknown".to_string()
 		};

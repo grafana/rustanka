@@ -230,3 +230,15 @@ name = "export: o11y-ingest"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/o11y-ingest", "environments/o11y-ingest", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
+
+[[commands]]
+name = "export: clickhouse-operator"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/clickhouse-operator", "environments/clickhouse-operator", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
+name = "export: k6-cloud"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/k6-cloud", "environments/k6-cloud", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
