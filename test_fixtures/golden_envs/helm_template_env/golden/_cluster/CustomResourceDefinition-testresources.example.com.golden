@@ -28,6 +28,9 @@ spec:
                   spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP,
                   status.podIPs.'
                 type: string
+              other:
+                description: Other == 'field'
+                type: string
               replicas:
                 description: Number of pod's replicas to create
                 type: integer
