@@ -49,7 +49,11 @@ local env = {
     apiServer: 'https://localhost:6443',
     namespace: 'default',
   },
-  data: helmResources,
+  data: helmResources {
+    deployment_test_k_8s_deployment+: {
+      hello: 'world',
+    },
+  },
 } + withFluxIgnore('platform-federal', 'Flux not running in federal clusters');
 
 {

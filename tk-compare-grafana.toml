@@ -154,6 +154,18 @@ runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: grafana-plugins-cd"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-plugins-cd", "environments/grafana-plugins-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
+name = "export: k8s-images-exporter"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/k8s-images-exporter", "environments/k8s-images-exporter", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
 name = "export: grafana-o11y (tk runs jrsonnet)"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-o11y", "environments/grafana-o11y", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1

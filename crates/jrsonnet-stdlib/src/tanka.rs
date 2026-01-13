@@ -171,11 +171,15 @@ fn helm_cache_key(
 }
 
 /// Convert a string to snake_case (lowercase with underscores)
+/// Matches Go Tanka's naming behavior which inserts underscores:
+/// - Before uppercase letters (CamelCase -> camel_case)
+/// - Between letters and digits (k8s -> k_8s)
+/// Note: Does NOT insert underscore between digit and letter (8s stays 8s)
 fn to_snake_case(s: &str) -> String {
 	let mut result = String::new();
-	let mut chars = s.chars().peekable();
+	let mut prev_char: Option<char> = None;
 
-	while let Some(ch) = chars.next() {
+	for ch in s.chars() {
 		if ch.is_uppercase() {
 			// Add underscore before uppercase letters (except at start)
 			if !result.is_empty() {
@@ -185,9 +189,18 @@ fn to_snake_case(s: &str) -> String {
 		} else if ch == '-' {
 			// Replace hyphens with underscores
 			result.push('_');
+		} else if ch.is_ascii_digit() {
+			// Add underscore between letter and digit (k8s -> k_8s)
+			if let Some(prev) = prev_char {
+				if prev.is_ascii_alphabetic() {
+					result.push('_');
+				}
+			}
+			result.push(ch);
 		} else {
 			result.push(ch);
 		}
+		prev_char = Some(ch);
 	}
 
 	result
