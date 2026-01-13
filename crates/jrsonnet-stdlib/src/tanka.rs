@@ -116,14 +116,8 @@ fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Resu
 			continue;
 		}
 
-		// Generate a key for this manifest: <snake_case_kind>_<snake_case_name>
-		// Skip resources that don't have proper structure (like Lists)
-		if let Val::Obj(ref obj) = val {
-			// Check if this is a List (has "items" field) - skip Lists as they're just containers
-			if let Ok(Some(Val::Arr(_))) = obj.get("items".into()) {
-				continue;
-			}
-		} else {
+		// Skip non-object values
+		if !matches!(val, Val::Obj(_)) {
 			continue;
 		}
 

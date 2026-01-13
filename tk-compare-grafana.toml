@@ -212,3 +212,21 @@ name = "export: crossplane-compositions"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/crossplane-compositions", "environments/crossplane-compositions", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
+
+[[commands]]
+name = "export: aws-eks-essentials"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/aws-eks-essentials", "environments/aws-eks-essentials", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
+name = "export: aws-load-balancer-controller"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/aws-load-balancer-controller", "environments/aws-load-balancer-controller", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
+name = "export: o11y-ingest"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/o11y-ingest", "environments/o11y-ingest", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true

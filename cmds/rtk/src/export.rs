@@ -995,12 +995,23 @@ fn collect_manifests(value: &JsonValue, manifests: &mut Vec<JsonValue>) {
 		JsonValue::Object(obj) => {
 			// Check if this looks like a Kubernetes manifest (has apiVersion and kind)
 			if obj.contains_key("apiVersion") && obj.contains_key("kind") {
-				// Skip Tanka Environment objects
 				if let Some(JsonValue::String(kind)) = obj.get("kind") {
+					// Skip Tanka Environment objects
 					if kind == "Environment" {
 						// Extract from data field if present
 						if let Some(data) = obj.get("data") {
 							collect_manifests(data, manifests);
+						}
+						return;
+					}
+
+					// Expand List kind - extract items as individual manifests
+					// This matches Tanka's behavior where List items are exported as separate files
+					if kind == "List" {
+						if let Some(JsonValue::Array(items)) = obj.get("items") {
+							for item in items {
+								collect_manifests(item, manifests);
+							}
 						}
 						return;
 					}
