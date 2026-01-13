@@ -173,13 +173,13 @@ fn helm_cache_key(
 /// Convert a string to snake_case (lowercase with underscores)
 /// Matches Go Tanka's naming behavior which inserts underscores:
 /// - Before uppercase letters (CamelCase -> camel_case)
-/// - Between letters and digits (k8s -> k_8s)
-/// Note: Does NOT insert underscore between digit and letter (8s stays 8s)
+/// - Between letter-digit-letter sequences (k8s -> k_8s)
+/// Note: Does NOT insert underscore when digit is at word boundary (flux2 stays flux2)
 fn to_snake_case(s: &str) -> String {
 	let mut result = String::new();
-	let mut prev_char: Option<char> = None;
+	let chars: Vec<char> = s.chars().collect();
 
-	for ch in s.chars() {
+	for (i, &ch) in chars.iter().enumerate() {
 		if ch.is_uppercase() {
 			// Add underscore before uppercase letters (except at start)
 			if !result.is_empty() {
@@ -190,17 +190,17 @@ fn to_snake_case(s: &str) -> String {
 			// Replace hyphens with underscores
 			result.push('_');
 		} else if ch.is_ascii_digit() {
-			// Add underscore between letter and digit (k8s -> k_8s)
-			if let Some(prev) = prev_char {
-				if prev.is_ascii_alphabetic() {
-					result.push('_');
-				}
+			// Add underscore between letter and digit ONLY if digit is followed by a letter
+			// This matches Go Tanka: k8s -> k_8s, but flux2 -> flux2
+			let prev_is_letter = i > 0 && chars[i - 1].is_ascii_alphabetic();
+			let next_is_letter = i + 1 < chars.len() && chars[i + 1].is_ascii_alphabetic();
+			if prev_is_letter && next_is_letter {
+				result.push('_');
 			}
 			result.push(ch);
 		} else {
 			result.push(ch);
 		}
-		prev_char = Some(ch);
 	}
 
 	result
@@ -385,8 +385,9 @@ pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
 		empty_array_as_brackets: true,
 		block_scalar_indent_in_seq: Some(2), // 2 spaces absolute for block scalar body in arrays
 		line_width: None,                    // go-yaml v3's Marshal() doesn't wrap lines by default
-		scientific_notation_threshold: Some(1000000), // 1 million
-		quote_numeric_strings: true,         // Quote numeric string keys like "12345"
+		scientific_notation_threshold: Some(1000000), // 1 million - large numbers use scientific notation
+		scientific_notation_small_threshold: Some(0.0001), // 1e-4 - small numbers use scientific notation (Go yaml.v3)
+		quote_numeric_strings: true,                       // Quote numeric string keys like "12345"
 		..Default::default()
 	};
 	let mut output = String::new();

@@ -424,21 +424,39 @@ pub fn render_float(
 	#[allow(clippy::bool_to_int_with_if)]
 	let dot_size = if precision == 0 && !ensure_pt { 0 } else { 1 };
 	padding = padding.saturating_sub(dot_size + precision);
-	render_decimal(out, n.floor(), padding, 0, blank, sign);
+
 	if precision == 0 {
+		// When precision is 0, round to nearest integer (matching Go's %0.0f behavior)
+		render_decimal(out, n.round(), padding, 0, blank, sign);
 		if ensure_pt {
 			out.push('.');
 		}
 		return;
 	}
+
+	// For precision > 0, we need to handle rounding of the fractional part
+	// The fractional part is rounded by adding 0.5 and flooring
 	let frac = n
 		.fract()
+		.abs()
 		.mul_add(10.0_f64.powf(precision as f64), 0.5)
 		.floor();
-	if trailing || frac > 0.0 {
+
+	// Check if fractional rounding causes carry to the integer part
+	let max_frac = 10.0_f64.powf(precision as f64);
+	let (int_part, frac_part) = if frac >= max_frac {
+		// Fractional part rounded up to next integer
+		(n.signum() * (n.abs().floor() + 1.0), 0.0)
+	} else {
+		(n.signum() * n.abs().floor(), frac)
+	};
+
+	render_decimal(out, int_part, padding, 0, blank, sign);
+
+	if trailing || frac_part > 0.0 {
 		out.push('.');
 		let mut frac_str = String::new();
-		render_decimal(&mut frac_str, frac, precision, 0, false, false);
+		render_decimal(&mut frac_str, frac_part, precision, 0, false, false);
 		let mut trim = frac_str.len();
 		if !trailing {
 			for b in frac_str.as_bytes().iter().rev() {

@@ -9,6 +9,9 @@ local alertingRulesData = {
       alert: 'PromScrapeFailed',
       annotations: {
         message: 'Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}',
+        test: 0.00002,
+        test2: '%s' % 0.00002,
+        test3: '%f' % 0.00002,
       },
       expr: 'up != 1',
       'for': '15m',
@@ -182,6 +185,7 @@ local htmlContent = |||
     },
     data: {
       'alerts.rules': std.manifestYamlDoc(alertingRulesData),
+      'alerts.rules.manifestYamlFromJson': std.native('manifestYamlFromJson')(std.toString(alertingRulesData)),
       '12': 'test',
       '12.5': 'test2',
       test: '00:00',

@@ -1,7 +1,13 @@
 apiVersion: batch/v1
-kind: CronJob
+hello: world
+kind: Job
 metadata:
-  name: remove-flux-ignores-before-rollout
+  annotations:
+    kustomize.toolkit.fluxcd.io/reconcile: disabled
+    kustomize.toolkit.fluxcd.io/reconcile-disabled-by: platform-federal
+    kustomize.toolkit.fluxcd.io/reconcile-disabled-reason: Ignored with the withFluxIgnore
+      jsonnet utility. Flux not running in federal clusters
+  name: flux2-flux-check
   namespace: default
 spec:
   jobTemplate:

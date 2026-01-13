@@ -53,6 +53,10 @@ local env = {
     deployment_test_k_8s_deployment+: {
       hello: 'world',
     },
+
+    job_flux2_flux_check+: {
+      hello: 'world',
+    },
   },
 } + withFluxIgnore('platform-federal', 'Flux not running in federal clusters');
 

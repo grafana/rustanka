@@ -7,6 +7,9 @@ data:
       - alert: "PromScrapeFailed"
         annotations:
           message: "Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}"
+          test: 0.00002
+          test2: "2.0000000000000002e-05"
+          test3: "0.000020"
         expr: "up != 1"
         for: "15m"
         labels:

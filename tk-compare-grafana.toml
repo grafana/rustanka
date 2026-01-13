@@ -190,6 +190,12 @@ runs = 1
 dir_compare = true
 
 [[commands]]
+name = "export: all tempo environments"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/tempo-all", "environments/tempo", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
 name = "export: ruler-exporter"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/ruler-exporter", "environments/ruler-exporter", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
