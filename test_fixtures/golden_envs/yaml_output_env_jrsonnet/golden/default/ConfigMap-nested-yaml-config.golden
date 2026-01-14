@@ -1,5 +1,20 @@
 apiVersion: v1
 data:
+  manifestJson1: |-
+    {
+        "otherField": "otherValue",
+        "test": "\n"
+    }
+  manifestJson2: '{"otherField":"otherValue","test":"\ntest\n"}'
+  manifestJson3: |-
+    {
+        "otherField": "otherValue,"
+    }
+  manifestJson4: "{\n    \"otherField\": \"\U0001F680\"\n}"
+  manifestYaml1: "\"otherField\": \"otherValue\"\n\"test\": |\n  "
+  manifestYaml2: "\"otherField\": \"otherValue\"\n\"test\": |\n  \n  test"
+  manifestYaml3: '"otherField": "otherValue,"'
+  manifestYaml4: "\"otherField\": \"\U0001F680\""
   rules.json: |-
     {
         "enabled": true,
@@ -61,6 +76,9 @@ data:
           - "a": "c"
           - "b": "d"
         "pattern": "server<type=metrics, listener=(.+), processor=(.+)><>(.+):"
+  test: "\U0001F680"
+  test2: hello,
+  test3: 2025-11-03T15:00:00
 kind: ConfigMap
 metadata:
   name: nested-yaml-config

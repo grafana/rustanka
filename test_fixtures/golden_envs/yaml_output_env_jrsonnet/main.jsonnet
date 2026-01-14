@@ -384,6 +384,43 @@ local htmlContent = |||
       namespace: 'default',
     },
     data: {
+      manifestJson1: std.manifestJson({
+        test: '\n',
+        otherField: 'otherValue',
+      }),
+      manifestJson3: std.manifestJson({
+        otherField: 'otherValue,',
+      }),
+      manifestJson4: std.manifestJson({
+        otherField: '🚀',
+      }),
+      manifestJson2: std.manifestJsonMinified({
+        test: |||
+
+          test
+        |||,
+        otherField: 'otherValue',
+      }),
+      manifestYaml1: std.manifestYamlDoc({
+        test: '\n',
+        otherField: 'otherValue',
+      }),
+      manifestYaml2: std.manifestYamlDoc({
+        test: |||
+
+          test
+        |||,
+        otherField: 'otherValue',
+      }),
+      manifestYaml3: std.manifestYamlDoc({
+        otherField: 'otherValue,',
+      }),
+      manifestYaml4: std.manifestYamlDoc({
+        otherField: '🚀',
+      }),
+      test: '🚀',
+      test2: 'hello,',
+      test3: '2025-11-03T15:00:00',
       'rules.json': std.manifestJson(nestedYamlData),
       'rules.json.minified': std.manifestJsonMinified(nestedYamlData),
       'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
@@ -405,6 +442,23 @@ local htmlContent = |||
       'dashboard-to-string.json': std.toString(import 'dashboard-promtail.json'),
       'dashboard2-to-string.json': std.toString(import 'dashboard-cle-headquarters.json'),
       'dashboard3-to-string.json': std.toString(import 'ds-querier-cluster-deployment.libsonnet'),
+      'dashboard4-to-string.json': std.toString(import 'conntrack_exporter.json'),
+    },
+  },
+  // ConfigMap with dashboard JSON containing floats
+  'configmap-dashboard-parse-and-output': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'dashboards-parse-and-output',
+      namespace: 'default',
+    },
+    data: {
+      // Dashboard JSON as string - matching real Grafana dashboard format
+      'dashboard.json': import 'dashboard-promtail.json',
+      'dashboard-to-string.json': std.manifestJson(std.parseJson(importstr 'dashboard-promtail.json')),
+      'dashboard2-to-string.json': std.manifestJson(std.parseJson(importstr 'dashboard-cle-headquarters.json')),
+      'dashboard4-to-string.json': std.manifestJson(std.parseJson(importstr 'conntrack_exporter.json')),
     },
   },
   // Test case for asterisk quoting: tk uses single quotes ('*'), rtk uses double quotes ("*")

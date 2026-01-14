@@ -242,3 +242,16 @@ name = "export: k6-cloud"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/k6-cloud", "environments/k6-cloud", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 1
 dir_compare = true
+
+
+[[commands]]
+name = "export: wiki"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/wiki", "environments/wiki", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true
+
+[[commands]]
+name = "export: betterops-platform-monitoring"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/betterops-platform-monitoring", "environments/betterops-platform-monitoring", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 1
+dir_compare = true

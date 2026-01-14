@@ -163,6 +163,43 @@ local htmlContent = |||
       namespace: 'default',
     },
     data: {
+      manifestJson1: std.manifestJson({
+        test: '\n',
+        otherField: 'otherValue',
+      }),
+      manifestJson3: std.manifestJson({
+        otherField: 'otherValue,',
+      }),
+      manifestJson4: std.manifestJson({
+        otherField: '🚀',
+      }),
+      manifestJson2: std.manifestJsonMinified({
+        test: |||
+
+          test
+        |||,
+        otherField: 'otherValue',
+      }),
+      manifestYaml1: std.manifestYamlDoc({
+        test: '\n',
+        otherField: 'otherValue',
+      }),
+      manifestYaml2: std.manifestYamlDoc({
+        test: |||
+
+          test
+        |||,
+        otherField: 'otherValue',
+      }),
+      manifestYaml3: std.manifestYamlDoc({
+        otherField: 'otherValue,',
+      }),
+      manifestYaml4: std.manifestYamlDoc({
+        otherField: '🚀',
+      }),
+      test: '🚀',
+      test2: 'hello,',
+      test3: '2025-11-03T15:00:00',
       'config.yaml': std.manifestYamlDoc(configData),
       'config.json': std.manifestJson(configData),
       'simple.txt': 'Hello, World!',
