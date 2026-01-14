@@ -21,6 +21,10 @@ spec:
             spec:
               type: object
               properties:
+                hello:
+                  maximum: 1
+                  minimum: 1e-05
+                  type: number
                 replicas:
                   type: integer
                   description: Number of pod's replicas to create

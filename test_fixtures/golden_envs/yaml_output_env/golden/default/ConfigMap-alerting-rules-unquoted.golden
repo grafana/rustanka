@@ -8,8 +8,15 @@ data:
         annotations:
           message: "Prometheus failed to scrape a target {{ $labels.job }} / {{ $labels.instance }}"
           test: 0.00002
+          test10: "hello + 0.90000000000000002"
           test2: "2.0000000000000002e-05"
           test3: "0.000020"
+          test4: 0.00001
+          test5: "1.0000000000000001e-05"
+          test6: "0.000010"
+          test7: "0.90000000000000002"
+          test8: "0.900000"
+          test9: "0.90000000000000002"
         expr: "up != 1"
         for: "15m"
         labels:

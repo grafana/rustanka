@@ -22,6 +22,10 @@ spec:
         properties:
           spec:
             properties:
+              hello:
+                maximum: 1
+                minimum: 1e-05
+                type: number
               message:
                 description: 'Selects a field of the pod: supports metadata.name,
                   metadata.namespace, `metadata.labels[''<KEY>'']`, `metadata.annotations[''<KEY>'']`,

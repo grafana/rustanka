@@ -12,6 +12,13 @@ local alertingRulesData = {
         test: 0.00002,
         test2: '%s' % 0.00002,
         test3: '%f' % 0.00002,
+        test4: 0.00001,
+        test5: '%s' % 0.00001,
+        test6: '%f' % 0.00001,
+        test7: '%s' % 0.9,
+        test8: '%f' % 0.9,
+        test9: std.toString(0.9),
+        test10: 'hello + ' + 0.90,
       },
       expr: 'up != 1',
       'for': '15m',
@@ -153,6 +160,37 @@ local htmlContent = |||
     </body>
   </html>
 |||;
+
+// Test string with multiple trailing newlines - triggers |2+ vs |2 chomping indicator
+// Go yaml.v2 uses |2+ (keep) to preserve all trailing newlines
+// serde-saphyr uses |2 (clip) which only keeps one trailing newline
+local rulesWithMultipleTrailingNewlines = |||
+  alert: TestAlert
+  expr: up == 1
+
+|||;  // Note: blank line before ||| creates content ending with \n\n
+
+// Test for |2+ vs |2 in array context (the 2 is the indentation indicator)
+local arrayWithMultipleTrailingNewlines = [
+  {
+    name: 'test-item',
+    rules: |||
+      alert: TestAlert
+      expr: up == 1
+
+    |||,  // Multiple trailing newlines in array context -> |2+
+  },
+];
+
+// Test for |2+ - the 2 appears when content starts with spaces or is in array at specific indent
+// This reproduces the exact case from the user's screenshot where rules: |2+ vs |2 differs
+local rulesStartingWithSpaces = '  alert: TestAlert\n  expr: up == 1\n\n';  // Starts with 2 spaces
+
+// Test cases for empty/nearly-empty content with trailing newlines
+// This may reproduce the |2+ vs |2 difference when rules is "empty"
+local emptyWithTrailingNewlines = '\n\n';  // Just newlines
+local emptyYamlDoc = std.manifestYamlDoc({});  // Empty YAML doc: "{}\n"
+local emptyYamlDocMultipleNewlines = std.manifestYamlDoc({}) + '\n';  // "{}\n\n"
 
 {
   configmap: {
@@ -335,6 +373,66 @@ local htmlContent = |||
     },
     data: {
       'envoy.yaml': std.native('manifestYamlFromJson')(std.manifestJson(envoyConfig)),
+    },
+  },
+  // Test multiple trailing newlines - triggers |2+ vs |2 chomping indicator difference
+  // Go yaml.v2 uses |2+ (keep) to preserve all trailing newlines
+  // serde-saphyr currently uses |2 (clip) which only keeps one trailing newline
+  'multiple-trailing-newlines-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'multiple-trailing-newlines',
+      namespace: 'default',
+    },
+    data: {
+      // String ending with \n\n - should use |2+ in Go yaml.v2
+      rules: rulesWithMultipleTrailingNewlines,
+      // Also test with three trailing newlines
+      'rules-triple': 'alert: TestAlert\nexpr: up == 1\n\n\n',
+    },
+  },
+  // Test |2+ in array context - the "2" is the indentation indicator used when
+  // block scalar is in an array and content starts with spaces/needs explicit indent
+  'multiple-trailing-newlines-in-array-resource': {
+    apiVersion: 'example.io/v1',
+    kind: 'RulesConfig',
+    metadata: {
+      name: 'multiple-trailing-newlines-in-array',
+      namespace: 'default',
+    },
+    spec: {
+      items: arrayWithMultipleTrailingNewlines,
+    },
+  },
+  // Test |2+ where content starts with spaces - this triggers the indentation indicator
+  'rules-starting-with-spaces-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'rules-starting-with-spaces',
+      namespace: 'default',
+    },
+    data: {
+      // Content starting with spaces AND multiple trailing newlines -> |2+
+      rules: rulesStartingWithSpaces,
+    },
+  },
+  // Test empty content with trailing newlines - may trigger |2+ vs |2 difference
+  'empty-rules-configmap': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'empty-rules',
+      namespace: 'default',
+    },
+    data: {
+      // Just newlines - tests empty content with multiple trailing newlines
+      'rules-just-newlines': emptyWithTrailingNewlines,
+      // Empty YAML doc
+      'rules-empty-yaml': emptyYamlDoc,
+      // Empty YAML doc with extra newline
+      'rules-empty-yaml-extra-newline': emptyYamlDocMultipleNewlines,
     },
   },
   // Test long string line wrapping in array context
