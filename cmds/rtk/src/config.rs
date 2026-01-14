@@ -47,6 +47,13 @@ pub struct OutputFormatConfig {
 	/// - "jrsonnet": quote_values follows quote_keys (when quote_keys=false, quote_values=false)
 	#[serde(default, rename = "std.manifestYamlDoc")]
 	pub std_manifest_yaml_doc: Option<JsonnetImplementation>,
+
+	/// Controls the output format for std.manifestYamlStream with empty arrays.
+	///
+	/// - "go-jsonnet" (default): Empty arrays produce "---\n\n" (document marker + empty line)
+	/// - "jrsonnet": Empty arrays produce "\n" (just a newline)
+	#[serde(default, rename = "std.manifestYamlStream")]
+	pub std_manifest_yaml_stream: Option<JsonnetImplementation>,
 }
 
 /// Specifies which jsonnet implementation's behavior to match
@@ -88,6 +95,7 @@ impl RtkConfig {
 			output_format: OutputFormatConfig {
 				floats: Some(JsonnetImplementation::Jrsonnet),
 				std_manifest_yaml_doc: Some(JsonnetImplementation::Jrsonnet),
+				std_manifest_yaml_stream: Some(JsonnetImplementation::Jrsonnet),
 			},
 		}
 	}
@@ -108,6 +116,10 @@ impl RtkConfig {
 		if file_config.output_format.std_manifest_yaml_doc.is_some() {
 			self.output_format.std_manifest_yaml_doc =
 				file_config.output_format.std_manifest_yaml_doc;
+		}
+		if file_config.output_format.std_manifest_yaml_stream.is_some() {
+			self.output_format.std_manifest_yaml_stream =
+				file_config.output_format.std_manifest_yaml_stream;
 		}
 	}
 }

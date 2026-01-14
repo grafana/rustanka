@@ -482,14 +482,18 @@ pub struct YamlStreamFormat<I> {
 	inner: I,
 	c_document_end: bool,
 	end_newline: bool,
+	/// When true, empty arrays produce "\n" (jrsonnet behavior)
+	/// When false, empty arrays produce "---\n\n" (go-jsonnet behavior)
+	jrsonnet_empty: bool,
 }
 impl<I> YamlStreamFormat<I> {
-	pub fn std_yaml_stream(inner: I, c_document_end: bool) -> Self {
+	pub fn std_yaml_stream(inner: I, c_document_end: bool, jrsonnet_empty: bool) -> Self {
 		Self {
 			inner,
 			c_document_end,
 			// Stdlib format always inserts useless newline at the end
 			end_newline: true,
+			jrsonnet_empty,
 		}
 	}
 	pub fn cli(inner: I) -> Self {
@@ -497,6 +501,7 @@ impl<I> YamlStreamFormat<I> {
 			inner,
 			c_document_end: true,
 			end_newline: false,
+			jrsonnet_empty: false,
 		}
 	}
 }
@@ -508,7 +513,16 @@ impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
 				val.value_type()
 			)
 		};
-		if !arr.is_empty() {
+		if arr.is_empty() {
+			if self.jrsonnet_empty {
+				// jrsonnet binary outputs "\n" for empty arrays (just a newline)
+				// or "...\n" when c_document_end is true
+				// (no document marker for empty arrays)
+			} else {
+				// go-jsonnet outputs "---\n\n" for empty arrays (document marker + empty document)
+				out.push_str("---\n\n");
+			}
+		} else {
 			for (i, v) in arr.iter().enumerate() {
 				let v = v.with_description(|| format!("elem <{i}> evaluation"))?;
 				out.push_str("---\n");
@@ -522,8 +536,12 @@ impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
 		if self.c_document_end {
 			out.push_str("...");
 		}
-		if self.end_newline {
-			out.push('\n');
+		// For jrsonnet empty mode: always add trailing newline
+		// For go-jsonnet mode: only add trailing newline if c_document_end is true
+		if self.jrsonnet_empty || self.c_document_end {
+			if self.end_newline {
+				out.push('\n');
+			}
 		}
 		Ok(())
 	}

@@ -100,6 +100,8 @@ data:
   multilineMangled.txt: "\"multilineMangled\": |\n  This is a multiline string.\n
     \ This is a second line. It has an intentional trailing space. tk mangles it.
     \n\"otherField\": \"otherValue\""
+  rules: |
+    ---
   simple.txt: Hello, World!
   test: "\U0001F680"
   test2: hello,

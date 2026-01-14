@@ -461,6 +461,36 @@ local htmlContent = |||
       'dashboard4-to-string.json': std.manifestJson(std.parseJson(importstr 'conntrack_exporter.json')),
     },
   },
+  'configmap-apiserver': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'apiserver',
+      namespace: 'default',
+    },
+    data: {
+      name: 'apiserver',
+      rules:
+        std.foldl(
+          function(acc, fn)
+            fn(acc),
+          [
+            // Manifest the rules as a YAML stream
+            function(ruleset)
+              std.manifestYamlStream(
+                ruleset,
+                quote_keys=false,
+                c_document_end=false,
+              ),
+            function(manifest)
+              std.strReplace(manifest, ' \n', '\n'),
+            function(manifest)
+              std.rstripChars(manifest, '\n') + '\n',
+          ],
+          std.get({}, 'rules', [])
+        ),
+    },
+  },
   // Test case for asterisk quoting: tk uses single quotes ('*'), rtk uses double quotes ("*")
   'wildcard-resource': {
     apiVersion: 'example.io/v1',

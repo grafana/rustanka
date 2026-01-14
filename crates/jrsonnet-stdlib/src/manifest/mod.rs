@@ -135,20 +135,25 @@ pub fn builtin_manifest_yaml_stream(
 	#[cfg(feature = "exp-preserve-order")]
 	preserve_order: bool,
 ) -> Result<String> {
-	use crate::QuoteValuesBehavior;
+	use crate::{ManifestYamlStreamEmptyBehavior, QuoteValuesBehavior};
+
+	let settings = this.settings.borrow();
 
 	// Determine quote_values based on the configured behavior (same as manifestYamlDoc)
-	let quote_values = match this
-		.settings
-		.borrow()
-		.manifest_yaml_doc_formatting
-		.quote_values_behavior
-	{
+	let quote_values = match settings.manifest_yaml_doc_formatting.quote_values_behavior {
 		// go-jsonnet always quotes values regardless of quote_keys
 		QuoteValuesBehavior::GoJsonnet => true,
 		// jrsonnet: quote_values follows quote_keys
 		QuoteValuesBehavior::Jrsonnet => quote_keys,
 	};
+
+	// Determine empty array behavior
+	let use_jrsonnet_empty = matches!(
+		settings.manifest_yaml_stream_formatting.empty_behavior,
+		ManifestYamlStreamEmptyBehavior::Jrsonnet
+	);
+
+	drop(settings); // Release borrow before calling manifest
 
 	value.manifest(YamlStreamFormat::std_yaml_stream(
 		YamlFormat::std_to_yaml_with_settings(
@@ -159,6 +164,7 @@ pub fn builtin_manifest_yaml_stream(
 			preserve_order,
 		),
 		c_document_end,
+		use_jrsonnet_empty,
 	))
 }
 

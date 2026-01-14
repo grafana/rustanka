@@ -1,6 +1,7 @@
 {
     "default/ConfigMap-alerting-rules-unquoted.golden": "main.jsonnet",
     "default/ConfigMap-alerting-rules.golden": "main.jsonnet",
+    "default/ConfigMap-apiserver.golden": "main.jsonnet",
     "default/ConfigMap-app-config.golden": "main.jsonnet",
     "default/ConfigMap-dashboards.golden": "main.jsonnet",
     "default/ConfigMap-empty-rules.golden": "main.jsonnet",

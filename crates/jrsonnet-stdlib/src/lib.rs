@@ -337,6 +337,23 @@ pub struct ManifestYamlDocFormatting {
 	pub quote_values_behavior: QuoteValuesBehavior,
 }
 
+/// Controls how empty arrays are formatted in manifestYamlStream
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ManifestYamlStreamEmptyBehavior {
+	/// Empty arrays produce "---\n\n" (document marker + empty line) - matches go-jsonnet
+	#[default]
+	GoJsonnet,
+	/// Empty arrays produce "\n" (just a newline) - matches jrsonnet binary
+	Jrsonnet,
+}
+
+/// Settings for std.manifestYamlStream formatting
+#[derive(Debug, Clone, Default)]
+pub struct ManifestYamlStreamFormatting {
+	/// Controls how empty arrays are formatted
+	pub empty_behavior: ManifestYamlStreamEmptyBehavior,
+}
+
 pub struct Settings {
 	/// Used for `std.extVar`
 	pub ext_vars: HashMap<IStr, TlaArg>,
@@ -348,6 +365,8 @@ pub struct Settings {
 	pub path_resolver: PathResolver,
 	/// Used for `std.manifestYamlDoc` formatting options
 	pub manifest_yaml_doc_formatting: ManifestYamlDocFormatting,
+	/// Used for `std.manifestYamlStream` formatting options
+	pub manifest_yaml_stream_formatting: ManifestYamlStreamFormatting,
 }
 
 fn extvar_source(name: &str, code: impl Into<IStr>) -> Source {
@@ -369,6 +388,7 @@ impl ContextInitializer {
 			trace_printer: Box::new(StdTracePrinter::new(resolver.clone())),
 			path_resolver: resolver,
 			manifest_yaml_doc_formatting: ManifestYamlDocFormatting::default(),
+			manifest_yaml_stream_formatting: ManifestYamlStreamFormatting::default(),
 		};
 		let settings = Rc::new(RefCell::new(settings));
 		let stdlib_obj = stdlib_uncached(settings.clone());
@@ -420,6 +440,10 @@ impl ContextInitializer {
 	/// Set the manifest YAML doc formatting options
 	pub fn set_manifest_yaml_doc_formatting(&self, formatting: ManifestYamlDocFormatting) {
 		self.settings_mut().manifest_yaml_doc_formatting = formatting;
+	}
+	/// Set the manifest YAML stream formatting options
+	pub fn set_manifest_yaml_stream_formatting(&self, formatting: ManifestYamlStreamFormatting) {
+		self.settings_mut().manifest_yaml_stream_formatting = formatting;
 	}
 }
 impl jrsonnet_evaluator::ContextInitializer for ContextInitializer {

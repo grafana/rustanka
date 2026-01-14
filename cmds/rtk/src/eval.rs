@@ -219,7 +219,10 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
 	use crate::config::JsonnetImplementation;
 	use jrsonnet_evaluator::manifest::set_use_go_style_floats;
-	use jrsonnet_stdlib::{ManifestYamlDocFormatting, QuoteValuesBehavior};
+	use jrsonnet_stdlib::{
+		ManifestYamlDocFormatting, ManifestYamlStreamEmptyBehavior, ManifestYamlStreamFormatting,
+		QuoteValuesBehavior,
+	};
 
 	// Apply std.manifestYamlDoc format setting
 	let quote_values_behavior = match config.output_format.std_manifest_yaml_doc {
@@ -231,6 +234,15 @@ fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
 		quote_values_behavior,
 	};
 	context_init.set_manifest_yaml_doc_formatting(formatting);
+
+	// Apply std.manifestYamlStream format setting
+	let empty_behavior = match config.output_format.std_manifest_yaml_stream {
+		Some(JsonnetImplementation::Jrsonnet) => ManifestYamlStreamEmptyBehavior::Jrsonnet,
+		Some(JsonnetImplementation::GoJsonnet) | None => ManifestYamlStreamEmptyBehavior::GoJsonnet,
+	};
+
+	let stream_formatting = ManifestYamlStreamFormatting { empty_behavior };
+	context_init.set_manifest_yaml_stream_formatting(stream_formatting);
 
 	// Apply float format setting
 	// Default is Go-style (true), set to false for jrsonnet-style

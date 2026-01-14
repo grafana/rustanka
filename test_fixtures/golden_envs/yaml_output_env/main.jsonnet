@@ -201,6 +201,25 @@ local emptyYamlDocMultipleNewlines = std.manifestYamlDoc({}) + '\n';  // "{}\n\n
       namespace: 'default',
     },
     data: {
+      rules:
+        std.foldl(
+          function(acc, fn)
+            fn(acc),
+          [
+            // Manifest the rules as a YAML stream
+            function(ruleset)
+              std.manifestYamlStream(
+                ruleset,
+                quote_keys=false,
+                c_document_end=false,
+              ),
+            function(manifest)
+              std.strReplace(manifest, ' \n', '\n'),
+            function(manifest)
+              std.rstripChars(manifest, '\n') + '\n',
+          ],
+          std.get({}, 'rules', [])
+        ),
       manifestJson1: std.manifestJson({
         test: '\n',
         otherField: 'otherValue',
@@ -248,6 +267,36 @@ local emptyYamlDocMultipleNewlines = std.manifestYamlDoc({}) + '\n';  // "{}\n\n
         |||,
         otherField: 'otherValue',
       }),
+    },
+  },
+  'configmap-apiserver': {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'apiserver',
+      namespace: 'default',
+    },
+    data: {
+      name: 'apiserver',
+      rules:
+        std.foldl(
+          function(acc, fn)
+            fn(acc),
+          [
+            // Manifest the rules as a YAML stream
+            function(ruleset)
+              std.manifestYamlStream(
+                ruleset,
+                quote_keys=false,
+                c_document_end=false,
+              ),
+            function(manifest)
+              std.strReplace(manifest, ' \n', '\n'),
+            function(manifest)
+              std.rstripChars(manifest, '\n') + '\n',
+          ],
+          std.get({}, 'rules', [])
+        ),
     },
   },
   // Test deeply nested object-in-array indentation (Prometheus alerting rules structure)
