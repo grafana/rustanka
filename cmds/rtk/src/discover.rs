@@ -85,6 +85,21 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 			cwd.join(path)
 		};
 
+		// If the path is a file (e.g., main.jsonnet), use its parent directory
+		let abs_path = if abs_path.is_file() {
+			let parent = abs_path
+				.parent()
+				.map(|p| p.to_path_buf())
+				.unwrap_or(abs_path);
+			debug!(
+				"Path is a file, using parent directory: {}",
+				parent.display()
+			);
+			parent
+		} else {
+			abs_path
+		};
+
 		debug!(
 			"Resolved abs_path={}, exists={}, is_dir={}",
 			abs_path.display(),

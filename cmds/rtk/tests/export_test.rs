@@ -524,13 +524,13 @@ fn test_export_empty_inline_environment() {
 	);
 }
 
-/// Test that export works with absolute paths
+/// Test that export works with absolute paths to directories
 #[test]
-fn test_export_with_absolute_path() {
+fn test_export_with_absolute_directory_path() {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
-	// Get absolute path to the test environment
+	// Get absolute path to the test environment directory
 	let abs_path = testdata_path("test-export-envs/static-env");
 	assert!(
 		abs_path.is_absolute(),
@@ -538,8 +538,8 @@ fn test_export_with_absolute_path() {
 		abs_path
 	);
 	assert!(
-		abs_path.exists(),
-		"Test environment should exist: {:?}",
+		abs_path.is_dir(),
+		"Path should be a directory: {:?}",
 		abs_path
 	);
 
@@ -595,6 +595,61 @@ fn test_export_with_absolute_path() {
 			value
 		);
 	}
+}
+
+/// Test that export works with absolute paths to files (e.g., main.jsonnet)
+#[test]
+fn test_export_with_absolute_file_path() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	// Get absolute path to the main.jsonnet file (not the directory)
+	let abs_path = testdata_path("test-export-envs/static-env/main.jsonnet");
+	assert!(
+		abs_path.is_absolute(),
+		"Path should be absolute: {:?}",
+		abs_path
+	);
+	assert!(abs_path.is_file(), "Path should be a file: {:?}", abs_path);
+
+	// Export using absolute path to the file
+	let mut ext_code = HashMap::new();
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'file-path-deployment'".to_string(),
+	);
+	ext_code.insert("serviceName".to_string(), "'file-path-service'".to_string());
+
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts {
+			ext_code,
+			..Default::default()
+		},
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		..Default::default()
+	};
+
+	let result = export(&[abs_path.to_string_lossy().to_string()], opts).unwrap();
+
+	// Should export successfully - the file path should resolve to its parent directory
+	assert_eq!(result.successful, 1, "Should export 1 environment");
+	assert_eq!(result.failed, 0, "Should have no failures");
+
+	// Check that expected files were created
+	check_files(
+		output_dir,
+		&[
+			"static/file-path-deployment.yaml",
+			"static/file-path-service.yaml",
+			"manifest.json",
+		],
+	);
 }
 
 // Note: The following tests from the Go version are not yet implemented:
