@@ -524,6 +524,79 @@ fn test_export_empty_inline_environment() {
 	);
 }
 
+/// Test that export works with absolute paths
+#[test]
+fn test_export_with_absolute_path() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	// Get absolute path to the test environment
+	let abs_path = testdata_path("test-export-envs/static-env");
+	assert!(
+		abs_path.is_absolute(),
+		"Path should be absolute: {:?}",
+		abs_path
+	);
+	assert!(
+		abs_path.exists(),
+		"Test environment should exist: {:?}",
+		abs_path
+	);
+
+	// Export using absolute path
+	let mut ext_code = HashMap::new();
+	ext_code.insert(
+		"deploymentName".to_string(),
+		"'absolute-deployment'".to_string(),
+	);
+	ext_code.insert("serviceName".to_string(), "'absolute-service'".to_string());
+
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts {
+			ext_code,
+			..Default::default()
+		},
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		..Default::default()
+	};
+
+	let result = export(&[abs_path.to_string_lossy().to_string()], opts).unwrap();
+
+	// Should export successfully
+	assert_eq!(result.successful, 1, "Should export 1 environment");
+	assert_eq!(result.failed, 0, "Should have no failures");
+
+	// Check that expected files were created
+	check_files(
+		output_dir,
+		&[
+			"static/absolute-deployment.yaml",
+			"static/absolute-service.yaml",
+			"manifest.json",
+		],
+	);
+
+	// Verify manifest.json points to the absolute path of the environment
+	let manifest_content = fs::read_to_string(output_dir.join("manifest.json")).unwrap();
+	let manifest_map: HashMap<String, String> = serde_json::from_str(&manifest_content).unwrap();
+	assert_eq!(manifest_map.len(), 2);
+
+	// The manifest should contain the absolute path to the main.jsonnet file
+	for value in manifest_map.values() {
+		assert!(
+			value.contains("test-export-envs/static-env/main.jsonnet"),
+			"Manifest entry should reference the environment path: {}",
+			value
+		);
+	}
+}
+
 // Note: The following tests from the Go version are not yet implemented:
 // - Test_replaceTmplText (not needed in Rust implementation - different path handling)
 // - BenchmarkExportEnvironmentsWithReplaceEnvs (benchmark test - can be added later)
