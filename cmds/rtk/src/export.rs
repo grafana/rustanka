@@ -5,6 +5,7 @@
 
 use anyhow::{bail, Context, Result};
 use gtmpl::{FuncError, Value};
+use log::debug;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -225,12 +226,35 @@ enum ExportError {
 
 /// Export environments from given paths to the output directory
 pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
+	use std::time::Instant;
+	let export_start = Instant::now();
+
+	debug!(
+		"Starting export: {} paths, parallelism={}, output_dir={:?}",
+		paths.len(),
+		opts.parallelism,
+		opts.output_dir
+	);
+
 	// PHASE 1: Validate template format FIRST (fail fast - Issue #2)
+	let validate_start = Instant::now();
+	debug!("Validating filename template: {}", opts.format);
 	validate_filename_template(&opts.format)
 		.context("Invalid filename format template - check Go text/template syntax")?;
+	debug!(
+		"Template validation completed in {}ms",
+		validate_start.elapsed().as_millis()
+	);
 
 	// PHASE 2: Discover environments
+	let discover_start = Instant::now();
+	debug!("Starting environment discovery for {} paths", paths.len());
 	let envs = find_environments(paths)?;
+	debug!(
+		"Environment discovery completed in {}ms, found {} environments",
+		discover_start.elapsed().as_millis(),
+		envs.len()
+	);
 
 	if envs.is_empty() {
 		return Ok(ExportResult {
@@ -258,6 +282,7 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 
 	// Filter by name if specified
 	let envs: Vec<_> = if let Some(ref name) = opts.name {
+		debug!("Filtering environments by name: {}", name);
 		envs.into_iter()
 			.filter(|e| {
 				e.path
@@ -278,12 +303,22 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 		);
 	}
 
+	debug!(
+		"Will export {} environments: {:?}",
+		envs.len(),
+		envs.iter()
+			.map(|e| e.path.display().to_string())
+			.collect::<Vec<_>>()
+	);
+
 	// Create output directory
+	debug!("Creating output directory: {:?}", opts.output_dir);
 	fs::create_dir_all(&opts.output_dir)
 		.context(format!("creating output directory {:?}", opts.output_dir))?;
 
 	// Check if directory is empty (if required by merge strategy)
 	if opts.merge_strategy == ExportMergeStrategy::None {
+		debug!("Checking if output directory is empty (merge_strategy=none)");
 		let is_empty = is_dir_empty(&opts.output_dir)?;
 		if !is_empty {
 			bail!(
@@ -295,16 +330,31 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 
 	// Delete files previously exported by the targeted environments
 	if opts.merge_strategy == ExportMergeStrategy::ReplaceEnvs {
+		debug!("Deleting previously exported manifests (merge_strategy=replace-envs)");
+		let delete_start = Instant::now();
 		delete_previously_exported_manifests(&opts.output_dir, &envs, opts.skip_manifest)?;
+		debug!(
+			"Deleted previously exported manifests in {}ms",
+			delete_start.elapsed().as_millis()
+		);
 	}
 
 	// Delete files from environments that have been deleted
 	if !opts.merge_deleted_envs.is_empty() {
+		debug!(
+			"Deleting files from {} deleted environments",
+			opts.merge_deleted_envs.len()
+		);
+		let delete_start = Instant::now();
 		delete_previously_exported_by_names(
 			&opts.output_dir,
 			&opts.merge_deleted_envs,
 			opts.skip_manifest,
 		)?;
+		debug!(
+			"Deleted files from deleted environments in {}ms",
+			delete_start.elapsed().as_millis()
+		);
 	}
 
 	// Abort flag for early termination (Issue #3 & #5)
@@ -316,6 +366,12 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 	let mut env_iter = envs.iter().enumerate();
 	let total_envs = envs.len();
 	let show_timing = opts.show_timing;
+
+	debug!(
+		"Starting parallel export with {} workers for {} environments",
+		opts.parallelism, total_envs
+	);
+	let parallel_start = Instant::now();
 
 	// Spawn initial batch of threads (up to parallelism limit)
 	for _ in 0..opts.parallelism {
@@ -443,14 +499,35 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 	results.sort_by_key(|(idx, _)| *idx);
 	let results: Vec<ExportEnvResult> = results.into_iter().map(|(_, r)| r).collect();
 
+	debug!(
+		"Parallel export completed in {}ms",
+		parallel_start.elapsed().as_millis()
+	);
+
 	// Summarize results
 	let successful = results.iter().filter(|r| r.error.is_none()).count();
 	let failed = results.iter().filter(|r| r.error.is_some()).count();
 
+	debug!(
+		"Export summary: {} successful, {} failed out of {} total",
+		successful, failed, total_envs
+	);
+
 	// Generate manifest.json file if not skipped
 	if !opts.skip_manifest {
+		debug!("Writing manifest.json");
+		let manifest_start = Instant::now();
 		export_manifest_file(&opts.output_dir, &results)?;
+		debug!(
+			"Manifest.json written in {}ms",
+			manifest_start.elapsed().as_millis()
+		);
 	}
+
+	debug!(
+		"Total export completed in {}ms",
+		export_start.elapsed().as_millis()
+	);
 
 	Ok(ExportResult {
 		total_envs: envs.len(),
@@ -551,6 +628,10 @@ fn export_single_env(
 ) -> Result<(Vec<PathBuf>, String, ExportTimingData), ExportError> {
 	use std::time::Instant;
 
+	let env_start = Instant::now();
+	let env_display = env.path.display().to_string();
+	debug!("[{}] Starting environment export", env_display);
+
 	let mut timing = ExportTimingData::default();
 
 	// Evaluate the environment, passing the env_name if this is a sub-environment
@@ -559,10 +640,15 @@ fn export_single_env(
 	// Pass exportJsonnetImplementation from discovery so eval can use jrsonnet-compatible formatting
 	eval_opts.export_jsonnet_implementation = env.export_jsonnet_implementation.clone();
 
+	debug!("[{}] Starting Jsonnet evaluation", env_display);
 	let eval_start = Instant::now();
 	let result = eval(env.path.to_string_lossy().as_ref(), eval_opts)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 	timing.eval_ms = eval_start.elapsed().as_millis();
+	debug!(
+		"[{}] Jsonnet evaluation completed in {}ms",
+		env_display, timing.eval_ms
+	);
 
 	// Check for multiple Environment objects (Issue C - match tk behavior)
 	let env_count = count_environment_objects(&result.value);
@@ -591,8 +677,16 @@ fn export_single_env(
 	};
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
+	debug!("[{}] Extracting Environment objects", env_display);
+	let extract_start = Instant::now();
 	let mut environments = extract_environments(&result.value, &result.spec)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+	debug!(
+		"[{}] Extracted {} Environment objects in {}ms",
+		env_display,
+		environments.len(),
+		extract_start.elapsed().as_millis()
+	);
 
 	// For inline environments (those without spec.json), set metadata.namespace to the relative
 	// path from root to entrypoint. This matches Go Tanka's behavior in pkg/tanka/inline.go:inlineParse
@@ -627,6 +721,7 @@ fn export_single_env(
 	}
 
 	if environments.is_empty() {
+		debug!("[{}] No environments to process, skipping", env_display);
 		return Ok((vec![], env_namespace, timing));
 	}
 
@@ -639,18 +734,46 @@ fn export_single_env(
 
 	// Process each Environment's manifests separately (matching Tanka's approach)
 	// This avoids loading all manifests into memory at once
-	for env_data in environments.iter() {
+	for (env_idx, env_data) in environments.iter().enumerate() {
+		let env_name = env_data
+			.spec
+			.as_ref()
+			.and_then(|s| s.metadata.name.as_deref())
+			.unwrap_or("unnamed");
+
+		debug!(
+			"[{}] Processing sub-environment {}/{}: {}",
+			env_display,
+			env_idx + 1,
+			environments.len(),
+			env_name
+		);
+
 		// Extract manifests from this environment's data field
+		debug!("[{}:{}] Collecting manifests", env_display, env_name);
+		let collect_start = Instant::now();
 		let mut manifests = Vec::new();
 		collect_manifests(&env_data.data, &mut manifests);
+		debug!(
+			"[{}:{}] Collected {} manifests in {}ms",
+			env_display,
+			env_name,
+			manifests.len(),
+			collect_start.elapsed().as_millis()
+		);
 
 		// Skip if there are no manifests to process
 		if manifests.is_empty() {
+			debug!(
+				"[{}:{}] No manifests to process, skipping",
+				env_display, env_name
+			);
 			continue;
 		}
 
 		// MAJOR OPTIMIZATION: Pre-substitute env values into template once per environment
 		// Instead of evaluating env.metadata.labels.X thousands of times, bake values into template
+		debug!("[{}:{}] Specializing template", env_display, env_name);
 		let specialized_template = specialize_template_for_env(&opts.format, &env_data.spec)
 			.map_err(|e| ExportError::Fatal(format!("Failed to specialize template: {}", e)))?;
 
@@ -690,6 +813,12 @@ fn export_single_env(
 		// (Actual improvement depends on CPU cores and serialization complexity)
 		// ============================================================================
 
+		debug!(
+			"[{}:{}] Starting parallel serialization of {} manifests",
+			env_display,
+			env_name,
+			manifests.len()
+		);
 		let serialize_start = Instant::now();
 		let manifest_count = manifests.len();
 		let processed_manifests: Result<Vec<_>, ExportError> = manifests
@@ -787,9 +916,21 @@ fn export_single_env(
 		let processed_manifests = processed_manifests?;
 		timing.serialize_ms += serialize_start.elapsed().as_millis();
 		timing.manifest_count += manifest_count;
+		debug!(
+			"[{}:{}] Serialization completed in {}ms ({} manifests, {:.2}ms/manifest)",
+			env_display,
+			env_name,
+			serialize_start.elapsed().as_millis(),
+			manifest_count,
+			serialize_start.elapsed().as_millis() as f64 / manifest_count as f64
+		);
 
 		// Phase 2: Write files (I/O-bound, kept sequential for directory coordination)
 		// Note: File writes could also be parallelized with proper directory creation synchronization
+		debug!(
+			"[{}:{}] Starting sequential file writes for {} files",
+			env_display, env_name, manifest_count
+		);
 		let write_start = Instant::now();
 		for (relative_path, content) in processed_manifests {
 			let filepath = opts.output_dir.join(&relative_path);
@@ -832,7 +973,25 @@ fn export_single_env(
 			files_written.push(relative_path);
 		}
 		timing.write_ms += write_start.elapsed().as_millis();
+		debug!(
+			"[{}:{}] File writes completed in {}ms ({} files, {:.2}ms/file)",
+			env_display,
+			env_name,
+			write_start.elapsed().as_millis(),
+			manifest_count,
+			write_start.elapsed().as_millis() as f64 / manifest_count as f64
+		);
 	}
+
+	debug!(
+		"[{}] Environment export completed in {}ms (eval={}ms, serialize={}ms, write={}ms, {} manifests)",
+		env_display,
+		env_start.elapsed().as_millis(),
+		timing.eval_ms,
+		timing.serialize_ms,
+		timing.write_ms,
+		timing.manifest_count
+	);
 
 	Ok((files_written, env_namespace, timing))
 }

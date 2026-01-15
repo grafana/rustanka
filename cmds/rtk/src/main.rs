@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use log::LevelFilter;
 use std::path::PathBuf;
 
 mod config;
@@ -606,8 +607,48 @@ enum ChartsCommands {
 	},
 }
 
+/// Initialize the logger based on the log level string
+fn init_logger(level: &str) {
+	let level_filter = match level.to_lowercase().as_str() {
+		"trace" => LevelFilter::Trace,
+		"debug" => LevelFilter::Debug,
+		"info" => LevelFilter::Info,
+		"warn" | "warning" => LevelFilter::Warn,
+		"error" => LevelFilter::Error,
+		_ => LevelFilter::Info,
+	};
+
+	env_logger::Builder::new()
+		.filter_level(level_filter)
+		.format_timestamp_millis()
+		.init();
+}
+
+/// Extract log level from command
+fn get_log_level(cmd: &Commands) -> &str {
+	match cmd {
+		Commands::Apply { log_level, .. } => log_level,
+		Commands::Show { log_level, .. } => log_level,
+		Commands::Diff { log_level, .. } => log_level,
+		Commands::Prune { log_level, .. } => log_level,
+		Commands::Delete { log_level, .. } => log_level,
+		Commands::Env { log_level, .. } => log_level,
+		Commands::Status { log_level, .. } => log_level,
+		Commands::Export { log_level, .. } => log_level,
+		Commands::Fmt { log_level, .. } => log_level,
+		Commands::Lint { log_level, .. } => log_level,
+		Commands::Eval { log_level, .. } => log_level,
+		Commands::Init { log_level, .. } => log_level,
+		Commands::Tool { log_level, .. } => log_level,
+		Commands::Complete { .. } => "info",
+	}
+}
+
 fn main() -> Result<()> {
 	let cli = Cli::parse();
+
+	// Initialize logger based on log level
+	init_logger(get_log_level(&cli.command));
 
 	match cli.command {
 		Commands::Apply { .. } => {
