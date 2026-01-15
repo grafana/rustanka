@@ -5,9 +5,6 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Build ${{ matrix.target }}
@@ -49,6 +46,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
         with:
           target: ${{ matrix.target }}
+          cache: false
 
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -71,6 +69,8 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4

@@ -6,7 +6,7 @@
 //! - `main.jsonnet` with inline environment definition
 
 use anyhow::{Context, Result};
-use log::debug;
+use log::trace;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -74,14 +74,14 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 	let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
 
 	for path in paths {
-		debug!("Processing path: {}", path);
+		trace!("Processing path: {}", path);
 		let path = PathBuf::from(path);
 		let abs_path = if path.is_absolute() {
-			debug!("Path is absolute");
+			trace!("Path is absolute");
 			path
 		} else {
 			let cwd = std::env::current_dir()?;
-			debug!("Path is relative, cwd={}", cwd.display());
+			trace!("Path is relative, cwd={}", cwd.display());
 			cwd.join(path)
 		};
 
@@ -91,7 +91,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 				.parent()
 				.map(|p| p.to_path_buf())
 				.unwrap_or(abs_path);
-			debug!(
+			trace!(
 				"Path is a file, using parent directory: {}",
 				parent.display()
 			);
@@ -100,7 +100,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 			abs_path
 		};
 
-		debug!(
+		trace!(
 			"Resolved abs_path={}, exists={}, is_dir={}",
 			abs_path.display(),
 			abs_path.exists(),
@@ -109,7 +109,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 
 		// If path is directly an environment, add it
 		if is_environment(&abs_path) {
-			debug!("Path is directly an environment: {}", abs_path.display());
+			trace!("Path is directly an environment: {}", abs_path.display());
 			if seen_dirs.insert(abs_path.clone()) {
 				let is_static = abs_path.join("spec.json").exists();
 				if is_static {
@@ -139,7 +139,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 			}
 			continue;
 		} else {
-			debug!(
+			trace!(
 				"Path is NOT directly an environment, will walk directory tree: {}",
 				abs_path.display()
 			);
@@ -210,7 +210,7 @@ pub fn find_environments(paths: &[String]) -> Result<Vec<DiscoveredEnv>> {
 /// Check if a directory is a Tanka environment
 fn is_environment(path: &Path) -> bool {
 	if !path.is_dir() {
-		debug!(
+		trace!(
 			"is_environment: {} is not a directory (exists={})",
 			path.display(),
 			path.exists()
@@ -222,7 +222,7 @@ fn is_environment(path: &Path) -> bool {
 	for marker in ENV_MARKERS {
 		let marker_path = path.join(marker);
 		if marker_path.exists() {
-			debug!(
+			trace!(
 				"is_environment: {} has marker {} -> true",
 				path.display(),
 				marker
@@ -231,7 +231,7 @@ fn is_environment(path: &Path) -> bool {
 		}
 	}
 
-	debug!(
+	trace!(
 		"is_environment: {} has no markers (spec.json or main.jsonnet) -> false",
 		path.display()
 	);
