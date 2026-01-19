@@ -119,8 +119,10 @@ mod tests {
 	use indoc::indoc;
 
 	use super::*;
-	use crate::commands::util::BrokenPipeGuard;
-	use crate::test_utils::{BrokenPipeWriter, MemoryImportResolver};
+	use crate::{
+		commands::util::BrokenPipeGuard,
+		test_utils::{BrokenPipeWriter, MemoryImportResolver},
+	};
 
 	const ENTRYPOINT: &str = "/test/main.jsonnet";
 
