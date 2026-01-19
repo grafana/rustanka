@@ -3,10 +3,13 @@
 //! Supports `.rtk-config.yaml` files that can be placed anywhere in the directory
 //! hierarchy. rtk searches from the environment directory upward to the filesystem root.
 
+use std::{
+	fs,
+	path::{Path, PathBuf},
+};
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::fs;
-use std::path::{Path, PathBuf};
 
 /// The name of the config file rtk looks for
 pub const CONFIG_FILE_NAME: &str = ".rtk-config.yaml";
@@ -163,8 +166,9 @@ pub fn find_config_file(start_dir: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use tempfile::TempDir;
+
+	use super::*;
 
 	#[test]
 	fn test_find_config_in_current_dir() {

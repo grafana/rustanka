@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 /// Environment represents a Tanka environment (tanka.dev/v1alpha1)
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -399,8 +399,12 @@ fn manifest_yaml_ex_buf(
 
 #[cfg(test)]
 mod tests {
+	use jrsonnet_evaluator::{
+		val::{ArrValue, NumValue},
+		ObjValueBuilder,
+	};
+
 	use super::*;
-	use jrsonnet_evaluator::{val::ArrValue, val::NumValue, ObjValueBuilder};
 
 	/// Helper to create a Val::Num
 	fn num(v: f64) -> Val {

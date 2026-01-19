@@ -1,9 +1,14 @@
-use rtk::discover::find_environments;
-use rtk::eval::EvalOpts;
-use rtk::export::{export, ExportOpts};
+use std::{
+	fs,
+	path::{Path, PathBuf},
+};
+
+use rtk::{
+	discover::find_environments,
+	eval::EvalOpts,
+	export::{export, ExportOpts},
+};
 use similar::{ChangeTag, TextDiff};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 /// The export format for golden fixtures - matches GOLDEN_EXPORT_FORMAT in Makefile
 /// Uses default for namespace to handle cluster-scoped resources (CRDs, ClusterRoles, etc.)

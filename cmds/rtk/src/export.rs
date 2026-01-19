@@ -3,23 +3,29 @@
 //! This module handles exporting multiple Tanka environments to files in parallel.
 //! It evaluates environments and writes the resulting Kubernetes manifests to disk.
 
+use std::{
+	collections::{BTreeMap, HashMap},
+	fs,
+	path::PathBuf,
+	sync::{
+		atomic::{AtomicBool, Ordering},
+		mpsc, Arc,
+	},
+	thread,
+};
+
 use anyhow::{bail, Context, Result};
 use gtmpl::{FuncError, Value};
 use log::{debug, trace};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::thread;
 
-use crate::discover::{find_environments, DiscoveredEnv};
-use crate::eval::{eval, EvalOpts};
-use crate::jpath;
+use crate::{
+	discover::{find_environments, DiscoveredEnv},
+	eval::{eval, EvalOpts},
+	jpath,
+};
 
 /// When exporting manifests to files, it becomes increasingly hard to map manifests back to its environment.
 /// This file can be used to map the files back to their environment.
@@ -538,8 +544,9 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 
 /// Validate that the filename template is valid Go text/template syntax (Issue #2)
 fn validate_filename_template(format: &str) -> Result<()> {
-	use crate::spec::{Environment, Metadata, Spec};
 	use std::collections::BTreeMap;
+
+	use crate::spec::{Environment, Metadata, Spec};
 
 	// Create a test manifest with all expected fields
 	let test_manifest = serde_json::json!({
@@ -1996,8 +2003,9 @@ fn delete_previously_exported_by_names(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use tempfile::TempDir;
+
+	use super::*;
 
 	fn setup_test_env(temp: &TempDir, name: &str, content: &str) -> PathBuf {
 		let root = temp.path();
@@ -3350,8 +3358,9 @@ mod tests {
 	#[test]
 	fn test_gtmpl_env_function() {
 		// Test that env variable works in templates
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3403,8 +3412,9 @@ mod tests {
 	#[test]
 	fn test_gtmpl_env_with_conditional() {
 		// Test the complex template from tk-compare with conditional logic
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3482,8 +3492,9 @@ mod tests {
 	fn test_gtmpl_env_missing_label_with_eq_comparison() {
 		// Regression test: missing labels should be replaced with empty string ""
 		// This ensures comparisons like {{ if eq env.metadata.labels.X "true" }} work correctly
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3536,8 +3547,9 @@ mod tests {
 	fn test_flux_export_label_missing() {
 		// Test case: fluxExport label is not set (missing)
 		// Expected: outputs to "flux-disabled/" directory
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3583,8 +3595,9 @@ mod tests {
 	fn test_flux_export_label_true() {
 		// Test case: fluxExport label is set to "true"
 		// Expected: outputs to "flux/" directory
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3630,8 +3643,9 @@ mod tests {
 	fn test_flux_export_label_false() {
 		// Test case: fluxExport label is explicitly set to "false"
 		// Expected: outputs to "flux-disabled/" directory
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",
@@ -3677,8 +3691,9 @@ mod tests {
 	fn test_flux_export_label_other_value() {
 		// Test case: fluxExport label is set to some other value (e.g., "disabled")
 		// Expected: outputs to "flux-disabled/" directory
-		use crate::spec::{Environment, Metadata, Spec};
 		use std::collections::BTreeMap;
+
+		use crate::spec::{Environment, Metadata, Spec};
 
 		let manifest = serde_json::json!({
 			"apiVersion": "v1",

@@ -1,9 +1,14 @@
-use rtk::discover::find_environments;
-use rtk::eval::EvalOpts;
-use rtk::export::{export, ExportOpts};
-use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+	collections::HashMap,
+	fs,
+	path::{Path, PathBuf},
+};
+
+use rtk::{
+	discover::find_environments,
+	eval::EvalOpts,
+	export::{export, ExportOpts},
+};
 
 /// Helper function to get absolute path to test data
 fn testdata_path(subpath: &str) -> PathBuf {

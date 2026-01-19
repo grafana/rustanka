@@ -5,10 +5,13 @@
 //! - `spec.json` (static environment)
 //! - `main.jsonnet` with inline environment definition
 
+use std::{
+	collections::HashSet,
+	path::{Path, PathBuf},
+};
+
 use anyhow::{Context, Result};
 use log::trace;
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// Files that indicate a Tanka environment
@@ -391,9 +394,11 @@ fn extract_environment_metadata(value: &serde_json::Value) -> Vec<(String, Optio
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::fs;
+
 	use tempfile::TempDir;
+
+	use super::*;
 
 	#[test]
 	fn test_find_single_environment() {

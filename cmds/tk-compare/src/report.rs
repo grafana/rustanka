@@ -1,5 +1,6 @@
-use colored::Colorize;
 use std::time::Duration;
+
+use colored::Colorize;
 
 /// Format a duration in a human-readable way
 fn format_duration(duration: Duration) -> String {

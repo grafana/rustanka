@@ -3,8 +3,9 @@
 //! This module handles finding the project root, environment base directory,
 //! and constructing the import paths needed by the jsonnet evaluator.
 
-use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Result};
 
 /// Default entrypoint filename for environments
 pub const DEFAULT_ENTRYPOINT: &str = "main.jsonnet";
@@ -172,9 +173,11 @@ fn find_parent_with_file_bounded(start: &Path, filename: &str, root: &Path) -> O
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::fs;
+
 	use tempfile::TempDir;
+
+	use super::*;
 
 	#[test]
 	fn test_default_entrypoint() {

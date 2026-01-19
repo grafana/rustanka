@@ -1,9 +1,12 @@
+use std::{
+	collections::HashMap,
+	path::PathBuf,
+	process::{Command as ProcessCommand, Stdio},
+	time::{Duration, Instant},
+};
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::{Command as ProcessCommand, Stdio};
-use std::time::{Duration, Instant};
 
 /// Check if a file path indicates a YAML file
 fn is_yaml_file(path: &str) -> bool {
@@ -398,8 +401,7 @@ pub fn compare_directories_detailed(
 }
 
 fn collect_files(dir: &str) -> Result<HashMap<String, Vec<u8>>> {
-	use std::collections::HashMap;
-	use std::fs;
+	use std::{collections::HashMap, fs};
 
 	let mut files = HashMap::new();
 	let base_path = PathBuf::from(dir);
@@ -899,9 +901,11 @@ pub fn print_directory_file_diffs(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::fs;
+
 	use tempfile::tempdir;
+
+	use super::*;
 
 	#[test]
 	fn test_compare_directories_identical() {

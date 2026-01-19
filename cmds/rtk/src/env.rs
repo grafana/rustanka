@@ -1,10 +1,13 @@
+use std::{
+	fs,
+	io::{BufWriter, Write},
+	path::{Path, PathBuf},
+	sync::Mutex,
+	time::{Duration, Instant},
+};
+
 use anyhow::{Context, Result};
 use rayon::prelude::*;
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use tabwriter::TabWriter;
 
 use crate::spec::Environment;
@@ -33,8 +36,8 @@ fn prune_empty_objects(value: &mut serde_json::Value) {
 	}
 }
 
-/// List environments in the given path
-pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
+/// List environments in the given path, writing to the provided writer.
+pub fn list_envs_to_writer<W: Write>(path: Option<String>, json: bool, writer: W) -> Result<()> {
 	let search_path = path
 		.map(PathBuf::from)
 		.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -59,16 +62,24 @@ pub fn list_envs(path: Option<String>, json: bool) -> Result<()> {
 				prune_empty_objects(ev);
 			}
 		}
-		println!("{}", serde_json::to_string(&envs)?);
+		writeln!(
+			&mut BufWriter::new(writer),
+			"{}",
+			serde_json::to_string(&envs)?
+		)?;
 	} else {
-		print_table(&envs, &search_path)?;
+		print_table_to_writer(&envs, &search_path, writer)?;
 	}
 
 	Ok(())
 }
 
-fn print_table(envs: &[Environment], search_path: &Path) -> Result<()> {
-	let mut tw = TabWriter::new(std::io::stdout()).padding(4);
+fn print_table_to_writer<W: Write>(
+	envs: &[Environment],
+	search_path: &Path,
+	writer: W,
+) -> Result<()> {
+	let mut tw = TabWriter::new(writer).padding(4);
 	writeln!(tw, "NAME\tNAMESPACE\tSERVER")?;
 
 	if envs.is_empty() {

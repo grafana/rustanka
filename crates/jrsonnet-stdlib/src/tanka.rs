@@ -2,19 +2,21 @@
 // These are wrappers around the existing stdlib functions to provide
 // Tanka-compatible API accessible via std.native()
 
-use jrsonnet_evaluator::IStr;
+use std::{
+	collections::HashMap,
+	io::{BufReader, Read, Write},
+	process::{Command, Stdio},
+	sync::RwLock,
+	thread,
+};
+
 use jrsonnet_evaluator::{
 	error::{ErrorKind::*, Result},
-	ObjValue, Val,
+	IStr, ObjValue, Val,
 };
 use jrsonnet_macros::builtin;
 use serde_json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::io::{BufReader, Read, Write};
-use std::process::{Command, Stdio};
-use std::sync::RwLock;
-use std::thread;
 
 // Global Helm template cache - caches raw YAML output from helm to avoid
 // redundant helm invocations (same optimization as Go Tanka)
@@ -217,8 +219,9 @@ fn to_snake_case(s: &str) -> String {
 	result
 }
 
-use crate::regex::RegexCacheInner;
 use std::rc::Rc;
+
+use crate::regex::RegexCacheInner;
 
 /// Tanka-compatible parseJson
 /// Parses a JSON string into a value

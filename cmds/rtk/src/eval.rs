@@ -3,19 +3,21 @@
 //! This module handles evaluating jsonnet files with proper tanka context,
 //! including native functions and environment configuration injection.
 
+use std::{collections::HashMap, fs, path::Path};
+
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
 	function::TlaArg, gc::GcHashMap, set_lenient_super, set_skip_assertions,
-	stack::set_stack_depth_limit, trace::PathResolver, FileImportResolver, IStr, State,
+	stack::set_stack_depth_limit, trace::PathResolver, FileImportResolver, IStr, ImportResolver,
+	State,
 };
 use jrsonnet_stdlib::ContextInitializer;
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 
-use crate::config::{uses_jrsonnet_binary, RtkConfig};
-use crate::jpath::{self, JpathResult};
-use crate::spec::Environment;
+use crate::{
+	config::{uses_jrsonnet_binary, RtkConfig},
+	jpath,
+	spec::Environment,
+};
 
 /// Environment ext code key used by Tanka
 const ENV_EXT_CODE_KEY: &str = "tanka.dev/environment";
@@ -86,6 +88,35 @@ pub struct EvalResult {
 
 /// Evaluate a tanka environment at the given path
 pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
+	// Resolve jpath (find root, base, import paths)
+	let jpath_result = jpath::resolve(path)?;
+
+	// Create import resolver with jpath
+	let import_resolver = FileImportResolver::new(jpath_result.import_paths.clone());
+
+	// Load spec.json if it exists (static environment)
+	let spec = load_spec(&jpath_result)?;
+
+	eval_with_resolver(
+		import_resolver,
+		&jpath_result.entrypoint,
+		Some(&jpath_result.base),
+		spec,
+		opts,
+	)
+}
+
+/// Evaluate jsonnet with a provided import resolver.
+///
+/// This is the core evaluation function that can be used with any ImportResolver,
+/// enabling testing with in-memory resolvers.
+pub fn eval_with_resolver(
+	import_resolver: impl ImportResolver,
+	entrypoint: &Path,
+	config_base: Option<&Path>,
+	spec: Option<Environment>,
+	opts: EvalOpts,
+) -> Result<EvalResult> {
 	// Skip assertions during manifest generation to match Go Tanka's behavior
 	// This prevents circular dependency errors in autoscaling configs and other complex patterns
 	set_skip_assertions(true);
@@ -94,19 +125,11 @@ pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
 	// This works around go-jsonnet compatibility issues in libraries like k8s-libsonnet
 	set_lenient_super(true);
 
-	// Resolve jpath (find root, base, import paths)
-	let jpath_result = jpath::resolve(path)?;
-
-	// Load spec.json if it exists (static environment)
-	// Note: This also sets metadata.name and metadata.namespace to relative paths
-	// matching Go Tanka's behavior in pkg/spec/spec.go:ParseDir
-	let spec = load_spec(&jpath_result)?;
-
 	// Set up the evaluator state
-	let state = setup_state(&jpath_result, &spec, &opts)?;
+	let state = setup_state(import_resolver, config_base, &spec, &opts)?;
 
 	// Evaluate the entrypoint
-	let result = evaluate_file(&state, &jpath_result.entrypoint, &opts)?;
+	let result = evaluate_file(&state, entrypoint, &opts)?;
 
 	// Parse the result as JSON
 	let value: serde_json::Value =
@@ -115,9 +138,9 @@ pub fn eval(path: &str, opts: EvalOpts) -> Result<EvalResult> {
 	Ok(EvalResult { value, spec })
 }
 
-/// Load spec.json from the environment directory if it exists
-/// Also sets metadata.name and metadata.namespace to relative paths matching Go Tanka's behavior
-fn load_spec(jpath: &jpath::JpathResult) -> Result<Option<Environment>> {
+/// Load spec.json from the environment directory if it exists.
+/// Also sets metadata.name and metadata.namespace to relative paths matching Go Tanka's behavior.
+pub fn load_spec(jpath: &jpath::JpathResult) -> Result<Option<Environment>> {
 	let spec_path = jpath.base.join("spec.json");
 	if !spec_path.exists() {
 		return Ok(None);
@@ -145,10 +168,12 @@ fn load_spec(jpath: &jpath::JpathResult) -> Result<Option<Environment>> {
 }
 
 /// Set up the jrsonnet evaluator state with proper configuration
-fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts) -> Result<State> {
-	// Create import resolver with jpath
-	let import_resolver = FileImportResolver::new(jpath.import_paths.clone());
-
+fn setup_state(
+	import_resolver: impl ImportResolver,
+	config_base: Option<&Path>,
+	spec: &Option<Environment>,
+	opts: &EvalOpts,
+) -> Result<State> {
 	// Create context initializer with stdlib and native functions
 	// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
 	let context_init = ContextInitializer::new(PathResolver::Absolute);
@@ -167,8 +192,10 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 	};
 
 	// Load .rtk-config.yaml if present and merge over defaults
-	if let Some(file_config) = RtkConfig::load_from_directory(&jpath.base)? {
-		config.merge_from(&file_config);
+	if let Some(base) = config_base {
+		if let Some(file_config) = RtkConfig::load_from_directory(base)? {
+			config.merge_from(&file_config);
+		}
 	}
 
 	apply_rtk_config(&context_init, &config);
@@ -217,12 +244,13 @@ fn setup_state(jpath: &JpathResult, spec: &Option<Environment>, opts: &EvalOpts)
 
 /// Apply settings from .rtk-config.yaml to the context initializer
 fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
-	use crate::config::JsonnetImplementation;
 	use jrsonnet_evaluator::manifest::set_use_go_style_floats;
 	use jrsonnet_stdlib::{
 		ManifestYamlDocFormatting, ManifestYamlStreamEmptyBehavior, ManifestYamlStreamFormatting,
 		QuoteValuesBehavior,
 	};
+
+	use crate::config::JsonnetImplementation;
 
 	// Apply std.manifestYamlDoc format setting
 	let quote_values_behavior = match config.output_format.std_manifest_yaml_doc {
@@ -392,9 +420,11 @@ fn apply_tla(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use std::fs;
+
 	use tempfile::TempDir;
+
+	use super::*;
 
 	fn setup_test_env(temp: &TempDir, main_content: &str) -> std::path::PathBuf {
 		let root = temp.path();

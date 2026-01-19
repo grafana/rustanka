@@ -29,8 +29,7 @@ pub use sort::*;
 pub use strings::*;
 pub use types::*;
 
-pub use crate::regex::*;
-pub use crate::tanka::*;
+pub use crate::{regex::*, tanka::*};
 
 mod arrays;
 mod compat;
