@@ -77,12 +77,30 @@ args = [
 runs = 3
 
 [[commands]]
+name = "tool importers: deleted env file"
+args = [
+    "tool", "importers", 
+    "deleted:environments/cortex/prod-eu-west-0.mimir-dedicated-33/temp.libsonnet",
+]
+runs = 3
+
+[[commands]]
 name = "tool importers: env+lib files"
 args = [
     "tool", "importers", 
     "environments/grafana-iam/iam-grafana-app-config.jsonnet", 
     "environments/grafana-iam/iam-grafana-app.jsonnet",
     "lib/argo-workflows-util/utils/cron-workflow.libsonnet",
+]
+runs = 3
+
+[[commands]]
+name = "tool importers: deleted lib files"
+args = [
+    "tool", "importers", 
+    "deleted:ksonnet/lib/external-secrets/gar-migration/argo-workflows.libsonnet",
+    "deleted:ksonnet/lib/grafana-unified-storage/database.libsonnet",
+    "deleted:ksonnet/lib/grafana_com/regions-and-cells/cells.libsonnet",
 ]
 runs = 3
 

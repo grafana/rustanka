@@ -893,8 +893,12 @@ fn main() -> Result<()> {
 			}
 			ToolCommands::Importers { files, root, .. } => {
 				let envs = importers::find_importers(&root, files)?;
-				for env in envs {
-					println!("{}", env);
+				if envs.is_empty() {
+					println!();
+				} else {
+					for env in envs {
+						println!("{}", env);
+					}
 				}
 				Ok(())
 			}
