@@ -7,6 +7,7 @@ data:
     "server":
       "host": "0.0.0.0"
       "port": 8080
+      "test": "6e50317"
   dashboard-to-string.json: '{"annotations": {"list": [{"builtIn": 1, "datasource":
     "-- Grafana --", "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255,
     1)", "name": "Annotations & Alerts", "target": {"limit": 100, "matchAny": false,
@@ -183,6 +184,7 @@ data:
         "debug": false,
         "maxConnections": 100
     }
+  test: 6e50317
 kind: ConfigMap
 metadata:
   annotations:

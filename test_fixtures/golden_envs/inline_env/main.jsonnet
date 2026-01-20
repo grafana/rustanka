@@ -77,6 +77,7 @@ local env = {
         server: {
           port: 8080,
           host: '0.0.0.0',
+          test: '6e50317',
         },
         logging: {
           level: 'info',
@@ -88,6 +89,7 @@ local env = {
         debug: false,
         maxConnections: 100,
       }),
+      test: '6e50317',
     }),
     'app-deployment': makeDeployment('app', 'nginx:1.25'),
   },

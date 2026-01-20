@@ -6,132 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
-
-/// Check if a file path indicates a YAML file
-fn is_yaml_file(path: &str) -> bool {
-	path.ends_with(".yaml") || path.ends_with(".yml")
-}
-
-/// Check if a key should be ignored during semantic comparison
-/// These are computed hashes that differ due to formatting differences
-fn is_ignored_key(key: &str) -> bool {
-	key.ends_with("-hash") || key.ends_with("_hash") || key == "config_hash"
-}
-
-/// Normalize a floating point number to handle precision differences
-/// e.g., 0.10000000000000001 -> 0.1
-fn normalize_float(f: f64) -> f64 {
-	// Round to 10 decimal places to handle floating point precision issues
-	(f * 1e10).round() / 1e10
-}
-
-/// Normalize a string value for comparison
-/// - Trims trailing newlines (handles \n\n vs \n differences)
-/// - Normalizes floating point precision in string values (e.g., "0.10000000000000001" -> "0.1")
-fn normalize_string(s: &str) -> String {
-	let trimmed = s.trim_end_matches('\n');
-
-	// Check if this looks like a command-line arg with a float (e.g., "-rate=0.10000000000000001")
-	if let Some(eq_pos) = trimmed.find('=') {
-		let (prefix, value) = trimmed.split_at(eq_pos + 1);
-		if let Ok(f) = value.parse::<f64>() {
-			let normalized = normalize_float(f);
-			// Format without unnecessary precision
-			if normalized.fract() == 0.0 {
-				return format!("{}{}", prefix, normalized as i64);
-			}
-			return format!("{}{}", prefix, normalized);
-		}
-	}
-
-	// Check if the entire string is a float
-	if let Ok(f) = trimmed.parse::<f64>() {
-		let normalized = normalize_float(f);
-		if normalized.fract() == 0.0 {
-			return (normalized as i64).to_string();
-		}
-		return normalized.to_string();
-	}
-
-	trimmed.to_string()
-}
-
-/// Normalize a YAML value for semantic comparison
-/// - Removes ignored keys (config_hash, etc.)
-/// - Normalizes floating point precision
-/// - Normalizes trailing newlines in strings
-fn normalize_yaml_value(value: serde_yaml::Value) -> serde_yaml::Value {
-	use serde_yaml::Value;
-
-	match value {
-		Value::Mapping(map) => {
-			let normalized: serde_yaml::Mapping = map
-				.into_iter()
-				.filter(|(k, _)| {
-					// Filter out ignored keys
-					if let Value::String(key) = k {
-						!is_ignored_key(key)
-					} else {
-						true
-					}
-				})
-				.map(|(k, v)| (normalize_yaml_value(k), normalize_yaml_value(v)))
-				.collect();
-			Value::Mapping(normalized)
-		}
-		Value::Sequence(seq) => {
-			Value::Sequence(seq.into_iter().map(normalize_yaml_value).collect())
-		}
-		Value::Number(n) => {
-			if let Some(f) = n.as_f64() {
-				// Normalize floating point precision
-				let normalized = normalize_float(f);
-				// Check if it's actually an integer
-				if normalized.fract() == 0.0 && normalized.abs() < i64::MAX as f64 {
-					Value::Number(serde_yaml::Number::from(normalized as i64))
-				} else {
-					Value::Number(serde_yaml::Number::from(normalized))
-				}
-			} else {
-				Value::Number(n)
-			}
-		}
-		Value::String(s) => {
-			// Normalize trailing newlines
-			Value::String(normalize_string(&s))
-		}
-		other => other,
-	}
-}
-
-/// Compare two YAML strings semantically, handling multi-document YAML
-/// Returns true if semantically equivalent, false otherwise
-///
-/// This comparison ignores:
-/// - config_hash and similar computed hash fields
-/// - Floating point precision differences (0.1 vs 0.10000000000000001)
-/// - Trailing newline differences in strings
-pub fn compare_yaml_docs_semantically(yaml1: &str, yaml2: &str) -> Result<bool> {
-	// Handle multi-document YAML (separated by ---)
-	let docs1: Result<Vec<serde_yaml::Value>, _> = serde_yaml::Deserializer::from_str(yaml1)
-		.map(|d| serde_yaml::Value::deserialize(d))
-		.collect();
-	let docs2: Result<Vec<serde_yaml::Value>, _> = serde_yaml::Deserializer::from_str(yaml2)
-		.map(|d| serde_yaml::Value::deserialize(d))
-		.collect();
-
-	match (docs1, docs2) {
-		(Ok(v1), Ok(v2)) => {
-			// Normalize both document lists before comparison
-			let normalized1: Vec<_> = v1.into_iter().map(normalize_yaml_value).collect();
-			let normalized2: Vec<_> = v2.into_iter().map(normalize_yaml_value).collect();
-			Ok(normalized1 == normalized2)
-		}
-		(Err(e), _) => Err(anyhow::anyhow!("Failed to parse first YAML: {}", e)),
-		(_, Err(e)) => Err(anyhow::anyhow!("Failed to parse second YAML: {}", e)),
-	}
-}
 
 #[derive(Debug)]
 pub struct RunResult {
@@ -213,35 +87,22 @@ pub enum FileDiffKind {
 }
 
 /// Compare two directories and return detailed results
-/// Returns (matched, line_similarity_percentage, semantic_similarity_percentage, matched_lines_line, matched_lines_semantic, total_lines, differences, file_diffs)
+/// Returns (matched, line_similarity_percentage, matched_lines, total_lines, differences, file_diffs)
 ///
 /// Similarity calculation:
 /// - Line similarity: Percentage of lines that match exactly (byte-for-byte)
-/// - Semantic similarity: Percentage of lines that are semantically equivalent (includes YAML semantic comparison)
 /// - Missing/extra files count their lines toward total_lines but not matched_lines
-/// - YAML files use semantic comparison (ignoring cosmetic differences)
 pub fn compare_directories_detailed(
 	dir1: &str,
 	dir2: &str,
-) -> Result<(
-	bool,
-	f64,
-	f64,
-	usize,
-	usize,
-	usize,
-	Vec<String>,
-	Vec<FileDiff>,
-)> {
+) -> Result<(bool, f64, usize, usize, Vec<String>, Vec<FileDiff>)> {
 	let files1 = collect_files(dir1)?;
 	let files2 = collect_files(dir2)?;
 
 	let mut diffs = Vec::new();
 	let mut file_diffs = Vec::new();
 	let mut total_lines = 0; // Total lines across all files
-	let mut matched_lines_exact = 0; // Exact line-by-line matches
-	let mut matched_lines_semantic = 0; // Semantic matches (includes exact matches)
-	let mut has_missing_or_extra_files = false;
+	let mut matched_lines = 0; // Exact line-by-line matches
 
 	// Get all unique file paths
 	let all_paths: std::collections::HashSet<_> = files1.keys().chain(files2.keys()).collect();
@@ -261,52 +122,20 @@ pub fn compare_directories_detailed(
 				// Check exact match first
 				let exact_match = content1 == content2;
 
-				// For YAML files, use semantic comparison
-				let semantically_equal = if is_yaml_file(path) {
-					compare_yaml_docs_semantically(&text1, &text2).unwrap_or(false)
-				} else {
-					false
-				};
-
 				if exact_match {
 					// All lines match exactly
-					matched_lines_exact += file_total_lines;
-					matched_lines_semantic += file_total_lines;
-				} else if semantically_equal {
-					// YAML files are semantically equal despite text differences
-					// All lines count as semantically matching
-					matched_lines_semantic += file_total_lines;
-
-					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
-						lines1
-							.iter()
-							.zip(lines2.iter())
-							.filter(|(a, b)| a != b)
-							.count(),
-					);
-
-					// Note: Not adding to diffs since it's semantically equivalent
-					// Store as a semantic-only match in file_diffs for informational purposes
-					file_diffs.push(FileDiff {
-						path: path.to_string(),
-						kind: FileDiffKind::ContentDiffers {
-							content1: text1.to_string(),
-							content2: text2.to_string(),
-							diff_lines,
-						},
-					});
+					matched_lines += file_total_lines;
 				} else {
-					// Count matching lines for both exact and semantic similarity
+					// Count matching lines
 					let min_len = lines1.len().min(lines2.len());
-					let matching_lines = lines1
+					let matching = lines1
 						.iter()
 						.zip(lines2.iter())
 						.take(min_len)
 						.filter(|(a, b)| a == b)
 						.count();
 
-					matched_lines_exact += matching_lines;
-					matched_lines_semantic += matching_lines;
+					matched_lines += matching;
 
 					let diff_lines = lines1.len().abs_diff(lines2.len()).max(
 						lines1
@@ -316,19 +145,10 @@ pub fn compare_directories_detailed(
 							.count(),
 					);
 
-					// For YAML files, indicate semantic comparison was attempted
-					let diff_msg = if is_yaml_file(path) {
-						format!(
-							"{}: content differs (~{} line differences, SEMANTIC MISMATCH)",
-							path, diff_lines
-						)
-					} else {
-						format!(
-							"{}: content differs (~{} line differences)",
-							path, diff_lines
-						)
-					};
-					diffs.push(diff_msg);
+					diffs.push(format!(
+						"{}: content differs (~{} line differences)",
+						path, diff_lines
+					));
 
 					// Store full content for detailed diff printing
 					file_diffs.push(FileDiff {
@@ -342,7 +162,6 @@ pub fn compare_directories_detailed(
 				}
 			}
 			(Some(content1), None) => {
-				has_missing_or_extra_files = true;
 				let text1 = String::from_utf8_lossy(content1);
 				let lines1 = text1.lines().count();
 				total_lines += lines1;
@@ -354,7 +173,6 @@ pub fn compare_directories_detailed(
 				});
 			}
 			(None, Some(content2)) => {
-				has_missing_or_extra_files = true;
 				let text2 = String::from_utf8_lossy(content2);
 				let lines2 = text2.lines().count();
 				total_lines += lines2;
@@ -373,27 +191,15 @@ pub fn compare_directories_detailed(
 
 	// Calculate line-based similarity (exact byte-for-byte matches)
 	let line_similarity = if total_lines > 0 {
-		(matched_lines_exact as f64 / total_lines as f64) * 100.0
+		(matched_lines as f64 / total_lines as f64) * 100.0
 	} else {
 		100.0
 	};
-
-	// Calculate semantic similarity (includes YAML semantic comparison)
-	let semantic_similarity = if total_lines > 0 {
-		(matched_lines_semantic as f64 / total_lines as f64) * 100.0
-	} else {
-		100.0
-	};
-
-	// Suppress unused variable warning
-	let _ = has_missing_or_extra_files;
 
 	Ok((
 		matched,
 		line_similarity,
-		semantic_similarity,
-		matched_lines_exact,
-		matched_lines_semantic,
+		matched_lines,
 		total_lines,
 		diffs,
 		file_diffs,
@@ -922,12 +728,10 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
 		assert_eq!(result.1, 100.0); // 100% line similarity
-		assert_eq!(result.2, 100.0); // 100% semantic similarity
-		assert_eq!(result.3, 1); // 1 matched line (exact)
-		assert_eq!(result.4, 1); // 1 matched line (semantic)
-		assert_eq!(result.5, 1); // 1 total line
-		assert!(result.6.is_empty()); // no diffs
-		assert!(result.7.is_empty()); // no file_diffs
+		assert_eq!(result.2, 1); // 1 matched line
+		assert_eq!(result.3, 1); // 1 total line
+		assert!(result.4.is_empty()); // no diffs
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -945,12 +749,10 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
 		assert_eq!(result.1, 0.0); // 0% line similarity
-		assert_eq!(result.2, 0.0); // 0% semantic similarity
-		assert_eq!(result.3, 0); // 0 matched lines (exact)
-		assert_eq!(result.4, 0); // 0 matched lines (semantic)
-		assert_eq!(result.5, 1); // 1 total line
-		assert_eq!(result.6.len(), 1); // 1 diff
-		assert_eq!(result.7.len(), 1); // 1 file_diff
+		assert_eq!(result.2, 0); // 0 matched lines
+		assert_eq!(result.3, 1); // 1 total line
+		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -969,12 +771,10 @@ mod tests {
 		assert!(!result.0); // not matched
 					  // Line-based similarity: 2 matched lines / 3 total lines = 66.67%
 		assert!((result.1 - 66.67).abs() < 0.1); // ~66.67% line similarity
-		assert!((result.2 - 66.67).abs() < 0.1); // ~66.67% semantic similarity
-		assert_eq!(result.3, 2); // 2 matched lines (exact) - line1 and line3
-		assert_eq!(result.4, 2); // 2 matched lines (semantic)
-		assert_eq!(result.5, 3); // 3 total lines
-		assert_eq!(result.6.len(), 1); // 1 diff
-		assert_eq!(result.7.len(), 1); // 1 file_diff
+		assert_eq!(result.2, 2); // 2 matched lines - line1 and line3
+		assert_eq!(result.3, 3); // 3 total lines
+		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -992,12 +792,10 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(!result.0); // not matched
 		assert_eq!(result.1, 0.0); // 0% line similarity
-		assert_eq!(result.2, 0.0); // 0% semantic similarity
-		assert_eq!(result.3, 0); // 0 matched lines (exact)
-		assert_eq!(result.4, 0); // 0 matched lines (semantic)
-		assert_eq!(result.5, 2); // 2 total lines (1 + 1)
-		assert_eq!(result.6.len(), 2); // 2 diffs (one in each dir only)
-		assert_eq!(result.7.len(), 2); // 2 file_diffs
+		assert_eq!(result.2, 0); // 0 matched lines
+		assert_eq!(result.3, 2); // 2 total lines (1 + 1)
+		assert_eq!(result.4.len(), 2); // 2 diffs (one in each dir only)
+		assert_eq!(result.5.len(), 2); // 2 file_diffs
 	}
 
 	#[test]
@@ -1012,11 +810,9 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched (both empty)
 		assert_eq!(result.1, 100.0); // 100% line similarity
-		assert_eq!(result.2, 100.0); // 100% semantic similarity
-		assert_eq!(result.3, 0); // 0 matched lines (exact)
-		assert_eq!(result.4, 0); // 0 matched lines (semantic)
-		assert_eq!(result.5, 0); // 0 total lines
-		assert!(result.7.is_empty()); // no file_diffs
+		assert_eq!(result.2, 0); // 0 matched lines
+		assert_eq!(result.3, 0); // 0 total lines
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -1034,10 +830,8 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
 		assert_eq!(result.1, 100.0); // 100% line similarity
-		assert_eq!(result.2, 100.0); // 100% semantic similarity
-		assert_eq!(result.3, 1); // 1 matched line (exact)
-		assert_eq!(result.4, 1); // 1 matched line (semantic)
-		assert!(result.7.is_empty()); // no file_diffs
+		assert_eq!(result.2, 1); // 1 matched line
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -1058,12 +852,10 @@ mod tests {
 			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
 		assert!(result.0); // matched
 		assert_eq!(result.1, 100.0); // 100% line similarity
-		assert_eq!(result.2, 100.0); // 100% semantic similarity
-		assert_eq!(result.3, 5); // 5 matched lines (exact) - 3 + 2
-		assert_eq!(result.4, 5); // 5 matched lines (semantic)
-		assert_eq!(result.5, 5); // 5 total lines
-		assert!(result.6.is_empty()); // no diffs
-		assert!(result.7.is_empty()); // no file_diffs
+		assert_eq!(result.2, 5); // 5 matched lines - 3 + 2
+		assert_eq!(result.3, 5); // 5 total lines
+		assert!(result.4.is_empty()); // no diffs
+		assert!(result.5.is_empty()); // no file_diffs
 	}
 
 	#[test]
@@ -1086,12 +878,10 @@ mod tests {
 		assert!(!result.0); // not matched
 					  // Line-based similarity: 4 matched lines / 5 total lines = 80%
 		assert_eq!(result.1, 80.0); // 80% line similarity
-		assert_eq!(result.2, 80.0); // 80% semantic similarity
-		assert_eq!(result.3, 4); // 4 matched lines (exact) - 3 from file1 + 1 from file2
-		assert_eq!(result.4, 4); // 4 matched lines (semantic)
-		assert_eq!(result.5, 5); // 5 total lines
-		assert_eq!(result.6.len(), 1); // 1 diff (file2)
-		assert_eq!(result.7.len(), 1); // 1 file_diff
+		assert_eq!(result.2, 4); // 4 matched lines - 3 from file1 + 1 from file2
+		assert_eq!(result.3, 5); // 5 total lines
+		assert_eq!(result.4.len(), 1); // 1 diff (file2)
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -1113,12 +903,10 @@ mod tests {
 		assert!(!result.0); // not matched
 					  // Line-based similarity: 1 matched line / 2 total lines = 50%
 		assert_eq!(result.1, 50.0); // 50% line similarity
-		assert_eq!(result.2, 50.0); // 50% semantic similarity
-		assert_eq!(result.3, 1); // 1 matched line (exact) - from file1
-		assert_eq!(result.4, 1); // 1 matched line (semantic)
-		assert_eq!(result.5, 2); // 2 total lines
-		assert_eq!(result.6.len(), 1); // 1 diff
-		assert_eq!(result.7.len(), 1); // 1 file_diff
+		assert_eq!(result.2, 1); // 1 matched line - from file1
+		assert_eq!(result.3, 2); // 2 total lines
+		assert_eq!(result.4.len(), 1); // 1 diff
+		assert_eq!(result.5.len(), 1); // 1 file_diff
 	}
 
 	#[test]
@@ -1162,335 +950,5 @@ mod tests {
 	fn test_calculate_string_similarity_empty() {
 		let (similarity, _, _) = calculate_string_similarity("", "");
 		assert_eq!(similarity, 100.0);
-	}
-
-	// ==================== YAML Semantic Comparison Tests ====================
-
-	#[test]
-	fn test_is_ignored_key() {
-		// Should ignore config_hash variants
-		assert!(is_ignored_key("config_hash"));
-		assert!(is_ignored_key("config-hash"));
-		assert!(is_ignored_key("mimir-config-exporter-hash"));
-		assert!(is_ignored_key("some_hash"));
-
-		// Should NOT ignore regular keys
-		assert!(!is_ignored_key("name"));
-		assert!(!is_ignored_key("hash")); // exact match only for suffix
-		assert!(!is_ignored_key("hashcode"));
-		assert!(!is_ignored_key("config"));
-		assert!(!is_ignored_key("environment"));
-	}
-
-	#[test]
-	fn test_normalize_float_precision() {
-		// Google's jsonnet bug: 0.1 becomes 0.10000000000000001
-		assert_eq!(normalize_float(0.10000000000000001), 0.1);
-		assert_eq!(normalize_float(0.1), 0.1);
-
-		// Other precision issues
-		assert_eq!(normalize_float(0.30000000000000004), 0.3);
-		assert_eq!(normalize_float(0.7000000000000001), 0.7);
-
-		// Should preserve correct values
-		assert_eq!(normalize_float(1.0), 1.0);
-		assert_eq!(normalize_float(0.5), 0.5);
-		assert_eq!(normalize_float(123.456), 123.456);
-	}
-
-	#[test]
-	fn test_normalize_string_trailing_newlines() {
-		// Should normalize trailing newlines
-		assert_eq!(normalize_string("hello\n\n"), "hello");
-		assert_eq!(normalize_string("hello\n"), "hello");
-		assert_eq!(normalize_string("hello"), "hello");
-
-		// Should preserve internal newlines
-		assert_eq!(normalize_string("hello\nworld\n"), "hello\nworld");
-		assert_eq!(normalize_string("hello\n\nworld\n\n"), "hello\n\nworld");
-	}
-
-	#[test]
-	fn test_yaml_semantic_identical() {
-		let yaml1 = r#"
-name: test
-value: 123
-"#;
-		let yaml2 = r#"
-name: test
-value: 123
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_different_formatting() {
-		// Same content, different formatting (quotes, spacing)
-		let yaml1 = r#"name: test
-value: "hello world""#;
-		let yaml2 = r#"name: 'test'
-value: hello world"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_ignores_config_hash() {
-		let yaml1 = r#"
-metadata:
-  annotations:
-    config_hash: abc123
-name: test
-"#;
-		let yaml2 = r#"
-metadata:
-  annotations:
-    config_hash: def456
-name: test
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_ignores_suffix_hash() {
-		let yaml1 = r#"
-metadata:
-  annotations:
-    mimir-config-exporter-hash: 2f8fdac13552ab53351b0a4f63520bf1
-name: deployment
-"#;
-		let yaml2 = r#"
-metadata:
-  annotations:
-    mimir-config-exporter-hash: 3b584294d0e5d33091e89350e81f2365
-name: deployment
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_float_precision() {
-		// Google's jsonnet floating point bug
-		let yaml1 = r#"
-args:
-  - -sample-rate=0.10000000000000001
-value: 0.30000000000000004
-"#;
-		let yaml2 = r#"
-args:
-  - -sample-rate=0.1
-value: 0.3
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_trailing_newlines() {
-		let yaml1 = r#"
-data:
-  config: |
-    hello
-    world
-
-"#;
-		let yaml2 = r#"
-data:
-  config: |
-    hello
-    world
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_multi_document() {
-		let yaml1 = r#"---
-name: doc1
----
-name: doc2
-"#;
-		let yaml2 = r#"---
-name: doc1
----
-name: doc2
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_actually_different() {
-		let yaml1 = r#"
-name: test
-value: 123
-"#;
-		let yaml2 = r#"
-name: test
-value: 456
-"#;
-		assert!(!compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_different_keys() {
-		let yaml1 = r#"
-name: test
-"#;
-		let yaml2 = r#"
-name: test
-extra: value
-"#;
-		assert!(!compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_nested_structures() {
-		let yaml1 = r#"
-metadata:
-  labels:
-    app: test
-    config_hash: hash1
-spec:
-  containers:
-    - name: main
-      args:
-        - -rate=0.10000000000000001
-"#;
-		let yaml2 = r#"
-metadata:
-  labels:
-    app: test
-    config_hash: hash2
-spec:
-  containers:
-    - name: main
-      args:
-        - -rate=0.1
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_yaml_semantic_complex_embedded_content() {
-		// Simulates ConfigMap with embedded config that has trailing newline diff
-		let yaml1 = r#"
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: test
-  annotations:
-    config-hash: abc123
-data:
-  httpd.conf: |
-    ServerRoot "/usr/local/apache2"
-    Listen 80
-
-"#;
-		let yaml2 = r#"
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: test
-  annotations:
-    config-hash: def456
-data:
-  httpd.conf: |
-    ServerRoot "/usr/local/apache2"
-    Listen 80
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_is_yaml_file() {
-		assert!(is_yaml_file("test.yaml"));
-		assert!(is_yaml_file("test.yml"));
-		assert!(is_yaml_file("/path/to/config.yaml"));
-		assert!(is_yaml_file("ConfigMap-test.yaml"));
-
-		assert!(!is_yaml_file("test.json"));
-		assert!(!is_yaml_file("test.txt"));
-		assert!(!is_yaml_file("manifest.json"));
-		assert!(!is_yaml_file("yaml")); // no extension
-	}
-
-	#[test]
-	fn test_normalize_yaml_value_removes_hash_keys() {
-		use serde_yaml::Value;
-
-		let yaml = r#"
-metadata:
-  name: test
-  annotations:
-    config_hash: abc123
-    other-hash: def456
-    regular: value
-"#;
-		let parsed: Value = serde_yaml::from_str(yaml).unwrap();
-		let normalized = normalize_yaml_value(parsed);
-
-		// Check that hash keys are removed
-		if let Value::Mapping(map) = normalized {
-			if let Some(Value::Mapping(metadata)) = map.get(&Value::String("metadata".to_string()))
-			{
-				if let Some(Value::Mapping(annotations)) =
-					metadata.get(&Value::String("annotations".to_string()))
-				{
-					assert!(!annotations.contains_key(&Value::String("config_hash".to_string())));
-					assert!(!annotations.contains_key(&Value::String("other-hash".to_string())));
-					assert!(annotations.contains_key(&Value::String("regular".to_string())));
-				} else {
-					panic!("annotations not found");
-				}
-			} else {
-				panic!("metadata not found");
-			}
-		} else {
-			panic!("expected mapping");
-		}
-	}
-
-	#[test]
-	fn test_yaml_semantic_quoting_difference() {
-		// Test that unquoted and single-quoted values are semantically equal
-		let yaml1 = r#"
-data:
-  - 100*( 1-( sum by (env)
-"#;
-		let yaml2 = r#"
-data:
-  - '100*( 1-( sum by (env)'
-"#;
-		assert!(compare_yaml_docs_semantically(yaml1, yaml2).unwrap());
-	}
-
-	#[test]
-	fn test_compare_directories_with_yaml_semantic() {
-		let dir = tempdir().unwrap();
-		let dir1 = dir.path().join("a");
-		let dir2 = dir.path().join("b");
-		fs::create_dir_all(&dir1).unwrap();
-		fs::create_dir_all(&dir2).unwrap();
-
-		// YAML files with same semantic content but different formatting
-		let yaml1 = r#"name: test
-config_hash: abc123
-value: 0.10000000000000001
-"#;
-		let yaml2 = r#"name: test
-config_hash: def456
-value: 0.1
-"#;
-		fs::write(dir1.join("config.yaml"), yaml1).unwrap();
-		fs::write(dir2.join("config.yaml"), yaml2).unwrap();
-
-		let result =
-			compare_directories_detailed(dir1.to_str().unwrap(), dir2.to_str().unwrap()).unwrap();
-
-		// Should match semantically (even though lines differ)
-		assert!(result.0); // matched
-		assert_eq!(result.1, 0.0); // 0% line similarity (content differs)
-		assert_eq!(result.2, 100.0); // 100% semantic similarity (YAML semantically equal)
-		assert_eq!(result.3, 0); // 0 matched lines (exact)
-		assert_eq!(result.4, 3); // 3 matched lines (semantic) - all lines semantically equal
-		assert_eq!(result.5, 3); // 3 total lines
 	}
 }

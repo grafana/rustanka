@@ -70,8 +70,6 @@ pub struct CommandReport {
 	pub exit_codes_consistent: bool, // True if exit codes were same across all runs
 	pub stdout_matched: bool,
 	pub stdout_similarity: Option<(f64, usize, usize)>, // (percentage, matched_lines, total_lines) - Line similarity
-	pub semantic_similarity: Option<(f64, usize, usize)>, // (percentage, matched_lines, total_lines) - Semantic similarity (for export commands)
-	pub is_export_command: bool, // True if this is an export/dir_compare command
 	pub both_failed_unexpectedly: bool, // True if both commands failed but expect_error was false
 	pub exec1_name: String,
 	pub exec1_stats: RuntimeStats,
@@ -121,21 +119,6 @@ impl CommandReport {
 			);
 		} else {
 			println!("Line Similarity: {}", output_status);
-		}
-
-		// Semantic Similarity (for export commands)
-		if self.is_export_command {
-			if let Some((similarity, matched, total)) = self.semantic_similarity {
-				let semantic_status = if matched == total {
-					"✓ MATCHED".green()
-				} else {
-					"✗ MISMATCH".red()
-				};
-				println!(
-					"Semantic Similarity: {} ({:.1}% similar: {}/{} matching)",
-					semantic_status, similarity, matched, total
-				);
-			}
 		}
 
 		// Show runtime comparison regardless of result match
@@ -291,16 +274,8 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 	println!("### Summary");
 	println!();
 
-	// Check if any reports are export commands to determine column layout
-	let has_export_commands = reports.iter().any(|r| r.is_export_command);
-
-	if has_export_commands {
-		println!("| Command | Exit Code | Line Similarity | Semantic Similarity | Performance |");
-		println!("|---------|-----------|-----------------|---------------------|-------------|");
-	} else {
-		println!("| Command | Exit Code | Line Similarity | Performance |");
-		println!("|---------|-----------|-----------------|-------------|");
-	}
+	println!("| Command | Exit Code | Line Similarity | Performance |");
+	println!("|---------|-----------|-----------------|-------------|");
 
 	for report in reports {
 		// Exit code status with emojis
@@ -325,23 +300,6 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			}
 		} else {
 			"❌".to_string()
-		};
-
-		// Semantic Similarity status (for export commands)
-		let semantic_similarity_status = if report.is_export_command {
-			if let Some((similarity, matched, total)) = report.semantic_similarity {
-				if matched == total {
-					"✅".to_string()
-				} else if similarity >= 99.5 {
-					format!("⚠️ {:.1}%", similarity)
-				} else {
-					format!("❌ {:.1}%", similarity)
-				}
-			} else {
-				"N/A".to_string()
-			}
-		} else {
-			"N/A".to_string()
 		};
 
 		// Performance status (show for all runs, use median for multiple runs, average for single run)
@@ -407,17 +365,10 @@ pub fn generate_github_comment(reports: &[CommandReport], exec1_name: &str, exec
 			report.command.clone()
 		};
 
-		if has_export_commands {
-			println!(
-				"| `{}` | {} | {} | {} | {} |",
-				cmd, exit_status, line_similarity_status, semantic_similarity_status, performance
-			);
-		} else {
-			println!(
-				"| `{}` | {} | {} | {} |",
-				cmd, exit_status, line_similarity_status, performance
-			);
-		}
+		println!(
+			"| `{}` | {} | {} | {} |",
+			cmd, exit_status, line_similarity_status, performance
+		);
 	}
 
 	println!();
