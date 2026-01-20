@@ -178,6 +178,12 @@ runs = 3
 dir_compare = true
 
 [[commands]]
+name = "export: grafana-bench-cd"
+args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/grafana-bench-cd", "environments/grafana-bench-cd", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
+runs = 3
+dir_compare = true
+
+[[commands]]
 name = "export: k8s-images-exporter"
 args = ["export", "/tmp/tk-compare-export-{{EXEC_NAME}}/k8s-images-exporter", "environments/k8s-images-exporter", "--recursive", "{{EXPORT_FORMAT}}", "--merge-strategy=fail-on-conflicts"]
 runs = 3

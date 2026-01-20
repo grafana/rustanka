@@ -79,7 +79,18 @@ data:
   test: "\U0001F680"
   test2: hello,
   test3: 2025-11-03T15:00:00
+  test4:
+  - - value: "\U0001F6A8 Workflow `{{workflow.namespace}}/{{workflow.name}}` failed"
 kind: ConfigMap
 metadata:
   name: nested-yaml-config
   namespace: default
+spec:
+  templates:
+  - name: exit-handler
+    steps:
+    - - arguments:
+          parameters:
+          - name: title
+            value: "\U0001F6A8 Workflow `{{workflow.namespace}}/{{workflow.name}}`
+              failed"

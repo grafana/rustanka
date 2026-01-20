@@ -383,6 +383,27 @@ local htmlContent = |||
       name: 'nested-yaml-config',
       namespace: 'default',
     },
+    spec: {
+      templates: [
+        {
+          name: 'exit-handler',
+          steps: [
+            [
+              {
+                arguments: {
+                  parameters: [
+                    {
+                      name: 'title',
+                      value: '🚨 Workflow `{{workflow.namespace}}/{{workflow.name}}` failed',
+                    },
+                  ],
+                },
+              },
+            ],
+          ],
+        },
+      ],
+    },
     data: {
       manifestJson1: std.manifestJson({
         test: '\n',
@@ -421,6 +442,13 @@ local htmlContent = |||
       test: '🚀',
       test2: 'hello,',
       test3: '2025-11-03T15:00:00',
+      test4: [
+        [
+          {
+            value: '🚨 Workflow `{{workflow.namespace}}/{{workflow.name}}` failed',
+          },
+        ],
+      ],
       'rules.json': std.manifestJson(nestedYamlData),
       'rules.json.minified': std.manifestJsonMinified(nestedYamlData),
       'rules.yml': std.manifestYamlDoc(nestedYamlData, quote_keys=false),
