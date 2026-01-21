@@ -9,6 +9,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -17,10 +20,14 @@ jobs:
             os: ubuntu-latest
             artifact_name: rtk
             asset_name: rtk-linux-amd64
+            platform: linux-amd64
+            docker_platform: linux/amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact_name: rtk
             asset_name: rtk-linux-arm64
+            platform: linux-arm64
+            docker_platform: linux/arm64
           - target: x86_64-apple-darwin
             os: macos-latest
             artifact_name: rtk
@@ -64,6 +71,44 @@ jobs:
         with:
           name: ${{ matrix.asset_name }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Prepare binary for Docker
+        if: matrix.platform != ''
+        run: |
+          mkdir -p docker-bin
+          cp target/${{ matrix.target }}/release/rtk docker-bin/rtk
+          chmod +x docker-bin/rtk
+
+      - name: Inject slug/short variables
+        if: matrix.platform != ''
+        uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b # v5.4.0
+
+      - name: Set tag names
+        if: matrix.platform != ''
+        id: set_tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "platform_tag=${{ matrix.platform }}-$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        if: matrix.platform != ''
+        # See doc at: https://github.com/grafana/shared-workflows/tree/main/actions/docker-build-push-image
+        uses: grafana/shared-workflows/actions/docker-build-push-image@docker-build-push-image/v0.3.0
+        with:
+          platforms: ${{ matrix.docker_platform }}
+          gar-environment: ${{ env.ENVIRONMENT }}
+          gar-image: rustanka
+          context: .
+          cache-to: type=inline
+          push: true
+          build-args: |
+            VERSION=${{ steps.set_tag.outputs.tag }}
+            BRANCH=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+          tags: |-
+            "${{ steps.set_tag.outputs.platform_tag }}"
+          registries: gar
 
   release:
     name: Create Release
