@@ -1,4 +1,0 @@
-{
-  greet(name): "Hello, " + name + "!",
-}
-

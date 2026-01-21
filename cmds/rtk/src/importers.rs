@@ -363,7 +363,8 @@ fn find_importers_recursive(
 				}
 
 				// Match on imports to lib/ or vendor/
-				if !is_importer {
+				// Skip this check if the import path starts with ../ (those are handled above as relative imports)
+				if !is_importer && !import_path.starts_with("..") {
 					let vendor_path = root_vendor.join(&import_path_clean);
 					let lib_path = root_lib.join(&import_path_clean);
 					is_importer = path_matches(search_for_file, &vendor_path.to_string_lossy())

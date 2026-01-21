@@ -441,3 +441,44 @@ fn test_complex_transitive_chain_env1_lib1_env2_lib3_env3() {
 	expected.sort();
 	assert_eq!(result, expected);
 }
+
+#[test]
+fn test_relative_import_from_lib_to_env_should_not_match_as_lib_vendor() {
+	let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.join("testdata/findImporters")
+		.to_string_lossy()
+		.to_string();
+	// Search for an environment file that is imported by a lib file using a relative path starting with ../
+	// The lib file should NOT be found as an importer because relative imports starting with ../
+	// should only match via the relative import check, not the lib/vendor check
+	let result = rtk::importers::find_importers(
+		&root,
+		vec![abs_path("environments/relative-import-target/main.jsonnet")],
+	)
+	.unwrap();
+	// The lib file imports it with ../environments/relative-import-target/main.jsonnet
+	// Without the fix, this incorrectly matches via lib/vendor path check because:
+	// - The relative import check resolves it to lib/environments/relative-import-target/main.jsonnet (doesn't match)
+	// - The lib/vendor check then does lib.join("../environments/...") = environments/... (incorrectly matches!)
+	// With the fix, the lib/vendor check should skip paths starting with ../, so it shouldn't match
+	let mut expected = vec![
+		abs_path("environments/relative-import-target/main.jsonnet"), // itself, it's a main file
+	];
+	expected.sort();
+	// Without the fix, lib/internal-alerting/main.libsonnet is incorrectly matched as an importer
+	// via lib/vendor path check. Even though it gets filtered out (non-main files are filtered),
+	// this causes incorrect transitive matching: if another env imports lib/internal-alerting/main.libsonnet,
+	// that env would incorrectly be included in the result.
+	//
+	// Create an environment that imports the lib file to test transitive matching
+	// Without the fix: test-env-imports-lib/main.jsonnet would be incorrectly included
+	// With the fix: test-env-imports-lib/main.jsonnet should NOT be included
+	let incorrectly_included =
+		result.contains(&abs_path("environments/test-env-imports-lib/main.jsonnet"));
+	assert!(!incorrectly_included,
+		"Environment importing lib file with relative import to ../environments/ should NOT be included. Result: {:?}", result);
+	assert_eq!(
+		result, expected,
+		"lib file with relative import starting with ../ should not match via lib/vendor check"
+	);
+}

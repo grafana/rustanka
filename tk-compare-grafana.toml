@@ -77,6 +77,15 @@ args = [
 runs = 3
 
 [[commands]]
+name = "tool importers: hosted-grafana"
+args = [
+    "tool", "importers", 
+    "environments/hosted-grafana/dev/config/dev-cd.libsonnet",
+    "environments/hosted-grafana/waves/channels/main.libsonnet",
+]
+runs = 1
+
+[[commands]]
 name = "tool importers: deleted env file"
 args = [
     "tool", "importers", 

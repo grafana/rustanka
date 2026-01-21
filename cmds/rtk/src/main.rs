@@ -102,7 +102,22 @@ fn get_log_level(cmd: &Commands) -> &str {
 		Commands::Lint(args) => &args.log_level,
 		Commands::Eval(args) => &args.log_level,
 		Commands::Init(args) => &args.log_level,
-		Commands::Tool(args) => &args.log_level,
+		Commands::Tool(args) => {
+			// Prefer log_level from subcommand if available, otherwise use ToolArgs log_level
+			match &args.command {
+				crate::commands::tool::ToolCommands::Importers(importers_args) => {
+					&importers_args.log_level
+				}
+				crate::commands::tool::ToolCommands::Imports(imports_args) => {
+					&imports_args.log_level
+				}
+				crate::commands::tool::ToolCommands::Jpath(jpath_args) => &jpath_args.log_level,
+				crate::commands::tool::ToolCommands::ImportersCount(importers_count_args) => {
+					&importers_count_args.log_level
+				}
+				crate::commands::tool::ToolCommands::Charts(_) => &args.log_level,
+			}
+		}
 		Commands::Complete(_) => "info",
 	}
 }
