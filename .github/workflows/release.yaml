@@ -17,13 +17,13 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact_name: rtk
             asset_name: rtk-linux-amd64
             platform: linux-amd64
             docker_platform: linux/amd64
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact_name: rtk
             asset_name: rtk-linux-arm64
             platform: linux-arm64
