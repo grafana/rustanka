@@ -97,7 +97,7 @@ jobs:
         uses: grafana/shared-workflows/actions/docker-build-push-image@docker-build-push-image/v0.3.0
         with:
           platforms: ${{ matrix.docker_platform }}
-          gar-environment: ${{ env.ENVIRONMENT }}
+          gar-environment: prod
           gar-image: rustanka
           context: .
           cache-to: type=inline
