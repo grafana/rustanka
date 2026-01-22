@@ -15,6 +15,19 @@ local makeEnv(cluster) = {
       },
     }
   ),
+  
+  // Modify CRD name to include cluster name to avoid conflicts
+  local modifiedResources = {
+    [k]: if helmResources[k].kind == 'CustomResourceDefinition' && helmResources[k].metadata.name == 'canaries.flagger.app' then
+      helmResources[k] {
+        metadata+: {
+          name: 'canaries-' + cluster + '.flagger.app',
+        },
+      }
+    else
+      helmResources[k]
+    for k in std.objectFields(helmResources)
+  },
 
   apiVersion: 'tanka.dev/v1alpha1',
   kind: 'Environment',
@@ -28,7 +41,7 @@ local makeEnv(cluster) = {
     apiServer: 'https://' + cluster + '.example.com:6443',
     namespace: 'flagger',
   },
-  data: helmResources,
+  data: modifiedResources,
 };
 
 // Return multiple environments for recursive export

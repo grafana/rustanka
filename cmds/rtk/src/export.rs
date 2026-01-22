@@ -949,8 +949,8 @@ fn export_single_env(
 		for (relative_path, content) in processed_manifests {
 			let filepath = opts.output_dir.join(&relative_path);
 
-			// Check if file already exists (for fail-on-conflicts strategy)
-			if opts.merge_strategy == ExportMergeStrategy::FailOnConflicts && filepath.exists() {
+			// Check if file already exists on disk. We do not allow conflicts in any case.
+			if filepath.exists() {
 				return Err(ExportError::Fatal(format!(
 					"file '{}' already exists. Aborting",
 					filepath.display()

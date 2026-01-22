@@ -657,6 +657,172 @@ fn test_export_with_absolute_file_path() {
 	);
 }
 
+/// Test that export fails on file conflicts with existing files on disk
+/// This tests scenarios where an export tries to write to a path that already exists from a previous export
+#[test]
+fn test_export_file_conflict_fail_on_conflicts() {
+	use rtk::export::ExportMergeStrategy;
+
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	// STEP 1: Export first environment to create a file
+	let opts1 = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts::default(),
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		merge_strategy: ExportMergeStrategy::None,
+		..Default::default()
+	};
+
+	let result1 = export(
+		&[testdata_path("test-export-conflict/env1")
+			.to_string_lossy()
+			.to_string()],
+		opts1,
+	);
+	result1.unwrap(); // First export should succeed
+
+	// STEP 2: Try to export second environment that maps to the same file path with fail-on-conflicts
+	let opts2 = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts::default(),
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		merge_strategy: ExportMergeStrategy::FailOnConflicts,
+		..Default::default()
+	};
+
+	let result2 = export(
+		&[testdata_path("test-export-conflict/env2")
+			.to_string_lossy()
+			.to_string()],
+		opts2,
+	);
+
+	// Should fail because file already exists from first export
+	match result2 {
+		Ok(r) => {
+			assert!(
+				r.failed > 0 || r.results.iter().any(|res| res.error.is_some()),
+				"Export should fail when file already exists with fail-on-conflicts strategy. Result: {:?}",
+				r
+			);
+			// Check that error message mentions file conflict
+			for res in &r.results {
+				if let Some(ref err) = res.error {
+					assert!(
+						err.contains("already exists"),
+						"Error should mention file already exists: {}",
+						err
+					);
+				}
+			}
+		}
+		Err(e) => {
+			let err_msg = e.to_string();
+			assert!(
+				err_msg.contains("already exists"),
+				"Error should mention file already exists: {}",
+				err_msg
+			);
+		}
+	}
+}
+
+/// Test that export fails on file conflicts with replace-envs strategy
+/// Even with replace-envs, conflicts with existing files should fail
+#[test]
+fn test_export_file_conflict_replace_envs() {
+	use rtk::export::ExportMergeStrategy;
+
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	// STEP 1: Export first environment to create a file
+	let opts1 = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts::default(),
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		merge_strategy: ExportMergeStrategy::None,
+		..Default::default()
+	};
+
+	let result1 = export(
+		&[testdata_path("test-export-conflict/env1")
+			.to_string_lossy()
+			.to_string()],
+		opts1,
+	);
+	result1.unwrap(); // First export should succeed
+
+	// STEP 2: Try to export second environment that maps to the same file path with replace-envs
+	let opts2 = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts::default(),
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		merge_strategy: ExportMergeStrategy::ReplaceEnvs,
+		..Default::default()
+	};
+
+	let result2 = export(
+		&[testdata_path("test-export-conflict/env2")
+			.to_string_lossy()
+			.to_string()],
+		opts2,
+	);
+
+	// Should fail because file already exists
+	// replace-envs only handles re-exporting previously exported envs (deletes their files first),
+	// but this is a different environment trying to write to the same path
+	match result2 {
+		Ok(r) => {
+			assert!(
+				r.failed > 0 || r.results.iter().any(|res| res.error.is_some()),
+				"Export should fail when file already exists with replace-envs strategy. Result: {:?}",
+				r
+			);
+			// Check that error message mentions file conflict
+			for res in &r.results {
+				if let Some(ref err) = res.error {
+					assert!(
+						err.contains("already exists"),
+						"Error should mention file already exists: {}",
+						err
+					);
+				}
+			}
+		}
+		Err(e) => {
+			let err_msg = e.to_string();
+			assert!(
+				err_msg.contains("already exists"),
+				"Error should mention file already exists: {}",
+				err_msg
+			);
+		}
+	}
+}
+
 // Note: The following tests from the Go version are not yet implemented:
 // - Test_replaceTmplText (not needed in Rust implementation - different path handling)
 // - BenchmarkExportEnvironmentsWithReplaceEnvs (benchmark test - can be added later)
