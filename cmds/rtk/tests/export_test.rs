@@ -823,6 +823,61 @@ fn test_export_file_conflict_replace_envs() {
 	}
 }
 
+/// Test that export fails when a Kubernetes object is missing required attributes
+/// This matches Tanka's behavior of validating that objects with kind+metadata also have apiVersion
+#[test]
+fn test_export_fails_on_invalid_k8s_object() {
+	let temp_dir = tempfile::TempDir::new().unwrap();
+	let output_dir = temp_dir.path();
+
+	let opts = ExportOpts {
+		output_dir: output_dir.to_path_buf(),
+		extension: "yaml".to_string(),
+		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
+		parallelism: 1,
+		eval_opts: EvalOpts::default(),
+		name: None,
+		recursive: false,
+		skip_manifest: false,
+		..Default::default()
+	};
+
+	let result = export(
+		&[testdata_path("test-export-invalid-k8s-object")
+			.to_string_lossy()
+			.to_string()],
+		opts,
+	);
+
+	// Should fail because thor_engine has kind and metadata but missing apiVersion
+	match result {
+		Ok(r) => {
+			assert!(
+				r.failed > 0 || r.results.iter().any(|res| res.error.is_some()),
+				"Export should fail when a k8s object is missing apiVersion. Result: {:?}",
+				r
+			);
+			// Check that error message mentions missing apiVersion
+			let has_apiversion_error = r
+				.results
+				.iter()
+				.any(|res| res.error.as_ref().is_some_and(|e| e.contains("apiVersion")));
+			assert!(
+				has_apiversion_error,
+				"Error should mention missing apiVersion attribute"
+			);
+		}
+		Err(e) => {
+			let err_msg = e.to_string();
+			assert!(
+				err_msg.contains("apiVersion"),
+				"Error should mention missing apiVersion: {}",
+				err_msg
+			);
+		}
+	}
+}
+
 // Note: The following tests from the Go version are not yet implemented:
 // - Test_replaceTmplText (not needed in Rust implementation - different path handling)
 // - BenchmarkExportEnvironmentsWithReplaceEnvs (benchmark test - can be added later)

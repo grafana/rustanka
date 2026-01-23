@@ -764,7 +764,8 @@ fn export_single_env(
 		trace!("[{}:{}] Collecting manifests", env_display, env_name);
 		let collect_start = Instant::now();
 		let mut manifests = Vec::new();
-		collect_manifests(&env_data.data, &mut manifests);
+		collect_manifests_with_validation(&env_data.data, &mut manifests, "")
+			.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 		trace!(
 			"[{}:{}] Collected {} manifests in {}ms",
 			env_display,
@@ -1153,7 +1154,7 @@ fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
 	let environments = extract_environments(value, &None)?;
 	let mut all_manifests = Vec::new();
 	for env_data in environments {
-		collect_manifests(&env_data.data, &mut all_manifests);
+		collect_manifests_with_validation(&env_data.data, &mut all_manifests, "")?;
 	}
 	Ok(all_manifests)
 }
@@ -1161,47 +1162,75 @@ fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
 /// Recursively collect Kubernetes manifests from a JSON value
 /// Generate a unique key for a manifest based on apiVersion, kind, namespace, and name
 /// Used to deduplicate manifests that appear at multiple paths in the JSON structure
-fn collect_manifests(value: &JsonValue, manifests: &mut Vec<JsonValue>) {
+///
+/// Validates that objects which look like Kubernetes objects (have `kind` and `metadata`)
+/// also have `apiVersion`. This matches Tanka's validation behavior.
+fn collect_manifests_with_validation(
+	value: &JsonValue,
+	manifests: &mut Vec<JsonValue>,
+	path: &str,
+) -> Result<()> {
 	match value {
 		JsonValue::Object(obj) => {
+			let has_api_version = obj.contains_key("apiVersion");
+			let has_kind = obj.contains_key("kind");
+			let has_metadata = obj.contains_key("metadata");
+
 			// Check if this looks like a Kubernetes manifest (has apiVersion and kind)
-			if obj.contains_key("apiVersion") && obj.contains_key("kind") {
+			if has_api_version && has_kind {
 				if let Some(JsonValue::String(kind)) = obj.get("kind") {
 					// Skip Tanka Environment objects
 					if kind == "Environment" {
 						// Extract from data field if present
 						if let Some(data) = obj.get("data") {
-							collect_manifests(data, manifests);
+							collect_manifests_with_validation(data, manifests, path)?;
 						}
-						return;
+						return Ok(());
 					}
 
 					// Expand List kind - extract items as individual manifests
 					// This matches Tanka's behavior where List items are exported as separate files
 					if kind == "List" {
 						if let Some(JsonValue::Array(items)) = obj.get("items") {
-							for item in items {
-								collect_manifests(item, manifests);
+							for (i, item) in items.iter().enumerate() {
+								let item_path = format!("{}.items[{}]", path, i);
+								collect_manifests_with_validation(item, manifests, &item_path)?;
 							}
 						}
-						return;
+						return Ok(());
 					}
 				}
 				manifests.push(value.clone());
+				Ok(())
+			} else if has_kind && has_metadata && !has_api_version {
+				// Object looks like a Kubernetes manifest (has kind and metadata) but is missing apiVersion
+				// This matches Tanka's validation: "found invalid Kubernetes object (at .X): missing attribute "apiVersion""
+				bail!(
+					"found invalid Kubernetes object (at {}): missing attribute \"apiVersion\"",
+					path
+				);
 			} else {
 				// Recurse into object values
-				for v in obj.values() {
-					collect_manifests(v, manifests);
+				for (key, v) in obj.iter() {
+					let child_path = if path.is_empty() {
+						format!(".{}", key)
+					} else {
+						format!("{}.{}", path, key)
+					};
+					collect_manifests_with_validation(v, manifests, &child_path)?;
 				}
+				Ok(())
 			}
 		}
 		JsonValue::Array(arr) => {
 			// Recurse into array elements
-			for v in arr {
-				collect_manifests(v, manifests);
+			for (i, v) in arr.iter().enumerate() {
+				let item_path = format!("{}[{}]", path, i);
+				collect_manifests_with_validation(v, manifests, &item_path)?;
 			}
+			Ok(())
 		}
-		_ => {}
+		_ => Ok(()),
 	}
 }
 
