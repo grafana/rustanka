@@ -101,7 +101,17 @@ fn print_table_to_writer<W: Write>(
 
 /// Find all environments recursively
 fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environment>> {
-	let main_files = find_main_jsonnet_files(root)?;
+	// Handle the case where a main.jsonnet file is passed directly
+	let main_files = if root.is_file()
+		&& root
+			.file_name()
+			.map(|f| f == "main.jsonnet")
+			.unwrap_or(false)
+	{
+		vec![root.to_path_buf()]
+	} else {
+		find_main_jsonnet_files(root)?
+	};
 	let profile = std::env::var("RTK_PROFILE").is_ok();
 
 	// Track timing for each file if profiling is enabled
@@ -384,4 +394,130 @@ fn load_static_env(path: &Path) -> Result<Environment> {
 		.with_context(|| format!("Failed to read {}", spec_path.display()))?;
 	serde_json::from_str(&content)
 		.with_context(|| format!("Failed to parse {}", spec_path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::io::Cursor;
+	use tempfile::TempDir;
+
+	fn create_inline_env_fixture(dir: &Path) {
+		// Create jsonnetfile.json at root (required for project root detection)
+		fs::write(
+			dir.join("jsonnetfile.json"),
+			r#"{"version": 1, "dependencies": [], "legacyImports": true}"#,
+		)
+		.unwrap();
+
+		// Create inline environment directory
+		let env_dir = dir.join("my-env");
+		fs::create_dir_all(&env_dir).unwrap();
+
+		// Create main.jsonnet with inline environment
+		fs::write(
+			env_dir.join("main.jsonnet"),
+			r#"{
+  env1: {
+    apiVersion: 'tanka.dev/v1alpha1',
+    kind: 'Environment',
+    metadata: { name: 'test-env-1' },
+    spec: { namespace: 'default', apiServer: 'https://localhost:6443' },
+    data: {},
+  },
+  env2: {
+    apiVersion: 'tanka.dev/v1alpha1',
+    kind: 'Environment',
+    metadata: { name: 'test-env-2' },
+    spec: { namespace: 'other', apiServer: 'https://localhost:6443' },
+    data: {},
+  },
+}"#,
+		)
+		.unwrap();
+	}
+
+	#[test]
+	fn test_list_envs_with_directory_path() {
+		let temp_dir = TempDir::new().unwrap();
+		create_inline_env_fixture(temp_dir.path());
+
+		let env_dir = temp_dir.path().join("my-env");
+		let mut output = Cursor::new(Vec::new());
+
+		list_envs_to_writer(
+			Some(env_dir.to_string_lossy().to_string()),
+			true,
+			&mut output,
+		)
+		.unwrap();
+
+		let output_str = String::from_utf8(output.into_inner()).unwrap();
+		let envs: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
+
+		assert_eq!(envs.len(), 2, "Should find 2 environments");
+	}
+
+	#[test]
+	fn test_list_envs_with_main_jsonnet_file_path() {
+		let temp_dir = TempDir::new().unwrap();
+		create_inline_env_fixture(temp_dir.path());
+
+		// Pass the main.jsonnet file path directly instead of the directory
+		let file_path = temp_dir.path().join("my-env").join("main.jsonnet");
+		let mut output = Cursor::new(Vec::new());
+
+		list_envs_to_writer(
+			Some(file_path.to_string_lossy().to_string()),
+			true,
+			&mut output,
+		)
+		.unwrap();
+
+		let output_str = String::from_utf8(output.into_inner()).unwrap();
+		let envs: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
+
+		assert_eq!(
+			envs.len(),
+			2,
+			"Should find 2 environments when passing main.jsonnet file path"
+		);
+	}
+
+	#[test]
+	fn test_list_envs_directory_and_file_path_produce_same_count() {
+		let temp_dir = TempDir::new().unwrap();
+		create_inline_env_fixture(temp_dir.path());
+
+		let env_dir = temp_dir.path().join("my-env");
+		let file_path = env_dir.join("main.jsonnet");
+
+		// List with directory path
+		let mut dir_output = Cursor::new(Vec::new());
+		list_envs_to_writer(
+			Some(env_dir.to_string_lossy().to_string()),
+			true,
+			&mut dir_output,
+		)
+		.unwrap();
+		let dir_envs: Vec<serde_json::Value> =
+			serde_json::from_str(&String::from_utf8(dir_output.into_inner()).unwrap()).unwrap();
+
+		// List with file path
+		let mut file_output = Cursor::new(Vec::new());
+		list_envs_to_writer(
+			Some(file_path.to_string_lossy().to_string()),
+			true,
+			&mut file_output,
+		)
+		.unwrap();
+		let file_envs: Vec<serde_json::Value> =
+			serde_json::from_str(&String::from_utf8(file_output.into_inner()).unwrap()).unwrap();
+
+		assert_eq!(
+			dir_envs.len(),
+			file_envs.len(),
+			"Directory path and file path should return the same number of environments"
+		);
+	}
 }
