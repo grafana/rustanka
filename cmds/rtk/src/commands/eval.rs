@@ -61,7 +61,7 @@ pub fn run<W: Write, R: ImportResolver>(
 	let result = eval::eval_with_resolver(import_resolver, entrypoint, config_base, spec, opts)?;
 
 	let output = serde_json::to_string_pretty(&result.value)?;
-	writeln!(writer, "{}", output)?;
+	write!(writer, "{}", output)?;
 	Ok(())
 }
 

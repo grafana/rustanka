@@ -141,19 +141,13 @@ fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environmen
 				match load_inline_envs(dir) {
 					Ok(mut envs) => {
 						for env in &mut envs {
-							// Inline envs may already have full paths from Jsonnet
-							// Only update name if it doesn't start with "environments/"
-							let should_update_name = if let Some(name) = &env.metadata.name {
-								!name.starts_with("environments/")
-							} else {
-								true
-							};
-
-							if should_update_name {
+							// For inline envs, preserve the name from jsonnet if it exists
+							// Only generate name from path if metadata.name is missing
+							if env.metadata.name.is_none() {
 								let _ = set_env_metadata(env, dir, original_path);
 							} else {
-								// Still set namespace even if name is preserved
-								let _ = set_env_namespace(env, dir);
+								// Name exists from jsonnet, just set the namespace relative to search path
+								let _ = set_env_namespace(env, dir, original_path);
 							}
 						}
 						Some(envs)
@@ -198,36 +192,50 @@ fn find_environments(root: &Path, original_path: &Path) -> Result<Vec<Environmen
 }
 
 /// Set environment metadata (name and namespace)
-fn set_env_metadata(env: &mut Environment, dir: &Path, _original_path: &Path) -> Result<()> {
-	let dir_str = dir.to_string_lossy();
-
-	// Extract path starting from "environments/"
-	let env_path = dir_str
-		.find("environments/")
-		.map(|pos| &dir_str[pos..])
-		.or_else(|| dir_str.strip_prefix("ksonnet/"))
-		.unwrap_or(&dir_str);
-
-	env.metadata.name = Some(env_path.to_string());
+fn set_env_metadata(env: &mut Environment, dir: &Path, original_path: &Path) -> Result<()> {
+	let env_path = compute_relative_env_path(dir, original_path);
+	env.metadata.name = Some(env_path.clone());
 	env.metadata.namespace = Some(format!("{}/main.jsonnet", env_path));
-
 	Ok(())
 }
 
 /// Set only the namespace without changing the name
-fn set_env_namespace(env: &mut Environment, dir: &Path) -> Result<()> {
-	let dir_str = dir.to_string_lossy();
-
-	// Extract path starting from "environments/"
-	let env_path = dir_str
-		.find("environments/")
-		.map(|pos| &dir_str[pos..])
-		.or_else(|| dir_str.strip_prefix("ksonnet/"))
-		.unwrap_or(&dir_str);
-
-	env.metadata.namespace = Some(format!("{}/main.jsonnet", env_path));
-
+fn set_env_namespace(env: &mut Environment, dir: &Path, original_path: &Path) -> Result<()> {
+	let relative_path = compute_relative_env_path(dir, original_path);
+	env.metadata.namespace = Some(format!("{}/main.jsonnet", relative_path));
 	Ok(())
+}
+
+/// Compute a relative path for environment metadata
+fn compute_relative_env_path(dir: &Path, original_path: &Path) -> String {
+	// First try: relative to original_path
+	if let Ok(rel) = dir.strip_prefix(original_path) {
+		let rel_str = rel.to_string_lossy().to_string();
+		if !rel_str.is_empty() {
+			return rel_str;
+		}
+	}
+
+	// If dir equals original_path, use the directory name
+	if dir == original_path {
+		if let Some(name) = dir.file_name() {
+			return name.to_string_lossy().to_string();
+		}
+	}
+
+	// Fallback: try to extract from "environments/" path pattern
+	let dir_str = dir.to_string_lossy();
+	if let Some(pos) = dir_str.find("environments/") {
+		return dir_str[pos..].to_string();
+	}
+	if let Some(stripped) = dir_str.strip_prefix("ksonnet/") {
+		return stripped.to_string();
+	}
+
+	// Last resort: just use the directory name
+	dir.file_name()
+		.map(|n| n.to_string_lossy().to_string())
+		.unwrap_or_else(|| dir_str.to_string())
 }
 
 /// Recursively find all main.jsonnet files

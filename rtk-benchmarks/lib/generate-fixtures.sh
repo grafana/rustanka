@@ -10,73 +10,6 @@ set -euo pipefail
 : "${ENVS_PER_INLINE_FILE:=100}"
 : "${NUM_RESOURCES_PER_ENV:=20}"
 
-# Get script directory and repo root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-
-# Check dependencies
-check_dependencies() {
-  for cmd in tk hyperfine jq cargo; do
-    if ! command -v "$cmd" &>/dev/null; then
-      echo "Error: $cmd is required but not found in PATH" >&2
-      exit 1
-    fi
-  done
-}
-
-# Build rtk in release mode
-build_rtk() {
-  echo "Building rtk in release mode..." >&2
-  cargo build --release -p rtk --manifest-path "${REPO_ROOT}/Cargo.toml" >&2
-  RTK="${REPO_ROOT}/target/release/rtk"
-  export RTK
-}
-
-# Build rtk from base branch (only when BENCHMARK_BASE_REF is set)
-build_rtk_base() {
-  if [ -z "${BENCHMARK_BASE_REF:-}" ]; then
-    RTK_BASE=""
-    export RTK_BASE
-    return
-  fi
-
-  echo "Building rtk from base branch (${BENCHMARK_BASE_REF})..." >&2
-  
-  # Save current HEAD
-  local current_head
-  current_head=$(git -C "${REPO_ROOT}" rev-parse HEAD)
-  
-  # Checkout base branch
-  git -C "${REPO_ROOT}" checkout --quiet "origin/${BENCHMARK_BASE_REF}"
-  
-  # Build to a separate target directory
-  CARGO_TARGET_DIR="${REPO_ROOT}/target-base" cargo build --release -p rtk --manifest-path "${REPO_ROOT}/Cargo.toml" >&2
-  
-  # Restore current HEAD
-  git -C "${REPO_ROOT}" checkout --quiet "${current_head}"
-  
-  RTK_BASE="${REPO_ROOT}/target-base/release/rtk"
-  export RTK_BASE
-  
-  echo "Built rtk-base: $(${RTK_BASE} --version)" >&2
-}
-
-# Print version info
-print_versions() {
-  cat <<EOF
-## Versions
-
-- tk: $(tk --version)
-- rtk: $(${RTK} --version)
-EOF
-
-  if [ -n "${RTK_BASE:-}" ]; then
-    echo "- rtk-base: $(${RTK_BASE} --version)"
-  fi
-  
-  echo ""
-}
-
 # Function to generate resource jsonnet
 generate_resources() {
   local prefix="$1"
@@ -350,17 +283,4 @@ JSONNET
 
   echo "Fixture generation complete." >&2
   echo "" >&2
-}
-
-# Print test configuration
-print_test_config() {
-  cat <<EOF
-## Test Configuration
-
-- Static environments: ${NUM_STATIC_ENVS}
-- Inline environment files: ${NUM_INLINE_FILES} (${ENVS_PER_INLINE_FILE} envs each = $((NUM_INLINE_FILES * ENVS_PER_INLINE_FILE)) total)
-- Resources per environment: ${NUM_RESOURCES_PER_ENV}
-- Total environments: $((NUM_STATIC_ENVS + NUM_INLINE_FILES * ENVS_PER_INLINE_FILE))
-
-EOF
 }

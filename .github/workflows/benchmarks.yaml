@@ -19,10 +19,10 @@ jobs:
       matrix:
         benchmark:
           - name: "Env List"
-            script: "benchmarks/env-list-benchmarks.sh"
+            config: "rtk-benchmarks/env-list.yaml"
             id: "env-list"
           - name: "Eval"
-            script: "benchmarks/eval-benchmarks.sh"
+            config: "rtk-benchmarks/eval.yaml"
             id: "eval"
     steps:
       - name: Checkout
@@ -45,6 +45,8 @@ jobs:
           # Install hyperfine
           wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
           sudo dpkg -i hyperfine_1.18.0_amd64.deb
+          # Install uv for Python script
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           # jq is pre-installed on ubuntu-latest
 
       - name: Run benchmark
@@ -55,8 +57,7 @@ jobs:
           BENCHMARK_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
         run: |
           # Run benchmark (markdown output goes to BENCHMARK_MARKDOWN_OUTPUT)
-          chmod +x ${{ matrix.benchmark.script }}
-          ./${{ matrix.benchmark.script }}
+          ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} | tee benchmark-results.md
           
           # Prepare comment body from markdown output
           {
