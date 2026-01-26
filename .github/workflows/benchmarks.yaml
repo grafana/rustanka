@@ -21,6 +21,9 @@ jobs:
           - name: "Env List"
             script: "benchmarks/env-list-benchmarks.sh"
             id: "env-list"
+          - name: "Eval"
+            script: "benchmarks/eval-benchmarks.sh"
+            id: "eval"
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4

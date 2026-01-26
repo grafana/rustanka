@@ -26,19 +26,6 @@ working_dir = "${DEPLOYMENT_TOOLS_PATH}/ksonnet"
 # For export commands, use {{EXEC_NAME}} placeholder in output directory to create separate
 # output directories for each executable, enabling directory comparison.
 
-# ==================== EVAL COMMANDS ====================
-[[commands]]
-name = "eval: mimir-ops-03"
-args = ["eval", "environments/cortex/ops-eu-south-0.mimir-ops-03"]
-runs = 3
-json_compare = true
-
-[[commands]]
-name = "eval: flux-system"
-args = ["eval", "environments/flux-system"]
-runs = 3
-json_compare = true
-
 # ==================== TOOL IMPORTERS COMMANDS ====================
 [[commands]]
 name = "tool importers: env files"
