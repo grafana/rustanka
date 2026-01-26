@@ -14,6 +14,7 @@ source "${SCRIPT_DIR}/lib/generate-fixtures.sh"
 # Check dependencies and build
 check_dependencies
 build_rtk
+build_rtk_base
 
 # Extra arguments to pass to hyperfine
 HYPERFINE_ARGS=("$@")
@@ -53,7 +54,7 @@ validate_eval_output() {
   fi
 
   if [ "$tk_output" = "$rtk_output" ]; then
-    echo "OK" >&2
+    echo -n "OK" >&2
   else
     echo "OUTPUT MISMATCH!" >&2
     echo "tk output:" >&2
@@ -61,6 +62,22 @@ validate_eval_output() {
     echo "rtk output:" >&2
     echo "$rtk_output" | head -20 >&2
     exit 1
+  fi
+
+  if [ -n "${RTK_BASE:-}" ]; then
+    rtk_base_output=$(${RTK_BASE} eval "$env_path" 2>/dev/null | jq -S '.' 2>/dev/null || echo "ERROR")
+    if [ "$rtk_base_output" = "ERROR" ]; then
+      echo " [rtk-base ERROR]" >&2
+      exit 1
+    fi
+    if [ "$tk_output" = "$rtk_base_output" ]; then
+      echo " [rtk-base OK]" >&2
+    else
+      echo " [rtk-base OUTPUT MISMATCH]" >&2
+      exit 1
+    fi
+  else
+    echo "" >&2
   fi
 }
 
@@ -79,17 +96,35 @@ cat <<EOF
 
 EOF
 
+# Helper function to run hyperfine with optional rtk-base
+run_benchmark() {
+  local output_file="$1"
+  local warmup="$2"
+  local tk_cmd="$3"
+  local rtk_cmd="$4"
+  local rtk_base_cmd="${5:-}"
+
+  local args=(-N --warmup "$warmup" "${HYPERFINE_ARGS[@]}" --export-markdown "$output_file")
+  args+=(-n "tk" "$tk_cmd")
+  args+=(-n "rtk" "$rtk_cmd")
+  
+  if [ -n "$rtk_base_cmd" ]; then
+    args+=(-n "rtk-base" "$rtk_base_cmd")
+  fi
+
+  hyperfine "${args[@]}"
+}
+
 # Benchmark 1: Eval single static environment
 echo "### Single Static Environment" | tee -a "${MARKDOWN_OUTPUT}"
 echo "" | tee -a "${MARKDOWN_OUTPUT}"
 echo "Evaluating a single static environment with ${NUM_RESOURCES_PER_ENV} resources (3 Kubernetes objects each)." | tee -a "${MARKDOWN_OUTPUT}"
 echo "" | tee -a "${MARKDOWN_OUTPUT}"
 
-hyperfine -N --warmup 2 \
-  "${HYPERFINE_ARGS[@]}" \
-  --export-markdown "${MARKDOWN_OUTPUT}.1" \
-  -n "tk" "sh -c 'tk eval ${SINGLE_STATIC_DIR} >/dev/null'" \
-  -n "rtk" "sh -c '${RTK} eval ${SINGLE_STATIC_DIR} >/dev/null'"
+run_benchmark "${MARKDOWN_OUTPUT}.1" 2 \
+  "sh -c 'tk eval ${SINGLE_STATIC_DIR} >/dev/null'" \
+  "sh -c '${RTK} eval ${SINGLE_STATIC_DIR} >/dev/null'" \
+  "${RTK_BASE:+sh -c '${RTK_BASE} eval ${SINGLE_STATIC_DIR} >/dev/null'}"
 cat "${MARKDOWN_OUTPUT}.1" | tee -a "${MARKDOWN_OUTPUT}"
 echo "" | tee -a "${MARKDOWN_OUTPUT}"
 
@@ -99,11 +134,10 @@ echo "" | tee -a "${MARKDOWN_OUTPUT}"
 echo "Evaluating an inline environment file containing ${ENVS_PER_INLINE_FILE} environments." | tee -a "${MARKDOWN_OUTPUT}"
 echo "" | tee -a "${MARKDOWN_OUTPUT}"
 
-hyperfine -N --warmup 2 \
-  "${HYPERFINE_ARGS[@]}" \
-  --export-markdown "${MARKDOWN_OUTPUT}.2" \
-  -n "tk" "sh -c 'tk eval ${SINGLE_INLINE_FILE} >/dev/null'" \
-  -n "rtk" "sh -c '${RTK} eval ${SINGLE_INLINE_FILE} >/dev/null'"
+run_benchmark "${MARKDOWN_OUTPUT}.2" 2 \
+  "sh -c 'tk eval ${SINGLE_INLINE_FILE} >/dev/null'" \
+  "sh -c '${RTK} eval ${SINGLE_INLINE_FILE} >/dev/null'" \
+  "${RTK_BASE:+sh -c '${RTK_BASE} eval ${SINGLE_INLINE_FILE} >/dev/null'}"
 cat "${MARKDOWN_OUTPUT}.2" | tee -a "${MARKDOWN_OUTPUT}"
 echo "" | tee -a "${MARKDOWN_OUTPUT}"
 

@@ -27,6 +27,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+        with:
+          # Fetch full history to allow building rtk from base branch
+          fetch-depth: 0
 
       - name: Set up Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
@@ -48,6 +51,8 @@ jobs:
         id: benchmark
         env:
           BENCHMARK_MARKDOWN_OUTPUT: benchmark-results.md
+          # On PRs, also build and benchmark rtk from the base branch (master)
+          BENCHMARK_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
         run: |
           # Run benchmark (markdown output goes to BENCHMARK_MARKDOWN_OUTPUT)
           chmod +x ${{ matrix.benchmark.script }}

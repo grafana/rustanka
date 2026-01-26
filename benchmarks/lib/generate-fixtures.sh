@@ -32,6 +32,35 @@ build_rtk() {
   export RTK
 }
 
+# Build rtk from base branch (only when BENCHMARK_BASE_REF is set)
+build_rtk_base() {
+  if [ -z "${BENCHMARK_BASE_REF:-}" ]; then
+    RTK_BASE=""
+    export RTK_BASE
+    return
+  fi
+
+  echo "Building rtk from base branch (${BENCHMARK_BASE_REF})..." >&2
+  
+  # Save current HEAD
+  local current_head
+  current_head=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+  
+  # Checkout base branch
+  git -C "${REPO_ROOT}" checkout --quiet "origin/${BENCHMARK_BASE_REF}"
+  
+  # Build to a separate target directory
+  CARGO_TARGET_DIR="${REPO_ROOT}/target-base" cargo build --release -p rtk --manifest-path "${REPO_ROOT}/Cargo.toml" >&2
+  
+  # Restore current HEAD
+  git -C "${REPO_ROOT}" checkout --quiet "${current_head}"
+  
+  RTK_BASE="${REPO_ROOT}/target-base/release/rtk"
+  export RTK_BASE
+  
+  echo "Built rtk-base: $(${RTK_BASE} --version)" >&2
+}
+
 # Print version info
 print_versions() {
   cat <<EOF
@@ -39,8 +68,13 @@ print_versions() {
 
 - tk: $(tk --version)
 - rtk: $(${RTK} --version)
-
 EOF
+
+  if [ -n "${RTK_BASE:-}" ]; then
+    echo "- rtk-base: $(${RTK_BASE} --version)"
+  fi
+  
+  echo ""
 }
 
 # Function to generate resource jsonnet
