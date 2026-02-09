@@ -8,10 +8,11 @@ use std::{
 	rc::Rc,
 };
 
-use jrsonnet_gcmodule::{Cc, Trace};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace, TraceBox};
 use jrsonnet_interner::IStr;
 pub use jrsonnet_macros::Thunk;
 use jrsonnet_types::ValType;
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 pub use crate::arr::{ArrValue, ArrayLike};
@@ -19,11 +20,10 @@ use crate::{
 	bail,
 	error::{Error, ErrorKind::*},
 	function::FuncVal,
-	gc::{GcHashMap, TraceBox},
+	gc::WithCapacityExt as _,
 	manifest::{ManifestFormat, ToStringFormat},
-	tb,
-	typed::BoundedUsize,
-	ObjValue, Result, Unbound, WeakObjValue,
+	typed::{BoundedUsize, MAX_SAFE_INTEGER, MIN_SAFE_INTEGER},
+	ObjValue, Result, SupThis, Unbound, WeakSupThis,
 };
 
 pub trait ThunkValue: Trace {
@@ -70,7 +70,9 @@ impl<T: Trace> Thunk<T> {
 		Self(Cc::new(RefCell::new(ThunkInner::Computed(val))))
 	}
 	pub fn new(f: impl ThunkValue<Output = T> + 'static) -> Self {
-		Self(Cc::new(RefCell::new(ThunkInner::Waiting(tb!(f)))))
+		Self(Cc::new(RefCell::new(ThunkInner::Waiting(TraceBox(
+			Box::new(f),
+		)))))
 	}
 	pub fn errored(e: Error) -> Self {
 		Self(Cc::new(RefCell::new(ThunkInner::Errored(e))))
@@ -166,38 +168,33 @@ impl<T: Trace + Default> Default for Thunk<T> {
 	}
 }
 
-type CacheKey = (Option<WeakObjValue>, Option<WeakObjValue>);
-
 #[derive(Trace, Clone)]
 pub struct CachedUnbound<I, T>
 where
 	I: Unbound<Bound = T>,
 	T: Trace,
 {
-	cache: Cc<RefCell<GcHashMap<CacheKey, T>>>,
+	cache: Cc<RefCell<FxHashMap<WeakSupThis, T>>>,
 	value: I,
 }
 impl<I: Unbound<Bound = T>, T: Trace> CachedUnbound<I, T> {
 	pub fn new(value: I) -> Self {
 		Self {
-			cache: Cc::new(RefCell::new(GcHashMap::new())),
+			cache: Cc::new(RefCell::new(FxHashMap::new())),
 			value,
 		}
 	}
 }
 impl<I: Unbound<Bound = T>, T: Clone + Trace> Unbound for CachedUnbound<I, T> {
 	type Bound = T;
-	fn bind(&self, sup: Option<ObjValue>, this: Option<ObjValue>) -> Result<T> {
-		let cache_key = (
-			sup.as_ref().map(|s| s.clone().downgrade()),
-			this.as_ref().map(|t| t.clone().downgrade()),
-		);
+	fn bind(&self, sup_this: SupThis) -> Result<T> {
+		let cache_key = sup_this.clone().downgrade();
 		{
 			if let Some(t) = self.cache.borrow().get(&cache_key) {
 				return Ok(t.clone());
 			}
 		}
-		let bound = self.value.bind(sup, this)?;
+		let bound = self.value.bind(sup_this)?;
 
 		{
 			let mut cache = self.cache.borrow_mut();
@@ -302,7 +299,7 @@ impl IndexableVal {
 	}
 }
 
-#[derive(Debug, Clone, Trace)]
+#[derive(Debug, Clone, Acyclic)]
 pub enum StrValue {
 	Flat(IStr),
 	Tree(Rc<(StrValue, StrValue, usize)>),
@@ -416,6 +413,12 @@ impl NumValue {
 	pub const fn get(&self) -> f64 {
 		self.0
 	}
+	pub(crate) fn truncate_for_bitwise(&self) -> Result<i64> {
+		if self.0 < MIN_SAFE_INTEGER || self.0 > MAX_SAFE_INTEGER {
+			bail!("numberic value outside of safe integer range for bitwise operation");
+		}
+		Ok(self.0 as i64)
+	}
 }
 impl PartialEq for NumValue {
 	fn eq(&self, other: &Self) -> bool {
@@ -488,7 +491,6 @@ macro_rules! impl_try_num {
 			type Error = ConvertNumValueError;
 			#[inline]
 			fn try_from(value: $ty) -> Result<Self, ConvertNumValueError> {
-				use crate::typed::conversions::{MIN_SAFE_INTEGER, MAX_SAFE_INTEGER};
 				let value = value as f64;
 				if value < MIN_SAFE_INTEGER {
 					return Err(ConvertNumValueError::Underflow)

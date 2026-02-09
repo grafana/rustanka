@@ -4,9 +4,9 @@ use std::{
 };
 
 use jrsonnet_evaluator::{
+	FileImportResolver, State,
 	manifest::JsonFormat,
 	trace::{CompactFormat, PathResolver, TraceFormat},
-	FileImportResolver, State,
 };
 use jrsonnet_stdlib::ContextInitializer;
 mod common;
@@ -20,6 +20,8 @@ fn run(file: &Path) -> String {
 	))
 	.import_resolver(FileImportResolver::default());
 	let s = s.build();
+
+	let _entered = s.enter();
 
 	let trace_format = CompactFormat {
 		resolver: PathResolver::FileName,

@@ -28,13 +28,6 @@ pub struct YamlFormat<'s> {
 	/// safe_key: 1
 	/// ```
 	quote_keys: bool,
-	/// Should yaml string values always be quoted
-	/// go-jsonnet always quotes string values in manifestYamlDoc
-	/// ```yaml
-	/// key: "value"
-	/// # vs
-	/// key: value
-	/// ```
 	quote_values: bool,
 	/// If true - then order of fields is preserved as written,
 	/// instead of sorting alphabetically
@@ -92,92 +85,223 @@ impl ManifestFormat for YamlFormat<'_> {
 	}
 }
 
-/// Check if string looks like an ISO8601 timestamp that YAML parsers might interpret as a date.
-/// Examples: 2025-07-03T15:30:00Z, 2025-07-03T15:30:00+00:00
+fn bare_safe(key: &str) -> bool {
+	fn count_char_u(k: &str, c: char) -> usize {
+		let cu = c.to_ascii_uppercase();
+		k.chars().filter(|v| *v == c || *v == cu).count()
+	}
+	fn count_char(k: &str, c: char) -> usize {
+		k.chars().filter(|v| *v == c).count()
+	}
+	fn is_reserved(key: &str) -> bool {
+		const RESERVED: &[&str] = &[
+			// Boolean types taken from https://yaml.org/type/bool.html
+			"true", "false", "yes", "no", "on", "off", "y", "n",
+			// Numerical words taken from https://yaml.org/type/float.html
+			".nan", "-.inf", "+.inf", ".inf", "null",
+			// Invalid keys that contain no invalid characters
+			"-", "---", "",
+		];
+		RESERVED.iter().any(|k| key.eq_ignore_ascii_case(k))
+	}
+
+	// Check for unsafe characters
+	if !key
+		.chars()
+		.all(|v| matches!(v, 'a'..='z' | 'A'..='Z' | '0'..='9'  | '-' | '_' | '.' | '/'))
+	{
+		return false;
+	}
+	// Check for reserved words
+	if is_reserved(key) {
+		return false;
+	}
+	// Check for timestamp values.  Since spaces and colons are already forbidden,
+	// all that could potentially pass is the standard date format (ex MM-DD-YYYY, YYYY-DD-MM, etc).
+	// This check is even more conservative: Keys that meet all of the following:
+	// - all characters match [0-9\-]
+	// - has exactly 2 dashes
+	// are considered dates.
+	if key.chars().all(|v| matches!(v, '0'..='9' | '-')) && count_char(key, '-') == 2 {
+		return false;
+	}
+	// Check for integers.  Keys that meet all of the following:
+	// - all characters match [0-9_\-]
+	// - has at most 1 dash
+	// are considered integers.
+	else if key.chars().all(|v| matches!(v, '0'..='9' | '-' | '_')) && count_char(key, '-') < 2 {
+		return false;
+	}
+	// Check for binary integers.  Keys that meet all of the following:
+	// - all characters match [0-9b_\-]
+	// - has at least 3 characters
+	// - starts with (-)0b
+	// are considered binary integers.
+	else if key
+		.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'b' | 'B'))
+		&& (key.starts_with("0b") || key.starts_with("-0b"))
+		&& key.len() > 2
+	{
+		return false;
+	}
+	// Check for floats. Keys that meet all of the following:
+	// - all characters match [0-9e._\-]
+	// - has at most a single period
+	// - has at most two dashes
+	// - has at most 1 'e'
+	// are considered floats.
+	else if key
+		.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'e' | 'E' | '.'))
+		&& count_char_u(key, 'e') < 2
+		&& count_char(key, '-') < 3
+		&& count_char(key, '.') <= 1
+	{
+		return false;
+	}
+	// Check for hexadecimals.  Keys that meet all of the following:
+	// - all characters match [0-9a-fx_\-]
+	// - has at most 1 dash
+	// - has at least 3 characters
+	// - starts with (-)0x
+	// are considered hexadecimals.
+	else if key
+		.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'x' | 'X' |  'a'..='f' | 'A'..='F' ))
+		&& key.len() >= 3
+		&& count_char(key, '-') < 2
+		&& (key.starts_with("-0x") || key.starts_with("0x"))
+	{
+		return false;
+	}
+	true
+}
+
+/// Like bare_safe but more permissive for YAML scalar values.
+/// Used when quote_values is false (Jrsonnet behavior) to match jrsonnet binary / tk output:
+/// allow space and common punctuation so values like "up != 1", "vector(1)", "$3" are unquoted.
+fn value_bare_safe(s: &str) -> bool {
+	fn count_char_u(k: &str, c: char) -> usize {
+		let cu = c.to_ascii_uppercase();
+		k.chars().filter(|v| *v == c || *v == cu).count()
+	}
+	fn count_char(k: &str, c: char) -> usize {
+		k.chars().filter(|v| *v == c).count()
+	}
+	fn is_reserved(key: &str) -> bool {
+		const RESERVED: &[&str] = &[
+			"true", "false", "yes", "no", "on", "off", "y", "n", ".nan", "-.inf", "+.inf", ".inf",
+			"null", "-", "---", "",
+		];
+		RESERVED.iter().any(|k| key.eq_ignore_ascii_case(k))
+	}
+
+	if s.is_empty() {
+		return false;
+	}
+	if s.contains('\n') || s.contains('#') {
+		return false;
+	}
+	if s != s.trim() {
+		return false;
+	}
+	if is_reserved(s) {
+		return false;
+	}
+	// Broader allowed set for values: alphanumeric, space, common punctuation.
+	// Exclude ' , " { } [ ] : so that strings requiring quoting (match tk) are quoted:
+	// e.g. "hello'", "target's", strings with ", {{ }}, [ ], or : (e.g. record names).
+	if !s.chars().all(|v| {
+		matches!(
+			v,
+			'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '/' | ' '
+				| '(' | ')' | '!' | '=' | '<' | '>' | '$' | '%' | '*' | '\\' | '@' | ';' | '&' | '|' | '~' | '`' | '?'
+		)
+	}) {
+		return false;
+	}
+	// Reject timestamp-like (same as bare_safe)
+	if s.len() >= 20 {
+		let bytes = s.as_bytes();
+		if bytes[4] == b'-'
+			&& bytes[7] == b'-'
+			&& bytes[10] == b'T'
+			&& bytes[13] == b':'
+			&& bytes[16] == b':'
+			&& bytes[0..4].iter().all(u8::is_ascii_digit)
+			&& bytes[5..7].iter().all(u8::is_ascii_digit)
+			&& bytes[8..10].iter().all(u8::is_ascii_digit)
+			&& bytes[11..13].iter().all(u8::is_ascii_digit)
+			&& bytes[14..16].iter().all(u8::is_ascii_digit)
+			&& bytes[17..19].iter().all(u8::is_ascii_digit)
+			&& (bytes[19] == b'Z' || bytes[19] == b'+' || bytes[19] == b'-')
+		{
+			return false;
+		}
+	}
+	// Reject whole-string numbers (same patterns as bare_safe)
+	if s.chars().all(|v| matches!(v, '0'..='9' | '-')) && count_char(s, '-') == 2 {
+		return false;
+	}
+	if s.chars().all(|v| matches!(v, '0'..='9' | '-' | '_')) && count_char(s, '-') < 2 {
+		return false;
+	}
+	if s.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'b' | 'B'))
+		&& (s.starts_with("0b") || s.starts_with("-0b"))
+		&& s.len() > 2
+	{
+		return false;
+	}
+	if s.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'e' | 'E' | '.'))
+		&& count_char_u(s, 'e') < 2
+		&& count_char(s, '-') < 3
+		&& count_char(s, '.') <= 1
+	{
+		return false;
+	}
+	if s.chars()
+		.all(|v| matches!(v, '0'..='9' | '-' | '_' | 'x' | 'X' | 'a'..='f' | 'A'..='F'))
+		&& s.len() >= 3
+		&& count_char(s, '-') < 2
+		&& (s.starts_with("-0x") || s.starts_with("0x"))
+	{
+		return false;
+	}
+	true
+}
+
+/// Used by tests: check if string looks like an ISO8601 timestamp.
+#[cfg(test)]
 fn looks_like_timestamp(string: &str) -> bool {
-	// Quick length check: ISO8601 timestamps are at least 20 chars (2025-07-03T15:30:00Z)
 	if string.len() < 20 {
 		return false;
 	}
-	// Check for ISO8601 pattern: YYYY-MM-DDTHH:MM:SS followed by Z or timezone
 	let bytes = string.as_bytes();
-	// Check date part: YYYY-MM-DD
 	if !(bytes[4] == b'-' && bytes[7] == b'-' && bytes[10] == b'T') {
 		return false;
 	}
-	// Check time part: HH:MM:SS
 	if !(bytes[13] == b':' && bytes[16] == b':') {
 		return false;
 	}
-	// Check all digits are in right places
 	bytes[0..4].iter().all(u8::is_ascii_digit)
 		&& bytes[5..7].iter().all(u8::is_ascii_digit)
 		&& bytes[8..10].iter().all(u8::is_ascii_digit)
 		&& bytes[11..13].iter().all(u8::is_ascii_digit)
 		&& bytes[14..16].iter().all(u8::is_ascii_digit)
 		&& bytes[17..19].iter().all(u8::is_ascii_digit)
-		// Check timezone indicator (Z, +, or -)
 		&& (bytes[19] == b'Z' || bytes[19] == b'+' || bytes[19] == b'-')
 }
 
-/// From <https://github.com/chyh1990/yaml-rust/blob/da52a68615f2ecdd6b7e4567019f280c433c1521/src/emitter.rs#L289>
-/// With added date check and go-jsonnet compatibility
+/// Used by tests: whether a YAML string value needs quoting (inverse of bare_safe).
+#[cfg(test)]
 fn yaml_needs_quotes(string: &str) -> bool {
-	fn need_quotes_spaces(string: &str) -> bool {
-		string.starts_with(' ') || string.ends_with(' ')
-	}
-
-	string.is_empty()
-		|| need_quotes_spaces(string)
-		// Characters that are special at the start of a YAML value
-		|| string.starts_with(['&', '*', '?', '|', '-', '!', '%', '@', '{', '[', '"', '\'', '<', '>'])
-		// Colon anywhere creates key-value ambiguity - jrsonnet quotes any string with colon
-		|| string.contains(':')
-		// Comma anywhere - jrsonnet quotes any string with comma
-		|| string.contains(',')
-		// Flow indicators anywhere in string need quoting
-		// This includes { } [ ] which could be interpreted as flow sequences/mappings
-		|| string.contains('{')
-		|| string.contains('}')
-		|| string.contains('[')
-		|| string.contains(']')
-		// # starts a comment in YAML - jrsonnet quotes any string containing #
-		// to avoid potential parsing issues even mid-string (e.g., URLs with anchors)
-		|| string.contains('#')
-		|| string.contains(|c| matches!(c, '`' | '\0'..='\x06' | '\t' | '\n' | '\r' | '\x0e'..='\x1a' | '\x1c'..='\x1f'))
-		|| [
-			// http://yaml.org/type/bool.html
-			"yes", "Yes", "YES", "no", "No", "NO", "True", "TRUE", "true", "False", "FALSE", "false",
-			"on", "On", "ON", "off", "Off", "OFF", // http://yaml.org/type/null.html
-			"null", "Null", "NULL", "~",
-			// > Quoted in std.jsonnet, however, in serde_yaml they were quoted:
-			// > Note: 'y', 'Y', 'n', 'N', is not quoted deliberately, as in libyaml. PyYAML also parse
-			// > them as string, not booleans, although it is violating the YAML 1.1 specification.
-			// > See https://github.com/dtolnay/serde-yaml/pull/83#discussion_r152628088.
-			"y", "Y", "n", "N",
-			"-.inf", "+.inf", ".inf",
-			"-", "---", ""
-		].contains(&string)
-		|| (string.chars().all(|c| matches!(c, '0'..='9' | '-'))
-			&& string.chars().filter(|c| *c == '-').count() == 2)
-		|| string.starts_with('.')
-		|| string.starts_with("0x")
-		|| string.parse::<i64>().is_ok()
-		|| string.parse::<f64>().is_ok_and(|f| f.is_finite())
-		// ISO8601 timestamps should be quoted to prevent YAML parsers from
-		// interpreting them as dates (matches Go's yaml.v3 behavior)
-		|| looks_like_timestamp(string)
-		// Strings containing quotes need quoting
-		|| string.contains('\'')
-		|| string.contains('"')
+	!bare_safe(string)
 }
 
-/// Escape a string for YAML with intelligent quote selection
-/// Always uses double quotes with JSON-style escaping to match both go-jsonnet and jrsonnet behavior.
-/// Go's yaml.v3 uses single quotes when possible, but both go-jsonnet and jrsonnet use double quotes.
 fn escape_string_yaml_buf(s: &str, buf: &mut String, _quote_values: bool) {
-	// Always use double quotes with JSON-style escaping
-	// This matches both go-jsonnet (quote_values=true) and jrsonnet (quote_values=false) behavior
 	escape_string_json_buf(s, buf);
 }
 
@@ -234,8 +358,7 @@ fn manifest_yaml_ex_buf(
 					buf.push_str(&options.padding);
 					buf.push_str(line);
 				}
-			} else if !options.quote_values && !yaml_needs_quotes(&s) {
-				// Simple string without newlines - output unquoted if safe
+			} else if !options.quote_values && value_bare_safe(&s) {
 				buf.push_str(&s);
 			} else {
 				// Use intelligent quote selection to match Go's yaml.v3 behavior
@@ -325,7 +448,7 @@ fn manifest_yaml_ex_buf(
 					buf.push('\n');
 					buf.push_str(&key_padding);
 				}
-				if !options.quote_keys && !yaml_needs_quotes(&key) {
+				if !options.quote_keys && bare_safe(&key) {
 					buf.push_str(&key);
 				} else {
 					escape_string_json_buf(&key, buf);

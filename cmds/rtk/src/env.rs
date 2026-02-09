@@ -300,6 +300,9 @@ fn load_inline_envs(dir: &Path) -> Result<Vec<Environment>> {
 
 	let state = builder.build();
 
+	// Enter state so with_state() (used by import resolution) uses our resolver
+	let _guard = state.enter();
+
 	// Evaluate with noDataEnv wrapper to strip out .data field
 	let eval_script = format!(
 		r#"

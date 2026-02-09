@@ -513,27 +513,24 @@ impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
 				val.value_type()
 			)
 		};
-		if arr.is_empty() {
-			if self.jrsonnet_empty {
-				// jrsonnet binary outputs "\n" for empty arrays (just a newline)
-				// or "...\n" when c_document_end is true
-				// (no document marker for empty arrays)
-			} else {
-				// go-jsonnet outputs "---\n\n" for empty arrays (document marker + empty document)
-				out.push_str("---\n\n");
-			}
+		// Rustanka: empty array behavior for Tanka (go-jsonnet) compatibility
+		if arr.is_empty() && !self.jrsonnet_empty {
+			out.push_str("---\n\n");
 		} else {
 			for (i, v) in arr.iter().enumerate() {
+				if i != 0 {
+					out.push('\n');
+				}
 				let v = v.with_description(|| format!("elem <{i}> evaluation"))?;
 				out.push_str("---\n");
 				in_description_frame(
 					|| format!("elem <{i}> manifestification"),
 					|| self.inner.manifest_buf(v, out),
 				)?;
-				out.push('\n');
 			}
 		}
 		if self.c_document_end {
+			out.push('\n');
 			out.push_str("...");
 		}
 		// For jrsonnet empty mode: always add trailing newline

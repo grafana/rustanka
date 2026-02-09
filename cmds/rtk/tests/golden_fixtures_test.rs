@@ -254,10 +254,9 @@ fn test_all_golden_fixtures() {
 
 	for (name, path) in &envs {
 		println!("\n=== Testing {} ===", name);
-		let result = std::panic::catch_unwind(|| {
+		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 			run_golden_test(path);
-		});
-
+		}));
 		match result {
 			Ok(()) => println!("✓ {} passed", name),
 			Err(e) => {

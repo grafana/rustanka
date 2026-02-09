@@ -1,8 +1,7 @@
 {
   description = "Jrsonnet";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs";
-
+    nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -132,7 +131,6 @@
                 name = "release";
               }
             ];
-          };
 
           jrsonnet = pkgs.callPackage ./nix/jrsonnet.nix {
             inherit craneLib;

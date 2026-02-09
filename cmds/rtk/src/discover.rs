@@ -376,6 +376,9 @@ fn discover_inline_environments(path: &Path, eval_opts: &EvalOpts) -> Result<Vec
 
 	let state = builder.build();
 
+	// Enter state so with_state() (used by TLA/import resolution) uses our resolver
+	let _guard = state.enter();
+
 	// Check if we need TLAs - if so, we have to fully evaluate main.jsonnet first
 	let has_tlas = !eval_opts.tla_str.is_empty() || !eval_opts.tla_code.is_empty();
 
@@ -389,7 +392,7 @@ fn discover_inline_environments(path: &Path, eval_opts: &EvalOpts) -> Result<Vec
 			.import(main_path.to_string_lossy().as_ref())
 			.map_err(|e| anyhow::anyhow!("importing main.jsonnet for discovery: {}", e))?;
 
-		let main_value = jrsonnet_evaluator::apply_tla(state.clone(), &tla_args, main_result)
+		let main_value = jrsonnet_evaluator::apply_tla(&tla_args, main_result)
 			.map_err(|e| anyhow::anyhow!("applying TLAs for discovery: {}", e))?;
 
 		let main_json = main_value
@@ -463,35 +466,23 @@ fn discover_inline_environments(path: &Path, eval_opts: &EvalOpts) -> Result<Vec
 fn build_tla_args(
 	eval_opts: &EvalOpts,
 ) -> Result<
-	jrsonnet_evaluator::gc::GcHashMap<
+	jrsonnet_evaluator::rustc_hash::FxHashMap<
 		jrsonnet_evaluator::IStr,
 		jrsonnet_evaluator::function::TlaArg,
 	>,
 > {
-	use jrsonnet_evaluator::{function::TlaArg, gc::GcHashMap, IStr};
+	use jrsonnet_evaluator::{function::TlaArg, rustc_hash::FxHashMap};
 
-	let mut tla_args: GcHashMap<IStr, TlaArg> = GcHashMap::new();
+	let mut tla_args = FxHashMap::default();
 
 	// Add string TLAs
 	for (key, value) in &eval_opts.tla_str {
 		tla_args.insert(key.as_str().into(), TlaArg::String(value.as_str().into()));
 	}
 
-	// Add code TLAs (need to parse as jsonnet)
+	// Add code TLAs (evaluator parses the string internally)
 	for (key, value) in &eval_opts.tla_code {
-		let source = jrsonnet_parser::Source::new_virtual(
-			format!("<tla:{}>", key).into(),
-			value.as_str().into(),
-		);
-		let parsed = jrsonnet_parser::parse(
-			value,
-			&jrsonnet_parser::ParserSettings {
-				source: source.clone(),
-			},
-		)
-		.map_err(|e| anyhow::anyhow!("failed to parse TLA code '{}':\n{}", key, e))?;
-
-		tla_args.insert(key.as_str().into(), TlaArg::Code(parsed));
+		tla_args.insert(key.as_str().into(), TlaArg::InlineCode(value.to_string()));
 	}
 
 	Ok(tla_args)
