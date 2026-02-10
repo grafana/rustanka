@@ -25,7 +25,7 @@ pub use token_set::SyntaxKindSet;
 
 use self::{
 	ast::support,
-	generated::nodes::{Expr, ExprBinary, ExprObjExtend},
+	generated::nodes::{Expr, ExprObjExtend},
 };
 
 pub fn parse(input: &str) -> (SourceFile, Vec<LocatedSyntaxError>) {
@@ -46,17 +46,6 @@ pub fn parse(input: &str) -> (SourceFile, Vec<LocatedSyntaxError>) {
 		},
 		parse.errors,
 	)
-}
-impl ExprBinary {
-	pub fn lhs_work(&self) -> Option<Expr> {
-		support::child(self.syntax())
-	}
-	pub fn rhs_work(&self) -> Option<Expr> {
-		let mut children = support::children(self.syntax());
-		// skip lhs
-		children.next()?;
-		children.next()
-	}
 }
 impl ExprObjExtend {
 	pub fn lhs_work(&self) -> Option<Expr> {
