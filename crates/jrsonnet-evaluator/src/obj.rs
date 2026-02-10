@@ -646,6 +646,12 @@ impl ObjValue {
 	}
 
 	fn get_idx(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
+		// Run assertions before checking/setting cache. This ensures assertion
+		// field accesses don't see false Pending markers for fields that aren't
+		// actually being computed yet. run_assertions() is idempotent (checks
+		// assertions_ran flag and start_asserting guard).
+		self.run_assertions()?;
+
 		let cache_key = (key.clone(), core);
 		let use_super_while_asserting = {
 			let mut cache = self.0.value_cache.borrow_mut();
@@ -682,7 +688,7 @@ impl ObjValue {
 		result
 	}
 	fn get_idx_uncached(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
-		self.run_assertions()?;
+		// Assertions already ran in get_idx before the Pending cache marker was set.
 		let mut add_stack = Vec::with_capacity(2);
 		let mut skip = Saturating(0);
 		for (sup, core) in self.0.cores[..core.idx].iter().enumerate().rev() {
