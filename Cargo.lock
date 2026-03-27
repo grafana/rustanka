@@ -1629,8 +1629,7 @@ dependencies = [
 [[package]]
 name = "jrsonnet-gcmodule"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c33f4f6cdc60f5ae94ebae3dfe7f484ae79b364225d9b19601b24c804cfd8751"
+source = "git+https://github.com/grafana/jrsonnet-gcmodule?branch=jj%2Fv0.4.1%2Ffix-memory-leak#c2fd883d560af7106db665671a7a510792a85cb7"
 dependencies = [
  "jrsonnet-gcmodule-derive",
 ]
@@ -1638,8 +1637,7 @@ dependencies = [
 [[package]]
 name = "jrsonnet-gcmodule-derive"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b30c95b285f9bb6709f1b3e6fc69b3a25e39b32ff987587fd108f0f22be5fa3"
+source = "git+https://github.com/grafana/jrsonnet-gcmodule?branch=jj%2Fv0.4.1%2Ffix-memory-leak#c2fd883d560af7106db665671a7a510792a85cb7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1682,6 +1680,7 @@ dependencies = [
  "jrsonnet-gcmodule",
  "jrsonnet-interner",
  "peg",
+ "rustc-hash 2.1.1",
  "static_assertions",
 ]
 
@@ -2962,6 +2961,7 @@ dependencies = [
  "bytes 1.11.1",
  "clap",
  "dirs",
+ "either",
  "gtmpl",
  "http 1.4.0",
  "http-body-util",
@@ -2987,6 +2987,7 @@ dependencies = [
  "regex",
  "rstest",
  "rtk-diff",
+ "rustc-hash 2.1.1",
  "serde",
  "serde-saphyr",
  "serde_json",

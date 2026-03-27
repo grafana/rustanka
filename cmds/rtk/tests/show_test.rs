@@ -5,7 +5,7 @@
 
 use rtk::{
 	commands::show::{show_environment, ShowOpts},
-	eval::EvalOpts,
+	jsonnet::evaluator::GlobalEvaluatorOptions,
 };
 
 /// Run a show test with custom options.
@@ -19,7 +19,7 @@ fn run_show_test_with_opts(test_dir: &std::path::Path, opts: ShowOpts) {
 	let env_dir = test_dir.join("environment");
 
 	// Capture show output to a string
-	let result = show_environment(env_dir.to_str().unwrap(), EvalOpts::default(), opts);
+	let result = show_environment(env_dir.as_path(), GlobalEvaluatorOptions::default(), opts);
 
 	let actual = result.expect("show failed");
 
@@ -35,7 +35,7 @@ fn run_show_test_with_opts(test_dir: &std::path::Path, opts: ShowOpts) {
 fn run_show_test_expect_error(test_dir: &std::path::Path, opts: ShowOpts, expected_error: &str) {
 	let env_dir = test_dir.join("environment");
 
-	let result = show_environment(env_dir.to_str().unwrap(), EvalOpts::default(), opts);
+	let result = show_environment(env_dir.as_path(), GlobalEvaluatorOptions::default(), opts);
 
 	let err = result.expect_err("show should have failed");
 	let err_msg = err.to_string();

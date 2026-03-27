@@ -10,6 +10,7 @@ mod test_utils;
 use k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use rtk::{
 	commands::diff::{diff_environment, ColorMode, DiffOpts},
+	jsonnet::evaluator::{EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::client::ClusterConnection,
 	spec::{DiffStrategy, Spec},
 };
@@ -47,9 +48,10 @@ async fn run_diff_test_with_opts(
 
 	// Call the diff_environment entrypoint (evaluates Jsonnet and diffs)
 	diff_environment(
-		env_dir.to_str().unwrap(),
+		env_dir.as_path(),
 		Some(connection),
-		rtk::eval::EvalOpts::default(),
+		GlobalEvaluatorOptions::default(),
+		EvaluatorOptions::default(),
 		opts,
 		&mut output,
 	)

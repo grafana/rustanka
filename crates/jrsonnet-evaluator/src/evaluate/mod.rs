@@ -3,11 +3,12 @@ use std::rc::Rc;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
 use jrsonnet_parser::{
-	ArgsDesc, AssertStmt, BinaryOpType, BindSpec, CompSpec, Expr, FieldMember, FieldName,
-	ForSpecData, IfSpecData, LiteralType, LocExpr, Member, ObjBody, ParamsDesc,
+	Analysis, AnalyzedExpr, ArgsDesc, AssertStmt, BinaryOpType, BindSpec, CompSpec, Expr,
+	FieldMember, FieldName, ForSpecData, IfSpecData, LiteralType, Member, ObjBody, Param,
+	ParamsDesc, UsedVars,
 };
 use jrsonnet_types::ValType;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use self::destructure::destruct;
 use crate::{
@@ -46,8 +47,8 @@ pub fn ensure_sufficient_stack<R>(f: impl FnOnce() -> R) -> R {
 	stacker::maybe_grow(RED_ZONE, STACK_PER_RECURSION, f)
 }
 
-pub fn evaluate_trivial(expr: &LocExpr) -> Option<Val> {
-	fn is_trivial(expr: &LocExpr) -> bool {
+pub fn evaluate_trivial(expr: &AnalyzedExpr) -> Option<Val> {
+	fn is_trivial(expr: &AnalyzedExpr) -> bool {
 		match expr.expr() {
 			Expr::Str(_)
 			| Expr::Num(_)
@@ -81,10 +82,25 @@ pub fn evaluate_trivial(expr: &LocExpr) -> Option<Val> {
 	})
 }
 
-pub fn evaluate_method(ctx: Context, name: IStr, params: ParamsDesc, body: LocExpr) -> Val {
+pub fn evaluate_method(ctx: Context, name: IStr, params: ParamsDesc, body: AnalyzedExpr) -> Val {
+	// Trim the captured context to only include variables the function
+	// body and parameter defaults actually use. Variables not in this set
+	// are excluded, allowing their thunks to be freed.
+	let mut set = FxHashSet::default();
+	body.extend_used_into(&mut set);
+	for Param(_, default) in params.iter() {
+		if let Some(default_expr) = default {
+			default_expr.extend_used_into(&mut set);
+		}
+	}
+	let analysis = Analysis {
+		var: None,
+		used_vars: UsedVars::from_set(set),
+	};
+	let trimmed_ctx = ctx.trimmed(&analysis);
 	Val::Func(FuncVal::Normal(Cc::new(FuncDesc {
 		name,
-		ctx,
+		ctx: trimmed_ctx,
 		params,
 		body,
 	})))
@@ -217,7 +233,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 			#[derive(Trace)]
 			struct UnboundValue<B: Trace> {
 				uctx: B,
-				value: LocExpr,
+				value: AnalyzedExpr,
 				name: IStr,
 			}
 			impl<B: Unbound<Bound = Context>> Unbound for UnboundValue<B> {
@@ -247,7 +263,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 			#[derive(Trace)]
 			struct UnboundMethod<B: Trace> {
 				uctx: B,
-				value: LocExpr,
+				value: AnalyzedExpr,
 				params: ParamsDesc,
 				name: IStr,
 			}
@@ -349,7 +365,7 @@ pub fn evaluate_object(ctx: Context, object: &ObjBody) -> Result<ObjValue> {
 
 pub fn evaluate_apply(
 	ctx: Context,
-	value: &LocExpr,
+	value: &AnalyzedExpr,
 	args: &ArgsDesc,
 	loc: CallLocation<'_>,
 	tailstrict: bool,
@@ -391,7 +407,7 @@ pub fn evaluate_assert(ctx: Context, assertion: &AssertStmt) -> Result<()> {
 	Ok(())
 }
 
-pub fn evaluate_named(ctx: Context, expr: &LocExpr, name: IStr) -> Result<Val> {
+pub fn evaluate_named(ctx: Context, expr: &AnalyzedExpr, name: IStr) -> Result<Val> {
 	use Expr::*;
 	Ok(match expr.expr() {
 		Function(params, body) => evaluate_method(ctx, name, params.clone(), body.clone()),
@@ -400,7 +416,7 @@ pub fn evaluate_named(ctx: Context, expr: &LocExpr, name: IStr) -> Result<Val> {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn evaluate(ctx: Context, expr: &LocExpr) -> Result<Val> {
+pub fn evaluate(ctx: Context, expr: &AnalyzedExpr) -> Result<Val> {
 	use Expr::*;
 
 	if let Some(trivial) = evaluate_trivial(expr) {
@@ -579,7 +595,10 @@ pub fn evaluate(ctx: Context, expr: &LocExpr) -> Result<Val> {
 				Val::Arr(ArrValue::empty())
 			} else if items.len() == 1 {
 				let item = items[0].clone();
-				Val::Arr(ArrValue::lazy(vec![Thunk!(move || evaluate(ctx, &item))]))
+				let trimmed = ctx.trimmed(item.analysis());
+				Val::Arr(ArrValue::lazy(vec![Thunk!(move || evaluate(
+					trimmed, &item
+				))]))
 			} else {
 				Val::Arr(ArrValue::expr(ctx, items.iter().cloned()))
 			}
@@ -588,7 +607,8 @@ pub fn evaluate(ctx: Context, expr: &LocExpr) -> Result<Val> {
 			let mut out = Vec::new();
 			evaluate_comp(ctx, comp_specs, &mut |ctx| {
 				let expr = expr.clone();
-				out.push(Thunk!(move || evaluate(ctx, &expr)));
+				let trimmed = ctx.trimmed(expr.analysis());
+				out.push(Thunk!(move || evaluate(trimmed, &expr)));
 				Ok(())
 			})?;
 			Val::Arr(ArrValue::lazy(out))
@@ -635,7 +655,7 @@ pub fn evaluate(ctx: Context, expr: &LocExpr) -> Result<Val> {
 			fn parse_idx<T: Typed>(
 				loc: CallLocation<'_>,
 				ctx: Context,
-				expr: Option<&LocExpr>,
+				expr: Option<&AnalyzedExpr>,
 				desc: &'static str,
 			) -> Result<Option<T>> {
 				if let Some(value) = expr {

@@ -6,7 +6,7 @@ use std::{
 
 use jrsonnet_gcmodule::{cc_dyn, Cc};
 use jrsonnet_interner::IBytes;
-use jrsonnet_parser::LocExpr;
+use jrsonnet_parser::AnalyzedExpr;
 
 use crate::{function::FuncVal, Context, Result, Thunk, Val};
 
@@ -37,7 +37,7 @@ impl ArrValue {
 		Self::new(RangeArray::empty())
 	}
 
-	pub fn expr(ctx: Context, exprs: impl IntoIterator<Item = LocExpr>) -> Self {
+	pub fn expr(ctx: Context, exprs: impl IntoIterator<Item = AnalyzedExpr>) -> Self {
 		Self::new(ExprArray::new(ctx, exprs))
 	}
 

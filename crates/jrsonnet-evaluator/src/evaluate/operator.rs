@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use jrsonnet_parser::{BinaryOpType, LocExpr, UnaryOpType};
+use jrsonnet_parser::{AnalyzedExpr, BinaryOpType, UnaryOpType};
 
 use crate::{
 	arr::ArrValue,
@@ -158,9 +158,9 @@ pub fn evaluate_mod_op(a: &Val, b: &Val) -> Result<Val> {
 
 pub fn evaluate_binary_op_special(
 	ctx: Context,
-	a: &LocExpr,
+	a: &AnalyzedExpr,
 	op: BinaryOpType,
-	b: &LocExpr,
+	b: &AnalyzedExpr,
 ) -> Result<Val> {
 	use BinaryOpType::*;
 	use Val::*;

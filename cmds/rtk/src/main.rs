@@ -1,20 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::util::BrokenPipeGuard;
-use jrsonnet_evaluator::FileImportResolver;
+use commands::common::BrokenPipeGuard;
 
 mod commands;
 mod config;
-mod discover;
-mod env;
-mod eval;
-mod export;
-mod importers;
-mod imports;
-mod jpath;
+mod environments;
+mod jsonnet;
 mod k8s;
 mod spec;
-mod tanka;
 mod telemetry;
 #[cfg(test)]
 pub mod test_utils;
@@ -112,18 +105,13 @@ fn main() -> Result<()> {
 		Commands::Fmt(args) => commands::fmt::run(args, stdout),
 		Commands::Lint(args) => commands::lint::run(args, stdout),
 		Commands::Eval(args) => {
-			let jpath_result = jpath::resolve(&args.path)?;
-			let import_resolver = FileImportResolver::new(jpath_result.import_paths.clone());
-			let spec = eval::load_spec(&jpath_result)?;
-			let opts = commands::eval::build_eval_opts(&args);
-			commands::eval::run(
-				import_resolver,
-				&jpath_result.entrypoint,
-				Some(&jpath_result.base),
-				spec,
-				opts,
-				stdout,
-			)
+			let eval_expr = args.eval.clone();
+			let global_opts = args.jsonnet.into_global_evaluator_options();
+			let eval_opts = crate::jsonnet::evaluator::EvaluatorOptions {
+				eval_expr,
+				..Default::default()
+			};
+			commands::eval::run(args.path.as_ref(), global_opts, eval_opts, stdout)
 		}
 		Commands::Init(args) => commands::init::run(args, stdout),
 		Commands::Tool(args) => commands::tool::run(args, stdout),

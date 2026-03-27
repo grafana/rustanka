@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, path::Path};
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -279,8 +279,8 @@ pub struct EnvironmentData {
 ///
 /// For inline environments (those without spec.json), metadata.namespace should be
 /// the relative path from project root to the entrypoint file.
-pub fn set_inline_env_namespace(environments: &mut [EnvironmentData], path: &str) {
-	let jpath_result = match crate::jpath::resolve(path) {
+pub fn set_inline_env_namespace(environments: &mut [EnvironmentData], path: &Path) {
+	let jpath_result = match crate::jsonnet::jpath::resolve(path) {
 		Ok(r) => r,
 		Err(_) => return,
 	};
@@ -301,6 +301,7 @@ pub fn set_inline_env_namespace(environments: &mut [EnvironmentData], path: &str
 }
 
 /// Check if a JSON value is an inline Environment object.
+#[cfg(test)]
 pub fn is_inline_environment(value: &serde_json::Value) -> bool {
 	if let serde_json::Value::Object(obj) = value {
 		obj.get("kind").and_then(|v| v.as_str()) == Some("Environment")
@@ -310,14 +311,31 @@ pub fn is_inline_environment(value: &serde_json::Value) -> bool {
 	}
 }
 
+/// Check if a JSON object map represents an inline Environment object.
+fn is_inline_environment_map(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+	obj.get("kind").and_then(|v| v.as_str()) == Some("Environment")
+		&& obj.contains_key("apiVersion")
+}
+
 /// Extract Environment objects from evaluated Jsonnet output.
 ///
 /// For inline environments (output contains Environment objects), extracts each one.
 /// For static environments (no Environment objects), wraps the output with the default spec.
+///
+/// Takes ownership of the value and spec to avoid cloning the entire JSON tree.
 pub fn extract_environments(
-	value: &serde_json::Value,
-	default_spec: &Option<Environment>,
+	value: serde_json::Value,
+	default_spec: Option<Environment>,
 ) -> Vec<EnvironmentData> {
+	// Quick read-only check: if no inline environments, use value directly (no clone)
+	if !has_inline_environments(&value) {
+		return vec![EnvironmentData {
+			spec: default_spec,
+			data: value,
+		}];
+	}
+
+	// Inline environments found — consume the tree to extract them
 	let mut environments = Vec::new();
 	collect_environments_recursive(value, &mut environments);
 
@@ -335,42 +353,48 @@ pub fn extract_environments(
 	});
 	environments.reverse();
 
-	if !environments.is_empty() {
-		return environments;
-	}
-
-	// No inline environments found - treat as static environment
-	environments.push(EnvironmentData {
-		spec: default_spec.clone(),
-		data: value.clone(),
-	});
-
 	environments
 }
 
+/// Check if a JSON value contains any inline Environment objects (read-only).
+fn has_inline_environments(value: &serde_json::Value) -> bool {
+	match value {
+		serde_json::Value::Object(obj) => {
+			if is_inline_environment_map(obj) {
+				return true;
+			}
+			obj.values().any(has_inline_environments)
+		}
+		serde_json::Value::Array(arr) => arr.iter().any(has_inline_environments),
+		_ => false,
+	}
+}
+
 /// Recursively collect Environment objects from a JSON value.
+/// Takes ownership to avoid cloning the tree.
 fn collect_environments_recursive(
-	value: &serde_json::Value,
+	value: serde_json::Value,
 	environments: &mut Vec<EnvironmentData>,
 ) {
 	match value {
-		serde_json::Value::Object(obj) => {
-			if is_inline_environment(value) {
-				let data = obj.get("data").cloned().unwrap_or(serde_json::Value::Null);
-				let env_spec: Result<Environment, _> = serde_json::from_value(value.clone());
-				let env_spec_opt = match env_spec {
-					Ok(spec) => Some(spec),
-					Err(e) => {
-						tracing::warn!("Failed to parse Environment object: {}", e);
-						None
-					}
-				};
+		serde_json::Value::Object(mut map) => {
+			if is_inline_environment_map(&map) {
+				// Extract data first so it's available even if spec parsing fails
+				let data = map.remove("data").unwrap_or(serde_json::Value::Null);
+				let env_spec_opt =
+					match serde_json::from_value::<Environment>(serde_json::Value::Object(map)) {
+						Ok(spec) => Some(spec),
+						Err(e) => {
+							tracing::warn!("Failed to parse Environment object: {}", e);
+							None
+						}
+					};
 				environments.push(EnvironmentData {
 					spec: env_spec_opt,
 					data,
 				});
 			} else {
-				for v in obj.values() {
+				for (_, v) in map {
 					collect_environments_recursive(v, environments);
 				}
 			}
@@ -447,7 +471,7 @@ mod tests {
 			}
 		]);
 
-		let environments = extract_environments(&value, &None);
+		let environments = extract_environments(value, None);
 
 		// Only one environment should remain after deduplication (last-wins)
 		assert_eq!(
@@ -472,13 +496,7 @@ mod tests {
 						expect_versions: None,
 						export_jsonnet_implementation: None,
 					},
-					data: Some(serde_json::json!({
-						"cm": {
-							"apiVersion": "v1",
-							"kind": "ConfigMap",
-							"metadata": { "name": "config2" }
-						}
-					})),
+					data: None,
 				}),
 				data: serde_json::json!({
 					"cm": {
@@ -510,7 +528,7 @@ mod tests {
 			}
 		});
 
-		let mut environments = extract_environments(&value, &None);
+		let mut environments = extract_environments(value, None);
 		environments.sort_by(|a, b| {
 			let a_name = a.spec.as_ref().and_then(|s| s.metadata.name.as_deref());
 			let b_name = b.spec.as_ref().and_then(|s| s.metadata.name.as_deref());
@@ -540,7 +558,7 @@ mod tests {
 							expect_versions: None,
 							export_jsonnet_implementation: None,
 						},
-						data: Some(serde_json::json!({ "key": "value-a" })),
+						data: None,
 					}),
 					data: serde_json::json!({ "key": "value-a" }),
 				},
@@ -564,7 +582,7 @@ mod tests {
 							expect_versions: None,
 							export_jsonnet_implementation: None,
 						},
-						data: Some(serde_json::json!({ "key": "value-b" })),
+						data: None,
 					}),
 					data: serde_json::json!({ "key": "value-b" }),
 				}

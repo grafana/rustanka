@@ -117,14 +117,9 @@ fn yaml_v3_key_compare(a: &str, b: &str) -> std::cmp::Ordering {
 	ar.len().cmp(&br.len())
 }
 
-/// Serialize a JSON value to YAML string using Tanka-compatible options.
-///
-/// This uses serde_saphyr with options matching Go's yaml.v2 output format.
-#[instrument(skip_all)]
-pub fn to_yaml(value: &JsonValue) -> Result<String, serde_saphyr::ser_error::Error> {
-	let sorted = sort_json_keys(value.clone());
-
-	let options = serde_saphyr::SerializerOptions {
+/// Common serializer options matching Go's yaml.v2 output format.
+fn yaml_serializer_options() -> serde_saphyr::SerializerOptions {
+	serde_saphyr::SerializerOptions {
 		indent_step: 2,
 		indent_array: Some(0),
 		prefer_block_scalars: true,
@@ -136,9 +131,27 @@ pub fn to_yaml(value: &JsonValue) -> Result<String, serde_saphyr::ser_error::Err
 		quote_ambiguous_keys: true,
 		quote_numeric_strings: true,
 		..Default::default()
-	};
+	}
+}
 
+/// Serialize a JSON value to YAML string using Tanka-compatible options.
+///
+/// This uses serde_saphyr with options matching Go's yaml.v2 output format.
+/// Clones the value for sorting — use [`into_yaml`] to avoid the clone when
+/// you can pass ownership.
+#[instrument(skip_all)]
+pub fn to_yaml(value: &JsonValue) -> Result<String, serde_saphyr::ser_error::Error> {
+	let sorted = sort_json_keys(value.clone());
 	let mut output = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut output, &sorted, options)?;
+	serde_saphyr::to_fmt_writer_with_options(&mut output, &sorted, yaml_serializer_options())?;
+	Ok(output)
+}
+
+/// Serialize a JSON value to YAML string, consuming the value to avoid cloning.
+#[instrument(skip_all)]
+pub fn into_yaml(value: JsonValue) -> Result<String, serde_saphyr::ser_error::Error> {
+	let sorted = sort_json_keys(value);
+	let mut output = String::new();
+	serde_saphyr::to_fmt_writer_with_options(&mut output, &sorted, yaml_serializer_options())?;
 	Ok(output)
 }

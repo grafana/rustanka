@@ -1,3 +1,9 @@
+//! Environment management and post-evaluation manipulation.
+//!
+//! Covers two concerns:
+//! - Filesystem operations: `env_add`, `env_remove`, `env_set`, `list_envs_to_writer`
+//! - Post-evaluation helpers: `extract_manifests`, `process_manifests`, filtering
+
 use std::{
 	fs,
 	io::{BufWriter, Write},
@@ -10,8 +16,15 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 use tabwriter::TabWriter;
 
-use crate::jpath;
-use crate::spec::{Environment, Spec};
+pub mod discover;
+pub mod export;
+
+use crate::jsonnet::jpath;
+use crate::spec::{Environment, EnvironmentData, Spec};
+
+// ============================================================================
+// env add / remove / set / list
+// ============================================================================
 
 /// Options shared between env add and env set for building spec.
 /// For env set, only `Some`/non-empty values are applied.
@@ -75,8 +88,8 @@ fn apply_spec_options(spec: &mut Spec, opts: &EnvSpecOptions) -> Result<()> {
 }
 
 /// Add a new environment: create directory, main.jsonnet, and optionally spec.json.
-pub fn env_add(path: &str, inline: bool, opts: &EnvSpecOptions) -> Result<()> {
-	let path_buf = PathBuf::from(path);
+pub fn env_add(path: &Path, inline: bool, opts: &EnvSpecOptions) -> Result<()> {
+	let path_buf = path.to_path_buf();
 	let (root, env_dir) = if path_buf.is_absolute() {
 		let env_dir = if path_buf.exists() {
 			path_buf.canonicalize().unwrap_or(path_buf)
@@ -90,7 +103,7 @@ pub fn env_add(path: &str, inline: bool, opts: &EnvSpecOptions) -> Result<()> {
 		let cwd = std::env::current_dir().context("current_dir")?;
 		let root = jpath::find_root(&cwd)
 			.context("could not find project root (no jsonnetfile.json or tkrc.yaml)")?;
-		let env_dir = root.join(path);
+		let env_dir = root.join(&path_buf);
 		let env_dir = if env_dir.exists() {
 			env_dir.canonicalize().unwrap_or(env_dir)
 		} else {
@@ -155,14 +168,14 @@ pub fn env_add(path: &str, inline: bool, opts: &EnvSpecOptions) -> Result<()> {
 }
 
 /// Remove environment(s) by path. Each path is resolved to an environment directory and removed.
-pub fn env_remove(paths: &[String]) -> Result<()> {
+pub fn env_remove(paths: &[PathBuf]) -> Result<()> {
 	for path in paths {
-		let base = crate::jpath::resolve(path)
+		let base = crate::jsonnet::jpath::resolve(path)
 			.map(|r| r.base)
 			.with_context(|| {
 				format!(
 					"could not resolve environment at {} (not an environment or not found)",
-					path
+					path.display()
 				)
 			})?;
 		if base.join("spec.json").exists() || base.join("main.jsonnet").exists() {
@@ -178,8 +191,8 @@ pub fn env_remove(paths: &[String]) -> Result<()> {
 }
 
 /// Update an existing environment's spec.json with the given options.
-pub fn env_set(path: &str, opts: &EnvSpecOptions) -> Result<()> {
-	let jpath_result = crate::jpath::resolve(path).context("resolve environment path")?;
+pub fn env_set(path: &Path, opts: &EnvSpecOptions) -> Result<()> {
+	let jpath_result = crate::jsonnet::jpath::resolve(path).context("resolve environment path")?;
 	let spec_path = jpath_result.base.join("spec.json");
 	if !spec_path.exists() {
 		anyhow::bail!(
@@ -220,9 +233,9 @@ fn prune_empty_objects(value: &mut serde_json::Value) {
 }
 
 /// List environments in the given path, writing to the provided writer.
-pub fn list_envs_to_writer<W: Write>(path: Option<String>, json: bool, writer: W) -> Result<()> {
+pub fn list_envs_to_writer<W: Write>(path: Option<&Path>, json: bool, writer: W) -> Result<()> {
 	let search_path = path
-		.map(PathBuf::from)
+		.map(|p| p.to_path_buf())
 		.unwrap_or_else(|| std::env::current_dir().unwrap());
 	let mut envs = find_environments(&search_path)?;
 
@@ -527,13 +540,13 @@ noDataEnv(main)
 	let json_value: serde_json::Value =
 		serde_json::from_str(&json_str).context("Failed to parse manifested JSON")?;
 
-	let environments = extract_environments(&json_value)?;
+	let environments = extract_env_list(&json_value)?;
 
 	Ok(environments)
 }
 
 /// Extract Environment objects from Jsonnet output
-fn extract_environments(value: &serde_json::Value) -> Result<Vec<Environment>> {
+fn extract_env_list(value: &serde_json::Value) -> Result<Vec<Environment>> {
 	let mut environments = Vec::new();
 
 	match value {
@@ -550,7 +563,7 @@ fn extract_environments(value: &serde_json::Value) -> Result<Vec<Environment>> {
 
 			// Otherwise, recursively extract from each field
 			for (key, val) in obj {
-				let mut extracted = extract_environments(val)?;
+				let mut extracted = extract_env_list(val)?;
 				for env in &mut extracted {
 					if env.metadata.name.is_none() {
 						env.metadata.name = Some(key.clone());
@@ -561,7 +574,7 @@ fn extract_environments(value: &serde_json::Value) -> Result<Vec<Environment>> {
 		}
 		serde_json::Value::Array(arr) => {
 			for val in arr {
-				environments.extend(extract_environments(val)?);
+				environments.extend(extract_env_list(val)?);
 			}
 		}
 		_ => {}
@@ -596,6 +609,147 @@ fn load_static_env(path: &Path) -> Result<Environment> {
 	serde_json::from_str(&content)
 		.with_context(|| format!("Failed to parse {}", spec_path.display()))
 }
+
+// ============================================================================
+// Post-evaluation helpers
+// ============================================================================
+
+/// Get the name of an environment, if available.
+pub fn env_name(env_data: &EnvironmentData) -> Option<&str> {
+	env_data
+		.spec
+		.as_ref()
+		.and_then(|s| s.metadata.name.as_deref())
+}
+
+/// Format a list of environment names for error messages.
+pub fn get_environment_names(environments: &[EnvironmentData]) -> String {
+	let names: Vec<&str> = environments.iter().filter_map(env_name).collect();
+	if names.is_empty() {
+		"(unnamed environments)".to_string()
+	} else {
+		names.join(", ")
+	}
+}
+
+/// Filter environments by name, trying exact match first, then substring.
+pub fn filter_environments_by_name(
+	environments: Vec<EnvironmentData>,
+	target_name: &str,
+) -> Result<Vec<EnvironmentData>> {
+	// Try exact match first
+	let exact: Vec<_> = environments
+		.iter()
+		.filter(|e| env_name(e) == Some(target_name))
+		.cloned()
+		.collect();
+
+	if let [_single] = exact.as_slice() {
+		return Ok(exact);
+	}
+
+	// Fall back to substring matching
+	let matches: Vec<_> = environments
+		.into_iter()
+		.filter(|e| env_name(e).is_some_and(|n| n.contains(target_name)))
+		.collect();
+
+	if matches.is_empty() {
+		anyhow::bail!("no environment found matching name '{}'", target_name);
+	}
+
+	Ok(matches)
+}
+
+/// Extract Kubernetes manifests from the evaluation result.
+///
+/// The evaluation result can be:
+/// - A single manifest object
+/// - An array of manifests
+/// - A nested object containing manifests (Tanka environment format)
+pub fn extract_manifests(
+	value: &serde_json::Value,
+	target_filters: &[String],
+) -> Result<Vec<serde_json::Value>> {
+	let mut manifests = Vec::new();
+	collect_manifests(value, &mut manifests);
+
+	// Apply target filters if specified
+	if !target_filters.is_empty() {
+		let filters: Vec<regex::Regex> = target_filters
+			.iter()
+			.map(|f| regex::RegexBuilder::new(f).case_insensitive(true).build())
+			.collect::<Result<Vec<_>, _>>()
+			.context("invalid target filter regex")?;
+
+		manifests.retain(|m| {
+			let kind = m.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+			let name = m
+				.pointer("/metadata/name")
+				.and_then(|v| v.as_str())
+				.unwrap_or("");
+			let target = format!("{}/{}", kind, name);
+
+			filters.iter().any(|f| f.is_match(&target))
+		});
+	}
+
+	Ok(manifests)
+}
+
+/// Recursively collect Kubernetes manifests from a JSON value.
+pub fn collect_manifests(value: &serde_json::Value, manifests: &mut Vec<serde_json::Value>) {
+	match value {
+		serde_json::Value::Object(map) => {
+			// Check if this looks like a Kubernetes manifest
+			if map.contains_key("apiVersion") && map.contains_key("kind") {
+				// Check if it's a List
+				if map.get("kind").and_then(|v| v.as_str()) == Some("List") {
+					if let Some(items) = map.get("items").and_then(|v| v.as_array()) {
+						for item in items {
+							collect_manifests(item, manifests);
+						}
+					}
+				} else {
+					// Regular manifest
+					manifests.push(value.clone());
+				}
+			} else {
+				// Nested object - recurse into values
+				for (_, v) in map {
+					collect_manifests(v, manifests);
+				}
+			}
+		}
+		serde_json::Value::Array(arr) => {
+			for item in arr {
+				collect_manifests(item, manifests);
+			}
+		}
+		_ => {
+			// Ignore primitives
+		}
+	}
+}
+
+/// Process manifests by injecting labels and stripping null fields.
+///
+/// This performs the common pattern of:
+/// 1. Injecting tanka.dev/environment label if injectLabels is enabled
+/// 2. Stripping empty annotations/labels
+pub fn process_manifests(manifests: &mut [serde_json::Value], env_spec: &Option<Environment>) {
+	for manifest in manifests.iter_mut() {
+		crate::spec::inject_environment_label(manifest, env_spec);
+	}
+
+	for manifest in manifests.iter_mut() {
+		crate::spec::strip_null_metadata_fields(manifest);
+	}
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -648,12 +802,7 @@ mod tests {
 		let env_dir = temp_dir.path().join("my-env");
 		let mut output = Cursor::new(Vec::new());
 
-		list_envs_to_writer(
-			Some(env_dir.to_string_lossy().to_string()),
-			true,
-			&mut output,
-		)
-		.unwrap();
+		list_envs_to_writer(Some(env_dir.as_path()), true, &mut output).unwrap();
 
 		let output_str = String::from_utf8(output.into_inner()).unwrap();
 		let envs: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
@@ -670,12 +819,7 @@ mod tests {
 		let file_path = temp_dir.path().join("my-env").join("main.jsonnet");
 		let mut output = Cursor::new(Vec::new());
 
-		list_envs_to_writer(
-			Some(file_path.to_string_lossy().to_string()),
-			true,
-			&mut output,
-		)
-		.unwrap();
+		list_envs_to_writer(Some(file_path.as_path()), true, &mut output).unwrap();
 
 		let output_str = String::from_utf8(output.into_inner()).unwrap();
 		let envs: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
@@ -697,23 +841,13 @@ mod tests {
 
 		// List with directory path
 		let mut dir_output = Cursor::new(Vec::new());
-		list_envs_to_writer(
-			Some(env_dir.to_string_lossy().to_string()),
-			true,
-			&mut dir_output,
-		)
-		.unwrap();
+		list_envs_to_writer(Some(env_dir.as_path()), true, &mut dir_output).unwrap();
 		let dir_envs: Vec<serde_json::Value> =
 			serde_json::from_str(&String::from_utf8(dir_output.into_inner()).unwrap()).unwrap();
 
 		// List with file path
 		let mut file_output = Cursor::new(Vec::new());
-		list_envs_to_writer(
-			Some(file_path.to_string_lossy().to_string()),
-			true,
-			&mut file_output,
-		)
-		.unwrap();
+		list_envs_to_writer(Some(file_path.as_path()), true, &mut file_output).unwrap();
 		let file_envs: Vec<serde_json::Value> =
 			serde_json::from_str(&String::from_utf8(file_output.into_inner()).unwrap()).unwrap();
 
@@ -725,7 +859,7 @@ mod tests {
 	}
 
 	/// Helper to extract metadata.namespace values from env list --json output
-	fn list_env_namespaces(path: Option<String>) -> Vec<String> {
+	fn list_env_namespaces(path: Option<&Path>) -> Vec<String> {
 		let mut output = Cursor::new(Vec::new());
 		list_envs_to_writer(path, true, &mut output).unwrap();
 		let output_str = String::from_utf8(output.into_inner()).unwrap();
@@ -793,7 +927,7 @@ mod tests {
 		let project_root = create_nested_inline_env_fixture(temp_dir.path());
 
 		let expected_namespace = "my-env/main.jsonnet";
-		let ns = list_env_namespaces(Some(project_root.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(project_root.as_path()));
 		assert_eq!(ns.len(), 2);
 		assert!(
 			ns.iter().all(|n| n == expected_namespace),
@@ -810,7 +944,7 @@ mod tests {
 
 		let expected_namespace = "my-env/main.jsonnet";
 		let parent = project_root.parent().unwrap();
-		let ns = list_env_namespaces(Some(parent.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(parent));
 		assert_eq!(ns.len(), 2);
 		assert!(
 			ns.iter().all(|n| n == expected_namespace),
@@ -827,7 +961,7 @@ mod tests {
 
 		let expected_namespace = "my-env/main.jsonnet";
 		let child = project_root.join("my-env");
-		let ns = list_env_namespaces(Some(child.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(child.as_path()));
 		assert_eq!(ns.len(), 2);
 		assert!(
 			ns.iter().all(|n| n == expected_namespace),
@@ -844,7 +978,7 @@ mod tests {
 
 		let expected_namespace = "my-env/main.jsonnet";
 		let file_path = project_root.join("my-env").join("main.jsonnet");
-		let ns = list_env_namespaces(Some(file_path.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(file_path.as_path()));
 		assert_eq!(ns.len(), 2);
 		assert!(
 			ns.iter().all(|n| n == expected_namespace),
@@ -861,7 +995,7 @@ mod tests {
 		let project_root = create_nested_static_env_fixture(temp_dir.path());
 
 		let expected_namespace = "environments/dev/main.jsonnet";
-		let ns = list_env_namespaces(Some(project_root.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(project_root.as_path()));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -877,7 +1011,7 @@ mod tests {
 
 		let expected_namespace = "environments/dev/main.jsonnet";
 		let parent = project_root.parent().unwrap();
-		let ns = list_env_namespaces(Some(parent.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(parent));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -893,7 +1027,7 @@ mod tests {
 
 		let expected_namespace = "environments/dev/main.jsonnet";
 		let child = project_root.join("environments");
-		let ns = list_env_namespaces(Some(child.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(child.as_path()));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -909,7 +1043,7 @@ mod tests {
 
 		let expected_namespace = "environments/dev/main.jsonnet";
 		let env_dir = project_root.join("environments").join("dev");
-		let ns = list_env_namespaces(Some(env_dir.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(env_dir.as_path()));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -968,7 +1102,7 @@ mod tests {
 		let expected_namespace = "environments/ge-logs/dev.ge-logs/main.jsonnet";
 
 		// From root
-		let ns = list_env_namespaces(Some(project_root.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(project_root.as_path()));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -978,7 +1112,7 @@ mod tests {
 
 		// From environments/ subdirectory
 		let child = project_root.join("environments");
-		let ns = list_env_namespaces(Some(child.to_string_lossy().to_string()));
+		let ns = list_env_namespaces(Some(child.as_path()));
 		assert_eq!(ns.len(), 1);
 		assert_eq!(
 			ns[0], expected_namespace,
@@ -1014,7 +1148,7 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: Some(true),
 		};
-		env_add(env_path.to_str().unwrap(), false, &opts).unwrap();
+		env_add(&env_path, false, &opts).unwrap();
 
 		assert!(env_path.is_dir(), "environments/dev should exist");
 		assert!(env_path.join("main.jsonnet").exists());
@@ -1045,7 +1179,7 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: None,
 		};
-		env_add(env_path.to_str().unwrap(), true, &opts).unwrap();
+		env_add(&env_path, true, &opts).unwrap();
 
 		assert!(env_path.is_dir());
 		assert!(env_path.join("main.jsonnet").exists());
@@ -1075,8 +1209,8 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: Some(false),
 		};
-		env_add(env_path.to_str().unwrap(), false, &opts).unwrap();
-		let err = env_add(env_path.to_str().unwrap(), false, &opts).unwrap_err();
+		env_add(&env_path, false, &opts).unwrap();
+		let err = env_add(&env_path, false, &opts).unwrap_err();
 		assert!(err.to_string().contains("already exists"));
 	}
 
@@ -1095,7 +1229,7 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: Some(false),
 		};
-		env_add(env_path.to_str().unwrap(), false, &add_opts).unwrap();
+		env_add(&env_path, false, &add_opts).unwrap();
 
 		let set_opts = EnvSpecOptions {
 			namespace: Some("updated-ns".to_string()),
@@ -1105,7 +1239,7 @@ mod tests {
 			diff_strategy: Some("server".to_string()),
 			inject_labels: Some(true),
 		};
-		env_set(env_path.to_str().unwrap(), &set_opts).unwrap();
+		env_set(&env_path, &set_opts).unwrap();
 
 		let spec_content = fs::read_to_string(env_path.join("spec.json")).unwrap();
 		let spec_value: serde_json::Value = serde_json::from_str(&spec_content).unwrap();
@@ -1133,10 +1267,10 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: Some(false),
 		};
-		env_add(env_path.to_str().unwrap(), false, &opts).unwrap();
+		env_add(&env_path, false, &opts).unwrap();
 		assert!(env_path.exists());
 
-		env_remove(&[env_path.to_string_lossy().to_string()]).unwrap();
+		env_remove(&[env_path.clone()]).unwrap();
 		assert!(!env_path.exists());
 	}
 
@@ -1156,15 +1290,413 @@ mod tests {
 			diff_strategy: None,
 			inject_labels: Some(false),
 		};
-		env_add(env_a.to_str().unwrap(), false, &opts).unwrap();
-		env_add(env_b.to_str().unwrap(), false, &opts).unwrap();
+		env_add(&env_a, false, &opts).unwrap();
+		env_add(&env_b, false, &opts).unwrap();
 
-		env_remove(&[
-			env_a.to_string_lossy().to_string(),
-			env_b.to_string_lossy().to_string(),
-		])
-		.unwrap();
+		env_remove(&[env_a.clone(), env_b.clone()]).unwrap();
 		assert!(!env_a.exists());
 		assert!(!env_b.exists());
+	}
+
+	// -----------------------------------------------------------------------
+	// filter_environments_by_name tests (mirrors Tanka's pkg/tanka/load_test.go)
+	// -----------------------------------------------------------------------
+
+	fn make_env(name: &str) -> EnvironmentData {
+		EnvironmentData {
+			spec: Some(Environment {
+				metadata: crate::spec::Metadata {
+					name: Some(name.to_string()),
+					namespace: None,
+					labels: None,
+				},
+				..Default::default()
+			}),
+			data: serde_json::json!({}),
+		}
+	}
+
+	#[test]
+	fn test_filter_environments_by_name_exact_match() {
+		let envs = vec![
+			make_env("project1-env1"),
+			make_env("project1-env2"),
+			make_env("project2-env1"),
+		];
+
+		let result = filter_environments_by_name(envs, "project1-env1").unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(env_name(&result[0]), Some("project1-env1"));
+	}
+
+	#[test]
+	fn test_filter_environments_by_name_partial_match_single() {
+		let envs = vec![
+			make_env("project1-env1"),
+			make_env("project1-env2"),
+			make_env("project2-env1"),
+		];
+
+		let result = filter_environments_by_name(envs, "project2").unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(env_name(&result[0]), Some("project2-env1"));
+	}
+
+	#[test]
+	fn test_filter_environments_by_name_partial_match_multiple() {
+		let envs = vec![
+			make_env("project1-env1"),
+			make_env("project1-env2"),
+			make_env("project2-env1"),
+		];
+
+		let result = filter_environments_by_name(envs, "project1").unwrap();
+		assert_eq!(result.len(), 2);
+	}
+
+	#[test]
+	fn test_filter_environments_by_name_no_match() {
+		let envs = vec![make_env("project1-env1"), make_env("project1-env2")];
+
+		let result = filter_environments_by_name(envs, "no match");
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_filter_environments_by_name_full_match_has_priority() {
+		// Mirrors Tanka's TestLoadSelectEnvironmentFullMatchHasPriority
+		let envs = vec![make_env("base"), make_env("base-extended")];
+
+		let result = filter_environments_by_name(envs, "base").unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(env_name(&result[0]), Some("base"));
+	}
+
+	// -----------------------------------------------------------------------
+	// extract_manifests tests (mirrors Tanka's pkg/process/extract_test.go)
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn test_extract_manifests_regular() {
+		let value = serde_json::json!({
+			"deployment": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "grafana" }
+			},
+			"service": {
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "grafana" }
+			}
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 2);
+	}
+
+	#[test]
+	fn test_extract_manifests_flat() {
+		let value = serde_json::json!({
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": { "name": "grafana" }
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 1);
+	}
+
+	#[test]
+	fn test_extract_manifests_deep_nesting() {
+		let value = serde_json::json!({
+			"app": {
+				"web": {
+					"backend": {
+						"server": {
+							"grafana": {
+								"deployment": {
+									"apiVersion": "apps/v1",
+									"kind": "Deployment",
+									"metadata": { "name": "grafana" }
+								}
+							}
+						}
+					},
+					"frontend": {
+						"nodejs": {
+							"express": {
+								"service": {
+									"apiVersion": "v1",
+									"kind": "Service",
+									"metadata": { "name": "frontend" }
+								}
+							}
+						}
+					}
+				}
+			}
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 2);
+	}
+
+	#[test]
+	fn test_extract_manifests_array() {
+		let value = serde_json::json!([
+			{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "cm1" }
+			},
+			{
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "cm2" }
+			}
+		]);
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 2);
+	}
+
+	#[test]
+	fn test_extract_manifests_nil_values_ignored() {
+		let value = serde_json::json!({
+			"enabled": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "config" }
+			},
+			"disabledObject": null
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 1);
+	}
+
+	#[test]
+	fn test_extract_manifests_unwrap_list() {
+		let value = serde_json::json!({
+			"foo": {
+				"apiVersion": "v1",
+				"kind": "List",
+				"items": [
+					{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": { "name": "cm1" }
+					},
+					{
+						"apiVersion": "v1",
+						"kind": "ConfigMap",
+						"metadata": { "name": "cm2" }
+					}
+				]
+			}
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 2);
+	}
+
+	#[test]
+	fn test_extract_manifests_primitives_ignored() {
+		let value = serde_json::json!({
+			"string_val": "hello",
+			"number_val": 42,
+			"bool_val": true,
+			"cm": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "test" }
+			}
+		});
+
+		let manifests = extract_manifests(&value, &[]).unwrap();
+		assert_eq!(manifests.len(), 1);
+	}
+
+	#[test]
+	fn test_extract_manifests_target_filter_regex() {
+		let value = serde_json::json!({
+			"deployment": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "grafana" }
+			},
+			"service": {
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "frontend" }
+			}
+		});
+
+		let manifests = extract_manifests(&value, &["Deployment/.*".to_string()]).unwrap();
+		assert_eq!(manifests.len(), 1);
+		assert_eq!(manifests[0]["kind"], "Deployment");
+	}
+
+	#[test]
+	fn test_extract_manifests_target_filter_multiple() {
+		let value = serde_json::json!({
+			"dep": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "grafana" }
+			},
+			"svc": {
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "frontend" }
+			},
+			"ns": {
+				"apiVersion": "v1",
+				"kind": "Namespace",
+				"metadata": { "name": "monitoring" }
+			}
+		});
+
+		let manifests = extract_manifests(
+			&value,
+			&[
+				"Deployment/grafana".to_string(),
+				"Service/frontend".to_string(),
+			],
+		)
+		.unwrap();
+		assert_eq!(manifests.len(), 2);
+	}
+
+	// -----------------------------------------------------------------------
+	// collect_manifests tests
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn test_collect_manifests_nested_objects() {
+		let value = serde_json::json!({
+			"app": {
+				"nested": {
+					"apiVersion": "v1",
+					"kind": "ConfigMap",
+					"metadata": { "name": "nested" }
+				}
+			}
+		});
+
+		let mut manifests = Vec::new();
+		collect_manifests(&value, &mut manifests);
+		assert_eq!(manifests.len(), 1);
+	}
+
+	#[test]
+	fn test_collect_manifests_environment_wrapper_extracts_data() {
+		let value = serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "List",
+			"items": [
+				{
+					"apiVersion": "v1",
+					"kind": "ConfigMap",
+					"metadata": { "name": "cm1" }
+				}
+			]
+		});
+
+		let mut manifests = Vec::new();
+		collect_manifests(&value, &mut manifests);
+		assert_eq!(manifests.len(), 1);
+		assert_eq!(manifests[0]["metadata"]["name"], "cm1");
+	}
+
+	// -----------------------------------------------------------------------
+	// process_manifests tests (mirrors Tanka's Process() integration)
+	// -----------------------------------------------------------------------
+
+	#[test]
+	fn test_process_manifests_inject_labels() {
+		let env = Some(Environment {
+			spec: crate::spec::Spec {
+				inject_labels: Some(true),
+				..Default::default()
+			},
+			metadata: crate::spec::Metadata {
+				name: Some("test-env".to_string()),
+				namespace: Some("main.jsonnet".to_string()),
+				labels: None,
+			},
+			..Default::default()
+		});
+
+		let mut manifests = vec![serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "test" }
+		})];
+
+		process_manifests(&mut manifests, &env);
+
+		let labels = manifests[0]["metadata"]["labels"].as_object().unwrap();
+		assert!(labels.contains_key("tanka.dev/environment"));
+	}
+
+	#[test]
+	fn test_process_manifests_strips_null_labels() {
+		let mut manifests = vec![serde_json::json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "test",
+				"labels": null,
+				"annotations": null
+			}
+		})];
+
+		process_manifests(&mut manifests, &None);
+
+		assert!(manifests[0]["metadata"].get("labels").is_none());
+		assert!(manifests[0]["metadata"].get("annotations").is_none());
+	}
+
+	#[test]
+	fn test_process_manifests_order_consistent() {
+		// Mirrors Tanka's TestProcessOrder
+		let manifests_data = vec![
+			serde_json::json!({
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "deploy1" }
+			}),
+			serde_json::json!({
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "svc1" }
+			}),
+			serde_json::json!({
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "cm1" }
+			}),
+		];
+
+		let env = Some(Environment {
+			spec: crate::spec::Spec {
+				inject_labels: Some(true),
+				..Default::default()
+			},
+			..Default::default()
+		});
+
+		let mut results = Vec::new();
+		for _ in 0..10 {
+			let mut manifests = manifests_data.clone();
+			process_manifests(&mut manifests, &env);
+			results.push(manifests);
+		}
+
+		for i in 1..10 {
+			assert_eq!(results[0], results[i], "run {} differs from run 0", i);
+		}
 	}
 }

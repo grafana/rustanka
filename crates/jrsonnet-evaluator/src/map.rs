@@ -24,14 +24,16 @@ impl LayeredHashMap {
 		}
 	}
 
-	pub(crate) fn new(layer: FxHashMap<IStr, Thunk<Val>>) -> Self {
+	pub(crate) fn new(mut layer: FxHashMap<IStr, Thunk<Val>>) -> Self {
+		layer.shrink_to_fit();
 		Self(Cc::new(LayeredHashMapInternals {
 			parent: None,
 			current: layer,
 		}))
 	}
 
-	pub fn extend(self, new_layer: FxHashMap<IStr, Thunk<Val>>) -> Self {
+	pub fn extend(self, mut new_layer: FxHashMap<IStr, Thunk<Val>>) -> Self {
+		new_layer.shrink_to_fit();
 		Self(Cc::new(LayeredHashMapInternals {
 			parent: Some(self),
 			current: new_layer,

@@ -220,6 +220,17 @@ pub trait ObjectCore: Trace + Any + Debug {
 
 #[derive(Clone, Trace)]
 pub struct WeakObjValue(#[trace(skip)] Weak<ObjValueInner>);
+impl WeakObjValue {
+	/// Returns `true` if the referenced object is still alive.
+	pub fn is_alive(&self) -> bool {
+		self.0.upgrade().is_some()
+	}
+	/// Attempts to obtain a strong reference. Returns `None` if the object
+	/// has been collected.
+	pub fn upgrade(&self) -> Option<ObjValue> {
+		self.0.upgrade().map(ObjValue)
+	}
+}
 impl Debug for WeakObjValue {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_tuple("WeakObjValue").finish()
@@ -246,10 +257,124 @@ cc_dyn!(
 	CcObjectCore, ObjectCore,
 	pub fn new() {...}
 );
+
+/// A layered linked list of `CcObjectCore`s. Clone is O(1) via Cc.
+/// `extend` creates a new node with `self` as parent — O(new_cores.len()).
+/// Iteration walks the chain (parent first, then current).
+#[derive(Trace, Debug)]
+#[trace(tracking(force))]
+struct LayeredCoresInner {
+	parent: Option<LayeredCores>,
+	parent_len: usize,
+	current: Vec<CcObjectCore>,
+}
+
+#[derive(Trace, Debug)]
+struct LayeredCores(Cc<LayeredCoresInner>);
+impl Clone for LayeredCores {
+	fn clone(&self) -> Self {
+		Self(self.0.clone())
+	}
+}
+impl LayeredCores {
+	fn new(cores: Vec<CcObjectCore>) -> Self {
+		Self(Cc::new(LayeredCoresInner {
+			parent: None,
+			parent_len: 0,
+			current: cores,
+		}))
+	}
+	fn empty() -> Self {
+		Self::new(vec![])
+	}
+	fn extend(self, mut more: Vec<CcObjectCore>) -> Self {
+		more.shrink_to_fit();
+		let parent_len = self.len();
+		Self(Cc::new(LayeredCoresInner {
+			parent: Some(self),
+			parent_len,
+			current: more,
+		}))
+	}
+	fn len(&self) -> usize {
+		self.0.parent_len + self.0.current.len()
+	}
+	fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
+	/// Collect all cores into a flat Vec (parent chain first, then current).
+	fn collect_vec(&self) -> Vec<CcObjectCore> {
+		let mut out = Vec::with_capacity(self.len());
+		self.collect_into(&mut out);
+		out
+	}
+	fn collect_into(&self, out: &mut Vec<CcObjectCore>) {
+		if let Some(parent) = &self.0.parent {
+			parent.collect_into(out);
+		}
+		out.extend(self.0.current.iter().cloned());
+	}
+	/// Iterate all cores in forward order with absolute index, calling f for each.
+	fn for_each_enumerated(&self, f: &mut impl FnMut(usize, &CcObjectCore)) {
+		if let Some(parent) = &self.0.parent {
+			parent.for_each_enumerated(f);
+		}
+		let offset = self.0.parent_len;
+		for (i, core) in self.0.current.iter().enumerate() {
+			f(offset + i, core);
+		}
+	}
+	/// Iterate cores in reverse order, calling f for each.
+	fn for_each_rev(&self, f: &mut impl FnMut(&CcObjectCore)) {
+		for core in self.0.current.iter().rev() {
+			f(core);
+		}
+		if let Some(parent) = &self.0.parent {
+			parent.for_each_rev(f);
+		}
+	}
+	/// Iterate cores [0..limit) in reverse order with absolute index.
+	fn for_each_rev_up_to(
+		&self,
+		limit: usize,
+		f: &mut impl FnMut(usize, &CcObjectCore) -> ControlFlow<()>,
+	) {
+		let offset = self.0.parent_len;
+		let end = limit.saturating_sub(offset).min(self.0.current.len());
+		for i in (0..end).rev() {
+			if f(offset + i, &self.0.current[i]).is_break() {
+				return;
+			}
+		}
+		if let Some(parent) = &self.0.parent {
+			parent.for_each_rev_up_to(limit.min(offset), f);
+		}
+	}
+	/// Like for_each_rev_up_to but the callback can return Result.
+	fn try_for_each_rev_up_to<E>(
+		&self,
+		limit: usize,
+		f: &mut impl FnMut(usize, &CcObjectCore) -> Result<ControlFlow<()>, E>,
+	) -> Result<(), E> {
+		let offset = self.0.parent_len;
+		let end = limit.saturating_sub(offset).min(self.0.current.len());
+		for i in (0..end).rev() {
+			match f(offset + i, &self.0.current[i])? {
+				ControlFlow::Continue(()) => {}
+				ControlFlow::Break(()) => return Ok(()),
+			}
+		}
+		if let Some(parent) = &self.0.parent {
+			parent.try_for_each_rev_up_to(limit.min(offset), f)?;
+		}
+		Ok(())
+	}
+}
+
 #[derive(Trace, Educe)]
 #[educe(Debug)]
 struct ObjValueInner {
-	cores: Vec<CcObjectCore>,
+	cores: LayeredCores,
 	assertions_ran: Cell<bool>,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
 }
@@ -308,9 +433,16 @@ fn finish_asserting(obj: &ObjValue) {
 	});
 }
 
+/// Resets all thread-local state in obj.rs to defaults.
+pub fn reset_obj_thread_locals() {
+	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
+	SKIP_ASSERTIONS.with(|v| v.set(false));
+	ASSERTION_DEPTH.with(|v| v.set(0));
+}
+
 thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
-		cores: vec![],
+		cores: LayeredCores::empty(),
 		assertions_ran: Cell::new(true),
 		value_cache: Default::default(),
 	}))
@@ -487,10 +619,16 @@ impl SupThis {
 		}
 	}
 }
-#[derive(Trace, PartialEq, Eq, Hash, Debug)]
+#[derive(Trace, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct WeakSupThis {
 	sup: CoreIdx,
 	this: WeakObjValue,
+}
+impl WeakSupThis {
+	/// Returns `true` if the referenced object is still alive.
+	pub fn is_alive(&self) -> bool {
+		self.this.is_alive()
+	}
 }
 
 impl ObjValue {
@@ -527,10 +665,11 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		let mut cores = sup.0.cores.clone();
-		cores.extend(self.0.cores.iter().cloned());
+		// Collect self's cores (the right/this side) — typically 1 element.
+		// Then extend sup's LayeredCores with them — O(self_cores.len()), not O(sup_cores.len()).
+		let self_cores = self.0.cores.collect_vec();
 		ObjValue(Cc::new(ObjValueInner {
-			cores,
+			cores: sup.0.cores.clone().extend(self_cores),
 			value_cache: RefCell::default(),
 			assertions_ran: Cell::new(false),
 		}))
@@ -567,13 +706,16 @@ impl ObjValue {
 		handler: &mut EnumFieldsHandler<'_>,
 		idx: CoreIdx,
 	) -> bool {
-		for core in self.0.cores[..idx.idx].iter().rev() {
+		let mut result = true;
+		self.0.cores.for_each_rev_up_to(idx.idx, &mut |_, core| {
 			if !core.0.enum_fields_core(super_depth, handler) {
-				return false;
+				result = false;
+				return ControlFlow::Break(());
 			}
 			super_depth.deepen();
-		}
-		true
+			ControlFlow::Continue(())
+		});
+		result
 	}
 
 	pub fn has_field_include_hidden(&self, name: IStr) -> bool {
@@ -586,22 +728,24 @@ impl ObjValue {
 	}
 	fn has_field_include_hidden_idx(&self, name: IStr, core: CoreIdx) -> bool {
 		let mut skip = Saturating(0usize);
-		for ele in self.0.cores[..core.idx].iter().rev() {
+		let mut found = false;
+		self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
 			match ele.0.has_field_include_hidden_core(name.clone()) {
 				HasFieldIncludeHidden::Exists => {
 					if skip.0 == 0 {
-						return true;
+						found = true;
+						return ControlFlow::Break(());
 					}
 				}
 				HasFieldIncludeHidden::Omit(new_skip) => {
-					// +1 including this core
 					skip = skip.max(new_skip + Saturating(1));
 				}
 				HasFieldIncludeHidden::NotFound => {}
 			}
 			skip -= 1;
-		}
-		false
+			ControlFlow::Continue(())
+		});
+		found
 	}
 	pub fn has_field(&self, name: IStr) -> bool {
 		match self.field_visibility(name) {
@@ -629,12 +773,11 @@ impl ObjValue {
 		let cache_key = (key.clone(), core);
 		{
 			let mut cache = self.0.value_cache.borrow_mut();
-			// entry_ref candidate?
 			match cache.entry(cache_key.clone()) {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
 					CacheValue::Pending => {
-						if !is_asserting(self) {
+						if !is_asserting(self) && !is_in_assertion() {
 							bail!(InfiniteRecursionDetected);
 						}
 					}
@@ -660,7 +803,13 @@ impl ObjValue {
 		}
 		let mut add_stack = Vec::with_capacity(2);
 		let mut skip = Saturating(0);
-		for (sup, core) in self.0.cores[..core.idx].iter().enumerate().rev() {
+		let mut early_return: Option<Result<Option<Val>>> = None;
+		self.0.cores.try_for_each_rev_up_to(core.idx, &mut |sup,
+		                                                     core|
+		 -> Result<
+			ControlFlow<()>,
+			crate::error::Error,
+		> {
 			let sup_this = SupThis {
 				sup: CoreIdx { idx: sup },
 				this: self.clone(),
@@ -668,13 +817,14 @@ impl ObjValue {
 			match core.0.get_for_core(key.clone(), sup_this, skip.0 != 0)? {
 				GetFor::Final(val) if add_stack.is_empty() => {
 					if skip.0 == 0 {
-						return Ok(Some(val));
+						early_return = Some(Ok(Some(val)));
+						return Ok(ControlFlow::Break(()));
 					}
 				}
 				GetFor::Final(val) => {
 					if skip.0 == 0 {
 						add_stack.push(val);
-						break;
+						return Ok(ControlFlow::Break(()));
 					}
 				}
 				GetFor::SuperPlus(val) => {
@@ -689,6 +839,10 @@ impl ObjValue {
 				GetFor::NotFound => {}
 			}
 			skip -= 1;
+			Ok(ControlFlow::Continue(()))
+		})?;
+		if let Some(result) = early_return {
+			return result;
 		}
 		if add_stack.is_empty() {
 			// None of layers had this field
@@ -727,12 +881,14 @@ impl ObjValue {
 	fn field_visibility_idx(&self, field: IStr, core: CoreIdx) -> Option<Visibility> {
 		let mut exists = false;
 		let mut skip = Saturating(0usize);
-		for ele in self.0.cores[..core.idx].iter().rev() {
+		let mut early = None;
+		self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
 			let vis = ele.0.field_visibility_core(field.clone());
 			match vis {
 				FieldVisibility::Found(vis @ (Visibility::Unhide | Visibility::Hidden)) => {
 					if skip.0 == 0 {
-						return Some(vis);
+						early = Some(vis);
+						return ControlFlow::Break(());
 					}
 				}
 				FieldVisibility::Found(Visibility::Normal) => {
@@ -742,13 +898,13 @@ impl ObjValue {
 				}
 				FieldVisibility::NotFound => {}
 				FieldVisibility::Omit(new_skip) => {
-					// +1 including this core
 					skip = skip.max(new_skip + Saturating(1));
 				}
 			}
 			skip -= 1;
-		}
-		exists.then_some(Visibility::Normal)
+			ControlFlow::Continue(())
+		});
+		early.or_else(|| exists.then_some(Visibility::Normal))
 	}
 
 	pub fn run_assertions(&self) -> Result<()> {
@@ -765,14 +921,19 @@ impl ObjValue {
 			return Ok(());
 		}
 		let _guard = AssertionGuard::new();
-		for (idx, ele) in self.0.cores.iter().enumerate() {
+		let mut assertion_err: Option<crate::error::Error> = None;
+		self.0.cores.for_each_enumerated(&mut |idx, ele| {
 			let sup_this = SupThis {
 				sup: CoreIdx { idx },
 				this: self.clone(),
 			};
-			ele.0.run_assertions_core(sup_this).inspect_err(|_e| {
+			if let Err(e) = ele.0.run_assertions_core(sup_this) {
 				finish_asserting(self);
-			})?;
+				assertion_err = Some(e);
+			}
+		});
+		if let Some(e) = assertion_err {
+			return Err(e);
 		}
 		finish_asserting(self);
 		self.0.assertions_ran.set(true);
@@ -872,7 +1033,7 @@ impl ObjValue {
 
 		let mut super_depth = SuperDepth::default();
 		let mut omit_index = Saturating(0);
-		for core in self.0.cores.iter().rev() {
+		self.0.cores.for_each_rev(&mut |core| {
 			core.0
 				.enum_fields_core(&mut super_depth, &mut |_depth, _index, name, visibility| {
 					let entry = out.entry(name);
@@ -920,7 +1081,7 @@ impl ObjValue {
 
 			super_depth.deepen();
 			omit_index += 1;
-		}
+		});
 
 		out.retain(|_, v| v.exists_visible.is_some());
 
@@ -1128,7 +1289,7 @@ impl ObjValueBuilder {
 		self
 	}
 	pub fn with_super(&mut self, super_obj: ObjValue) -> &mut Self {
-		self.sup = super_obj.0.cores.clone();
+		self.sup = super_obj.0.cores.collect_vec();
 		self
 	}
 
@@ -1165,6 +1326,8 @@ impl ObjValueBuilder {
 
 	fn commit(&mut self) {
 		if !self.new.is_empty() {
+			self.new.this_entries.shrink_to_fit();
+			self.new.assertions.shrink_to_fit();
 			self.sup.push(CcObjectCore::new(mem::take(&mut self.new)));
 		}
 		self.next_field_index = FieldIndex::default();
@@ -1184,7 +1347,7 @@ impl ObjValueBuilder {
 			return ObjValue::empty();
 		}
 		ObjValue(Cc::new(ObjValueInner {
-			cores: self.sup,
+			cores: LayeredCores::new(self.sup),
 			assertions_ran: Cell::new(false),
 			value_cache: Default::default(),
 		}))

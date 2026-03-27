@@ -47,7 +47,7 @@ pub use jrsonnet_interner::{IBytes, IStr};
 #[doc(hidden)]
 pub use jrsonnet_macros;
 pub use jrsonnet_parser as parser;
-use jrsonnet_parser::{LocExpr, ParserSettings, Source, SourcePath};
+use jrsonnet_parser::{AnalyzedExpr, ParserSettings, Source, SourcePath};
 pub use obj::*;
 pub use rustc_hash;
 use rustc_hash::FxHashMap;
@@ -184,12 +184,24 @@ impl_context_initializer! {
 	A @ B C D E F G
 }
 
+/// How an evaluated import result is cached.
+#[derive(Trace)]
+enum CachedEvaluation {
+	/// Object results are stored as weak references. The value stays alive
+	/// only while callers hold their own [`ObjValue`] references. When all
+	/// callers drop, the weak expires and a re-import will re-evaluate.
+	WeakObj(WeakObjValue),
+	/// Non-object results (strings, numbers, arrays, etc.) are small and
+	/// stored as strong references.
+	Other(Val),
+}
+
 #[derive(Trace)]
 struct FileData {
 	string: Option<IStr>,
 	bytes: Option<IBytes>,
-	parsed: Option<LocExpr>,
-	evaluated: Option<Val>,
+	parsed: Option<AnalyzedExpr>,
+	evaluated: Option<CachedEvaluation>,
 
 	evaluating: bool,
 }
@@ -337,8 +349,16 @@ impl State {
 				))
 			}
 		};
-		if let Some(val) = &file.evaluated {
-			return Ok(val.clone());
+		match &file.evaluated {
+			Some(CachedEvaluation::WeakObj(weak)) => {
+				if let Some(obj) = weak.upgrade() {
+					return Ok(Val::Obj(obj));
+				}
+				// Weak expired — fall through to re-evaluate
+				file.evaluated = None;
+			}
+			Some(CachedEvaluation::Other(val)) => return Ok(val.clone()),
+			None => {}
 		}
 		let code = file
 			.get_string()
@@ -386,7 +406,10 @@ impl State {
 		file.evaluating = false;
 		match res {
 			Ok(v) => {
-				file.evaluated = Some(v.clone());
+				file.evaluated = Some(match &v {
+					Val::Obj(obj) => CachedEvaluation::WeakObj(obj.clone().downgrade()),
+					other => CachedEvaluation::Other(other.clone()),
+				});
 				Ok(v)
 			}
 			Err(e) => Err(e),
@@ -429,6 +452,15 @@ impl State {
 impl State {
 	fn file_cache(&self) -> RefMut<'_, FxHashMap<SourcePath, FileData>> {
 		self.0.file_cache.borrow_mut()
+	}
+
+	/// Clears thread-local caches and resets transient state.
+	/// Call between evaluations to release memory held by the file cache
+	/// and other accumulated thread-local data.
+	pub fn clear_thread_local_state(&self) {
+		self.file_cache().clear();
+		reset_obj_thread_locals();
+		manifest::set_use_go_style_floats(false);
 	}
 }
 /// Executes code creating a new stack frame, to be replaced with try{}

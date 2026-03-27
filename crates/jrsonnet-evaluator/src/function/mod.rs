@@ -4,7 +4,7 @@ pub use arglike::{ArgLike, ArgsLike, TlaArg};
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
 pub use jrsonnet_macros::builtin;
-use jrsonnet_parser::{Destruct, Expr, LocExpr, ParamsDesc, Span};
+use jrsonnet_parser::{AnalyzedExpr, Destruct, Expr, ParamsDesc, Span};
 
 use self::{
 	arglike::OptionalContext,
@@ -66,7 +66,7 @@ pub struct FuncDesc {
 	/// Function parameter definition
 	pub params: ParamsDesc,
 	/// Function body
-	pub body: LocExpr,
+	pub body: AnalyzedExpr,
 }
 impl FuncDesc {
 	/// Create body context, but fill arguments without defaults with lazy error

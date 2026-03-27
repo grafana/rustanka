@@ -5,7 +5,7 @@ use std::io::Write;
 use anyhow::Result;
 use clap::Args;
 
-use crate::{commands::util::UnimplementedArgs, env as env_impl};
+use crate::{commands::common::UnimplementedArgs, environments};
 
 #[derive(Args)]
 pub struct ListArgs {
@@ -53,7 +53,11 @@ pub struct ListArgs {
 pub fn run<W: Write>(args: ListArgs, writer: W) -> Result<()> {
 	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
 
-	env_impl::list_envs_to_writer(args.path, args.json, writer)
+	environments::list_envs_to_writer(
+		args.path.as_deref().map(std::path::Path::new),
+		args.json,
+		writer,
+	)
 }
 
 #[cfg(test)]
@@ -61,7 +65,7 @@ mod tests {
 	use assert_matches::assert_matches;
 
 	use super::*;
-	use crate::{commands::util::BrokenPipeGuard, test_utils::BrokenPipeWriter};
+	use crate::{commands::common::BrokenPipeGuard, test_utils::BrokenPipeWriter};
 
 	fn make_args() -> ListArgs {
 		ListArgs {

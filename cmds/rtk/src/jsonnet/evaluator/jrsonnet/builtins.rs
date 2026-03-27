@@ -231,7 +231,7 @@ fn to_snake_case(s: &str) -> String {
 /// Tanka-compatible parseJson
 /// Parses a JSON string into a value
 #[builtin]
-pub fn builtin_tanka_parse_json(json: String) -> Result<Val> {
+pub fn parse_json(json: String) -> Result<Val> {
 	serde_json::from_str(&json)
 		.map_err(|e| RuntimeError(format!("failed to parse json: {e}").into()).into())
 }
@@ -239,7 +239,7 @@ pub fn builtin_tanka_parse_json(json: String) -> Result<Val> {
 /// Tanka-compatible parseYaml
 /// Parses a YAML string (potentially multiple documents) into an array of values
 #[builtin]
-pub fn builtin_tanka_parse_yaml(yaml: String) -> Result<Val> {
+pub fn parse_yaml(yaml: String) -> Result<Val> {
 	// Use serde-saphyr which properly handles YAML 1.1 features including:
 	// - Multiple merge keys (<<) in the same mapping
 	// - Octal numbers (0755 -> 493)
@@ -257,7 +257,7 @@ pub fn builtin_tanka_parse_yaml(yaml: String) -> Result<Val> {
 /// Tanka-compatible manifestJsonFromJson
 /// Reserializes JSON with custom indentation
 #[builtin]
-pub fn builtin_tanka_manifest_json_from_json(json: String, indent: usize) -> Result<String> {
+pub fn manifest_json_from_json(json: String, indent: usize) -> Result<String> {
 	let parsed: serde_json::Value = serde_json::from_str(&json)
 		.map_err(|e| RuntimeError(format!("failed to parse json: {e}").into()))?;
 
@@ -386,7 +386,7 @@ fn yaml_v3_key_compare(a: &str, b: &str) -> std::cmp::Ordering {
 /// Tanka-compatible manifestYamlFromJson
 /// Converts JSON string to YAML using Go yaml.v3 compatible settings
 #[builtin]
-pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
+pub fn manifest_yaml_from_json(json: String) -> Result<String> {
 	let parsed: serde_json::Value = serde_json::from_str(&json)
 		.map_err(|e| RuntimeError(format!("failed to parse json: {e}").into()))?;
 
@@ -425,7 +425,7 @@ pub fn builtin_tanka_manifest_yaml_from_json(json: String) -> Result<String> {
 /// Tanka-compatible sha256
 /// Computes SHA256 hash of a string
 #[builtin]
-pub fn builtin_tanka_sha256(str: String) -> String {
+pub fn sha256(str: String) -> String {
 	let mut hasher = Sha256::new();
 	hasher.update(str.as_bytes());
 	format!("{:x}", hasher.finalize())
@@ -435,7 +435,7 @@ pub fn builtin_tanka_sha256(str: String) -> String {
 /// Escapes regex special characters using Go's regexp.QuoteMeta set: \.+*?()|[]{}^$
 /// This matches Go's behavior exactly (Rust's regex::escape escapes additional characters like `-`).
 #[builtin]
-pub fn builtin_escape_string_regex(pattern: String) -> String {
+pub fn escape_string_regex(pattern: String) -> String {
 	const GO_META: &str = r"\.+*?()|[]{}^$";
 	let mut escaped = String::with_capacity(pattern.len() * 2);
 	for ch in pattern.chars() {
@@ -452,11 +452,7 @@ pub fn builtin_escape_string_regex(pattern: String) -> String {
 #[builtin(fields(
     cache: Rc<RegexCacheInner>,
 ))]
-pub fn builtin_tanka_regex_match(
-	this: &builtin_tanka_regex_match,
-	regex: IStr,
-	string: String,
-) -> Result<bool> {
+pub fn regex_match(this: &regex_match, regex: IStr, string: String) -> Result<bool> {
 	let regex = this.cache.parse(regex)?;
 	Ok(regex.is_match(&string))
 }
@@ -466,12 +462,7 @@ pub fn builtin_tanka_regex_match(
 #[builtin(fields(
     cache: Rc<RegexCacheInner>,
 ))]
-pub fn builtin_tanka_regex_subst(
-	this: &builtin_tanka_regex_subst,
-	regex: IStr,
-	src: String,
-	repl: String,
-) -> Result<String> {
+pub fn regex_subst(this: &regex_subst, regex: IStr, src: String, repl: String) -> Result<String> {
 	let regex = this.cache.parse(regex)?;
 	let replaced = regex.replace_all(&src, repl.as_str());
 	Ok(replaced.to_string())
@@ -481,7 +472,7 @@ pub fn builtin_tanka_regex_subst(
 /// Executes `helm template` and returns the rendered manifests as an object
 /// Each manifest is keyed by "<snake_case_kind>_<snake_case_name>"
 #[builtin]
-pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val> {
+pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val> {
 	// calledFrom is required for proper path resolution
 
 	let called_from = opts.get("calledFrom".into())?.ok_or_else(|| {
@@ -729,7 +720,7 @@ pub fn builtin_tanka_helm_template(name: String, chart: String, opts: ObjValue) 
 /// Executes `kustomize build` and returns the rendered manifests as an object
 /// Each manifest is keyed by "<snake_case_kind>_<snake_case_name>"
 #[builtin]
-pub fn builtin_tanka_kustomize_build(path: String, opts: ObjValue) -> Result<Val> {
+pub fn kustomize_build(path: String, opts: ObjValue) -> Result<Val> {
 	// calledFrom is required for proper path resolution
 	let called_from = opts.get("calledFrom".into())?.ok_or_else(|| {
 		RuntimeError("kustomizeBuild requires calledFrom field (usually std.thisFile)".into())
@@ -909,7 +900,7 @@ mod tests {
 	fn test_yaml_octal_parsing() {
 		// YAML 1.1 octal: 0755 -> 493 decimal
 		let yaml = "myval: 0755";
-		let result = builtin_tanka_parse_yaml(yaml.to_string()).unwrap();
+		let result = parse_yaml(yaml.to_string()).unwrap();
 		if let Val::Arr(arr) = result {
 			let val = arr.get(0).unwrap().unwrap();
 			if let Val::Obj(obj) = val {
@@ -928,7 +919,7 @@ mod tests {
 
 		// Also test double-zero prefix (00755)
 		let yaml = "myval: 00755";
-		let result = builtin_tanka_parse_yaml(yaml.to_string()).unwrap();
+		let result = parse_yaml(yaml.to_string()).unwrap();
 		if let Val::Arr(arr) = result {
 			let val = arr.get(0).unwrap().unwrap();
 			if let Val::Obj(obj) = val {

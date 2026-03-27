@@ -17,7 +17,9 @@ use std::{
 	process::{Command, Stdio},
 };
 
-use rtk::eval::{eval, EvalOpts};
+use rtk::jsonnet::evaluator::{
+	Evaluator, EvaluatorOptions, GlobalEvaluatorOptions, JrsonnetEvaluator,
+};
 
 /// Helper function to get absolute path to test_fixtures
 fn fixtures_path(subpath: &str) -> PathBuf {
@@ -115,7 +117,8 @@ fn run_error_test(env_path: &PathBuf, expected_error: &str) {
 	}
 
 	// Then, verify rtk also fails with the expected error
-	let result = eval(&env_path.to_string_lossy(), EvalOpts::default());
+	let evaluator = JrsonnetEvaluator::new(GlobalEvaluatorOptions::default());
+	let result = evaluator.eval_file(&*env_path.to_string_lossy(), &EvaluatorOptions::default());
 
 	match result {
 		Ok(_) => {

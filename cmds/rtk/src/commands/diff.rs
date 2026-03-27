@@ -2,20 +2,25 @@
 //!
 //! Compares local Tanka environment manifests against the live Kubernetes cluster state.
 
-use std::{fmt, io::Write};
+use std::{
+	fmt,
+	io::Write,
+	path::{Path, PathBuf},
+	sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::util::{
-	build_eval_opts, create_tokio_runtime, extract_manifests, get_or_create_connection,
-	parse_key_value_pairs, process_manifests, setup_diff_engine, DiffEngineConfig,
+use super::common::{
+	create_tokio_runtime, get_or_create_connection, setup_diff_engine, DiffEngineConfig,
 };
 use crate::{
-	discover::find_environments,
-	eval::EvalOpts,
+	environments::discover::{Discover, Discovered},
+	environments::{extract_manifests, process_manifests},
+	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{
 		client::ClusterConnection,
 		diff::{DiffEngine, DiffStatus, ResourceDiff},
@@ -66,7 +71,7 @@ pub const EXIT_CODE_DIFF_FOUND: i32 = 16;
 #[derive(Args)]
 pub struct DiffArgs {
 	/// Path to the Tanka environment
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Color output mode
 	#[arg(long, default_value = "auto", value_enum)]
@@ -80,25 +85,12 @@ pub struct DiffArgs {
 	#[arg(short = 'z', long)]
 	pub exit_zero: bool,
 
-	/// Set code value of extVar (Format: key=<code>)
-	#[arg(long)]
-	pub ext_code: Vec<String>,
-
-	/// Set string value of extVar (Format: key=value)
-	#[arg(short = 'V', long)]
-	pub ext_str: Vec<String>,
-
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go")]
-	pub jsonnet_implementation: String,
-
-	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
-
 	/// String that only a single inline environment contains in its name
 	#[arg(long)]
 	pub name: Option<String>,
+
+	#[command(flatten)]
+	pub jsonnet: super::JsonnetArgs,
 
 	/// Print summary of the differences, not the actual contents
 	#[arg(short = 's', long)]
@@ -108,14 +100,6 @@ pub struct DiffArgs {
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
 
-	/// Set code value of top level function (Format: key=<code>)
-	#[arg(long)]
-	pub tla_code: Vec<String>,
-
-	/// Set string value of top level function (Format: key=value)
-	#[arg(short = 'A', long)]
-	pub tla_str: Vec<String>,
-
 	/// Include objects deleted from the configuration in the differences
 	#[arg(short = 'p', long)]
 	pub with_prune: bool,
@@ -124,8 +108,6 @@ pub struct DiffArgs {
 	#[arg(long)]
 	pub list_modified_envs: bool,
 }
-
-crate::impl_jsonnet_args!(DiffArgs);
 
 /// Result of running the diff command.
 struct DiffResult {
@@ -180,17 +162,17 @@ pub struct DiffOpts {
 /// Evaluates the Jsonnet environment, extracts manifests, and compares them
 /// against the current state in the connected cluster. If no connection is
 /// provided, one is created from the environment's spec.
-#[instrument(skip_all, fields(path = %path))]
+#[instrument(skip_all, fields(path = %path.display()))]
 pub async fn diff_environment<W: Write>(
-	path: &str,
+	path: &Path,
 	connection: Option<ClusterConnection>,
-	eval_opts: EvalOpts,
+	global_opts: GlobalEvaluatorOptions,
+	eval_opts: EvaluatorOptions,
 	opts: DiffOpts,
 	writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	use super::util::evaluate_single_environment;
-
-	let env_data = evaluate_single_environment(path, eval_opts, opts.name.as_deref())?;
+	let evaluator = DefaultEvaluator::new(global_opts);
+	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
 	let env_spec = env_data.spec;
 
 	// Get the spec for cluster connection and strategy selection
@@ -274,25 +256,25 @@ pub async fn diff_manifests<W: Write>(
 }
 
 /// Async implementation of the diff command.
-#[instrument(skip_all, fields(path = %args.path))]
+#[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: DiffArgs, writer: W) -> Result<DiffResult> {
 	// Handle --list-modified-envs mode: find all environments and check each for changes
 	if args.list_modified_envs {
 		return list_modified_environments(&args, &mut std::io::sink()).await;
 	}
 
+	let global_opts = args.jsonnet.into_global_evaluator_options();
+	let eval_opts = EvaluatorOptions::default();
 	let opts = DiffOpts {
 		strategy: args.diff_strategy,
 		with_prune: args.with_prune,
 		color: args.color,
 		summarize: args.summarize,
-		target: args.target.clone(),
-		name: args.name.clone(),
+		target: args.target,
+		name: args.name,
 	};
 
-	let mut eval_opts = build_eval_opts(&args);
-	eval_opts.env_name = args.name.clone();
-	let diffs = diff_environment(&args.path, None, eval_opts, opts, writer).await?;
+	let diffs = diff_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
 	let has_changes = diffs.iter().any(|d| d.has_changes());
 
 	Ok(DiffResult { has_changes })
@@ -302,15 +284,17 @@ async fn run_async<W: Write>(args: DiffArgs, writer: W) -> Result<DiffResult> {
 ///
 /// Discovers all environments in the path, checks each for changes in parallel,
 /// and prints the names of environments with differences.
-#[instrument(skip_all, fields(path = %args.path))]
+#[instrument(skip_all, fields(path = %args.path.display()))]
 async fn list_modified_environments<W: Write>(
 	args: &DiffArgs,
 	writer: &mut W,
 ) -> Result<DiffResult> {
 	// Discover all environments in the path
-	tracing::debug!(path = %args.path, "discovering environments");
-	let envs =
-		find_environments(std::slice::from_ref(&args.path)).context("discovering environments")?;
+	tracing::debug!(path = %args.path.display(), "discovering environments");
+	let evaluator = DefaultEvaluator::new(GlobalEvaluatorOptions::default());
+	let envs: Vec<Discovered> = Discover::new(evaluator, vec![args.path.clone()])
+		.collect::<Result<Vec<_>>>()
+		.context("discovering environments")?;
 
 	// Filter environments by --name if specified
 	let envs: Vec<_> = if let Some(ref target_name) = args.name {
@@ -345,15 +329,17 @@ async fn list_modified_environments<W: Write>(
 
 	tracing::debug!(env_count = envs.len(), "found environments");
 
-	// Build shared eval options from args
-	let ext_str = parse_key_value_pairs(&args.ext_str);
-	let ext_code = parse_key_value_pairs(&args.ext_code);
-	let tla_str = parse_key_value_pairs(&args.tla_str);
-	let tla_code = parse_key_value_pairs(&args.tla_code);
+	// Build shared global eval options from args
+	let ext_str = &args.jsonnet.ext_str;
+	let ext_code = &args.jsonnet.ext_code;
+	let tla_str = &args.jsonnet.tla_str;
+	let tla_code = &args.jsonnet.tla_code;
+	let max_stack = args.jsonnet.max_stack;
 
 	// Check all environments in parallel using JoinSet with concurrency limit
 	const MAX_PARALLEL: usize = 8;
 	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_PARALLEL));
+	let target = std::sync::Arc::new(args.target.clone());
 	let mut join_set = tokio::task::JoinSet::new();
 
 	for env in &envs {
@@ -364,20 +350,21 @@ async fn list_modified_environments<W: Write>(
 			.map(|n| n.to_string())
 			.unwrap_or_else(|| env_path.clone());
 
-		let eval_opts = EvalOpts {
-			ext_str: ext_str.clone(),
-			ext_code: ext_code.clone(),
-			tla_str: tla_str.clone(),
-			tla_code: tla_code.clone(),
-			max_stack: Some(args.max_stack as usize),
-			eval_expr: None,
+		let global_opts = GlobalEvaluatorOptions::builder()
+			.ext_strs(ext_str.clone())
+			.ext_codes(ext_code.clone())
+			.tla_strs(tla_str.clone())
+			.tla_codes(tla_code.clone())
+			.max_stack(max_stack)
+			.build();
+		let eval_opts = EvaluatorOptions {
 			env_name: env.env_name.clone(),
-			export_jsonnet_implementation: None,
+			..Default::default()
 		};
 
 		let diff_strategy = args.diff_strategy;
 		let with_prune = args.with_prune;
-		let target = args.target.clone();
+		let target = Arc::clone(&target);
 		let sem = semaphore.clone();
 
 		join_set.spawn(async move {
@@ -385,6 +372,7 @@ async fn list_modified_environments<W: Write>(
 			tracing::debug!(env_path = %env_path, "checking environment");
 			match check_environment_for_changes(
 				env_path.clone(),
+				global_opts,
 				eval_opts,
 				diff_strategy,
 				with_prune,
@@ -429,13 +417,17 @@ async fn list_modified_environments<W: Write>(
 #[instrument(skip_all, fields(path = %path))]
 async fn check_environment_for_changes(
 	path: String,
-	eval_opts: EvalOpts,
+	global_opts: GlobalEvaluatorOptions,
+	eval_opts: EvaluatorOptions,
 	diff_strategy: Option<DiffStrategy>,
 	with_prune: bool,
-	target: Vec<String>,
+	target: Arc<Vec<String>>,
 ) -> Result<bool> {
 	// Evaluate the environment
-	let eval_result = crate::eval::eval(&path, eval_opts).context("evaluating environment")?;
+	let evaluator = DefaultEvaluator::new(global_opts);
+	let eval_result = evaluator
+		.eval_file(&path, &eval_opts)
+		.context("evaluating environment")?;
 
 	let spec = eval_result.spec.as_ref().map(|e| &e.spec);
 
@@ -502,6 +494,7 @@ async fn check_environment_for_changes(
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
 
 	/// Helper to extract (kind, name) pairs from manifests for structural comparison.
@@ -634,46 +627,34 @@ mod tests {
 
 	#[test]
 	fn test_build_eval_opts() {
+		use crate::jsonnet::evaluator::EvaluatorImplementation;
+
 		let args = DiffArgs {
-			path: "test".to_string(),
+			path: PathBuf::from("test"),
 			color: ColorMode::Auto,
 			diff_strategy: None,
 			exit_zero: false,
-			ext_code: vec!["code1={}".to_string()],
-			ext_str: vec!["str1=value1".to_string()],
-			jsonnet_implementation: "go".to_string(),
-			max_stack: 500,
 			name: Some("my-env".to_string()),
+			jsonnet: crate::commands::JsonnetArgs {
+				ext_code: vec![("code1".into(), "{}".into())],
+				ext_str: vec![("str1".into(), "value1".into())],
+				implementation: EvaluatorImplementation::default(),
+				max_stack: 500,
+				tla_code: vec![("tla1".into(), "true".into())],
+				tla_str: vec![("tla2".into(), "hello".into())],
+			},
 			summarize: false,
 			target: vec![],
-			tla_code: vec!["tla1=true".to_string()],
-			tla_str: vec!["tla2=hello".to_string()],
 			with_prune: false,
 			list_modified_envs: false,
 		};
 
-		// build_eval_opts only handles jsonnet args, not env_name
-		let opts = build_eval_opts(&args);
-		assert_eq!(
-			opts,
-			crate::eval::EvalOpts {
-				ext_str: [("str1".to_string(), "value1".to_string())]
-					.into_iter()
-					.collect(),
-				ext_code: [("code1".to_string(), "{}".to_string())]
-					.into_iter()
-					.collect(),
-				tla_str: [("tla2".to_string(), "hello".to_string())]
-					.into_iter()
-					.collect(),
-				tla_code: [("tla1".to_string(), "true".to_string())]
-					.into_iter()
-					.collect(),
-				max_stack: Some(500),
-				eval_expr: None,
-				env_name: None,
-				export_jsonnet_implementation: None,
-			}
-		);
+		// into_global_evaluator_options handles jsonnet args
+		let opts = args.jsonnet.into_global_evaluator_options();
+		assert_eq!(opts.ext_str.get("str1").map(|v| &**v), Some("value1"));
+		assert_eq!(opts.ext_code.get("code1").map(|v| &**v), Some("{}"));
+		assert_eq!(opts.tla_str.get("tla2").map(|v| &**v), Some("hello"));
+		assert_eq!(opts.tla_code.get("tla1").map(|v| &**v), Some("true"));
+		assert_eq!(opts.max_stack, 500);
 	}
 }

@@ -1,23 +1,20 @@
 //! Export command handler.
 
-use std::{io::Write, path::PathBuf};
+use std::{io::Write, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use clap::Args;
 
-use super::util::{parse_key_value_pairs, UnimplementedArgs};
-use crate::{
-	eval::EvalOpts,
-	export::{self as export_impl, ExportMergeStrategy, ExportOpts},
-};
+use super::common::UnimplementedArgs;
+use crate::environments::export::{self as export_impl, ExportMergeStrategy, ExportOpts};
 
 #[derive(Args)]
 pub struct ExportArgs {
 	/// Output directory
-	pub output_dir: String,
+	pub output_dir: PathBuf,
 
 	/// Paths to export
-	pub paths: Vec<String>,
+	pub paths: Vec<PathBuf>,
 
 	/// Regexes which define which environment should be cached (if caching is enabled)
 	#[arg(short = 'e', long)]
@@ -25,15 +22,7 @@ pub struct ExportArgs {
 
 	/// Local file path where cached evaluations should be stored
 	#[arg(short = 'c', long)]
-	pub cache_path: Option<String>,
-
-	/// Set code value of extVar (Format: key=<code>)
-	#[arg(long)]
-	pub ext_code: Vec<String>,
-
-	/// Set string value of extVar (Format: key=value)
-	#[arg(short = 'V', long)]
-	pub ext_str: Vec<String>,
+	pub cache_path: Option<PathBuf>,
 
 	/// File extension
 	#[arg(long, default_value = "yaml", overrides_with = "extension")]
@@ -46,14 +35,6 @@ pub struct ExportArgs {
 		overrides_with = "format"
 	)]
 	pub format: String,
-
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go", overrides_with = "jsonnet_implementation")]
-	pub jsonnet_implementation: String,
-
-	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
 
 	/// Size of memory ballast to allocate. This may improve performance for large environments.
 	#[arg(long)]
@@ -91,31 +72,26 @@ pub struct ExportArgs {
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
 
-	/// Set code value of top level function (Format: key=<code>)
-	#[arg(long)]
-	pub tla_code: Vec<String>,
-
-	/// Set string value of top level function (Format: key=value)
-	#[arg(short = 'A', long)]
-	pub tla_str: Vec<String>,
+	#[command(flatten)]
+	pub jsonnet: super::JsonnetArgs,
 }
 
 /// Run the export command.
 pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	UnimplementedArgs {
-		jsonnet_implementation: Some(&args.jsonnet_implementation),
+		jsonnet_implementation: None,
 		cache_envs: Some(&args.cache_envs),
 		cache_path: Some(&args.cache_path),
 		mem_ballast_size_bytes: Some(&args.mem_ballast_size_bytes),
 	}
 	.warn_if_set();
 
-	let opts = build_export_opts(&args)?;
-	let result = export_impl::export(&args.paths, opts)?;
+	let (paths, opts) = build_export_opts(args)?;
+	let result = export_impl::export(&paths, opts)?;
 
 	// Match tk behavior: silent on success, errors reported via the provided writer
 	// But report fatal errors prominently and summarize skipped ones
-	let mut fatal_error: Option<(PathBuf, String)> = None;
+	let mut fatal_error: Option<(Arc<PathBuf>, String)> = None;
 	let mut env_errors = Vec::new();
 	let mut skipped_count = 0;
 
@@ -169,17 +145,8 @@ pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	Ok(())
 }
 
-fn build_export_opts(args: &ExportArgs) -> Result<ExportOpts> {
-	let eval_opts = EvalOpts {
-		ext_str: parse_key_value_pairs(&args.ext_str),
-		ext_code: parse_key_value_pairs(&args.ext_code),
-		tla_str: parse_key_value_pairs(&args.tla_str),
-		tla_code: parse_key_value_pairs(&args.tla_code),
-		max_stack: Some(args.max_stack as usize),
-		eval_expr: None,
-		env_name: None,
-		export_jsonnet_implementation: None,
-	};
+fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, ExportOpts)> {
+	let eval_opts = args.jsonnet.into_global_evaluator_options();
 
 	// Parse merge strategy
 	let merge_strategy = if let Some(ref strategy) = args.merge_strategy {
@@ -188,19 +155,21 @@ fn build_export_opts(args: &ExportArgs) -> Result<ExportOpts> {
 		ExportMergeStrategy::default()
 	};
 
-	Ok(ExportOpts {
-		output_dir: PathBuf::from(&args.output_dir),
-		extension: args.extension.clone(),
-		format: args.format.clone(),
+	let paths = args.paths;
+	let opts = ExportOpts {
+		output_dir: args.output_dir,
+		extension: args.extension,
+		format: args.format,
 		parallelism: args.parallel as usize,
 		eval_opts,
-		name: args.name.clone(),
+		name: args.name,
 		recursive: args.recursive,
-		selector: args.selector.clone(),
+		selector: args.selector,
 		skip_manifest: args.skip_manifest,
-		target: args.target.clone(),
+		target: args.target,
 		merge_strategy,
-		merge_deleted_envs: args.merge_deleted_envs.clone(),
+		merge_deleted_envs: args.merge_deleted_envs,
 		show_timing: false,
-	})
+	};
+	Ok((paths, opts))
 }

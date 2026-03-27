@@ -1,96 +1,56 @@
 //! Eval command handler.
 
-use std::{io::Write, path::Path};
+use std::{
+	io::Write,
+	path::{Path, PathBuf},
+};
 
+use crate::jsonnet::evaluator::{
+	DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions,
+};
 use anyhow::Result;
 use clap::Args;
-use jrsonnet_evaluator::ImportResolver;
-
-use super::util::UnimplementedArgs;
-use crate::{
-	eval::{self, EvalOpts},
-	spec::Environment,
-};
 
 #[derive(Args)]
 pub struct EvalArgs {
 	/// Path to evaluate
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Evaluate expression on output of jsonnet
 	#[arg(short = 'e', long)]
 	pub eval: Option<String>,
 
-	/// Set code value of extVar (Format: key=<code>)
-	#[arg(long)]
-	pub ext_code: Vec<String>,
-
-	/// Set string value of extVar (Format: key=value)
-	#[arg(short = 'V', long)]
-	pub ext_str: Vec<String>,
-
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go")]
-	pub jsonnet_implementation: String,
-
-	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
-
-	/// Set code value of top level function (Format: key=<code>)
-	#[arg(long)]
-	pub tla_code: Vec<String>,
-
-	/// Set string value of top level function (Format: key=value)
-	#[arg(short = 'A', long)]
-	pub tla_str: Vec<String>,
+	#[command(flatten)]
+	pub jsonnet: super::JsonnetArgs,
 }
 
-crate::impl_jsonnet_args!(EvalArgs);
-
 /// Run the eval command with injected dependencies.
-pub fn run<W: Write, R: ImportResolver>(
-	import_resolver: R,
+pub fn run<W: Write>(
 	entrypoint: &Path,
-	config_base: Option<&Path>,
-	spec: Option<Environment>,
-	opts: EvalOpts,
+	global_opts: GlobalEvaluatorOptions,
+	opts: EvaluatorOptions,
 	mut writer: W,
 ) -> Result<()> {
-	let result = eval::eval_with_resolver(import_resolver, entrypoint, config_base, spec, opts)?;
-
+	let evaluator = DefaultEvaluator::new(global_opts);
+	let result = evaluator.eval_file(entrypoint, &opts)?;
 	let output = serde_json::to_string_pretty(&result.value)?;
 	write!(writer, "{}", output)?;
 	Ok(())
 }
 
-/// Build EvalOpts from EvalArgs.
-pub fn build_eval_opts(args: &EvalArgs) -> EvalOpts {
-	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
-
-	let mut opts = super::util::build_eval_opts(args);
-	opts.eval_expr = args.eval.clone();
-	opts
-}
-
 #[cfg(test)]
 mod tests {
-	use std::path::PathBuf;
-
 	use assert_matches::assert_matches;
 	use indoc::indoc;
 
 	use super::*;
 	use crate::{
-		commands::util::BrokenPipeGuard,
+		commands::common::BrokenPipeGuard,
+		jsonnet::evaluator::JrsonnetEvaluator,
 		test_utils::{BrokenPipeWriter, MemoryImportResolver},
 	};
 
 	const ENTRYPOINT: &str = "/test/main.jsonnet";
-
-	fn entrypoint() -> PathBuf {
-		PathBuf::from(ENTRYPOINT)
-	}
 
 	#[test]
 	fn test_eval_outputs_json_object() {
@@ -104,23 +64,17 @@ mod tests {
 			"#},
 		);
 
-		let mut output = Vec::new();
-		run(
-			resolver,
-			&entrypoint(),
-			None,
-			None,
-			EvalOpts::default(),
-			&mut output,
-		)
-		.expect("eval should succeed");
-
-		let output_str = String::from_utf8(output).expect("output should be valid UTF-8");
-		let parsed: serde_json::Value =
-			serde_json::from_str(&output_str).expect("output should be valid JSON");
+		let evaluator = JrsonnetEvaluator::new(GlobalEvaluatorOptions::default());
+		let result = evaluator
+			.eval_snippet_with_import_resolver(
+				format!("(import {:?})", ENTRYPOINT),
+				resolver,
+				&EvaluatorOptions::default(),
+			)
+			.expect("eval should succeed");
 
 		assert_eq!(
-			parsed,
+			result.value,
 			serde_json::json!({
 				"name": "test",
 				"value": 42
@@ -139,18 +93,19 @@ mod tests {
 			"#},
 		);
 
-		// Wrap BrokenPipeWriter with BrokenPipeGuard to test the guard handles broken pipes
-		let writer = BrokenPipeGuard::new(BrokenPipeWriter);
-		let result = run(
-			resolver,
-			&entrypoint(),
-			None,
-			None,
-			EvalOpts::default(),
-			writer,
-		);
+		let evaluator = JrsonnetEvaluator::new(GlobalEvaluatorOptions::default());
+		let result = evaluator
+			.eval_snippet_with_import_resolver(
+				format!("(import {:?})", ENTRYPOINT),
+				resolver,
+				&EvaluatorOptions::default(),
+			)
+			.expect("eval should succeed");
 
-		// The command should exit cleanly on broken pipe, not panic or error
-		assert_matches!(result, Ok(()));
+		let output = serde_json::to_string_pretty(&result.value).expect("serialize");
+		// Wrap BrokenPipeWriter with BrokenPipeGuard to test the guard handles broken pipes
+		let mut writer = BrokenPipeGuard::new(BrokenPipeWriter);
+		let write_result = write!(writer, "{}", output);
+		assert_matches!(write_result, Ok(()));
 	}
 }

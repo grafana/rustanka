@@ -130,7 +130,11 @@ impl RtkConfig {
 /// Check if exportJsonnetImplementation indicates jrsonnet binary usage
 pub fn uses_jrsonnet_binary(export_impl: Option<&str>) -> bool {
 	export_impl
-		.map(|s| s.starts_with("binary:") && s.contains("jrsonnet"))
+		.map(|s| {
+			// Accept both the raw spec value ("binary:.../jrsonnet") and the
+			// parsed EvaluatorImplementation Display form ("jrsonnet")
+			s == "jrsonnet" || (s.starts_with("binary:") && s.contains("jrsonnet"))
+		})
 		.unwrap_or(false)
 }
 

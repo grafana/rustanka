@@ -1,11 +1,11 @@
 //! Importers subcommand handler.
 
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
 
-use crate::importers as importers_impl;
+use crate::jsonnet::importers as importers_impl;
 
 #[derive(Args)]
 pub struct ImportersArgs {
@@ -14,12 +14,12 @@ pub struct ImportersArgs {
 
 	/// Root directory to search for environments
 	#[arg(long, default_value = ".")]
-	pub root: String,
+	pub root: PathBuf,
 }
 
 /// Run the importers subcommand.
 pub fn run<W: Write>(args: ImportersArgs, mut writer: W) -> Result<()> {
-	let envs = importers_impl::find_importers(&args.root, args.files)?;
+	let envs = importers_impl::find_importers(&args.root.to_string_lossy(), args.files)?;
 	if envs.is_empty() {
 		writeln!(writer)?;
 	} else {
@@ -35,12 +35,12 @@ mod tests {
 	use assert_matches::assert_matches;
 
 	use super::*;
-	use crate::{commands::util::BrokenPipeGuard, test_utils::BrokenPipeWriter};
+	use crate::{commands::common::BrokenPipeGuard, test_utils::BrokenPipeWriter};
 
 	fn make_args() -> ImportersArgs {
 		ImportersArgs {
 			files: vec![],
-			root: ".".to_string(),
+			root: PathBuf::from("."),
 		}
 	}
 

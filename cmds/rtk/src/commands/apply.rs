@@ -3,24 +3,28 @@
 //! Applies Tanka environment manifests to the Kubernetes cluster after showing
 //! a diff and optionally prompting for confirmation.
 
-use std::{fmt, io::Write};
+use std::{
+	fmt,
+	io::Write,
+	path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::diff::ColorMode;
-use super::util::{
-	build_eval_opts, create_tokio_runtime, extract_manifests, get_or_create_connection,
-	process_manifests, prompt_confirmation, setup_diff_engine, validate_dry_run, DiffEngineConfig,
-	UnimplementedArgs,
+use super::common::{
+	create_tokio_runtime, get_or_create_connection, prompt_confirmation, setup_diff_engine,
+	validate_dry_run, DiffEngineConfig,
 };
+use super::diff::ColorMode;
 
 // Re-export AutoApprove for backwards compatibility
-pub use super::util::AutoApprove;
+pub use super::common::AutoApprove;
 use crate::{
-	eval::EvalOpts,
+	environments::{extract_manifests, process_manifests},
+	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
@@ -54,7 +58,7 @@ impl fmt::Display for ApplyStrategy {
 #[derive(Args)]
 pub struct ApplyArgs {
 	/// Path to the Tanka environment
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Force the apply strategy to use. Automatically chosen if not set.
 	#[arg(long, value_enum)]
@@ -76,25 +80,9 @@ pub struct ApplyArgs {
 	#[arg(long)]
 	pub dry_run: Option<String>,
 
-	/// Set code value of extVar (Format: key=<code>)
-	#[arg(long)]
-	pub ext_code: Vec<String>,
-
-	/// Set string value of extVar (Format: key=value)
-	#[arg(short = 'V', long)]
-	pub ext_str: Vec<String>,
-
 	/// Force applying (kubectl apply --force)
 	#[arg(long)]
 	pub force: bool,
-
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go")]
-	pub jsonnet_implementation: String,
-
-	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
 
 	/// String that only a single inline environment contains in its name
 	#[arg(long)]
@@ -104,25 +92,16 @@ pub struct ApplyArgs {
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
 
-	/// Set code value of top level function (Format: key=<code>)
-	#[arg(long)]
-	pub tla_code: Vec<String>,
-
-	/// Set string value of top level function (Format: key=value)
-	#[arg(short = 'A', long)]
-	pub tla_str: Vec<String>,
-
 	/// Validation of resources (kubectl --validate=false)
 	#[arg(long, default_value = "true")]
 	pub validate: bool,
-}
 
-crate::impl_jsonnet_args!(ApplyArgs);
+	#[command(flatten)]
+	pub jsonnet: super::JsonnetArgs,
+}
 
 /// Run the apply command.
 pub fn run<W: Write>(args: ApplyArgs, writer: W) -> Result<()> {
-	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
-
 	validate_dry_run(args.dry_run.as_deref())?;
 
 	let runtime = create_tokio_runtime()?;
@@ -153,17 +132,17 @@ pub struct ApplyOpts {
 /// Apply manifests to the cluster.
 ///
 /// Returns the list of applied resources.
-#[instrument(skip_all, fields(path = %path))]
+#[instrument(skip_all, fields(path = %path.display()))]
 pub async fn apply_environment<W: Write>(
-	path: &str,
+	path: &Path,
 	connection: Option<ClusterConnection>,
-	eval_opts: EvalOpts,
+	global_opts: GlobalEvaluatorOptions,
+	eval_opts: EvaluatorOptions,
 	opts: ApplyOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	use super::util::evaluate_single_environment;
-
-	let env_data = evaluate_single_environment(path, eval_opts, opts.name.as_deref())?;
+	let evaluator = DefaultEvaluator::new(global_opts);
+	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
 	let env_spec = env_data.spec;
 
 	// Get the spec for cluster connection and strategy selection
@@ -309,10 +288,10 @@ pub async fn apply_environment<W: Write>(
 }
 
 /// Async implementation of the apply command.
-#[instrument(skip_all, fields(path = %args.path))]
+#[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: ApplyArgs, writer: W) -> Result<()> {
-	let mut eval_opts = build_eval_opts(&args);
-	eval_opts.env_name = args.name.clone();
+	let global_opts = args.jsonnet.into_global_evaluator_options();
+	let eval_opts = EvaluatorOptions::default();
 	let opts = ApplyOpts {
 		diff_strategy: args.diff_strategy,
 		apply_strategy: args.apply_strategy,
@@ -324,6 +303,6 @@ async fn run_async<W: Write>(args: ApplyArgs, writer: W) -> Result<()> {
 		name: args.name,
 	};
 
-	apply_environment(&args.path, None, eval_opts, opts, writer).await?;
+	apply_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
 	Ok(())
 }

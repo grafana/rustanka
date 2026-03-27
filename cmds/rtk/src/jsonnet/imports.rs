@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result};
 use regex::Regex;
 
-use crate::jpath;
+use crate::jsonnet::jpath;
 
 /// Compiled regexes for import scanning, created once and reused across recursive calls.
 struct ImportRegexes {

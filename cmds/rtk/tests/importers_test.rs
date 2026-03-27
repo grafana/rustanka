@@ -17,7 +17,7 @@ fn test_no_files() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(&root, vec![]).unwrap();
+	let result = rtk::jsonnet::importers::find_importers(&root, vec![]).unwrap();
 	assert_eq!(result, Vec::<String>::new());
 }
 
@@ -31,7 +31,7 @@ fn test_invalid_file() {
 		.join("does-not-exist.jsonnet")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(&root, vec![invalid_file]);
+	let result = rtk::jsonnet::importers::find_importers(&root, vec![invalid_file]);
 	assert!(result.is_err());
 	assert!(result.unwrap_err().to_string().contains("does not exist"));
 }
@@ -43,7 +43,7 @@ fn test_project_with_no_imports() {
 		.to_string_lossy()
 		.to_string();
 	let file = abs_path("environments/no-imports/main.jsonnet");
-	let result = rtk::importers::find_importers(&root, vec![file.clone()]).unwrap();
+	let result = rtk::jsonnet::importers::find_importers(&root, vec![file.clone()]).unwrap();
 	assert_eq!(result, vec![file]); // itself only
 }
 
@@ -53,7 +53,7 @@ fn test_local_import() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/imports-locals-and-vendored/local-file1.libsonnet",
@@ -74,7 +74,7 @@ fn test_local_import_with_relative_path() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/imports-locals-and-vendored/local-file2.libsonnet",
@@ -96,7 +96,8 @@ fn test_lib_imported_through_chain() {
 		.to_string_lossy()
 		.to_string();
 	let result =
-		rtk::importers::find_importers(&root, vec![abs_path("lib/lib1/main.libsonnet")]).unwrap();
+		rtk::jsonnet::importers::find_importers(&root, vec![abs_path("lib/lib1/main.libsonnet")])
+			.unwrap();
 	assert_eq!(
 		result,
 		vec![abs_path(
@@ -111,9 +112,11 @@ fn test_vendored_lib_imported_through_chain_and_directly() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result =
-		rtk::importers::find_importers(&root, vec![abs_path("vendor/vendored/main.libsonnet")])
-			.unwrap();
+	let result = rtk::jsonnet::importers::find_importers(
+		&root,
+		vec![abs_path("vendor/vendored/main.libsonnet")],
+	)
+	.unwrap();
 	let mut expected = vec![
 		abs_path("environments/imports-lib-and-vendored-through-chain/main.jsonnet"),
 		abs_path("environments/imports-locals-and-vendored/main.jsonnet"),
@@ -129,7 +132,7 @@ fn test_vendored_lib_found_through_symlink() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("vendor/vendor-symlinked/main.libsonnet")],
 	)
@@ -149,9 +152,11 @@ fn test_text_file() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result =
-		rtk::importers::find_importers(&root, vec![abs_path("vendor/vendored/text-file.txt")])
-			.unwrap();
+	let result = rtk::jsonnet::importers::find_importers(
+		&root,
+		vec![abs_path("vendor/vendored/text-file.txt")],
+	)
+	.unwrap();
 	let mut expected = vec![
 		abs_path("environments/imports-lib-and-vendored-through-chain/main.jsonnet"),
 		abs_path("environments/imports-locals-and-vendored/main.jsonnet"),
@@ -167,7 +172,7 @@ fn test_relative_imported_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("environments/relative-imported/main.jsonnet")],
 	)
@@ -186,7 +191,7 @@ fn test_relative_imported_environment_with_doubled_dotdot() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("environments/relative-imported2/main.jsonnet")],
 	)
@@ -206,7 +211,8 @@ fn test_relative_imported_text_file() {
 		.to_string_lossy()
 		.to_string();
 	let result =
-		rtk::importers::find_importers(&root, vec![abs_path("other-files/test.txt")]).unwrap();
+		rtk::jsonnet::importers::find_importers(&root, vec![abs_path("other-files/test.txt")])
+			.unwrap();
 	assert_eq!(
 		result,
 		vec![abs_path("environments/relative-import/main.jsonnet")]
@@ -220,7 +226,8 @@ fn test_relative_imported_text_file_with_doubled_dotdot() {
 		.to_string_lossy()
 		.to_string();
 	let result =
-		rtk::importers::find_importers(&root, vec![abs_path("other-files/test2.txt")]).unwrap();
+		rtk::jsonnet::importers::find_importers(&root, vec![abs_path("other-files/test2.txt")])
+			.unwrap();
 	assert_eq!(
 		result,
 		vec![abs_path("environments/relative-import/main.jsonnet")]
@@ -233,7 +240,7 @@ fn test_vendor_override_in_env_override_vendor_used() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/vendor-override-in-env/vendor/vendor-override-in-env/main.libsonnet",
@@ -252,7 +259,7 @@ fn test_vendor_override_in_env_global_vendor_unused() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("vendor/vendor-override-in-env/main.libsonnet")],
 	)
@@ -266,7 +273,7 @@ fn test_imported_file_in_lib_relative_to_env() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/lib-import-relative-to-env/file-to-import.libsonnet",
@@ -287,7 +294,7 @@ fn test_unused_deleted_file() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:vendor/deleted-vendor/main.libsonnet".to_string()],
 	)
@@ -301,7 +308,7 @@ fn test_deleted_local_path_that_is_still_potentially_imported() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:environments/using-deleted-stuff/my-import-dir/main.libsonnet".to_string()],
 	)
@@ -318,7 +325,7 @@ fn test_deleted_lib_that_is_still_potentially_imported() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:lib/my-import-dir/main.libsonnet".to_string()],
 	)
@@ -335,7 +342,7 @@ fn test_deleted_vendor_that_is_still_potentially_imported() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:vendor/my-import-dir/main.libsonnet".to_string()],
 	)
@@ -352,7 +359,7 @@ fn test_deleted_lib_that_is_still_potentially_imported_relative_path_from_root()
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:lib/my-import-dir/main.libsonnet".to_string()],
 	)
@@ -369,7 +376,7 @@ fn test_deleted_dir_in_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec!["deleted:environments/no-imports/deleted-dir/deleted-file.libsonnet".to_string()],
 	)
@@ -386,7 +393,7 @@ fn test_imports_through_a_main_file_are_followed() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/import-other-main-file/env2/file.libsonnet",
@@ -407,7 +414,7 @@ fn test_lib_file_imports_environment_file() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/lib-imports-environment/config.jsonnet",
@@ -428,7 +435,7 @@ fn test_complex_transitive_chain_env1_lib1_env2_lib3_env3() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("environments/chain-env1/config.jsonnet")],
 	)
@@ -451,7 +458,7 @@ fn test_relative_import_from_lib_to_env_should_not_match_as_lib_vendor() {
 	// Search for an environment file that is imported by a lib file using a relative path starting with ../
 	// The lib file should NOT be found as an importer because relative imports starting with ../
 	// should only match via the relative import check, not the lib/vendor check
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("environments/relative-import-target/main.jsonnet")],
 	)
@@ -489,7 +496,7 @@ fn test_helm_chart_values_file_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/uses-helm-chart/charts/my-chart/values.yaml",
@@ -508,7 +515,7 @@ fn test_helm_chart_template_file_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/uses-helm-chart/charts/my-chart/templates/deployment.yaml",
@@ -527,7 +534,7 @@ fn test_kustomize_file_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/uses-kustomize/kustomize/deployment.yaml",
@@ -546,7 +553,7 @@ fn test_helm_chart_dynamic_version_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/uses-helm-chart-dynamic/charts/my-dynamic-chart-1.0.0/values.yaml",
@@ -569,7 +576,7 @@ fn test_helm_chart_readme_in_lib_is_ignored() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path("lib/helm-chart-lib/charts/my-lib-chart/README.md")],
 	)
@@ -584,7 +591,7 @@ fn test_helm_chart_yaml_in_lib_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"lib/helm-chart-lib/charts/my-lib-chart/values.yaml",
@@ -604,7 +611,7 @@ fn test_helm_chart_non_yaml_file_finds_environment() {
 		.join("testdata/findImporters")
 		.to_string_lossy()
 		.to_string();
-	let result = rtk::importers::find_importers(
+	let result = rtk::jsonnet::importers::find_importers(
 		&root,
 		vec![abs_path(
 			"environments/uses-helm-chart/charts/my-chart/config.txt",

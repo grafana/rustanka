@@ -128,9 +128,22 @@ fn run_add_repo<W: Write>(args: ChartsAddRepoArgs, _writer: W) -> Result<()> {
 	let path = cwd.join(cf::FILENAME);
 	let mut c = load_chartfile(&cwd)?;
 
+	let name = args.name;
+	let url = args.url;
+
+	if !is_valid_repo_name(&name) {
+		eprintln!(
+			"Skipping {}. invalid name. cannot contain any special characters",
+			name
+		);
+		return Err(anyhow!(
+			"1 Repo(s) were skipped. Please check above logs for details"
+		));
+	}
+
 	let new_repo = cf::Repo {
-		name: args.name.clone(),
-		url: args.url,
+		name,
+		url,
 		ca_file: String::new(),
 		cert_file: String::new(),
 		key_file: String::new(),
@@ -139,16 +152,7 @@ fn run_add_repo<W: Write>(args: ChartsAddRepoArgs, _writer: W) -> Result<()> {
 	};
 
 	if cf::repos_has(&c.repositories, &new_repo) {
-		eprintln!("Skipping {}. already exists", args.name);
-		return Err(anyhow!(
-			"1 Repo(s) were skipped. Please check above logs for details"
-		));
-	}
-	if !is_valid_repo_name(&args.name) {
-		eprintln!(
-			"Skipping {}. invalid name. cannot contain any special characters",
-			args.name
-		);
+		eprintln!("Skipping {}. already exists", new_repo.name);
 		return Err(anyhow!(
 			"1 Repo(s) were skipped. Please check above logs for details"
 		));

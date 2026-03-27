@@ -2,18 +2,18 @@
 //!
 //! Lists all transitive imports of an environment.
 
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
 use serde_json;
 
-use crate::imports as imports_impl;
+use crate::jsonnet::imports as imports_impl;
 
 #[derive(Args)]
 pub struct ImportsArgs {
 	/// Path to the environment (directory or main.jsonnet file)
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Git commit hash to check against (not implemented)
 	#[arg(short = 'c', long)]
@@ -29,7 +29,7 @@ pub fn run<W: Write>(args: ImportsArgs, mut writer: W) -> Result<()> {
 		anyhow::bail!("--check flag is not implemented");
 	}
 
-	let imports = imports_impl::transitive_imports(&args.path)?;
+	let imports = imports_impl::transitive_imports(&args.path.to_string_lossy())?;
 
 	// Output as JSON array (matching tk's output format)
 	let json = serde_json::to_string(&imports)?;
@@ -50,7 +50,7 @@ mod tests {
 	#[test]
 	fn test_imports_command_output() {
 		let args = ImportsArgs {
-			path: test_root().to_string_lossy().to_string(),
+			path: test_root(),
 			check: None,
 		};
 		let mut output = Vec::new();
@@ -77,7 +77,7 @@ mod tests {
 	#[test]
 	fn test_imports_check_flag_not_implemented() {
 		let args = ImportsArgs {
-			path: test_root().to_string_lossy().to_string(),
+			path: test_root(),
 			check: Some("abc123".to_string()),
 		};
 		let mut output = Vec::new();

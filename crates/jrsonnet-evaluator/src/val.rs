@@ -21,7 +21,6 @@ use crate::{
 	bail,
 	error::{Error, ErrorKind::*},
 	function::FuncVal,
-	gc::WithCapacityExt as _,
 	manifest::{ManifestFormat, ToStringFormat},
 	typed::{BoundedUsize, MAX_SAFE_INTEGER, MIN_SAFE_INTEGER},
 	ObjValue, Result, SupThis, Unbound, WeakSupThis,
@@ -213,7 +212,7 @@ where
 impl<I: Unbound<Bound = T>, T: Trace> CachedUnbound<I, T> {
 	pub fn new(value: I) -> Self {
 		Self {
-			cache: Cc::new(RefCell::new(FxHashMap::new())),
+			cache: Cc::new(RefCell::new(FxHashMap::default())),
 			value,
 		}
 	}
@@ -223,7 +222,10 @@ impl<I: Unbound<Bound = T>, T: Clone + Trace> Unbound for CachedUnbound<I, T> {
 	fn bind(&self, sup_this: SupThis) -> Result<T> {
 		let cache_key = sup_this.clone().downgrade();
 		{
-			if let Some(t) = self.cache.borrow().get(&cache_key) {
+			let mut cache = self.cache.borrow_mut();
+			// Prune entries whose weak keys reference collected objects.
+			cache.retain(|k: &WeakSupThis, _| k.is_alive());
+			if let Some(t) = cache.get(&cache_key) {
 				return Ok(t.clone());
 			}
 		}

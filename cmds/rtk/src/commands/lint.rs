@@ -43,7 +43,7 @@ pub fn run<W: Write>(args: LintArgs, _writer: W) -> Result<()> {
 	let paths = if args.paths.is_empty() {
 		vec![".".to_string()]
 	} else {
-		args.paths.clone()
+		args.paths
 	};
 
 	let mut all_files: Vec<String> = Vec::new();

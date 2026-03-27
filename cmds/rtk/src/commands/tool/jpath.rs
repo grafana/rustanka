@@ -1,6 +1,6 @@
 //! Jpath subcommand handler.
 
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
@@ -8,7 +8,7 @@ use clap::Args;
 #[derive(Args)]
 pub struct JpathArgs {
 	/// File or directory
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Show debug info
 	#[arg(short = 'd', long)]

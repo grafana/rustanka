@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --bin xtask --"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false

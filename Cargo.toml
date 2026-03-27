@@ -21,7 +21,7 @@ jrsonnet-cli = { path = "./crates/jrsonnet-cli", version = "0.5.0-pre97" }
 jrsonnet-lint = { path = "./crates/jrsonnet-lint" }
 jrsonnet-types = { path = "./crates/jrsonnet-types", version = "0.5.0-pre97" }
 jrsonnet-formatter = { path = "./crates/jrsonnet-formatter", version = "0.5.0-pre97" }
-jrsonnet-gcmodule = { version = "0.4.1" }
+jrsonnet-gcmodule = { git = "https://github.com/grafana/jrsonnet-gcmodule", branch = "jj/v0.4.1/fix-memory-leak" }
 # Diagnostics.
 # hi-doc is my library, which handles text formatting very well, but isn't polished enough yet
 # Previous implementation was based on annotate-snippets, which I don't like for many reasons.

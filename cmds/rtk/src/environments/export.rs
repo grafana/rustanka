@@ -9,21 +9,21 @@ use std::{
 	path::PathBuf,
 	sync::{
 		atomic::{AtomicBool, Ordering},
-		mpsc, Arc,
+		Arc,
 	},
-	thread,
 };
 
 use anyhow::{bail, Context, Result};
 use gtmpl::{FuncError, Value};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rustc_hash::FxHashMap;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tracing::{debug, trace};
 
 use crate::{
-	discover::{find_environments_with_opts, DiscoveredEnv},
-	eval::{eval, EvalOpts},
+	environments::discover::{Discover, Discovered},
+	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	yaml::sort_json_keys,
 };
 
@@ -108,8 +108,8 @@ pub struct ExportOpts {
 	pub format: String,
 	/// Number of parallel workers
 	pub parallelism: usize,
-	/// Eval options to pass through
-	pub eval_opts: EvalOpts,
+	/// Global eval options to pass through
+	pub eval_opts: GlobalEvaluatorOptions,
 	/// Environment name filter (for multi-env directories)
 	pub name: Option<String>,
 	/// Recursive mode - process all environments found
@@ -136,7 +136,7 @@ impl Default for ExportOpts {
 			format: "{{.apiVersion}}.{{.kind}}-{{or .metadata.name .metadata.generateName}}"
 				.to_string(),
 			parallelism: 8,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: false,
 			selector: None,
@@ -196,7 +196,7 @@ pub struct ExportTimingData {
 #[derive(Debug)]
 pub struct ExportEnvResult {
 	/// Path to the environment
-	pub env_path: PathBuf,
+	pub env_path: Arc<PathBuf>,
 	/// Files that were written (relative to output_dir)
 	#[allow(dead_code)]
 	pub files_written: Vec<PathBuf>,
@@ -233,7 +233,7 @@ enum ExportError {
 	Fatal(String),
 	/// Per-environment error - log and continue
 	#[allow(dead_code)]
-	EnvError(PathBuf, String),
+	EnvError(Arc<PathBuf>, String),
 }
 
 /// A single selector requirement (parsed from kubectl-style selector)
@@ -282,28 +282,28 @@ fn parse_label_selector(selector: &str) -> Result<Vec<SelectorRequirement>> {
 
 /// Check if labels match all selector requirements
 fn matches_label_selector(
-	labels: &HashMap<String, String>,
+	labels: &FxHashMap<Box<str>, Box<str>>,
 	requirements: &[SelectorRequirement],
 ) -> bool {
 	for req in requirements {
 		match req {
 			SelectorRequirement::Equals(key, value) => {
-				if labels.get(key) != Some(value) {
+				if labels.get(key.as_str()).map(|v| &**v) != Some(value.as_str()) {
 					return false;
 				}
 			}
 			SelectorRequirement::NotEquals(key, value) => {
-				if labels.get(key) == Some(value) {
+				if labels.get(key.as_str()).map(|v| &**v) == Some(value.as_str()) {
 					return false;
 				}
 			}
 			SelectorRequirement::Exists(key) => {
-				if !labels.contains_key(key) {
+				if !labels.contains_key(key.as_str()) {
 					return false;
 				}
 			}
 			SelectorRequirement::DoesNotExist(key) => {
-				if labels.contains_key(key) {
+				if labels.contains_key(key.as_str()) {
 					return false;
 				}
 			}
@@ -347,7 +347,7 @@ fn matches_target_patterns(manifest: &JsonValue, patterns: &[regex::Regex]) -> b
 }
 
 /// Export environments from given paths to the output directory
-pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
+pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	use std::time::Instant;
 	let export_start = Instant::now();
 
@@ -368,71 +368,44 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 		validate_start.elapsed().as_millis()
 	);
 
-	// PHASE 2: Discover environments
-	let discover_start = Instant::now();
+	// PHASE 2: Create lazy discovery iterator with filters
 	debug!("Finding Tanka environments in {} paths", paths.len());
-	let envs = find_environments_with_opts(paths, &opts.eval_opts)?;
-	debug!(
-		"Found {} Tanka environments in {}ms",
-		envs.len(),
-		discover_start.elapsed().as_millis()
-	);
+	let discover_evaluator = DefaultEvaluator::new(opts.eval_opts.clone());
+	let discover = Discover::new(discover_evaluator, paths.to_vec());
 
-	if envs.is_empty() {
-		return Ok(ExportResult {
-			total_envs: 0,
-			successful: 0,
-			failed: 0,
-			results: vec![],
-		});
-	}
+	// Parse selector once (before chaining filters)
+	let selector_parts = opts
+		.selector
+		.as_ref()
+		.map(|s| parse_label_selector(s))
+		.transpose()?;
 
-	// PHASE 3: Check for ambiguous multi-environment case (Issue #4)
-	if envs.len() > 1 && opts.name.is_none() && !opts.recursive {
-		let env_names: Vec<_> = envs.iter().map(|e| e.path.display().to_string()).collect();
-		bail!(
-			"Found {} environments. Use --name to select one or --recursive to export all:\n{}",
-			envs.len(),
-			env_names
-				.iter()
-				.take(10)
-				.map(|n| format!("  - {}", n))
-				.collect::<Vec<_>>()
-				.join("\n")
-		);
-	}
-
-	// Filter by name if specified
-	let envs: Vec<_> = if let Some(ref name) = opts.name {
-		trace!("Filtering environments by name: {}", name);
-		envs.into_iter()
-			.filter(|e| {
-				// For inline environments, check env_name (metadata.name)
-				if let Some(ref env_name) = e.env_name {
+	// Chain name and selector filters lazily
+	let name_filter = opts.name.clone();
+	let mut env_iter = discover
+		.filter(move |result| {
+			let Ok(env) = result else { return true }; // pass errors through
+			if let Some(ref name) = name_filter {
+				if let Some(ref env_name) = env.env_name {
 					if env_name.contains(name) {
 						return true;
 					}
 				}
-				// Also allow filtering by path
-				e.path.to_string_lossy().contains(name)
-			})
-			.collect()
-	} else {
-		envs
-	};
+				return env.path.to_string_lossy().contains(name);
+			}
+			true
+		})
+		.filter(move |result| {
+			let Ok(env) = result else { return true };
+			if let Some(ref parts) = selector_parts {
+				return matches_label_selector(&env.labels, parts);
+			}
+			true
+		})
+		.enumerate();
 
-	// Filter by selector if specified (kubectl-style label selector)
-	let envs: Vec<_> = if let Some(ref selector) = opts.selector {
-		trace!("Filtering environments by selector: {}", selector);
-		let selector_parts = parse_label_selector(selector)?;
-		envs.into_iter()
-			.filter(|e| matches_label_selector(&e.labels, &selector_parts))
-			.collect()
-	} else {
-		envs
-	};
-
-	if envs.is_empty() {
+	// PHASE 3: Ambiguity check via peek — pull first env
+	let Some((first_idx, first_result)) = env_iter.next() else {
 		if opts.name.is_some() || opts.selector.is_some() {
 			bail!(
 				"No environments found matching filters (name: {:?}, selector: {:?})",
@@ -440,15 +413,35 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 				opts.selector
 			);
 		}
+		return Ok(ExportResult {
+			total_envs: 0,
+			successful: 0,
+			failed: 0,
+			results: vec![],
+		});
+	};
+	let first_env = first_result?;
+
+	// If not recursive and no name filter, check there isn't a second env
+	if !opts.recursive && opts.name.is_none() {
+		if let Some((_, second_result)) = env_iter.next() {
+			let second_env = second_result?;
+			// Count remaining environments for the error message
+			let mut count = 2;
+			while let Some((_, result)) = env_iter.next() {
+				let _ = result?;
+				count += 1;
+			}
+			bail!(
+				"Found {} environments. Use --name to select one or --recursive to export all:\n  - {}\n  - {}",
+				count,
+				first_env.path.display(),
+				second_env.path.display()
+			);
+		}
 	}
 
-	trace!(
-		"Will export {} environments: {:?}",
-		envs.len(),
-		envs.iter()
-			.map(|e| e.path.display().to_string())
-			.collect::<Vec<_>>()
-	);
+	trace!("First environment: {}", first_env.path.display());
 
 	// Create output directory
 	trace!("Creating output directory: {:?}", opts.output_dir);
@@ -481,10 +474,126 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 		}
 	};
 
-	// Collect files previously exported by the targeted environments
+	// Abort flag for early termination (Issue #3 & #5)
+	let abort_flag = Arc::new(AtomicBool::new(false));
+
+	debug!("Loading environments");
+	let parallel_start = Instant::now();
+
+	// Build a rayon thread pool with the requested parallelism.
+	// The lazy Discover iterator is consumed via par_bridge(), which pulls
+	// work items on-demand as pool threads become free.
+	let pool = rayon::ThreadPoolBuilder::new()
+		.num_threads(opts.parallelism)
+		.stack_size(8 * 1024 * 1024)
+		.build()
+		.context("building export thread pool")?;
+
+	// Wrap the iterator in a Mutex so par_bridge can pull from it across threads.
+	// Chain first_env (already consumed from the iterator) back in front.
+	let env_iter = std::iter::once((first_idx, Ok(first_env))).chain(env_iter);
+	let show_timing = opts.show_timing;
+
+	let results: Vec<(usize, ExportEnvResult)> = pool.install(|| {
+		use rayon::iter::{ParallelBridge, ParallelIterator};
+
+		let abort = &abort_flag;
+		let opts = &opts;
+
+		env_iter
+			.par_bridge()
+			.map(|(idx, result)| {
+				// Handle discovery errors
+				let env = match result {
+					Ok(env) => env,
+					Err(err) => {
+						return (
+							idx,
+							ExportEnvResult {
+								env_path: Arc::new(PathBuf::new()),
+								files_written: vec![],
+								env_namespace: None,
+								error: Some(format!("Discovery error: {}", err)),
+								timing: None,
+							},
+						);
+					}
+				};
+
+				// Check abort flag
+				if abort.load(Ordering::Relaxed) {
+					return (
+						idx,
+						ExportEnvResult {
+							env_path: env.path.clone(),
+							files_written: vec![],
+							env_namespace: None,
+							error: Some("Skipped due to earlier fatal error".to_string()),
+							timing: None,
+						},
+					);
+				}
+
+				let result = match export_single_env(&env, opts) {
+					Ok((files, namespace, timing)) => ExportEnvResult {
+						env_path: env.path.clone(),
+						files_written: files,
+						env_namespace: Some(namespace),
+						error: None,
+						timing: if show_timing { Some(timing) } else { None },
+					},
+					Err(ExportError::Fatal(msg)) => {
+						abort.store(true, Ordering::Relaxed);
+						ExportEnvResult {
+							env_path: env.path.clone(),
+							files_written: vec![],
+							env_namespace: None,
+							error: Some(format!("FATAL: {}", msg)),
+							timing: None,
+						}
+					}
+					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
+						env_path: env.path.clone(),
+						files_written: vec![],
+						env_namespace: None,
+						error: Some(msg),
+						timing: None,
+					},
+				};
+
+				jrsonnet_gcmodule::collect_thread_cycles();
+
+				(idx, result)
+			})
+			.collect::<Vec<_>>()
+	});
+
+	// Sort by discovery order and extract results
+	let mut indexed_results = results;
+	indexed_results.sort_by_key(|(idx, _)| *idx);
+	let results: Vec<ExportEnvResult> = indexed_results.into_iter().map(|(_, r)| r).collect();
+
+	trace!(
+		"Parallel export completed in {}ms",
+		parallel_start.elapsed().as_millis()
+	);
+
+	// Summarize results
+	let total_envs = results.len();
+	let successful = results.iter().filter(|r| r.error.is_none()).count();
+	let failed = results.iter().filter(|r| r.error.is_some()).count();
+
+	trace!(
+		"Export summary: {} successful, {} failed out of {} total",
+		successful,
+		failed,
+		total_envs
+	);
+
+	// Collect files previously exported by the targeted environments (deferred from discovery)
 	// These can be safely overwritten during re-export
 	let mut previously_exported = if opts.merge_strategy == ExportMergeStrategy::ReplaceEnvs {
-		collect_previously_exported_files(&opts.output_dir, &envs)?
+		collect_previously_exported_files(&opts.output_dir, &results)?
 	} else {
 		HashSet::new()
 	};
@@ -496,172 +605,11 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 		previously_exported.extend(files);
 	}
 
-	// Abort flag for early termination (Issue #3 & #5)
-	let abort_flag = Arc::new(AtomicBool::new(false));
-
-	// Dynamic scheduling: spawn threads up to parallelism limit
-	// Fresh threads for each export ensure thread-local GC state is freed
-	let (tx, rx) = mpsc::channel();
-	let mut env_iter = envs.iter().enumerate();
-	let total_envs = envs.len();
-	let show_timing = opts.show_timing;
-
-	debug!("Loading {} environments", total_envs);
-	let parallel_start = Instant::now();
-
-	// Spawn initial batch of threads (up to parallelism limit)
-	for _ in 0..opts.parallelism {
-		if let Some((idx, env)) = env_iter.next() {
-			let env = env.clone();
-			let opts = opts.clone();
-			let abort_flag = Arc::clone(&abort_flag);
-			let tx = tx.clone();
-
-			thread::spawn(move || {
-				if abort_flag.load(Ordering::Relaxed) {
-					let result = ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: vec![],
-						env_namespace: None,
-						error: Some("Skipped due to earlier fatal error".to_string()),
-						timing: None,
-					};
-					let _ = tx.send((idx, result));
-					return;
-				}
-
-				let result = match export_single_env(&env, &opts) {
-					Ok((files, namespace, timing)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: files,
-						env_namespace: Some(namespace),
-						error: None,
-						timing: if show_timing { Some(timing) } else { None },
-					},
-					Err(ExportError::Fatal(msg)) => {
-						abort_flag.store(true, Ordering::Relaxed);
-						ExportEnvResult {
-							env_path: env.path.clone(),
-							files_written: vec![],
-							env_namespace: None,
-							error: Some(format!("FATAL: {}", msg)),
-							timing: None,
-						}
-					}
-					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: vec![],
-						env_namespace: None,
-						error: Some(msg),
-						timing: None,
-					},
-				};
-
-				// Collect GC cycles to free memory from evaluation
-				jrsonnet_gcmodule::collect_thread_cycles();
-
-				let _ = tx.send((idx, result));
-			});
-		}
-	}
-
-	// Keep original sender alive for spawning more threads
-	let tx_main = tx.clone();
-	drop(tx); // Drop this clone so channel closes when all threads complete
-
-	// Collect results and dynamically spawn new threads as old ones complete
-	let mut collected_results = HashMap::with_capacity(total_envs);
-	let mut received_count = 0;
-
-	for (idx, result) in rx {
-		collected_results.insert(idx, result);
-		received_count += 1;
-
-		// Spawn a new thread for the next environment (if any remain)
-		if let Some((next_idx, env)) = env_iter.next() {
-			let env = env.clone();
-			let opts = opts.clone();
-			let abort_flag = Arc::clone(&abort_flag);
-			let tx = tx_main.clone();
-
-			thread::spawn(move || {
-				if abort_flag.load(Ordering::Relaxed) {
-					let result = ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: vec![],
-						env_namespace: None,
-						error: Some("Skipped due to earlier fatal error".to_string()),
-						timing: None,
-					};
-					let _ = tx.send((next_idx, result));
-					return;
-				}
-
-				let result = match export_single_env(&env, &opts) {
-					Ok((files, namespace, timing)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: files,
-						env_namespace: Some(namespace),
-						error: None,
-						timing: if show_timing { Some(timing) } else { None },
-					},
-					Err(ExportError::Fatal(msg)) => {
-						abort_flag.store(true, Ordering::Relaxed);
-						ExportEnvResult {
-							env_path: env.path.clone(),
-							files_written: vec![],
-							env_namespace: None,
-							error: Some(format!("FATAL: {}", msg)),
-							timing: None,
-						}
-					}
-					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: vec![],
-						env_namespace: None,
-						error: Some(msg),
-						timing: None,
-					},
-				};
-
-				// Collect GC cycles to free memory from evaluation
-				jrsonnet_gcmodule::collect_thread_cycles();
-
-				let _ = tx.send((next_idx, result));
-			});
-		} else if received_count == total_envs {
-			// All environments processed, drop the sender to close the channel
-			drop(tx_main);
-			break;
-		}
-	}
-
-	// Extract results in order by index
-	let mut results: Vec<_> = collected_results.into_iter().collect();
-	results.sort_by_key(|(idx, _)| *idx);
-	let results: Vec<ExportEnvResult> = results.into_iter().map(|(_, r)| r).collect();
-
-	trace!(
-		"Parallel export completed in {}ms",
-		parallel_start.elapsed().as_millis()
-	);
-
-	// Summarize results
-	let successful = results.iter().filter(|r| r.error.is_none()).count();
-	let failed = results.iter().filter(|r| r.error.is_some()).count();
-
-	trace!(
-		"Export summary: {} successful, {} failed out of {} total",
-		successful,
-		failed,
-		total_envs
-	);
-
 	// Check for file conflicts and collect files written
 	// Conflicts occur when:
 	// 1. Multiple environments in this export write the same file
 	// 2. A file was previously exported by a different environment (not being re-exported)
-	let mut all_files_written: HashMap<String, PathBuf> = HashMap::new();
+	let mut all_files_written: HashMap<String, Arc<PathBuf>> = HashMap::new();
 	for result in &results {
 		if result.error.is_none() {
 			for file in &result.files_written {
@@ -737,7 +685,7 @@ pub fn export(paths: &[String], opts: ExportOpts) -> Result<ExportResult> {
 	);
 
 	Ok(ExportResult {
-		total_envs: envs.len(),
+		total_envs,
 		successful,
 		failed,
 		results,
@@ -831,7 +779,7 @@ fn count_environment_objects(value: &JsonValue) -> usize {
 /// Export a single environment
 /// Returns (files_written, environment_namespace, timing_data)
 fn export_single_env(
-	env: &DiscoveredEnv,
+	env: &Discovered,
 	opts: &ExportOpts,
 ) -> Result<(Vec<PathBuf>, String, ExportTimingData), ExportError> {
 	use std::time::Instant;
@@ -847,14 +795,20 @@ fn export_single_env(
 	let mut timing = ExportTimingData::default();
 
 	// Evaluate the environment, passing the env_name if this is a sub-environment
-	let mut eval_opts = opts.eval_opts.clone();
-	eval_opts.env_name = env.env_name.clone();
-	// Pass exportJsonnetImplementation from discovery so eval can use jrsonnet-compatible formatting
-	eval_opts.export_jsonnet_implementation = env.export_jsonnet_implementation.clone();
+	let eval_opts = EvaluatorOptions {
+		env_name: env.env_name.clone(),
+		export_jsonnet_implementation: env
+			.export_jsonnet_implementation
+			.as_ref()
+			.map(|e| e.to_string()),
+		..Default::default()
+	};
 
 	trace!("[{}] Starting Jsonnet evaluation", env_display);
 	let eval_start = Instant::now();
-	let result = eval(env.path.to_string_lossy().as_ref(), eval_opts)
+	let evaluator = DefaultEvaluator::new(opts.eval_opts.clone());
+	let result = evaluator
+		.eval_file(env.path.to_string_lossy().as_ref(), &eval_opts)
 		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 	timing.eval_ms = eval_start.elapsed().as_millis();
 	trace!(
@@ -890,9 +844,11 @@ fn export_single_env(
 	};
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
+	// Move result.value and result.spec to avoid cloning the entire JSON tree
 	trace!("[{}] Extracting Environment objects", env_display);
 	let extract_start = Instant::now();
-	let mut environments = crate::spec::extract_environments(&result.value, &result.spec);
+	let is_spec_none = result.spec.is_none();
+	let mut environments = crate::spec::extract_environments(result.value, result.spec);
 	trace!(
 		"[{}] Extracted {} Environment objects in {}ms",
 		env_display,
@@ -901,11 +857,8 @@ fn export_single_env(
 	);
 
 	// For inline environments, set metadata.namespace to file path
-	if result.spec.is_none() {
-		crate::spec::set_inline_env_namespace(
-			&mut environments,
-			env.path.to_string_lossy().as_ref(),
-		);
+	if is_spec_none {
+		crate::spec::set_inline_env_namespace(&mut environments, &env.path);
 	}
 
 	// If a specific env_name is requested, filter to only that environment
@@ -935,9 +888,15 @@ fn export_single_env(
 
 	// Process each Environment's manifests separately (matching Tanka's approach)
 	// This avoids loading all manifests into memory at once
-	for (env_idx, env_data) in environments.iter().enumerate() {
-		let env_name = env_data
-			.spec
+	let env_count = environments.len();
+	for (env_idx, env_data) in environments.into_iter().enumerate() {
+		// Destructure to move data out (avoids cloning) while keeping spec for injection
+		let crate::spec::EnvironmentData {
+			spec: env_spec,
+			data: env_data_json,
+		} = env_data;
+
+		let env_name = env_spec
 			.as_ref()
 			.and_then(|s| s.metadata.name.as_deref())
 			.unwrap_or("unnamed");
@@ -946,7 +905,7 @@ fn export_single_env(
 			"[{}] Processing sub-environment {}/{}: {}",
 			env_display,
 			env_idx + 1,
-			environments.len(),
+			env_count,
 			env_name
 		);
 
@@ -954,7 +913,7 @@ fn export_single_env(
 		trace!("[{}:{}] Collecting manifests", env_display, env_name);
 		let collect_start = Instant::now();
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&env_data.data, &mut manifests, "")
+		collect_manifests_with_validation(env_data_json, &mut manifests, "")
 			.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 		trace!(
 			"[{}:{}] Collected {} manifests in {}ms",
@@ -1002,7 +961,7 @@ fn export_single_env(
 		// MAJOR OPTIMIZATION: Pre-substitute env values into template once per environment
 		// Instead of evaluating env.metadata.labels.X thousands of times, bake values into template
 		trace!("[{}:{}] Specializing template", env_display, env_name);
-		let specialized_template = specialize_template_for_env(&opts.format, &env_data.spec)
+		let specialized_template = specialize_template_for_env(&opts.format, &env_spec)
 			.map_err(|e| ExportError::Fatal(format!("Failed to specialize template: {}", e)))?;
 
 		// Parse the specialized template once per environment
@@ -1053,19 +1012,19 @@ fn export_single_env(
 			.into_par_iter()
 			.map(|mut manifest| {
 				// Inject namespace if needed (matching Tanka's behavior in pkg/process/namespace.go)
-				inject_namespace(&mut manifest, &env_data.spec);
+				inject_namespace(&mut manifest, &env_spec);
 
 				// Inject tanka.dev/environment label if needed (matching Tanka's behavior in pkg/process/process.go)
-				crate::spec::inject_environment_label(&mut manifest, &env_data.spec);
+				crate::spec::inject_environment_label(&mut manifest, &env_spec);
 
 				// Inject resourceDefaults annotations if present (matching Tanka's behavior)
-				inject_resource_defaults(&mut manifest, &env_data.spec);
+				inject_resource_defaults(&mut manifest, &env_spec);
 
 				// Strip null values from metadata.annotations and metadata.labels
 				// (standard Kubernetes YAML behavior - null fields should be omitted)
 				crate::spec::strip_null_metadata_fields(&mut manifest);
 
-				let rendered_filename = render_filename_simple(&tmpl, &manifest, &env_data.spec)
+				let rendered_filename = render_filename_simple(&tmpl, &manifest, &env_spec)
 					.map_err(|e| {
 						// Template errors after validation are fatal (something very wrong)
 						ExportError::Fatal(format!("Template rendering failed: {}", e))
@@ -1290,11 +1249,11 @@ fn export_manifest_file(
 
 /// Extract Kubernetes manifests from evaluation result (legacy function for tests)
 #[allow(dead_code)]
-fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
-	let environments = crate::spec::extract_environments(value, &None);
+fn extract_manifests(value: JsonValue) -> Result<Vec<JsonValue>> {
+	let environments = crate::spec::extract_environments(value, None);
 	let mut all_manifests = Vec::new();
 	for env_data in environments {
-		collect_manifests_with_validation(&env_data.data, &mut all_manifests, "")?;
+		collect_manifests_with_validation(env_data.data, &mut all_manifests, "")?;
 	}
 	Ok(all_manifests)
 }
@@ -1306,23 +1265,24 @@ fn extract_manifests(value: &JsonValue) -> Result<Vec<JsonValue>> {
 /// Validates that objects which look like Kubernetes objects (have `kind` and `metadata`)
 /// also have `apiVersion`. This matches Tanka's validation behavior.
 fn collect_manifests_with_validation(
-	value: &JsonValue,
+	value: JsonValue,
 	manifests: &mut Vec<JsonValue>,
 	path: &str,
 ) -> Result<()> {
 	match value {
-		JsonValue::Object(obj) => {
+		JsonValue::Object(mut obj) => {
 			let has_api_version = obj.contains_key("apiVersion");
 			let has_kind = obj.contains_key("kind");
 			let has_metadata = obj.contains_key("metadata");
 
 			// Check if this looks like a Kubernetes manifest (has apiVersion and kind)
 			if has_api_version && has_kind {
-				if let Some(JsonValue::String(kind)) = obj.get("kind") {
+				let kind_str = obj.get("kind").and_then(|v| v.as_str()).map(String::from);
+				if let Some(kind) = kind_str {
 					// Skip Tanka Environment objects
 					if kind == "Environment" {
 						// Extract from data field if present
-						if let Some(data) = obj.get("data") {
+						if let Some(data) = obj.remove("data") {
 							collect_manifests_with_validation(data, manifests, path)?;
 						}
 						return Ok(());
@@ -1331,8 +1291,8 @@ fn collect_manifests_with_validation(
 					// Expand List kind - extract items as individual manifests
 					// This matches Tanka's behavior where List items are exported as separate files
 					if kind == "List" {
-						if let Some(JsonValue::Array(items)) = obj.get("items") {
-							for (i, item) in items.iter().enumerate() {
+						if let Some(JsonValue::Array(items)) = obj.remove("items") {
+							for (i, item) in items.into_iter().enumerate() {
 								let item_path = format!("{}.items[{}]", path, i);
 								collect_manifests_with_validation(item, manifests, &item_path)?;
 							}
@@ -1340,7 +1300,7 @@ fn collect_manifests_with_validation(
 						return Ok(());
 					}
 				}
-				manifests.push(value.clone());
+				manifests.push(JsonValue::Object(obj));
 				Ok(())
 			} else if has_kind && has_metadata && !has_api_version {
 				// Object looks like a Kubernetes manifest (has kind and metadata) but is missing apiVersion
@@ -1351,7 +1311,7 @@ fn collect_manifests_with_validation(
 				);
 			} else {
 				// Recurse into object values
-				for (key, v) in obj.iter() {
+				for (key, v) in obj {
 					let child_path = if path.is_empty() {
 						format!(".{}", key)
 					} else {
@@ -1364,7 +1324,7 @@ fn collect_manifests_with_validation(
 		}
 		JsonValue::Array(arr) => {
 			// Recurse into array elements
-			for (i, v) in arr.iter().enumerate() {
+			for (i, v) in arr.into_iter().enumerate() {
 				let item_path = format!("{}[{}]", path, i);
 				collect_manifests_with_validation(v, manifests, &item_path)?;
 			}
@@ -1858,13 +1818,14 @@ fn is_dir_empty(dir: &PathBuf) -> Result<bool> {
 /// Returns a set of relative file paths (keys from manifest.json) that belong to these environments
 fn collect_previously_exported_files(
 	output_dir: &PathBuf,
-	envs: &[DiscoveredEnv],
+	results: &[ExportEnvResult],
 ) -> Result<HashSet<String>> {
-	// Collect environment identifiers
-	let env_ids: Vec<String> = envs
+	// Collect environment identifiers from the export results
+	let env_ids: Vec<String> = results
 		.iter()
-		.map(|env| {
-			let main_jsonnet_path = env.path.join("main.jsonnet");
+		.filter(|r| r.error.is_none())
+		.map(|r| {
+			let main_jsonnet_path = r.env_path.join("main.jsonnet");
 			if let Ok(cwd) = std::env::current_dir() {
 				main_jsonnet_path
 					.strip_prefix(&cwd)
@@ -2142,7 +2103,7 @@ mod tests {
 			"metadata": { "name": "test" }
 		});
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 1);
 	}
 
@@ -2161,7 +2122,7 @@ mod tests {
 			}
 		});
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -2180,7 +2141,7 @@ mod tests {
 			}
 		]);
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -2281,14 +2242,14 @@ mod tests {
 			extension: "yaml".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true, // Allow single env
 			skip_manifest: false,
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[env_path.clone()], opts).unwrap();
 
 		assert_eq!(result.total_envs, 1);
 		assert_eq!(result.successful, 1);
@@ -2315,14 +2276,14 @@ mod tests {
 			extension: "json".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true,
 			skip_manifest: false,
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[env_path.clone()], opts).unwrap();
 
 		assert_eq!(result.total_envs, 1);
 		assert_eq!(result.successful, 1);
@@ -2370,14 +2331,14 @@ mod tests {
 			extension: "yaml".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true,
 			skip_manifest: false,
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[env_path.clone()], opts).unwrap();
 
 		assert_eq!(result.total_envs, 1);
 		assert_eq!(result.successful, 1);
@@ -2397,7 +2358,7 @@ mod tests {
 			}
 		});
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 1);
 	}
 
@@ -2419,7 +2380,7 @@ mod tests {
 			}
 		});
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -2484,10 +2445,7 @@ mod tests {
 		};
 
 		// Should fail with multiple environments
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		);
+		let result = export(&[root.join("environments")], opts);
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(err_msg.contains("Found 2 environments"));
@@ -2532,10 +2490,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		);
+		let result = export(&[root.join("environments")], opts);
 		assert!(result.is_ok());
 		let result = result.unwrap();
 		assert_eq!(result.total_envs, 2);
@@ -2683,7 +2638,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(&[env.to_string_lossy().to_string()], opts);
+		let result = export(&[env.clone()], opts);
 
 		// Should fail with template error, not evaluation error
 		assert!(result.is_err());
@@ -2758,10 +2713,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		);
+		let result = export(&[root.join("environments")], opts);
 		assert!(result.is_ok());
 		let result = result.unwrap();
 		assert_eq!(result.total_envs, 1);
@@ -2808,10 +2760,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		);
+		let result = export(&[root.join("environments")], opts);
 		assert!(result.is_err());
 		let err = result.unwrap_err().to_string();
 		assert!(err.contains("No environments found"));
@@ -2835,7 +2784,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts);
+		let result = export(&[env_path.clone()], opts);
 		assert!(result.is_ok());
 		assert_eq!(result.unwrap().successful, 1);
 	}
@@ -2880,11 +2829,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		)
-		.unwrap();
+		let result = export(&[root.join("environments")], opts).unwrap();
 
 		// Should have processed both, with one failure
 		assert_eq!(result.total_envs, 2);
@@ -2915,7 +2860,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(&[invalid_env.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[invalid_env.clone()], opts).unwrap();
 
 		assert_eq!(result.failed, 1);
 		assert!(result.results[0].error.is_some());
@@ -2982,7 +2927,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[env_path.clone()], opts).unwrap();
 
 		assert_eq!(result.successful, 1);
 		assert_eq!(result.results[0].files_written.len(), 0);
@@ -3004,7 +2949,7 @@ mod tests {
 			}
 		});
 
-		let manifests = extract_manifests(&value).unwrap();
+		let manifests = extract_manifests(value).unwrap();
 		assert_eq!(manifests.len(), 1);
 		assert_eq!(manifests[0]["kind"], "ConfigMap");
 	}
@@ -3134,11 +3079,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		)
-		.unwrap();
+		let result = export(&[root.join("environments")], opts).unwrap();
 
 		assert_eq!(result.total_envs, 3);
 		assert_eq!(result.successful, 3);
@@ -3184,11 +3125,7 @@ mod tests {
 				..Default::default()
 			};
 
-			let result = export(
-				&[root.join("environments").to_string_lossy().to_string()],
-				opts,
-			)
-			.unwrap();
+			let result = export(&[root.join("environments")], opts).unwrap();
 
 			assert_eq!(
 				result.total_envs, 5,
@@ -3252,7 +3189,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let result = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let result = export(&[env_path.clone()], opts).unwrap();
 
 		assert_eq!(result.successful, 1);
 		// Verify nested directory was created (namespace becomes part of path after sanitization)
@@ -3283,7 +3220,7 @@ mod tests {
 			recursive: true,
 			..Default::default()
 		};
-		let yaml_result = export(&[env_path.to_string_lossy().to_string()], yaml_opts).unwrap();
+		let yaml_result = export(&[env_path.clone()], yaml_opts).unwrap();
 		assert!(yaml_result.results[0].files_written[0]
 			.to_string_lossy()
 			.ends_with(".yaml"));
@@ -3297,7 +3234,7 @@ mod tests {
 			recursive: true,
 			..Default::default()
 		};
-		let json_result = export(&[env_path.to_string_lossy().to_string()], json_opts).unwrap();
+		let json_result = export(&[env_path.clone()], json_opts).unwrap();
 		assert!(json_result.results[0].files_written[0]
 			.to_string_lossy()
 			.ends_with(".json"));
@@ -3758,14 +3695,14 @@ mod tests {
 			extension: "yaml".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true,
 			skip_manifest: false,
 			..Default::default()
 		};
 
-		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let _ = export(&[env_path.clone()], opts).unwrap();
 
 		// Check manifest.json exists
 		let manifest_path = output_dir.join(MANIFEST_FILE);
@@ -3807,14 +3744,14 @@ mod tests {
 			extension: "yaml".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true,
 			skip_manifest: true,
 			..Default::default()
 		};
 
-		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let _ = export(&[env_path.clone()], opts).unwrap();
 
 		// Check manifest.json does not exist
 		let manifest_path = output_dir.join(MANIFEST_FILE);
@@ -3857,7 +3794,7 @@ mod tests {
 			extension: "yaml".to_string(),
 			format: "{{.kind}}-{{.metadata.name}}".to_string(),
 			parallelism: 1,
-			eval_opts: EvalOpts::default(),
+			eval_opts: GlobalEvaluatorOptions::default(),
 			name: None,
 			recursive: true,
 			skip_manifest: false,
@@ -3865,7 +3802,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let _ = export(&[env_path.to_string_lossy().to_string()], opts).unwrap();
+		let _ = export(&[env_path.clone()], opts).unwrap();
 
 		// Read manifest.json
 		let manifest_content = fs::read_to_string(output_dir.join(MANIFEST_FILE)).unwrap();
@@ -3919,11 +3856,7 @@ mod tests {
 			..Default::default()
 		};
 
-		let _ = export(
-			&[root.join("environments").to_string_lossy().to_string()],
-			opts,
-		)
-		.unwrap();
+		let _ = export(&[root.join("environments")], opts).unwrap();
 
 		// Read manifest.json
 		let manifest_path = output_dir.join(MANIFEST_FILE);
@@ -4207,7 +4140,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -4220,7 +4153,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 1);
 	}
 
@@ -4236,7 +4169,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		let result = collect_manifests_with_validation(&value, &mut manifests, "");
+		let result = collect_manifests_with_validation(value, &mut manifests, "");
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(
@@ -4259,7 +4192,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 1);
 	}
 
@@ -4287,7 +4220,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -4307,7 +4240,7 @@ mod tests {
 		]);
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -4334,7 +4267,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 2);
 	}
 
@@ -4356,7 +4289,7 @@ mod tests {
 		});
 
 		let mut manifests = Vec::new();
-		collect_manifests_with_validation(&value, &mut manifests, "").unwrap();
+		collect_manifests_with_validation(value, &mut manifests, "").unwrap();
 		assert_eq!(manifests.len(), 1);
 		assert_eq!(manifests[0]["kind"], "ConfigMap");
 	}

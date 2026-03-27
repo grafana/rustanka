@@ -2,8 +2,8 @@ use std::{any::Any, cell::RefCell, future::Future};
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_parser::{
-	ArgsDesc, AssertStmt, BindSpec, CompSpec, Destruct, Expr, FieldMember, FieldName, ForSpecData,
-	IfSpecData, LocExpr, Member, ObjBody, Param, ParamsDesc, ParserSettings, SliceDesc, Source,
+	AnalyzedExpr, ArgsDesc, AssertStmt, BindSpec, CompSpec, Destruct, Expr, FieldMember, FieldName,
+	ForSpecData, IfSpecData, Member, ObjBody, Param, ParamsDesc, ParserSettings, SliceDesc, Source,
 	SourcePath,
 };
 use rustc_hash::FxHashMap;
@@ -19,7 +19,7 @@ pub struct FoundImports(Vec<Import>);
 
 // Visits all nodes, trying to find import statements
 #[allow(clippy::too_many_lines)]
-pub fn find_imports(expr: &LocExpr, out: &mut FoundImports) {
+pub fn find_imports(expr: &AnalyzedExpr, out: &mut FoundImports) {
 	fn in_destruct(dest: &Destruct, #[allow(unused_variables)] out: &mut FoundImports) {
 		match dest {
 			#[cfg(feature = "exp-destruct")]

@@ -7,6 +7,8 @@ mod expr;
 pub use expr::*;
 pub use jrsonnet_interner::IStr;
 pub use peg;
+pub(crate) mod used_vars;
+pub use used_vars::UsedVars;
 mod location;
 mod source;
 mod unescape;
@@ -69,7 +71,7 @@ parser! {
 			= params:param(s) ** comma() comma()? { expr::ParamsDesc(Rc::new(params)) }
 			/ { expr::ParamsDesc(Rc::new(Vec::new())) }
 
-		pub rule arg(s: &ParserSettings) -> (Option<IStr>, LocExpr)
+		pub rule arg(s: &ParserSettings) -> (Option<IStr>, AnalyzedExpr)
 			= name:(quiet! { (s:id() _ "=" !['='] _ {s})? } / expected!("<argument name>")) expr:expr(s) {(name, expr)}
 
 		pub rule args(s: &ParserSettings) -> expr::ArgsDesc
@@ -245,8 +247,8 @@ parser! {
 			}}
 		pub rule var_expr(s: &ParserSettings) -> Expr
 			= n:id() { expr::Expr::Var(n) }
-		pub rule id_loc(s: &ParserSettings) -> LocExpr
-			= a:position!() n:id() b:position!() { LocExpr::new(expr::Expr::Str(n), Span(s.source.clone(), a as u32,b as u32)) }
+		pub rule id_loc(s: &ParserSettings) -> AnalyzedExpr
+			= a:position!() n:id() b:position!() { AnalyzedExpr::new(expr::Expr::Str(n), Span(s.source.clone(), a as u32,b as u32)) }
 		pub rule if_then_else_expr(s: &ParserSettings) -> Expr
 			= cond:ifspec(s) _ keyword("then") _ cond_then:expr(s) cond_else:(_ keyword("else") _ e:expr(s) {e})? {Expr::IfElse{
 				cond,
@@ -286,7 +288,7 @@ parser! {
 
 			/ keyword("error") _ expr:expr(s) { Expr::ErrorStmt(expr) }
 
-		rule slice_part(s: &ParserSettings) -> Option<LocExpr>
+		rule slice_part(s: &ParserSettings) -> Option<AnalyzedExpr>
 			= _ e:(e:expr(s) _{e})? {e}
 		pub rule slice_desc(s: &ParserSettings) -> SliceDesc
 			= start:slice_part(s) ":" pair:(end:slice_part(s) step:(":" e:slice_part(s){e})? {(end, step.flatten())})? {
@@ -311,9 +313,9 @@ parser! {
 			}
 		use BinaryOpType::*;
 		use UnaryOpType::*;
-		rule expr(s: &ParserSettings) -> LocExpr
+		rule expr(s: &ParserSettings) -> AnalyzedExpr
 			= precedence! {
-				start:position!() v:@ end:position!() { LocExpr::new(v, Span(s.source.clone(), start as u32, end as u32)) }
+				start:position!() v:@ end:position!() { AnalyzedExpr::new(v, Span(s.source.clone(), start as u32, end as u32)) }
 				--
 				a:(@) _ binop(<"||">) _ b:@ {expr_bin!(a Or b)}
 				a:(@) _ binop(<"??">) _ ensure_null_coaelse() b:@ {
@@ -373,18 +375,18 @@ parser! {
 			null_coaelse: n.is_some(),
 		}}
 
-		pub rule jsonnet(s: &ParserSettings) -> LocExpr = _ e:expr(s) _ {e}
+		pub rule jsonnet(s: &ParserSettings) -> AnalyzedExpr = _ e:expr(s) _ {e}
 	}
 }
 
 pub type ParseError = peg::error::ParseError<peg::str::LineCol>;
-pub fn parse(str: &str, settings: &ParserSettings) -> Result<LocExpr, ParseError> {
+pub fn parse(str: &str, settings: &ParserSettings) -> Result<AnalyzedExpr, ParseError> {
 	jsonnet_parser::jsonnet(str, settings)
 }
 /// Used for importstr values
-pub fn string_to_expr(str: IStr, settings: &ParserSettings) -> LocExpr {
+pub fn string_to_expr(str: IStr, settings: &ParserSettings) -> AnalyzedExpr {
 	let len = str.len();
-	LocExpr::new(Expr::Str(str), Span(settings.source.clone(), 0, len as u32))
+	AnalyzedExpr::new(Expr::Str(str), Span(settings.source.clone(), 0, len as u32))
 }
 
 #[cfg(test)]
@@ -409,7 +411,7 @@ pub mod tests {
 
 	macro_rules! el {
 		($expr:expr, $from:expr, $to:expr$(,)?) => {
-			LocExpr::new(
+			AnalyzedExpr::new(
 				$expr,
 				Span(
 					Source::new_virtual("<test>".into(), IStr::empty()),

@@ -45,7 +45,7 @@ impl TlaOpts {
 		for ext in &self.tla_code {
 			out.insert(
 				ext.name.as_str().into(),
-				TlaArg::InlineCode(ext.value.clone()),
+				TlaArg::InlineCode(ext.value.as_str().into()),
 			);
 		}
 		for ext in &self.tla_code_file {

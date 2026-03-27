@@ -6,15 +6,17 @@ use std::{
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
+use rustc_hash::FxHashSet;
 
 use crate::source::Source;
+use crate::used_vars::{compute_used_vars, UsedVars};
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum FieldName {
 	/// {fixed: 2}
 	Fixed(IStr),
 	/// {["dyn"+"amic"]: 3}
-	Dyn(LocExpr),
+	Dyn(AnalyzedExpr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
@@ -35,7 +37,7 @@ impl Visibility {
 }
 
 #[derive(Clone, Debug, PartialEq, Acyclic)]
-pub struct AssertStmt(pub LocExpr, pub Option<LocExpr>);
+pub struct AssertStmt(pub AnalyzedExpr, pub Option<AnalyzedExpr>);
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct FieldMember {
@@ -43,7 +45,7 @@ pub struct FieldMember {
 	pub plus: bool,
 	pub params: Option<ParamsDesc>,
 	pub visibility: Visibility,
-	pub value: LocExpr,
+	pub value: AnalyzedExpr,
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
@@ -147,7 +149,7 @@ impl Display for BinaryOpType {
 
 /// name, default value
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct Param(pub Destruct, pub Option<LocExpr>);
+pub struct Param(pub Destruct, pub Option<AnalyzedExpr>);
 
 /// Defined function parameters
 #[derive(Debug, Clone, PartialEq, Acyclic)]
@@ -162,11 +164,11 @@ impl Deref for ParamsDesc {
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct ArgsDesc {
-	pub unnamed: Vec<LocExpr>,
-	pub named: Vec<(IStr, LocExpr)>,
+	pub unnamed: Vec<AnalyzedExpr>,
+	pub named: Vec<(IStr, AnalyzedExpr)>,
 }
 impl ArgsDesc {
-	pub fn new(unnamed: Vec<LocExpr>, named: Vec<(IStr, LocExpr)>) -> Self {
+	pub fn new(unnamed: Vec<AnalyzedExpr>, named: Vec<(IStr, AnalyzedExpr)>) -> Self {
 		Self { unnamed, named }
 	}
 }
@@ -192,7 +194,7 @@ pub enum Destruct {
 	},
 	#[cfg(feature = "exp-destruct")]
 	Object {
-		fields: Vec<(IStr, Option<Destruct>, Option<LocExpr>)>,
+		fields: Vec<(IStr, Option<Destruct>, Option<AnalyzedExpr>)>,
 		rest: Option<DestructRest>,
 	},
 }
@@ -244,12 +246,12 @@ impl Destruct {
 pub enum BindSpec {
 	Field {
 		into: Destruct,
-		value: LocExpr,
+		value: AnalyzedExpr,
 	},
 	Function {
 		name: IStr,
 		params: ParamsDesc,
-		value: LocExpr,
+		value: AnalyzedExpr,
 	},
 }
 impl BindSpec {
@@ -262,10 +264,10 @@ impl BindSpec {
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct IfSpecData(pub LocExpr);
+pub struct IfSpecData(pub AnalyzedExpr);
 
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct ForSpecData(pub Destruct, pub LocExpr);
+pub struct ForSpecData(pub Destruct, pub AnalyzedExpr);
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum CompSpec {
@@ -299,9 +301,9 @@ pub enum LiteralType {
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct SliceDesc {
-	pub start: Option<LocExpr>,
-	pub end: Option<LocExpr>,
-	pub step: Option<LocExpr>,
+	pub start: Option<AnalyzedExpr>,
+	pub end: Option<AnalyzedExpr>,
+	pub step: Option<AnalyzedExpr>,
 }
 
 /// Syntax base
@@ -317,7 +319,7 @@ pub enum Expr {
 	Var(IStr),
 
 	/// Array of expressions: [1, 2, "Hello"]
-	Arr(Vec<LocExpr>),
+	Arr(Vec<AnalyzedExpr>),
 	/// Array comprehension:
 	/// ```jsonnet
 	///  ingredients: [
@@ -329,54 +331,54 @@ pub enum Expr {
 	///    ]
 	///  ],
 	/// ```
-	ArrComp(LocExpr, Vec<CompSpec>),
+	ArrComp(AnalyzedExpr, Vec<CompSpec>),
 
 	/// Object: {a: 2}
 	Obj(ObjBody),
 	/// Object extension: var1 {b: 2}
-	ObjExtend(LocExpr, ObjBody),
+	ObjExtend(AnalyzedExpr, ObjBody),
 
 	/// (obj)
-	Parened(LocExpr),
+	Parened(AnalyzedExpr),
 
 	/// -2
-	UnaryOp(UnaryOpType, LocExpr),
+	UnaryOp(UnaryOpType, AnalyzedExpr),
 	/// 2 - 2
-	BinaryOp(LocExpr, BinaryOpType, LocExpr),
+	BinaryOp(AnalyzedExpr, BinaryOpType, AnalyzedExpr),
 	/// assert 2 == 2 : "Math is broken"
-	AssertExpr(AssertStmt, LocExpr),
+	AssertExpr(AssertStmt, AnalyzedExpr),
 	/// local a = 2; { b: a }
-	LocalExpr(Vec<BindSpec>, LocExpr),
+	LocalExpr(Vec<BindSpec>, AnalyzedExpr),
 
 	/// import "hello"
-	Import(LocExpr),
+	Import(AnalyzedExpr),
 	/// importStr "file.txt"
-	ImportStr(LocExpr),
+	ImportStr(AnalyzedExpr),
 	/// importBin "file.txt"
-	ImportBin(LocExpr),
+	ImportBin(AnalyzedExpr),
 	/// error "I'm broken"
-	ErrorStmt(LocExpr),
+	ErrorStmt(AnalyzedExpr),
 	/// a(b, c)
-	Apply(LocExpr, ArgsDesc, bool),
+	Apply(AnalyzedExpr, ArgsDesc, bool),
 	/// a[b], a.b, a?.b
 	Index {
-		indexable: LocExpr,
+		indexable: AnalyzedExpr,
 		parts: Vec<IndexPart>,
 	},
 	/// function(x) x
-	Function(ParamsDesc, LocExpr),
+	Function(ParamsDesc, AnalyzedExpr),
 	/// if true == false then 1 else 2
 	IfElse {
 		cond: IfSpecData,
-		cond_then: LocExpr,
-		cond_else: Option<LocExpr>,
+		cond_then: AnalyzedExpr,
+		cond_else: Option<AnalyzedExpr>,
 	},
-	Slice(LocExpr, SliceDesc),
+	Slice(AnalyzedExpr, SliceDesc),
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct IndexPart {
-	pub value: LocExpr,
+	pub value: AnalyzedExpr,
 	#[cfg(feature = "exp-null-coaelse")]
 	pub null_coaelse: bool,
 }
@@ -399,26 +401,80 @@ impl Debug for Span {
 	}
 }
 
-/// Holds AST expression and its location in source file
-#[derive(Clone, PartialEq, Acyclic)]
-pub struct LocExpr(Rc<(Expr, Span)>);
-impl LocExpr {
+/// Information about an expression that can be used for optimization.
+#[derive(Debug, Clone, Acyclic)]
+pub struct Analysis {
+	/// Single variable referenced by this expression (for `Var` nodes).
+	/// Avoids allocating a hashset for the common single-variable case.
+	pub var: Option<IStr>,
+	/// Set of variable names referenced (used) by this expression and its sub-expressions.
+	pub used_vars: UsedVars,
+}
+
+/// Internal representation of an analyzed expression node.
+#[derive(Debug, Acyclic)]
+struct AnalyzedExprInternals {
+	expr: Expr,
+	span: Span,
+	analysis: Analysis,
+}
+
+/// Holds AST expression, its location in source file, and used-variable analysis.
+#[derive(Clone, Acyclic)]
+pub struct AnalyzedExpr(Rc<AnalyzedExprInternals>);
+
+/// Backward-compatible alias.
+pub type LocExpr = AnalyzedExpr;
+
+impl AnalyzedExpr {
 	pub fn new(expr: Expr, span: Span) -> Self {
-		Self(Rc::new((expr, span)))
+		let var = match &expr {
+			Expr::Var(name) => Some(name.clone()),
+			_ => None,
+		};
+		let used_vars = compute_used_vars(&expr);
+		Self(Rc::new(AnalyzedExprInternals {
+			expr,
+			span,
+			analysis: Analysis { var, used_vars },
+		}))
 	}
 	#[inline]
 	pub fn span(&self) -> Span {
-		self.0 .1.clone()
+		self.0.span.clone()
 	}
 	#[inline]
 	pub fn expr(&self) -> &Expr {
-		&self.0 .0
+		&self.0.expr
+	}
+	#[inline]
+	pub fn analysis(&self) -> &Analysis {
+		&self.0.analysis
+	}
+	#[inline]
+	pub fn used_vars(&self) -> &UsedVars {
+		&self.0.analysis.used_vars
+	}
+	/// Insert all variable names used by this expression into `target`.
+	/// Handles both the singleton `var` field and the `used_vars` set.
+	#[inline]
+	pub fn extend_used_into(&self, target: &mut FxHashSet<IStr>) {
+		if let Some(var) = &self.0.analysis.var {
+			target.insert(var.clone());
+		}
+		self.0.analysis.used_vars.extend_into(target);
 	}
 }
 
-static_assertions::assert_eq_size!(LocExpr, usize);
+impl PartialEq for AnalyzedExpr {
+	fn eq(&self, other: &Self) -> bool {
+		self.0.expr == other.0.expr && self.0.span == other.0.span
+	}
+}
 
-impl Debug for LocExpr {
+static_assertions::assert_eq_size!(AnalyzedExpr, usize);
+
+impl Debug for AnalyzedExpr {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let expr = self.expr();
 		if f.alternate() {

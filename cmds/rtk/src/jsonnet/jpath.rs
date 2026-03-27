@@ -34,8 +34,11 @@ pub struct JpathResult {
 /// - Project root: directory containing tkrc.yaml or jsonnetfile.json
 /// - Environment base: directory containing main.jsonnet
 /// - Import paths: [base, lib, base/vendor, root/vendor]
-pub fn resolve(path: &str) -> Result<JpathResult> {
-	let path = PathBuf::from(path);
+pub fn resolve<P>(path: P) -> Result<JpathResult>
+where
+	P: AsRef<Path>,
+{
+	let path = PathBuf::from(path.as_ref());
 	let abs_path = if path.is_absolute() {
 		path
 	} else {

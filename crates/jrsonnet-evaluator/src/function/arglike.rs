@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{ArgsDesc, LocExpr, SourceFifo, SourcePath};
+use jrsonnet_parser::{AnalyzedExpr, ArgsDesc, SourceFifo, SourcePath};
 
 use crate::{evaluate, typed::Typed, with_state, Context, Result, Thunk, Val};
 
@@ -13,13 +13,14 @@ pub trait ArgLike {
 	fn evaluate_arg(&self, ctx: Context, tailstrict: bool) -> Result<Thunk<Val>>;
 }
 
-impl ArgLike for &LocExpr {
+impl ArgLike for &AnalyzedExpr {
 	fn evaluate_arg(&self, ctx: Context, tailstrict: bool) -> Result<Thunk<Val>> {
 		Ok(if tailstrict {
 			Thunk::evaluated(evaluate(ctx, self)?)
 		} else {
+			let trimmed = ctx.trimmed(self.analysis());
 			let expr = (*self).clone();
-			Thunk!(move || evaluate(ctx, &expr))
+			Thunk!(move || evaluate(trimmed, &expr))
 		})
 	}
 }
@@ -45,7 +46,7 @@ pub enum TlaArg {
 	Lazy(Thunk<Val>),
 	Import(String),
 	ImportStr(String),
-	InlineCode(String),
+	InlineCode(IStr),
 }
 impl TlaArg {
 	pub fn evaluate_tailstrict(&self) -> Result<Val> {
@@ -168,10 +169,10 @@ impl ArgsLike for ArgsDesc {
 				if tailstrict {
 					Thunk::evaluated(evaluate(ctx.clone(), arg)?)
 				} else {
-					let ctx = ctx.clone();
+					let trimmed = ctx.clone().trimmed(arg.analysis());
 					let arg = arg.clone();
 
-					Thunk!(move || evaluate(ctx, &arg))
+					Thunk!(move || evaluate(trimmed, &arg))
 				},
 			)?;
 		}
@@ -190,10 +191,10 @@ impl ArgsLike for ArgsDesc {
 				if tailstrict {
 					Thunk::evaluated(evaluate(ctx.clone(), arg)?)
 				} else {
-					let ctx = ctx.clone();
+					let trimmed = ctx.clone().trimmed(arg.analysis());
 					let arg = arg.clone();
 
-					Thunk!(move || evaluate(ctx, &arg))
+					Thunk!(move || evaluate(trimmed, &arg))
 				},
 			)?;
 		}

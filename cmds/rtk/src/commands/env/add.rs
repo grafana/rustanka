@@ -1,16 +1,16 @@
 //! Env add subcommand handler.
 
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
 
-use crate::env::{env_add, EnvSpecOptions};
+use crate::environments::{env_add, EnvSpecOptions};
 
 #[derive(Args)]
 pub struct AddArgs {
 	/// Path for the new environment
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Valid context name for environment, can pass multiple, regex supported
 	#[arg(long)]

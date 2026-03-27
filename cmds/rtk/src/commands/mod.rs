@@ -13,4 +13,6 @@ pub mod show;
 pub mod status;
 pub mod tool;
 
-pub mod util;
+pub mod common;
+
+pub use common::JsonnetArgs;

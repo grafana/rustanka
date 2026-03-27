@@ -425,7 +425,7 @@ impl ContextInitializer {
 		// self.data_mut().volatile_files.insert(source_name, code);
 		self.settings_mut()
 			.ext_vars
-			.insert(name.into(), TlaArg::InlineCode(code.as_ref().to_owned()));
+			.insert(name.into(), TlaArg::InlineCode(code.as_ref().into()));
 		Ok(())
 	}
 	pub fn add_native(&self, name: impl Into<IStr>, cb: impl Into<FuncVal>) {

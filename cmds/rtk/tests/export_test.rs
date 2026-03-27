@@ -5,9 +5,11 @@ use std::{
 };
 
 use rtk::{
-	discover::find_environments,
-	eval::EvalOpts,
-	export::{export, ExportOpts},
+	environments::{
+		discover::Discover,
+		export::{export, ExportOpts},
+	},
+	jsonnet::evaluator::{DefaultEvaluator, Evaluator, GlobalEvaluatorOptions},
 };
 
 /// Helper function to get absolute path to test data
@@ -56,9 +58,11 @@ fn test_export_environments() {
 	let _original_dir = std::env::current_dir().unwrap();
 
 	// Find environments
-	let envs = find_environments(&[testdata_path("test-export-envs")
-		.to_string_lossy()
-		.to_string()])
+	let envs = Discover::new(
+		DefaultEvaluator::new(GlobalEvaluatorOptions::default()),
+		vec![testdata_path("test-export-envs")],
+	)
+	.collect::<anyhow::Result<Vec<_>>>()
 	.unwrap();
 	// Should find 3 environments: 1 static (static-env) + 2 inline sub-envs (inline-namespace1, inline-namespace2)
 	assert_eq!(
@@ -68,36 +72,23 @@ fn test_export_environments() {
 	);
 
 	// Export all envs
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'initial-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'initial-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 8,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'initial-deployment'")
+			.ext_code("serviceName", "'initial-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
 	assert_eq!(result.successful, 3);
@@ -162,9 +153,11 @@ fn test_export_environments_broken() {
 	let output_dir = temp_dir.path();
 
 	// Find environments
-	let _envs = find_environments(&[testdata_path("test-export-envs-broken")
-		.to_string_lossy()
-		.to_string()])
+	let _envs = Discover::new(
+		DefaultEvaluator::new(GlobalEvaluatorOptions::default()),
+		vec![testdata_path("test-export-envs-broken")],
+	)
+	.collect::<anyhow::Result<Vec<_>>>()
 	.unwrap();
 
 	// Export all envs
@@ -173,19 +166,14 @@ fn test_export_environments_broken() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs-broken")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	);
+	let result = export(&[testdata_path("test-export-envs-broken")], opts);
 
 	// Should fail - the environment has a schema error (name field is boolean instead of string)
 	// For now, this might just be an evaluation error rather than a schema error
@@ -211,41 +199,30 @@ fn test_export_environments_skip_manifest() {
 	let output_dir = temp_dir.path();
 
 	// Find environments
-	let _envs = find_environments(&[testdata_path("test-export-envs")
-		.to_string_lossy()
-		.to_string()])
+	let _envs = Discover::new(
+		DefaultEvaluator::new(GlobalEvaluatorOptions::default()),
+		vec![testdata_path("test-export-envs")],
+	)
+	.collect::<anyhow::Result<Vec<_>>>()
 	.unwrap();
 
 	// Export all envs with skip manifest flag
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'test-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'test-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'test-deployment'")
+			.ext_code("serviceName", "'test-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: true,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
 	assert_eq!(result.successful, 3);
@@ -275,15 +252,17 @@ fn test_export_environments_skip_manifest() {
 
 #[test]
 fn test_export_merge_strategies() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
 	// Find environments
-	let envs = find_environments(&[testdata_path("test-export-envs")
-		.to_string_lossy()
-		.to_string()])
+	let envs = Discover::new(
+		DefaultEvaluator::new(GlobalEvaluatorOptions::default()),
+		vec![testdata_path("test-export-envs")],
+	)
+	.collect::<anyhow::Result<Vec<_>>>()
 	.unwrap();
 	// Should find 3 environments: 1 static (static-env) + 2 inline sub-envs (inline-namespace1, inline-namespace2)
 	assert_eq!(
@@ -293,22 +272,15 @@ fn test_export_merge_strategies() {
 	);
 
 	// STEP 1: Initial export with default strategy
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'initial-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'initial-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'initial-deployment'")
+			.ext_code("serviceName", "'initial-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -316,13 +288,7 @@ fn test_export_merge_strategies() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts.clone(),
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts.clone()).unwrap();
 
 	// Should export 3 environments successfully (1 static + 2 inline sub-envs)
 	assert_eq!(result.successful, 3);
@@ -344,12 +310,7 @@ fn test_export_merge_strategies() {
 	);
 
 	// STEP 2: Try to re-export without merge strategy - should fail
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts.clone(),
-	);
+	let result = export(&[testdata_path("test-export-envs")], opts.clone());
 	assert!(result.is_err(), "Should fail when directory is not empty");
 	assert!(
 		result
@@ -363,12 +324,7 @@ fn test_export_merge_strategies() {
 	let mut fail_opts = opts.clone();
 	fail_opts.merge_strategy = ExportMergeStrategy::FailOnConflicts;
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		fail_opts,
-	);
+	let result = export(&[testdata_path("test-export-envs")], fail_opts);
 	// Should fail because files already exist
 	match result {
 		Ok(r) => {
@@ -383,13 +339,6 @@ fn test_export_merge_strategies() {
 	}
 
 	// STEP 4: Re-export only static env with replace-envs strategy
-	let mut updated_ext_code = HashMap::new();
-	updated_ext_code.insert(
-		"deploymentName".to_string(),
-		"'updated-deployment'".to_string(),
-	);
-	updated_ext_code.insert("serviceName".to_string(), "'updated-service'".to_string());
-
 	// Find just the static environment
 	let static_envs: Vec<_> = envs
 		.iter()
@@ -402,10 +351,10 @@ fn test_export_merge_strategies() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: updated_ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'updated-deployment'")
+			.ext_code("serviceName", "'updated-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -413,11 +362,7 @@ fn test_export_merge_strategies() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[static_envs[0].path.to_string_lossy().to_string()],
-		replace_opts.clone(),
-	)
-	.unwrap();
+	let result = export(&[(*static_envs[0].path).clone()], replace_opts.clone()).unwrap();
 
 	assert_eq!(result.successful, 1);
 
@@ -446,40 +391,27 @@ fn test_export_merge_strategies() {
 
 	// STEP 5: Re-export and delete files from inline environment
 	let inline_env_path = testdata_path("test-export-envs/inline-envs/main.jsonnet");
-	let mut updated_again_ext_code = HashMap::new();
-	updated_again_ext_code.insert(
-		"deploymentName".to_string(),
-		"'updated-again-deployment'".to_string(),
-	);
-	updated_again_ext_code.insert(
-		"serviceName".to_string(),
-		"'updated-again-service'".to_string(),
-	);
 
 	let delete_opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: updated_again_ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'updated-again-deployment'")
+			.ext_code("serviceName", "'updated-again-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		selector: None,
 		skip_manifest: false,
 		target: vec![],
 		merge_strategy: ExportMergeStrategy::ReplaceEnvs,
-		merge_deleted_envs: vec![inline_env_path.to_string_lossy().to_string()],
+		merge_deleted_envs: vec![inline_env_path.to_string_lossy().into_owned()],
 		show_timing: false,
 	};
 
-	let result = export(
-		&[static_envs[0].path.to_string_lossy().to_string()],
-		delete_opts,
-	)
-	.unwrap();
+	let result = export(&[(*static_envs[0].path).clone()], delete_opts).unwrap();
 
 	assert_eq!(result.successful, 1);
 
@@ -518,9 +450,11 @@ fn test_export_merge_strategies() {
 #[test]
 fn test_export_empty_inline_environment() {
 	// Find environments - should find none (no valid Tanka Environment object in the output)
-	let envs = find_environments(&[testdata_path("test-export-empty-inline-env")
-		.to_string_lossy()
-		.to_string()])
+	let envs = Discover::new(
+		DefaultEvaluator::new(GlobalEvaluatorOptions::default()),
+		vec![testdata_path("test-export-empty-inline-env")],
+	)
+	.collect::<anyhow::Result<Vec<_>>>()
 	.unwrap();
 
 	// Should NOT discover the environment directory because it has no valid Tanka Environment
@@ -551,29 +485,22 @@ fn test_export_with_absolute_directory_path() {
 	);
 
 	// Export using absolute path
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'absolute-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'absolute-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'absolute-deployment'")
+			.ext_code("serviceName", "'absolute-service'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(&[abs_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[abs_path.clone()], opts).unwrap();
 
 	// Should export successfully
 	assert_eq!(result.successful, 1, "Should export 1 environment");
@@ -620,29 +547,22 @@ fn test_export_with_absolute_file_path() {
 	assert!(abs_path.is_file(), "Path should be a file: {:?}", abs_path);
 
 	// Export using absolute path to the file
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'file-path-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'file-path-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'file-path-deployment'")
+			.ext_code("serviceName", "'file-path-service'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(&[abs_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[abs_path.clone()], opts).unwrap();
 
 	// Should export successfully - the file path should resolve to its parent directory
 	assert_eq!(result.successful, 1, "Should export 1 environment");
@@ -663,7 +583,7 @@ fn test_export_with_absolute_file_path() {
 /// This tests scenarios where an export tries to write to a path that already exists from a previous export
 #[test]
 fn test_export_file_conflict_fail_on_conflicts() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -674,7 +594,7 @@ fn test_export_file_conflict_fail_on_conflicts() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -682,12 +602,7 @@ fn test_export_file_conflict_fail_on_conflicts() {
 		..Default::default()
 	};
 
-	let result1 = export(
-		&[testdata_path("test-export-conflict/env1")
-			.to_string_lossy()
-			.to_string()],
-		opts1,
-	);
+	let result1 = export(&[testdata_path("test-export-conflict/env1")], opts1);
 	result1.unwrap(); // First export should succeed
 
 	// STEP 2: Try to export second environment that maps to the same file path with fail-on-conflicts
@@ -696,7 +611,7 @@ fn test_export_file_conflict_fail_on_conflicts() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -704,12 +619,7 @@ fn test_export_file_conflict_fail_on_conflicts() {
 		..Default::default()
 	};
 
-	let result2 = export(
-		&[testdata_path("test-export-conflict/env2")
-			.to_string_lossy()
-			.to_string()],
-		opts2,
-	);
+	let result2 = export(&[testdata_path("test-export-conflict/env2")], opts2);
 
 	// Should fail because file already exists from first export
 	match result2 {
@@ -745,7 +655,7 @@ fn test_export_file_conflict_fail_on_conflicts() {
 /// Even with replace-envs, conflicts with existing files should fail
 #[test]
 fn test_export_file_conflict_replace_envs() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -756,7 +666,7 @@ fn test_export_file_conflict_replace_envs() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -764,12 +674,7 @@ fn test_export_file_conflict_replace_envs() {
 		..Default::default()
 	};
 
-	let result1 = export(
-		&[testdata_path("test-export-conflict/env1")
-			.to_string_lossy()
-			.to_string()],
-		opts1,
-	);
+	let result1 = export(&[testdata_path("test-export-conflict/env1")], opts1);
 	result1.unwrap(); // First export should succeed
 
 	// STEP 2: Try to export second environment that maps to the same file path with replace-envs
@@ -778,7 +683,7 @@ fn test_export_file_conflict_replace_envs() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -786,12 +691,7 @@ fn test_export_file_conflict_replace_envs() {
 		..Default::default()
 	};
 
-	let result2 = export(
-		&[testdata_path("test-export-conflict/env2")
-			.to_string_lossy()
-			.to_string()],
-		opts2,
-	);
+	let result2 = export(&[testdata_path("test-export-conflict/env2")], opts2);
 
 	// Should fail because file already exists
 	// replace-envs only handles re-exporting previously exported envs (deletes their files first),
@@ -837,19 +737,14 @@ fn test_export_fails_on_invalid_k8s_object() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-invalid-k8s-object")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	);
+	let result = export(&[testdata_path("test-export-invalid-k8s-object")], opts);
 
 	// Should fail because thor_engine has kind and metadata but missing apiVersion
 	match result {
@@ -910,7 +805,7 @@ fn collect_files_with_content(dir: &Path) -> HashMap<String, String> {
 /// Verifies: export -> re-export (identical) -> change -> re-export (reflects change)
 #[test]
 fn test_replace_envs_idempotent_single_static_env() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -918,19 +813,15 @@ fn test_replace_envs_idempotent_single_static_env() {
 	let static_env_path = testdata_path("test-export-envs/static-env");
 
 	// STEP 1: Initial export
-	let mut ext_code = HashMap::new();
-	ext_code.insert("deploymentName".to_string(), "'my-deployment'".to_string());
-	ext_code.insert("serviceName".to_string(), "'my-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'my-deployment'")
+			.ext_code("serviceName", "'my-service'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -938,7 +829,7 @@ fn test_replace_envs_idempotent_single_static_env() {
 		..Default::default()
 	};
 
-	let result = export(&[static_env_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[static_env_path.clone()], opts).unwrap();
 	assert_eq!(result.successful, 1);
 	assert_eq!(result.failed, 0);
 
@@ -952,10 +843,10 @@ fn test_replace_envs_idempotent_single_static_env() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'my-deployment'")
+			.ext_code("serviceName", "'my-service'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -963,11 +854,7 @@ fn test_replace_envs_idempotent_single_static_env() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[static_env_path.to_string_lossy().to_string()],
-		opts_replace.clone(),
-	)
-	.unwrap();
+	let result = export(&[static_env_path.clone()], opts_replace.clone()).unwrap();
 	assert_eq!(result.successful, 1);
 
 	// Verify idempotency - files should be identical
@@ -978,22 +865,15 @@ fn test_replace_envs_idempotent_single_static_env() {
 	);
 
 	// STEP 3: Change ext_code and re-export - should reflect changes
-	let mut changed_ext_code = HashMap::new();
-	changed_ext_code.insert(
-		"deploymentName".to_string(),
-		"'changed-deployment'".to_string(),
-	);
-	changed_ext_code.insert("serviceName".to_string(), "'changed-service'".to_string());
-
 	let opts_changed = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: changed_ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'changed-deployment'")
+			.ext_code("serviceName", "'changed-service'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1001,11 +881,7 @@ fn test_replace_envs_idempotent_single_static_env() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[static_env_path.to_string_lossy().to_string()],
-		opts_changed,
-	)
-	.unwrap();
+	let result = export(&[static_env_path.clone()], opts_changed).unwrap();
 	assert_eq!(result.successful, 1);
 
 	// Verify changes are reflected
@@ -1041,7 +917,7 @@ fn test_replace_envs_idempotent_single_static_env() {
 /// Verifies: export -> re-export (identical) -> change -> re-export (reflects change)
 #[test]
 fn test_replace_envs_idempotent_all_envs() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -1049,23 +925,16 @@ fn test_replace_envs_idempotent_all_envs() {
 	let envs_path = testdata_path("test-export-envs");
 
 	// STEP 1: Initial export of all environments
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'initial-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'initial-service'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 4,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'initial-deployment'")
+			.ext_code("serviceName", "'initial-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1073,7 +942,7 @@ fn test_replace_envs_idempotent_all_envs() {
 		..Default::default()
 	};
 
-	let result = export(&[envs_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[envs_path.clone()], opts).unwrap();
 	assert_eq!(result.successful, 3); // 1 static + 2 inline
 	assert_eq!(result.failed, 0);
 
@@ -1089,10 +958,10 @@ fn test_replace_envs_idempotent_all_envs() {
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 4,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'initial-deployment'")
+			.ext_code("serviceName", "'initial-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1100,11 +969,7 @@ fn test_replace_envs_idempotent_all_envs() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[envs_path.to_string_lossy().to_string()],
-		opts_replace.clone(),
-	)
-	.unwrap();
+	let result = export(&[envs_path.clone()], opts_replace.clone()).unwrap();
 	assert_eq!(result.successful, 3);
 
 	// Verify idempotency
@@ -1115,23 +980,16 @@ fn test_replace_envs_idempotent_all_envs() {
 	);
 
 	// STEP 3: Change ext_code and re-export all
-	let mut changed_ext_code = HashMap::new();
-	changed_ext_code.insert(
-		"deploymentName".to_string(),
-		"'updated-deployment'".to_string(),
-	);
-	changed_ext_code.insert("serviceName".to_string(), "'updated-service'".to_string());
-
 	let opts_changed = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 4,
-		eval_opts: EvalOpts {
-			ext_code: changed_ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'updated-deployment'")
+			.ext_code("serviceName", "'updated-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1139,7 +997,7 @@ fn test_replace_envs_idempotent_all_envs() {
 		..Default::default()
 	};
 
-	let result = export(&[envs_path.to_string_lossy().to_string()], opts_changed).unwrap();
+	let result = export(&[envs_path.clone()], opts_changed).unwrap();
 	assert_eq!(result.successful, 3);
 
 	// Verify changes are reflected for static env
@@ -1177,7 +1035,7 @@ fn test_replace_envs_idempotent_all_envs() {
 /// Verifies: export -> re-export (identical) -> change -> re-export (reflects change)
 #[test]
 fn test_replace_envs_idempotent_inline_env() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -1192,7 +1050,7 @@ fn test_replace_envs_idempotent_inline_env() {
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: true, // Need recursive since there are 2 inline sub-envs
 		skip_manifest: false,
@@ -1200,7 +1058,7 @@ fn test_replace_envs_idempotent_inline_env() {
 		..Default::default()
 	};
 
-	let result = export(&[inline_env_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[inline_env_path.clone()], opts).unwrap();
 	assert_eq!(result.successful, 2); // 2 inline sub-envs
 	assert_eq!(result.failed, 0);
 
@@ -1218,7 +1076,7 @@ fn test_replace_envs_idempotent_inline_env() {
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1226,11 +1084,7 @@ fn test_replace_envs_idempotent_inline_env() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[inline_env_path.to_string_lossy().to_string()],
-		opts_replace.clone(),
-	)
-	.unwrap();
+	let result = export(&[inline_env_path.clone()], opts_replace.clone()).unwrap();
 	assert_eq!(result.successful, 2);
 
 	// Verify idempotency
@@ -1242,11 +1096,7 @@ fn test_replace_envs_idempotent_inline_env() {
 
 	// STEP 3: Re-export multiple times to ensure continued idempotency
 	for _ in 0..3 {
-		let result = export(
-			&[inline_env_path.to_string_lossy().to_string()],
-			opts_replace.clone(),
-		)
-		.unwrap();
+		let result = export(&[inline_env_path.clone()], opts_replace.clone()).unwrap();
 		assert_eq!(result.successful, 2);
 
 		let files = collect_files_with_content(output_dir);
@@ -1261,19 +1111,12 @@ fn test_replace_envs_idempotent_inline_env() {
 /// Exports with different parallelism values and verifies identical results
 #[test]
 fn test_replace_envs_idempotent_parallel() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
 	let envs_path = testdata_path("test-export-envs");
-
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'parallel-deployment'".to_string(),
-	);
-	ext_code.insert("serviceName".to_string(), "'parallel-service'".to_string());
 
 	// Initial export with parallelism=1
 	let opts = ExportOpts {
@@ -1282,10 +1125,10 @@ fn test_replace_envs_idempotent_parallel() {
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'parallel-deployment'")
+			.ext_code("serviceName", "'parallel-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1293,7 +1136,7 @@ fn test_replace_envs_idempotent_parallel() {
 		..Default::default()
 	};
 
-	let result = export(&[envs_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[envs_path.clone()], opts).unwrap();
 	assert_eq!(result.successful, 3);
 
 	let files_initial = collect_files_with_content(output_dir);
@@ -1305,10 +1148,10 @@ fn test_replace_envs_idempotent_parallel() {
 		format: "{{env.metadata.labels.cluster_name}}/{{env.spec.namespace}}/{{.metadata.name}}"
 			.to_string(),
 		parallelism: 8,
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'parallel-deployment'")
+			.ext_code("serviceName", "'parallel-service'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1316,11 +1159,7 @@ fn test_replace_envs_idempotent_parallel() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[envs_path.to_string_lossy().to_string()],
-		opts_parallel.clone(),
-	)
-	.unwrap();
+	let result = export(&[envs_path.clone()], opts_parallel.clone()).unwrap();
 	assert_eq!(result.successful, 3);
 
 	let files_after_parallel = collect_files_with_content(output_dir);
@@ -1330,7 +1169,7 @@ fn test_replace_envs_idempotent_parallel() {
 	);
 
 	// Re-export again with high parallelism
-	let result = export(&[envs_path.to_string_lossy().to_string()], opts_parallel).unwrap();
+	let result = export(&[envs_path.clone()], opts_parallel).unwrap();
 	assert_eq!(result.successful, 3);
 
 	let files_final = collect_files_with_content(output_dir);
@@ -1344,7 +1183,7 @@ fn test_replace_envs_idempotent_parallel() {
 /// from the jsonnet output
 #[test]
 fn test_replace_envs_removes_deleted_resources() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -1354,19 +1193,15 @@ fn test_replace_envs_removes_deleted_resources() {
 	let static_env_path = testdata_path("test-export-envs/static-env");
 
 	// STEP 1: Initial export with two resources
-	let mut ext_code = HashMap::new();
-	ext_code.insert("deploymentName".to_string(), "'resource-a'".to_string());
-	ext_code.insert("serviceName".to_string(), "'resource-b'".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'resource-a'")
+			.ext_code("serviceName", "'resource-b'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1374,7 +1209,7 @@ fn test_replace_envs_removes_deleted_resources() {
 		..Default::default()
 	};
 
-	let result = export(&[static_env_path.to_string_lossy().to_string()], opts).unwrap();
+	let result = export(&[static_env_path.clone()], opts).unwrap();
 	assert_eq!(result.successful, 1);
 
 	// Verify initial files
@@ -1388,19 +1223,15 @@ fn test_replace_envs_removes_deleted_resources() {
 	);
 
 	// STEP 2: Re-export with different resource names (simulates resource deletion + creation)
-	let mut changed_ext_code = HashMap::new();
-	changed_ext_code.insert("deploymentName".to_string(), "'resource-c'".to_string());
-	changed_ext_code.insert("serviceName".to_string(), "'resource-d'".to_string());
-
 	let opts_changed = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code: changed_ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'resource-c'")
+			.ext_code("serviceName", "'resource-d'")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1408,11 +1239,7 @@ fn test_replace_envs_removes_deleted_resources() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[static_env_path.to_string_lossy().to_string()],
-		opts_changed,
-	)
-	.unwrap();
+	let result = export(&[static_env_path.clone()], opts_changed).unwrap();
 	assert_eq!(result.successful, 1);
 
 	// Old files should be deleted, new files should exist
@@ -1454,22 +1281,15 @@ fn test_export_timing_data_populated() {
 	let output_dir = temp_dir.path();
 
 	// Export with timing enabled
-	let mut ext_code = HashMap::new();
-	ext_code.insert("serviceName".to_string(), "'test-service'".to_string());
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'test-deployment'".to_string(),
-	);
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 4,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("serviceName", "'test-service'")
+			.ext_code("deploymentName", "'test-deployment'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1477,13 +1297,7 @@ fn test_export_timing_data_populated() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Verify timing data is present for successful environments
 	for env_result in &result.results {
@@ -1517,22 +1331,15 @@ fn test_export_timing_data_disabled() {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
-	let mut ext_code = HashMap::new();
-	ext_code.insert("serviceName".to_string(), "'test-service'".to_string());
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'test-deployment'".to_string(),
-	);
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 4,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("serviceName", "'test-service'")
+			.ext_code("deploymentName", "'test-deployment'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1540,13 +1347,7 @@ fn test_export_timing_data_disabled() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Verify timing data is NOT present when disabled
 	for env_result in &result.results {
@@ -1564,23 +1365,16 @@ fn test_export_parallel_processing_correctness() {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
-	let mut ext_code = HashMap::new();
-	ext_code.insert("serviceName".to_string(), "'parallel-service'".to_string());
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'parallel-deployment'".to_string(),
-	);
-
 	// Export with high parallelism
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 16, // High parallelism to stress test
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("serviceName", "'parallel-service'")
+			.ext_code("deploymentName", "'parallel-deployment'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: false,
@@ -1588,13 +1382,7 @@ fn test_export_parallel_processing_correctness() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Should have exported environments successfully
 	assert!(
@@ -1636,38 +1424,22 @@ fn test_export_parallelism_determinism() {
 	let temp_dir_seq = tempfile::TempDir::new().unwrap();
 	let output_dir_seq = temp_dir_seq.path();
 
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"serviceName".to_string(),
-		"'determinism-service'".to_string(),
-	);
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'determinism-deployment'".to_string(),
-	);
-
 	let opts_seq = ExportOpts {
 		output_dir: output_dir_seq.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1, // Sequential
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("serviceName", "'determinism-service'")
+			.ext_code("deploymentName", "'determinism-deployment'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: true, // Skip manifest.json for simpler comparison
 		..Default::default()
 	};
 
-	let result_seq = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts_seq,
-	)
-	.unwrap();
+	let result_seq = export(&[testdata_path("test-export-envs")], opts_seq).unwrap();
 
 	// Export with parallelism=8 (parallel)
 	let temp_dir_par = tempfile::TempDir::new().unwrap();
@@ -1678,23 +1450,17 @@ fn test_export_parallelism_determinism() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 8, // Parallel
-		eval_opts: EvalOpts {
-			ext_code: ext_code.clone(),
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("serviceName", "'determinism-service'")
+			.ext_code("deploymentName", "'determinism-deployment'")
+			.build(),
 		name: None,
 		recursive: true,
 		skip_manifest: true,
 		..Default::default()
 	};
 
-	let result_par = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts_par,
-	)
-	.unwrap();
+	let result_par = export(&[testdata_path("test-export-envs")], opts_par).unwrap();
 
 	// Both should succeed with same number of files
 	assert_eq!(
@@ -1750,7 +1516,7 @@ fn test_export_parallelism_determinism() {
 /// (two resources mapping to the same path)
 #[test]
 fn test_export_duplicate_file_same_env() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -1760,7 +1526,7 @@ fn test_export_duplicate_file_same_env() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1768,12 +1534,7 @@ fn test_export_duplicate_file_same_env() {
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-conflict/env-duplicate")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	);
+	let result = export(&[testdata_path("test-export-conflict/env-duplicate")], opts);
 
 	// Should fail because two resources map to the same file path
 	match result {
@@ -1810,7 +1571,7 @@ fn test_export_duplicate_file_same_env() {
 /// The file content stays the same, only manifest.json ownership changes
 #[test]
 fn test_replace_envs_move_manifest_between_envs() {
-	use rtk::export::ExportMergeStrategy;
+	use rtk::environments::export::ExportMergeStrategy;
 
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
@@ -1821,7 +1582,7 @@ fn test_replace_envs_move_manifest_between_envs() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1829,12 +1590,7 @@ fn test_replace_envs_move_manifest_between_envs() {
 		..Default::default()
 	};
 
-	let result1 = export(
-		&[testdata_path("test-export-conflict/env1")
-			.to_string_lossy()
-			.to_string()],
-		opts1,
-	);
+	let result1 = export(&[testdata_path("test-export-conflict/env1")], opts1);
 	result1.unwrap();
 
 	// Check manifest.json shows env1 owns the file
@@ -1863,7 +1619,7 @@ fn test_replace_envs_move_manifest_between_envs() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
@@ -1872,12 +1628,7 @@ fn test_replace_envs_move_manifest_between_envs() {
 		..Default::default()
 	};
 
-	let result2 = export(
-		&[testdata_path("test-export-conflict/env2")
-			.to_string_lossy()
-			.to_string()],
-		opts2,
-	);
+	let result2 = export(&[testdata_path("test-export-conflict/env2")], opts2);
 
 	// Should succeed - env1's file is "released" via merge_deleted_envs
 	assert!(
@@ -1930,20 +1681,14 @@ fn test_export_filter_inline_env_by_name() {
 		extension: "yaml".to_string(),
 		format: "{{env.spec.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: Some("inline-namespace1".to_string()), // Filter by env_name
 		recursive: true,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Should export only 1 environment (inline-namespace1)
 	assert_eq!(
@@ -1970,39 +1715,23 @@ fn test_export_filter_by_path() {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
 
-	let mut ext_code = HashMap::new();
-	ext_code.insert(
-		"deploymentName".to_string(),
-		"'path-filter-deployment'".to_string(),
-	);
-	ext_code.insert(
-		"serviceName".to_string(),
-		"'path-filter-service'".to_string(),
-	);
-
 	// Filter using a path segment that matches static-env
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			ext_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.ext_code("deploymentName", "'path-filter-deployment'")
+			.ext_code("serviceName", "'path-filter-service'")
+			.build(),
 		name: Some("static-env".to_string()), // Filter by path segment
 		recursive: true,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-envs")], opts).unwrap();
 
 	// Should export only 1 environment (static-env)
 	assert_eq!(
@@ -2033,19 +1762,14 @@ fn test_export_filter_no_match_returns_error() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		name: Some("nonexistent-env-name".to_string()), // Filter that matches nothing
 		recursive: true,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-envs")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	);
+	let result = export(&[testdata_path("test-export-envs")], opts);
 
 	// Should fail with an error about no environments found
 	assert!(
@@ -2073,20 +1797,14 @@ fn test_export_tla_function_with_defaults() {
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts::default(), // No TLAs!
+		eval_opts: GlobalEvaluatorOptions::default(), // No TLAs!
 		name: None,
 		recursive: false,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-tla-defaults")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-tla-defaults")], opts).unwrap();
 
 	// Should export successfully even without TLAs
 	assert_eq!(
@@ -2123,35 +1841,22 @@ fn test_export_tla_function_with_overrides() {
 	let output_dir = temp_dir.path();
 
 	// Provide TLAs to override defaults
-	let mut tla_str = HashMap::new();
-	tla_str.insert("mode".to_string(), "production".to_string());
-
-	let mut tla_code = HashMap::new();
-	tla_code.insert("replicas".to_string(), "3".to_string());
-
 	let opts = ExportOpts {
 		output_dir: output_dir.to_path_buf(),
 		extension: "yaml".to_string(),
 		format: "{{.metadata.namespace}}/{{.metadata.name}}".to_string(),
 		parallelism: 1,
-		eval_opts: EvalOpts {
-			tla_str,
-			tla_code,
-			..Default::default()
-		},
+		eval_opts: GlobalEvaluatorOptions::builder()
+			.tla_str("mode", "production")
+			.tla_code("replicas", "3")
+			.build(),
 		name: None,
 		recursive: false,
 		skip_manifest: false,
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-tla-defaults")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.unwrap();
+	let result = export(&[testdata_path("test-export-tla-defaults")], opts).unwrap();
 
 	// Should export successfully with TLA overrides
 	assert_eq!(result.successful, 1);
@@ -2190,17 +1895,12 @@ fn regression_minimal_used_field_export() {
 		extension: "yaml".to_string(),
 		parallelism: 1,
 		recursive: false,
-		eval_opts: EvalOpts::default(),
+		eval_opts: GlobalEvaluatorOptions::default(),
 		..Default::default()
 	};
 
-	let result = export(
-		&[testdata_path("test-export-used-field-regression")
-			.to_string_lossy()
-			.to_string()],
-		opts,
-	)
-	.expect("export should succeed");
+	let result = export(&[testdata_path("test-export-used-field-regression")], opts)
+		.expect("export should succeed");
 
 	assert_eq!(result.successful, 1);
 	assert_eq!(result.failed, 0);

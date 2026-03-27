@@ -2,19 +2,23 @@
 //!
 //! For each file in a directory, counts how many environments import it.
 
-use std::{fs, io::Write, path::Path};
+use std::{
+	fs,
+	io::Write,
+	path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use clap::Args;
 use regex::Regex;
 use walkdir::WalkDir;
 
-use crate::{importers as importers_impl, jpath::DEFAULT_ENTRYPOINT};
+use crate::{jsonnet::importers as importers_impl, jsonnet::jpath::DEFAULT_ENTRYPOINT};
 
 #[derive(Args)]
 pub struct ImportersCountArgs {
 	/// Directory to scan for files
-	pub dir: String,
+	pub dir: PathBuf,
 
 	/// Only count files that match the given regex. Matches only jsonnet files by default
 	#[arg(long)]
@@ -26,7 +30,7 @@ pub struct ImportersCountArgs {
 
 	/// Root directory to search for environments
 	#[arg(long, default_value = ".")]
-	pub root: String,
+	pub root: PathBuf,
 }
 
 /// Result of counting importers for a file
@@ -50,8 +54,7 @@ pub fn run<W: Write>(args: ImportersCountArgs, mut writer: W) -> Result<()> {
 	let filename_regex = Regex::new(filename_regex_str).context("compiling filename regex")?;
 
 	// Collect files from the directory
-	let dir = Path::new(&args.dir);
-	let files = collect_files(dir, args.recursive, &filename_regex)?;
+	let files = collect_files(&args.dir, args.recursive, &filename_regex)?;
 
 	// Count importers for all files at once (builds context only once)
 	let importers_map = importers_impl::find_importers_batch(&root_str, files)?;
@@ -134,13 +137,10 @@ mod tests {
 	#[test]
 	fn test_project_with_no_imports() {
 		let args = ImportersCountArgs {
-			dir: test_root()
-				.join("environments/no-imports")
-				.to_string_lossy()
-				.to_string(),
+			dir: test_root().join("environments/no-imports"),
 			filename_regex: None,
 			recursive: true,
-			root: test_root().to_string_lossy().to_string(),
+			root: test_root(),
 		};
 		let mut output = Vec::new();
 
@@ -154,13 +154,10 @@ mod tests {
 	#[test]
 	fn test_project_with_imports() {
 		let args = ImportersCountArgs {
-			dir: test_root()
-				.join("environments/imports-locals-and-vendored")
-				.to_string_lossy()
-				.to_string(),
+			dir: test_root().join("environments/imports-locals-and-vendored"),
 			filename_regex: None,
 			recursive: true,
-			root: test_root().to_string_lossy().to_string(),
+			root: test_root(),
 		};
 		let mut output = Vec::new();
 
@@ -175,10 +172,10 @@ mod tests {
 	#[test]
 	fn test_lib_non_recursive() {
 		let args = ImportersCountArgs {
-			dir: test_root().join("lib/lib1").to_string_lossy().to_string(),
+			dir: test_root().join("lib/lib1"),
 			filename_regex: None,
 			recursive: false,
-			root: test_root().to_string_lossy().to_string(),
+			root: test_root(),
 		};
 		let mut output = Vec::new();
 
@@ -193,10 +190,10 @@ mod tests {
 	#[test]
 	fn test_lib_recursive() {
 		let args = ImportersCountArgs {
-			dir: test_root().join("lib/lib1").to_string_lossy().to_string(),
+			dir: test_root().join("lib/lib1"),
 			filename_regex: None,
 			recursive: true,
-			root: test_root().to_string_lossy().to_string(),
+			root: test_root(),
 		};
 		let mut output = Vec::new();
 

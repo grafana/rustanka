@@ -2,7 +2,8 @@ use std::{any::Any, cell::RefCell, fmt::Debug, iter, mem::replace};
 
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::{IBytes, IStr};
-use jrsonnet_parser::LocExpr;
+use jrsonnet_parser::AnalyzedExpr;
+use rustc_hash::FxHashSet;
 
 use super::ArrValue;
 use crate::{
@@ -138,12 +139,23 @@ enum ArrayThunk<T: 'static + Trace> {
 #[derive(Debug, Trace, Clone)]
 pub struct ExprArray {
 	ctx: Context,
-	cached: Cc<RefCell<Vec<ArrayThunk<LocExpr>>>>,
+	cached: Cc<RefCell<Vec<ArrayThunk<AnalyzedExpr>>>>,
 }
 impl ExprArray {
-	pub fn new(ctx: Context, items: impl IntoIterator<Item = LocExpr>) -> Self {
+	pub fn new(ctx: Context, items: impl IntoIterator<Item = AnalyzedExpr>) -> Self {
+		let items: Vec<_> = items.into_iter().collect();
+		// Trim context to only include variables used by any array element
+		let mut combined = FxHashSet::default();
+		for item in &items {
+			item.extend_used_into(&mut combined);
+		}
+		let analysis = jrsonnet_parser::Analysis {
+			var: None,
+			used_vars: jrsonnet_parser::UsedVars::from_set(combined),
+		};
+		let trimmed_ctx = ctx.trimmed(&analysis);
 		Self {
-			ctx,
+			ctx: trimmed_ctx,
 			cached: Cc::new(RefCell::new(
 				items.into_iter().map(ArrayThunk::Waiting).collect(),
 			)),

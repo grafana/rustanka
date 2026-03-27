@@ -3,23 +3,26 @@
 //! Removes Kubernetes resources that exist in the cluster but are no longer
 //! defined in the Tanka environment manifests.
 
-use std::io::Write;
+use std::{
+	io::Write,
+	path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use clap::Args;
 use tracing::instrument;
 
-use super::diff::ColorMode;
-use super::util::{
-	build_eval_opts, create_tokio_runtime, extract_manifests, get_or_create_connection,
-	process_manifests, prompt_confirmation, setup_diff_engine, validate_dry_run, DiffEngineConfig,
-	UnimplementedArgs,
+use super::common::{
+	create_tokio_runtime, get_or_create_connection, prompt_confirmation, setup_diff_engine,
+	validate_dry_run, DiffEngineConfig,
 };
+use super::diff::ColorMode;
 
 // Re-export AutoApprove for backwards compatibility
-pub use super::util::AutoApprove;
+pub use super::common::AutoApprove;
 use crate::{
-	eval::EvalOpts,
+	environments::{extract_manifests, process_manifests},
+	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
@@ -32,7 +35,7 @@ use crate::{
 #[derive(Args)]
 pub struct PruneArgs {
 	/// Path to prune
-	pub path: String,
+	pub path: PathBuf,
 
 	/// Skip interactive approval. Only for automation! Allowed values: 'always', 'never', 'if-no-changes'
 	#[arg(long, value_enum)]
@@ -50,25 +53,9 @@ pub struct PruneArgs {
 	#[arg(long)]
 	pub dry_run: Option<String>,
 
-	/// Set code value of extVar (Format: key=<code>)
-	#[arg(long)]
-	pub ext_code: Vec<String>,
-
-	/// Set string value of extVar (Format: key=value)
-	#[arg(short = 'V', long)]
-	pub ext_str: Vec<String>,
-
 	/// Force applying (kubectl apply --force)
 	#[arg(long)]
 	pub force: bool,
-
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go")]
-	pub jsonnet_implementation: String,
-
-	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
 
 	/// String that only a single inline environment contains in its name
 	#[arg(long)]
@@ -78,21 +65,12 @@ pub struct PruneArgs {
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
 
-	/// Set code value of top level function (Format: key=<code>)
-	#[arg(long)]
-	pub tla_code: Vec<String>,
-
-	/// Set string value of top level function (Format: key=value)
-	#[arg(short = 'A', long)]
-	pub tla_str: Vec<String>,
+	#[command(flatten)]
+	pub jsonnet: super::JsonnetArgs,
 }
-
-crate::impl_jsonnet_args!(PruneArgs);
 
 /// Run the prune command.
 pub fn run<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
-	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
-
 	validate_dry_run(args.dry_run.as_deref())?;
 
 	let runtime = create_tokio_runtime()?;
@@ -121,17 +99,17 @@ pub struct PruneOpts {
 /// Prune orphaned resources from the cluster.
 ///
 /// Returns the list of deleted resources.
-#[instrument(skip_all, fields(path = %path))]
+#[instrument(skip_all, fields(path = %path.display()))]
 pub async fn prune_environment<W: Write>(
-	path: &str,
+	path: &Path,
 	connection: Option<ClusterConnection>,
-	eval_opts: EvalOpts,
+	global_opts: GlobalEvaluatorOptions,
+	eval_opts: EvaluatorOptions,
 	opts: PruneOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	use super::util::evaluate_single_environment;
-
-	let env_data = evaluate_single_environment(path, eval_opts, opts.name.as_deref())?;
+	let evaluator = DefaultEvaluator::new(global_opts);
+	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
 	let env_spec = env_data.spec;
 
 	// Get the spec for cluster connection and strategy selection
@@ -279,10 +257,10 @@ pub async fn prune_environment<W: Write>(
 }
 
 /// Async implementation of the prune command.
-#[instrument(skip_all, fields(path = %args.path))]
+#[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
-	let mut eval_opts = build_eval_opts(&args);
-	eval_opts.env_name = args.name.clone();
+	let global_opts = args.jsonnet.into_global_evaluator_options();
+	let eval_opts = EvaluatorOptions::default();
 	let opts = PruneOpts {
 		diff_strategy: args.diff_strategy,
 		auto_approve: args.auto_approve.unwrap_or_default(),
@@ -293,6 +271,6 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		name: args.name,
 	};
 
-	prune_environment(&args.path, None, eval_opts, opts, writer).await?;
+	prune_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
 	Ok(())
 }
