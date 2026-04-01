@@ -258,15 +258,31 @@ cc_dyn!(
 	pub fn new() {...}
 );
 
+/// Either a flat Vec of cores or a nested LayeredCores reference.
+#[derive(Trace, Debug)]
+enum CoreSegment {
+	Flat(Vec<CcObjectCore>),
+	Nested(LayeredCores),
+}
+impl CoreSegment {
+	fn len(&self) -> usize {
+		match self {
+			CoreSegment::Flat(v) => v.len(),
+			CoreSegment::Nested(lc) => lc.len(),
+		}
+	}
+}
+
 /// A layered linked list of `CcObjectCore`s. Clone is O(1) via Cc.
 /// `extend` creates a new node with `self` as parent — O(new_cores.len()).
+/// `extend_layered` creates a new node with a nested LayeredCores — O(1).
 /// Iteration walks the chain (parent first, then current).
 #[derive(Trace, Debug)]
 #[trace(tracking(force))]
 struct LayeredCoresInner {
 	parent: Option<LayeredCores>,
 	parent_len: usize,
-	current: Vec<CcObjectCore>,
+	current: CoreSegment,
 }
 
 #[derive(Trace, Debug)]
@@ -281,7 +297,7 @@ impl LayeredCores {
 		Self(Cc::new(LayeredCoresInner {
 			parent: None,
 			parent_len: 0,
-			current: cores,
+			current: CoreSegment::Flat(cores),
 		}))
 	}
 	fn empty() -> Self {
@@ -293,7 +309,19 @@ impl LayeredCores {
 		Self(Cc::new(LayeredCoresInner {
 			parent: Some(self),
 			parent_len,
-			current: more,
+			current: CoreSegment::Flat(more),
+		}))
+	}
+	/// Create a new layer with a nested LayeredCores as the current segment — O(1).
+	fn extend_layered(self, more: LayeredCores) -> Self {
+		if more.is_empty() {
+			return self;
+		}
+		let parent_len = self.len();
+		Self(Cc::new(LayeredCoresInner {
+			parent: Some(self),
+			parent_len,
+			current: CoreSegment::Nested(more),
 		}))
 	}
 	fn len(&self) -> usize {
@@ -302,72 +330,97 @@ impl LayeredCores {
 	fn is_empty(&self) -> bool {
 		self.len() == 0
 	}
-	/// Collect all cores into a flat Vec (parent chain first, then current).
-	fn collect_vec(&self) -> Vec<CcObjectCore> {
-		let mut out = Vec::with_capacity(self.len());
-		self.collect_into(&mut out);
-		out
-	}
-	fn collect_into(&self, out: &mut Vec<CcObjectCore>) {
-		if let Some(parent) = &self.0.parent {
-			parent.collect_into(out);
-		}
-		out.extend(self.0.current.iter().cloned());
-	}
 	/// Iterate all cores in forward order with absolute index, calling f for each.
-	fn for_each_enumerated(&self, f: &mut impl FnMut(usize, &CcObjectCore)) {
+	fn for_each_enumerated(&self, f: &mut dyn FnMut(usize, &CcObjectCore)) {
 		if let Some(parent) = &self.0.parent {
 			parent.for_each_enumerated(f);
 		}
 		let offset = self.0.parent_len;
-		for (i, core) in self.0.current.iter().enumerate() {
-			f(offset + i, core);
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				for (i, core) in v.iter().enumerate() {
+					f(offset + i, core);
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				lc.for_each_enumerated(&mut |idx, core| f(offset + idx, core));
+			}
 		}
 	}
 	/// Iterate cores in reverse order, calling f for each.
-	fn for_each_rev(&self, f: &mut impl FnMut(&CcObjectCore)) {
-		for core in self.0.current.iter().rev() {
-			f(core);
+	fn for_each_rev(&self, f: &mut dyn FnMut(&CcObjectCore)) {
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				for core in v.iter().rev() {
+					f(core);
+				}
+			}
+			CoreSegment::Nested(lc) => lc.for_each_rev(f),
 		}
 		if let Some(parent) = &self.0.parent {
 			parent.for_each_rev(f);
 		}
 	}
 	/// Iterate cores [0..limit) in reverse order with absolute index.
+	/// Returns `Break` if the callback broke early, `Continue` otherwise.
 	fn for_each_rev_up_to(
 		&self,
 		limit: usize,
-		f: &mut impl FnMut(usize, &CcObjectCore) -> ControlFlow<()>,
-	) {
+		f: &mut dyn FnMut(usize, &CcObjectCore) -> ControlFlow<()>,
+	) -> ControlFlow<()> {
 		let offset = self.0.parent_len;
-		let end = limit.saturating_sub(offset).min(self.0.current.len());
-		for i in (0..end).rev() {
-			if f(offset + i, &self.0.current[i]).is_break() {
-				return;
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				let end = limit.saturating_sub(offset).min(v.len());
+				for i in (0..end).rev() {
+					f(offset + i, &v[i])?;
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				let nested_limit = limit.saturating_sub(offset).min(lc.len());
+				if nested_limit > 0 {
+					lc.for_each_rev_up_to(nested_limit, &mut |idx, core| f(offset + idx, core))?;
+				}
 			}
 		}
 		if let Some(parent) = &self.0.parent {
-			parent.for_each_rev_up_to(limit.min(offset), f);
+			parent.for_each_rev_up_to(limit.min(offset), f)?;
 		}
+		ControlFlow::Continue(())
 	}
 	/// Like for_each_rev_up_to but the callback can return Result.
-	fn try_for_each_rev_up_to<E>(
+	fn try_for_each_rev_up_to(
 		&self,
 		limit: usize,
-		f: &mut impl FnMut(usize, &CcObjectCore) -> Result<ControlFlow<()>, E>,
-	) -> Result<(), E> {
+		f: &mut dyn FnMut(usize, &CcObjectCore) -> Result<ControlFlow<()>, crate::error::Error>,
+	) -> Result<ControlFlow<()>, crate::error::Error> {
 		let offset = self.0.parent_len;
-		let end = limit.saturating_sub(offset).min(self.0.current.len());
-		for i in (0..end).rev() {
-			match f(offset + i, &self.0.current[i])? {
-				ControlFlow::Continue(()) => {}
-				ControlFlow::Break(()) => return Ok(()),
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				let end = limit.saturating_sub(offset).min(v.len());
+				for i in (0..end).rev() {
+					match f(offset + i, &v[i])? {
+						ControlFlow::Continue(()) => {}
+						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+					}
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				let nested_limit = limit.saturating_sub(offset).min(lc.len());
+				if nested_limit > 0 {
+					match lc.try_for_each_rev_up_to(nested_limit, &mut |idx, core| {
+						f(offset + idx, core)
+					})? {
+						ControlFlow::Continue(()) => {}
+						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+					}
+				}
 			}
 		}
 		if let Some(parent) = &self.0.parent {
-			parent.try_for_each_rev_up_to(limit.min(offset), f)?;
+			return parent.try_for_each_rev_up_to(limit.min(offset), f);
 		}
-		Ok(())
+		Ok(ControlFlow::Continue(()))
 	}
 }
 
@@ -665,11 +718,9 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		// Collect self's cores (the right/this side) — typically 1 element.
-		// Then extend sup's LayeredCores with them — O(self_cores.len()), not O(sup_cores.len()).
-		let self_cores = self.0.cores.collect_vec();
+		// Chain sup's cores with self's cores — O(1) via nested LayeredCores.
 		ObjValue(Cc::new(ObjValueInner {
-			cores: sup.0.cores.clone().extend(self_cores),
+			cores: sup.0.cores.clone().extend_layered(self.0.cores.clone()),
 			value_cache: RefCell::default(),
 			assertions_ran: Cell::new(false),
 		}))
@@ -707,7 +758,7 @@ impl ObjValue {
 		idx: CoreIdx,
 	) -> bool {
 		let mut result = true;
-		self.0.cores.for_each_rev_up_to(idx.idx, &mut |_, core| {
+		let _ = self.0.cores.for_each_rev_up_to(idx.idx, &mut |_, core| {
 			if !core.0.enum_fields_core(super_depth, handler) {
 				result = false;
 				return ControlFlow::Break(());
@@ -729,7 +780,7 @@ impl ObjValue {
 	fn has_field_include_hidden_idx(&self, name: IStr, core: CoreIdx) -> bool {
 		let mut skip = Saturating(0usize);
 		let mut found = false;
-		self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
+		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
 			match ele.0.has_field_include_hidden_core(name.clone()) {
 				HasFieldIncludeHidden::Exists => {
 					if skip.0 == 0 {
@@ -804,8 +855,8 @@ impl ObjValue {
 		let mut add_stack = Vec::with_capacity(2);
 		let mut skip = Saturating(0);
 		let mut early_return: Option<Result<Option<Val>>> = None;
-		self.0.cores.try_for_each_rev_up_to(core.idx, &mut |sup,
-		                                                     core|
+		let _ = self.0.cores.try_for_each_rev_up_to(core.idx, &mut |sup,
+		                                                             core|
 		 -> Result<
 			ControlFlow<()>,
 			crate::error::Error,
@@ -882,7 +933,7 @@ impl ObjValue {
 		let mut exists = false;
 		let mut skip = Saturating(0usize);
 		let mut early = None;
-		self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
+		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
 			let vis = ele.0.field_visibility_core(field.clone());
 			match vis {
 				FieldVisibility::Found(vis @ (Visibility::Unhide | Visibility::Hidden)) => {
@@ -1261,6 +1312,7 @@ impl ObjectCore for OopObject {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct ObjValueBuilder {
+	base: Option<LayeredCores>,
 	sup: Vec<CcObjectCore>,
 
 	new: OopObject,
@@ -1272,6 +1324,7 @@ impl ObjValueBuilder {
 	}
 	pub fn with_capacity(capacity: usize) -> Self {
 		Self {
+			base: None,
 			sup: vec![],
 			new: OopObject {
 				assertions: vec![],
@@ -1289,7 +1342,7 @@ impl ObjValueBuilder {
 		self
 	}
 	pub fn with_super(&mut self, super_obj: ObjValue) -> &mut Self {
-		self.sup = super_obj.0.cores.collect_vec();
+		self.base = Some(super_obj.0.cores.clone());
 		self
 	}
 
@@ -1335,19 +1388,21 @@ impl ObjValueBuilder {
 
 	pub fn with_fields_omitted(&mut self, omit: FxHashSet<IStr>) {
 		self.commit();
-		self.sup.push(CcObjectCore::new(OmitFieldsCore {
-			omit,
-			prev_layers: self.sup.len(),
-		}));
+		let prev_layers = self.base.as_ref().map_or(0, |b| b.len()) + self.sup.len();
+		self.sup
+			.push(CcObjectCore::new(OmitFieldsCore { omit, prev_layers }));
 	}
 
 	pub fn build(mut self) -> ObjValue {
 		self.commit();
-		if self.sup.is_empty() {
-			return ObjValue::empty();
-		}
+		let cores = match self.base {
+			Some(base) if self.sup.is_empty() => base,
+			Some(base) => base.extend(self.sup),
+			None if self.sup.is_empty() => return ObjValue::empty(),
+			None => LayeredCores::new(self.sup),
+		};
 		ObjValue(Cc::new(ObjValueInner {
-			cores: LayeredCores::new(self.sup),
+			cores,
 			assertions_ran: Cell::new(false),
 			value_cache: Default::default(),
 		}))
