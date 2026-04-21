@@ -1,0 +1,20 @@
+[
+  {
+    "apiVersion": "tanka.dev/v1alpha1",
+    "kind": "Environment",
+    "metadata": {
+      "name": "native-in-labels",
+      "namespace": "golden_envs/native_in_labels_env/main.jsonnet",
+      "labels": {
+        "inline": "true",
+        "region_match": "true"
+      }
+    },
+    "spec": {
+      "apiServer": "https://example.cluster:6443",
+      "namespace": "default",
+      "resourceDefaults": {},
+      "expectVersions": {}
+    }
+  }
+]

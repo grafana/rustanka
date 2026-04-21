@@ -458,7 +458,7 @@ impl JrsonnetEvaluator {
 	}
 
 	/// Register Tanka-compatible native functions
-	fn register_native_functions(context: &ContextInitializer) {
+	pub(crate) fn register_native_functions(context: &ContextInitializer) {
 		use jrsonnet_stdlib::RegexCache;
 
 		use builtins::{

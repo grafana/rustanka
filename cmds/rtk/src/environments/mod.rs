@@ -492,6 +492,10 @@ fn load_inline_envs(dir: &Path) -> Result<Vec<Environment>> {
 	use jrsonnet_evaluator::trace::PathResolver;
 	// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
 	let ctx_init = jrsonnet_stdlib::ContextInitializer::new(PathResolver::Absolute);
+	// Register Tanka-compatible native functions so that main.jsonnet files that call
+	// std.native('regexMatch'), etc. outside of `data` (e.g. in labels or metadata)
+	// don't fail evaluation and produce an empty env list.
+	crate::jsonnet::evaluator::JrsonnetEvaluator::register_native_functions(&ctx_init);
 	builder.context_initializer(ctx_init);
 
 	let state = builder.build();
@@ -1120,6 +1124,55 @@ mod tests {
 			"Nested jsonnetfile.json from child dir; got '{}'",
 			ns[0]
 		);
+	}
+
+	/// Regression test: `env list` must not silently return an empty list when a
+	/// main.jsonnet file calls `std.native('regexMatch')` (or any Tanka-compatible
+	/// native) at metadata/labels level. Previously, native functions were not
+	/// registered during env list's metadata evaluation, so evaluation failed and
+	/// the error was swallowed, producing "No environments found".
+	#[test]
+	fn test_list_envs_inline_uses_native_function_in_labels() {
+		let temp_dir = TempDir::new().unwrap();
+		let root = temp_dir.path();
+		fs::write(
+			root.join("jsonnetfile.json"),
+			r#"{"version": 1, "dependencies": [], "legacyImports": true}"#,
+		)
+		.unwrap();
+
+		let env_dir = root.join("my-env");
+		fs::create_dir_all(&env_dir).unwrap();
+		fs::write(
+			env_dir.join("main.jsonnet"),
+			r#"{
+  apiVersion: 'tanka.dev/v1alpha1',
+  kind: 'Environment',
+  metadata: {
+    name: 'test',
+    labels: {
+      match: std.toString(std.native('regexMatch')('^foo', 'foobar')),
+    },
+  },
+  spec: { namespace: 'ns1', apiServer: 'https://k8s' },
+  data: {},
+}"#,
+		)
+		.unwrap();
+
+		let mut output = Cursor::new(Vec::new());
+		list_envs_to_writer(Some(env_dir.as_path()), true, &mut output).unwrap();
+		let output_str = String::from_utf8(output.into_inner()).unwrap();
+		let envs: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
+
+		assert_eq!(
+			envs.len(),
+			1,
+			"env list must evaluate successfully when main.jsonnet uses \
+			 std.native outside of `data`; got: {}",
+			output_str
+		);
+		assert_eq!(envs[0]["metadata"]["labels"]["match"], "true");
 	}
 
 	// -----------------------------------------------------------------------

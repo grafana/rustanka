@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use rtk::commands;
+use rtk::{commands, environments};
 use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
@@ -197,6 +197,46 @@ fn run_golden_test(env_path: &Path) {
 			"Content mismatch for {} file(s):\n\n{}",
 			comparison.differences.len(),
 			comparison.differences.join("\n\n")
+		);
+	}
+
+	// Opt-in: if the fixture has an `env_list.golden.json`, also verify that
+	// `rtk env list --json` against this fixture matches the golden output.
+	// Comparison is done on parsed JSON values so whitespace/ordering in the
+	// golden file do not matter.
+	let env_list_golden = env_path.join("env_list.golden.json");
+	if env_list_golden.exists() {
+		run_env_list_golden_test(env_path, &env_list_golden);
+	}
+}
+
+/// Run `rtk env list --json` against `env_path` and compare the parsed JSON to
+/// the contents of `golden_path`.
+fn run_env_list_golden_test(env_path: &Path, golden_path: &Path) {
+	let mut output = Vec::new();
+	environments::list_envs_to_writer(Some(env_path), true, &mut output)
+		.unwrap_or_else(|e| panic!("rtk env list failed for {}: {}", env_path.display(), e));
+
+	let actual: serde_json::Value = serde_json::from_slice(&output).unwrap_or_else(|e| {
+		panic!(
+			"rtk env list output for {} was not valid JSON: {}\noutput:\n{}",
+			env_path.display(),
+			e,
+			String::from_utf8_lossy(&output)
+		)
+	});
+
+	let golden_text = fs::read_to_string(golden_path)
+		.unwrap_or_else(|e| panic!("failed to read {}: {}", golden_path.display(), e));
+	let expected: serde_json::Value = serde_json::from_str(&golden_text)
+		.unwrap_or_else(|e| panic!("{} is not valid JSON: {}", golden_path.display(), e));
+
+	if actual != expected {
+		panic!(
+			"env list output does not match {}:\nexpected:\n{}\n\nactual:\n{}",
+			golden_path.display(),
+			serde_json::to_string_pretty(&expected).unwrap(),
+			serde_json::to_string_pretty(&actual).unwrap()
 		);
 	}
 }
