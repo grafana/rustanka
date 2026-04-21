@@ -318,6 +318,15 @@ fn expr_binding_power(
 	p: &mut Parser,
 	minimum_binding_power: u8,
 ) -> Result<CompletedMarker, CompletedMarker> {
+	// `local x = ...; e` and `assert e; e` are expressions that may appear
+	// anywhere, including as the right-hand side of a binary operator
+	// (e.g. `foo + local bar = 1; baz`). They have lower binding power than
+	// any binary operator, so they consume the remaining expression —
+	// delegating to `expr` does exactly that.
+	if p.at(T![local]) || p.at(T![assert]) {
+		return Ok(expr(p));
+	}
+
 	let mut lhs = lhs(p)?;
 
 	while let Some(op) = BinaryOperatorKind::cast(p.current())

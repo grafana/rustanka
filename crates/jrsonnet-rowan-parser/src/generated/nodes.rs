@@ -929,6 +929,7 @@ pub struct UnaryOperator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOperatorKind {
+	Plus,
 	Minus,
 	Not,
 	BitNot,
@@ -2425,12 +2426,13 @@ impl AstToken for UnaryOperator {
 impl UnaryOperatorKind {
 	fn can_cast(kind: SyntaxKind) -> bool {
 		match kind {
-			MINUS | NOT | BIT_NOT => true,
+			PLUS | MINUS | NOT | BIT_NOT => true,
 			_ => false,
 		}
 	}
 	pub fn cast(kind: SyntaxKind) -> Option<Self> {
 		let res = match kind {
+			PLUS => Self::Plus,
 			MINUS => Self::Minus,
 			NOT => Self::Not,
 			BIT_NOT => Self::BitNot,
