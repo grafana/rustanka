@@ -119,13 +119,14 @@ jobs:
           chmod +x /usr/local/bin/tk
           tk --version
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
       - name: Install dependencies
         run: |
           # Install hyperfine
           wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
           sudo dpkg -i hyperfine_1.18.0_amd64.deb
-          # Install uv for Python script
-          curl -LsSf https://astral.sh/uv/install.sh | sh
           # jq is pre-installed on ubuntu-latest
 
       - name: Run benchmark

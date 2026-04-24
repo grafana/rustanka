@@ -519,6 +519,7 @@ class BenchmarkRunner:
         rtk_inner = f"{cd_prefix}{self.rtk} {rtk_command} >/dev/null"
         args = [
             "hyperfine", "-N",
+            "--show-output",
             *self.hyperfine_args,
             *prepare_args,
             "--export-markdown", str(temp_md),
@@ -535,7 +536,15 @@ class BenchmarkRunner:
             args.extend(
                 ["-n", "rtk-base", f"sh -c {shlex.quote(rtk_base_inner)}"])
 
-        subprocess.run(args, check=True, stdout=subprocess.DEVNULL)
+        try:
+            result = subprocess.run(args, check=True, capture_output=True, text=True)
+        except:
+            # Only print the output on failure
+            print("### STDOUT")
+            print(result.stdout, file=sys.stderr)
+            print("### STDERR")
+            print(result.stderr, file=sys.stderr)
+            raise
 
         with open(temp_md) as f:
             print(f.read())
