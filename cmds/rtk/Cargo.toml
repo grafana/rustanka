@@ -48,7 +48,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "reqwest-rustls"] }
 thiserror.workspace = true
 dirs = "6.0.0"
 http = "1.4.0"
