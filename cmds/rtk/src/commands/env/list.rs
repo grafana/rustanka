@@ -62,14 +62,17 @@ pub fn run<W: Write>(args: ListArgs, writer: W) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+	use std::fs;
+
 	use assert_matches::assert_matches;
+	use tempfile::TempDir;
 
 	use super::*;
 	use crate::{commands::common::BrokenPipeGuard, test_utils::BrokenPipeWriter};
 
-	fn make_args() -> ListArgs {
+	fn make_args(path: Option<String>) -> ListArgs {
 		ListArgs {
-			path: None,
+			path,
 			ext_code: vec![],
 			ext_str: vec![],
 			json: false,
@@ -84,7 +87,29 @@ mod tests {
 
 	#[test]
 	fn test_list_exits_cleanly_on_broken_pipe() {
-		let args = make_args();
+		// Use an isolated fixture so the broken-pipe path doesn't pick up unrelated
+		// (possibly-erroring) testdata environments under cargo's working directory.
+		let tmp = TempDir::new().unwrap();
+		fs::write(
+			tmp.path().join("jsonnetfile.json"),
+			r#"{"version":1,"dependencies":[],"legacyImports":true}"#,
+		)
+		.unwrap();
+		let env_dir = tmp.path().join("env");
+		fs::create_dir_all(&env_dir).unwrap();
+		fs::write(
+			env_dir.join("main.jsonnet"),
+			r#"{
+  apiVersion: 'tanka.dev/v1alpha1',
+  kind: 'Environment',
+  metadata: { name: 'test' },
+  spec: { namespace: 'default' },
+  data: {},
+}"#,
+		)
+		.unwrap();
+
+		let args = make_args(Some(tmp.path().to_string_lossy().into_owned()));
 		// Wrap BrokenPipeWriter with BrokenPipeGuard to test the guard handles broken pipes
 		let writer = BrokenPipeGuard::new(BrokenPipeWriter);
 		let result = run(args, writer);

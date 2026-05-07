@@ -313,27 +313,25 @@ fn find_environments(root: &Path) -> Result<Vec<Environment>> {
 	// Track timing for each file if profiling is enabled
 	let timings: Mutex<Vec<(PathBuf, Duration)>> = Mutex::new(Vec::new());
 
-	// Process all files in parallel - Rayon handles work-stealing automatically
-	let all_envs: Vec<Vec<Environment>> = main_files
+	// Process all files in parallel - Rayon handles work-stealing automatically.
+	// Mirror tk's behavior: collect every per-file evaluation error and report
+	// them together rather than silently dropping failed files.
+	let processed: Vec<Result<Vec<Environment>, (PathBuf, anyhow::Error)>> = main_files
 		.par_iter()
 		.filter_map(|main_file| {
 			let start = Instant::now();
 			let dir = main_file.parent()?;
 			let spec_file = dir.join("spec.json");
 
-			let result = if spec_file.exists() {
-				// Static environment
-				if let Ok(mut env) = load_static_env(dir) {
-					if set_env_metadata(&mut env, dir).is_ok() {
-						Some(vec![env])
-					} else {
-						None
-					}
-				} else {
-					None
+			let result: Result<Vec<Environment>, (PathBuf, anyhow::Error)> = if spec_file.exists() {
+				match load_static_env(dir) {
+					Ok(mut env) => match set_env_metadata(&mut env, dir) {
+						Ok(()) => Ok(vec![env]),
+						Err(e) => Err((main_file.clone(), e)),
+					},
+					Err(e) => Err((main_file.clone(), e)),
 				}
 			} else {
-				// Inline environment
 				match load_inline_envs(dir) {
 					Ok(mut envs) => {
 						for env in &mut envs {
@@ -346,21 +344,24 @@ fn find_environments(root: &Path) -> Result<Vec<Environment>> {
 								let _ = set_env_namespace(env, dir);
 							}
 						}
-						Some(envs)
+						Ok(envs)
 					}
-					Err(_) => None,
+					Err(e) => Err((main_file.clone(), e)),
 				}
 			};
 
-			// Record timing if profiling
 			if profile {
 				let elapsed = start.elapsed();
 				timings.lock().unwrap().push((dir.to_path_buf(), elapsed));
 			}
 
-			result
+			Some(result)
 		})
 		.collect();
+
+	let (oks, errs): (Vec<_>, Vec<_>) = processed.into_iter().partition(Result::is_ok);
+	let all_envs: Vec<Vec<Environment>> = oks.into_iter().map(Result::unwrap).collect();
+	let errors: Vec<(PathBuf, anyhow::Error)> = errs.into_iter().map(|r| r.unwrap_err()).collect();
 
 	// Print slowest files if profiling
 	if profile {
@@ -376,6 +377,23 @@ fn find_environments(root: &Path) -> Result<Vec<Environment>> {
 			);
 		}
 		eprintln!();
+	}
+
+	if !errors.is_empty() {
+		// Match tk's "finding environments: Errors occurred during parallel processing"
+		// shape so callers and tests see the same failure mode.
+		let project_root = find_project_root(root).unwrap_or_else(|| root.to_path_buf());
+		let mut sorted = errors;
+		sorted.sort_by(|a, b| a.0.cmp(&b.0));
+		let mut msg = String::from("Errors occurred during parallel processing:\n");
+		for (path, err) in &sorted {
+			let display_path = path
+				.strip_prefix(&project_root)
+				.map(|p| p.to_string_lossy().to_string())
+				.unwrap_or_else(|_| path.display().to_string());
+			msg.push_str(&format!("\n- {}:\n {}\n", display_path, err));
+		}
+		anyhow::bail!("finding environments: {}", msg.trim_end());
 	}
 
 	// Flatten results
