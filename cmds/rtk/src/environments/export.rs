@@ -21,6 +21,7 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tracing::{debug, trace};
 
+use super::{compile_target_matchers, keep_target, manifest_kind_name, TargetMatcher};
 use crate::{
 	environments::discover::{Discover, Discovered},
 	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
@@ -312,38 +313,9 @@ fn matches_label_selector(
 	true
 }
 
-/// Compile target patterns (regex patterns for kind/name filtering)
-fn compile_target_patterns(patterns: &[String]) -> Result<Vec<regex::Regex>> {
-	patterns
-		.iter()
-		.map(|p| {
-			regex::RegexBuilder::new(p)
-				.case_insensitive(true)
-				.build()
-				.map_err(|e| anyhow::anyhow!("Invalid target regex '{}': {}", p, e))
-		})
-		.collect()
-}
-
-/// Check if a manifest matches any of the target patterns
-/// Target patterns match against "kind/name" (e.g., "Deployment/my-app" or ".*Map/config.*")
-fn matches_target_patterns(manifest: &JsonValue, patterns: &[regex::Regex]) -> bool {
-	// If no patterns, include all manifests
-	if patterns.is_empty() {
-		return true;
-	}
-
-	// Build the kind/name string to match against
-	let kind = manifest.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-	let name = manifest
-		.get("metadata")
-		.and_then(|m| m.get("name"))
-		.and_then(|n| n.as_str())
-		.unwrap_or("");
-	let target_str = format!("{}/{}", kind, name);
-
-	// Match against any pattern (OR logic)
-	patterns.iter().any(|p| p.is_match(&target_str))
+/// Check if a manifest survives the target matcher set. See `keep_target`.
+fn matches_target_patterns(manifest: &JsonValue, matchers: &[TargetMatcher]) -> bool {
+	keep_target(&manifest_kind_name(manifest), matchers)
 }
 
 /// Export environments from given paths to the output directory
@@ -925,7 +897,7 @@ fn export_single_env(
 
 		// Filter manifests by target patterns if specified
 		let manifests = if !opts.target.is_empty() {
-			let target_patterns = compile_target_patterns(&opts.target)
+			let target_patterns = compile_target_matchers(&opts.target)
 				.map_err(|e| ExportError::Fatal(format!("Invalid target pattern: {}", e)))?;
 			trace!(
 				"[{}:{}] Filtering manifests by {} target patterns",
@@ -3880,7 +3852,7 @@ mod tests {
 
 	#[test]
 	fn test_matches_target_patterns_basic_regex() {
-		let patterns = compile_target_patterns(&["Deployment/.*".to_string()]).unwrap();
+		let patterns = compile_target_matchers(&["Deployment/.*".to_string()]).unwrap();
 
 		let deployment = serde_json::json!({
 			"kind": "Deployment",
@@ -3897,7 +3869,7 @@ mod tests {
 
 	#[test]
 	fn test_matches_target_patterns_multiple() {
-		let patterns = compile_target_patterns(&[
+		let patterns = compile_target_matchers(&[
 			"Deployment/grafana".to_string(),
 			"Service/frontend".to_string(),
 		])
@@ -3923,7 +3895,7 @@ mod tests {
 
 	#[test]
 	fn test_matches_target_patterns_empty_allows_all() {
-		let patterns = compile_target_patterns(&[]).unwrap();
+		let patterns = compile_target_matchers(&[]).unwrap();
 
 		let manifest = serde_json::json!({
 			"kind": "ConfigMap",

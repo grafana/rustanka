@@ -683,6 +683,64 @@ pub fn filter_environments_by_name(
 	Ok(matches)
 }
 
+/// A compiled `-t/--target` expression. Mirrors Tanka's `pkg/process/filter.go`:
+/// patterns are anchored with `^…$`, case-insensitive, and a leading `!`
+/// inverts the match (exclude rather than include).
+#[derive(Debug, Clone)]
+pub struct TargetMatcher {
+	pub re: regex::Regex,
+	pub negate: bool,
+}
+
+/// Compile raw `-t` strings into matchers. Strips a leading `!` to flag
+/// negation, anchors the remainder with `^…$`, and builds the regex
+/// case-insensitively. Matches Tanka's `process.StrExps`.
+pub fn compile_target_matchers(patterns: &[String]) -> Result<Vec<TargetMatcher>> {
+	patterns
+		.iter()
+		.map(|raw| {
+			let (negate, body) = match raw.strip_prefix('!') {
+				Some(rest) => (true, rest),
+				None => (false, raw.as_str()),
+			};
+			let re = regex::RegexBuilder::new(&format!("^{body}$"))
+				.case_insensitive(true)
+				.build()
+				.with_context(|| format!("invalid target regex {raw:?}"))?;
+			Ok(TargetMatcher { re, negate })
+		})
+		.collect()
+}
+
+/// Return true if `kind_name` (the manifest's `kind/name`) survives the matcher
+/// set. Mirrors Tanka's `process.Filter`: keep iff at least one matcher matches
+/// AND no negative matcher matches. A negative matcher always satisfies the
+/// "match at least one" gate (Tanka's `NegMatcher.MatchString` is unconditionally
+/// true), so a query of only `!…` patterns keeps everything except the excluded.
+pub fn keep_target(kind_name: &str, matchers: &[TargetMatcher]) -> bool {
+	if matchers.is_empty() {
+		return true;
+	}
+	let match_one = matchers
+		.iter()
+		.any(|m| m.negate || m.re.is_match(kind_name));
+	let ignored = matchers
+		.iter()
+		.any(|m| m.negate && m.re.is_match(kind_name));
+	match_one && !ignored
+}
+
+/// Extract `kind/name` for matcher input. Missing fields become empty strings,
+/// matching Tanka's behavior on unidentified manifests.
+pub fn manifest_kind_name(manifest: &serde_json::Value) -> String {
+	let kind = manifest.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+	let name = manifest
+		.pointer("/metadata/name")
+		.and_then(|v| v.as_str())
+		.unwrap_or("");
+	format!("{kind}/{name}")
+}
+
 /// Extract Kubernetes manifests from the evaluation result.
 ///
 /// The evaluation result can be:
@@ -696,24 +754,9 @@ pub fn extract_manifests(
 	let mut manifests = Vec::new();
 	collect_manifests(value, &mut manifests);
 
-	// Apply target filters if specified
 	if !target_filters.is_empty() {
-		let filters: Vec<regex::Regex> = target_filters
-			.iter()
-			.map(|f| regex::RegexBuilder::new(f).case_insensitive(true).build())
-			.collect::<Result<Vec<_>, _>>()
-			.context("invalid target filter regex")?;
-
-		manifests.retain(|m| {
-			let kind = m.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-			let name = m
-				.pointer("/metadata/name")
-				.and_then(|v| v.as_str())
-				.unwrap_or("");
-			let target = format!("{}/{}", kind, name);
-
-			filters.iter().any(|f| f.is_match(&target))
-		});
+		let matchers = compile_target_matchers(target_filters)?;
+		manifests.retain(|m| keep_target(&manifest_kind_name(m), &matchers));
 	}
 
 	Ok(manifests)
@@ -1639,6 +1682,94 @@ mod tests {
 		)
 		.unwrap();
 		assert_eq!(manifests.len(), 2);
+	}
+
+	fn three_kinds() -> serde_json::Value {
+		serde_json::json!({
+			"dep": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "grafana" }
+			},
+			"svc": {
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "frontend" }
+			},
+			"ns": {
+				"apiVersion": "v1",
+				"kind": "Namespace",
+				"metadata": { "name": "monitoring" }
+			}
+		})
+	}
+
+	#[test]
+	fn test_extract_manifests_target_filter_negation() {
+		let value = three_kinds();
+
+		let manifests = extract_manifests(&value, &["!Deployment/.*".to_string()]).unwrap();
+		let kinds: Vec<&str> = manifests
+			.iter()
+			.map(|m| m["kind"].as_str().unwrap())
+			.collect();
+		assert_eq!(manifests.len(), 2);
+		assert!(!kinds.contains(&"Deployment"));
+		assert!(kinds.contains(&"Service"));
+		assert!(kinds.contains(&"Namespace"));
+	}
+
+	#[test]
+	fn test_extract_manifests_target_filter_mixed_positive_and_negative() {
+		// Matches Tanka semantics: a negative matcher's MatchString is unconditionally
+		// true, so adding `!X` does not narrow the positive set — it only adds an
+		// exclusion. The set ["Deployment/.*", "!Deployment/skip-me"] therefore keeps
+		// every non-skip-me manifest, not just the deployments.
+		let value = serde_json::json!({
+			"a": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "keep" }
+			},
+			"b": {
+				"apiVersion": "apps/v1",
+				"kind": "Deployment",
+				"metadata": { "name": "skip-me" }
+			},
+			"c": {
+				"apiVersion": "v1",
+				"kind": "Service",
+				"metadata": { "name": "elsewhere" }
+			}
+		});
+
+		let manifests = extract_manifests(
+			&value,
+			&[
+				"Deployment/.*".to_string(),
+				"!Deployment/skip-me".to_string(),
+			],
+		)
+		.unwrap();
+
+		let kind_names: Vec<String> = manifests.iter().map(manifest_kind_name).collect();
+		assert_eq!(manifests.len(), 2);
+		assert!(kind_names.contains(&"Deployment/keep".to_string()));
+		assert!(kind_names.contains(&"Service/elsewhere".to_string()));
+		assert!(!kind_names.contains(&"Deployment/skip-me".to_string()));
+	}
+
+	#[test]
+	fn test_extract_manifests_target_filter_is_anchored() {
+		// Matches Tanka: patterns are anchored with ^…$, so a bare kind
+		// does not match "kind/name" — callers must use ".*" explicitly.
+		let value = three_kinds();
+
+		let manifests = extract_manifests(&value, &["Deployment".to_string()]).unwrap();
+		assert!(
+			manifests.is_empty(),
+			"bare 'Deployment' should not match 'Deployment/grafana' once anchored, got {manifests:?}",
+		);
 	}
 
 	// -----------------------------------------------------------------------
