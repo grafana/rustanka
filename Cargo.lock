@@ -3566,8 +3566,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcc7fe48e34d02a97bc8e6253b8b91e5a47fe2c47eaacb5149cefbb69922eaf0"
+source = "git+https://github.com/CertainLach/serde-saphyr?branch=fix%2Flegacy-octal-handling#9666bd8d66a143b5e5d7a18d7915253696f5afe6"
 dependencies = [
  "ahash",
  "annotate-snippets",
