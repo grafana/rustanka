@@ -1,0 +1,5 @@
+{
+    "default/Deployment-hooks-disabled-deployment.golden": "main.jsonnet",
+    "default/Deployment-hooks-enabled-deployment.golden": "main.jsonnet",
+    "default/Job-hooks-enabled-pre-install.golden": "main.jsonnet"
+}

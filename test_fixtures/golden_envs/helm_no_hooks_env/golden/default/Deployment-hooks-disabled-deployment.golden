@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hooks-disabled
+  name: hooks-disabled-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hooks-disabled
+  template:
+    metadata:
+      labels:
+        app: hooks-disabled
+    spec:
+      containers:
+      - image: nginx:1.25
+        name: hooks-disabled
+        ports:
+        - containerPort: 80

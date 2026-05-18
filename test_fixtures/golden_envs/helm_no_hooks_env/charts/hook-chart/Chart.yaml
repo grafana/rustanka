@@ -1,0 +1,5 @@
+apiVersion: v2
+name: hook-chart
+description: A minimal test chart for helmTemplate noHooks testing
+version: 0.1.0
+appVersion: "1.0.0"

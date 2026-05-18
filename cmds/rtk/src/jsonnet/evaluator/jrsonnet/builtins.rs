@@ -156,6 +156,7 @@ fn helm_cache_key(
 	namespace: Option<&str>,
 	values_json: Option<&str>,
 	include_crds: bool,
+	no_hooks: bool,
 	api_versions: &[String],
 ) -> String {
 	let mut hasher = Sha256::new();
@@ -172,6 +173,8 @@ fn helm_cache_key(
 	}
 	hasher.update(b"|");
 	hasher.update(if include_crds { b"1" } else { b"0" });
+	hasher.update(b"|");
+	hasher.update(if no_hooks { b"1" } else { b"0" });
 	hasher.update(b"|");
 	for av in api_versions {
 		hasher.update(av.as_bytes());
@@ -588,6 +591,14 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 		Vec::new()
 	};
 
+	// Extract noHooks if present (defaults to false, matching Go Tanka's behavior)
+	// When true, passes --no-hooks to helm template to exclude hook resources
+	let no_hooks = if let Some(nh) = opts.get("noHooks".into())? {
+		matches!(nh, Val::Bool(true))
+	} else {
+		false
+	};
+
 	// Check cache first
 	let cache_key = helm_cache_key(
 		&name,
@@ -595,6 +606,7 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 		namespace.as_deref(),
 		values_json.as_deref(),
 		include_crds,
+		no_hooks,
 		&api_versions,
 	);
 	{
@@ -622,6 +634,11 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 	// Add --include-crds if requested
 	if include_crds {
 		cmd.arg("--include-crds");
+	}
+
+	// Add --no-hooks if requested (excludes hook resources from template output)
+	if no_hooks {
+		cmd.arg("--no-hooks");
 	}
 
 	// Add --api-versions for each version specified

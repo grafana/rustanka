@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  annotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-delete-policy: hook-succeeded
+    helm.sh/hook-weight: "-5"
+  name: hooks-enabled-pre-install
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - command:
+        - sh
+        - -c
+        - echo pre-install hook running
+        image: busybox
+        name: pre-install
+      restartPolicy: Never
