@@ -196,14 +196,14 @@ mod tests {
 
 	#[test]
 	fn run_accepts_valid_disable_checks() {
+		let dir = tempfile::tempdir().unwrap();
 		let args = LintArgs {
-			paths: vec![".".to_string()],
+			paths: vec![dir.path().to_string_lossy().to_string()],
 			exclude: vec![],
 			parallelism: 4,
 			disable_checks: vec!["unused_locals".to_string()],
 			fix: false,
 		};
-		// Run from cwd; may have no jsonnet files, so Ok(())
 		let result = run(args, sink());
 		assert!(result.is_ok());
 	}

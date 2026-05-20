@@ -1,0 +1,3 @@
+{
+  someOtherThing: 'hello',
+}

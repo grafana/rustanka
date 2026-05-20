@@ -537,13 +537,13 @@ class BenchmarkRunner:
                 ["-n", "rtk-base", f"sh -c {shlex.quote(rtk_base_inner)}"])
 
         try:
-            result = subprocess.run(args, check=True, capture_output=True, text=True)
-        except:
+            subprocess.run(args, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
             # Only print the output on failure
             print("### STDOUT")
-            print(result.stdout, file=sys.stderr)
+            print(e.stdout, file=sys.stderr)
             print("### STDERR")
-            print(result.stderr, file=sys.stderr)
+            print(e.stderr, file=sys.stderr)
             raise
 
         with open(temp_md) as f:

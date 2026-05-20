@@ -12,6 +12,7 @@ pub mod prune;
 pub mod show;
 pub mod status;
 pub mod tool;
+pub mod validate;
 
 pub mod common;
 

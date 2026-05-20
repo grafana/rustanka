@@ -75,6 +75,9 @@ enum Commands {
 	/// Handy utilities for working with jsonnet
 	Tool(commands::tool::ToolArgs),
 
+	/// Validate manifests and configurations
+	Validate(commands::validate::ValidateArgs),
+
 	/// Install CLI completions
 	Complete(commands::complete::CompleteArgs),
 }
@@ -115,6 +118,7 @@ fn main() -> Result<()> {
 		}
 		Commands::Init(args) => commands::init::run(args, stdout),
 		Commands::Tool(args) => commands::tool::run(args, stdout),
+		Commands::Validate(args) => commands::validate::run(args, stdout),
 		Commands::Complete(args) => commands::complete::run(args, stdout),
 	}
 }
