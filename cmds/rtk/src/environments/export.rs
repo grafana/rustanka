@@ -9,7 +9,7 @@ use std::{
 	path::PathBuf,
 	sync::{
 		atomic::{AtomicBool, Ordering},
-		Arc,
+		Arc, OnceLock,
 	},
 };
 
@@ -1386,76 +1386,57 @@ fn json_to_gtmpl(value: &JsonValue) -> Value {
 
 /// Specialize template by substituting environment values (called once per environment)
 /// This eliminates the need for env function calls and HashMap lookups during rendering
-fn specialize_template_for_env(
+pub(crate) fn specialize_template_for_env(
 	template: &str,
 	env_spec: &Option<crate::spec::Environment>,
 ) -> Result<String> {
 	use regex::Regex;
 
-	let mut result = template.to_string();
+	// One regex catches every `env.*` reference we substitute. Doing it as a
+	// single `replace_all` pass turns the previous O(refs × template_len) loop
+	// of `String::replace` calls into one O(template_len) walk with a single
+	// output allocation.
+	static ENV_REF_REGEX: OnceLock<Regex> = OnceLock::new();
+	let env_ref_pattern = ENV_REF_REGEX.get_or_init(|| {
+		Regex::new(r"env\.metadata\.labels\.\w+|env\.spec\.namespace|env\.metadata\.name")
+			.expect("env reference regex must be valid")
+	});
 
-	// Find all env.metadata.labels.X references in the template
-	// This pattern is a compile-time constant, so it should never fail
-	let label_pattern = Regex::new(r"env\.metadata\.labels\.(\w+)")
-		.context("failed to compile label reference pattern")?;
-	let all_label_refs: std::collections::HashSet<String> = label_pattern
-		.captures_iter(template)
-		.map(|cap| cap[1].to_string())
-		.collect();
+	let (labels, namespace, name) = match env_spec {
+		Some(env) => (
+			env.metadata.labels.as_ref(),
+			env.spec.namespace.as_str(),
+			env.metadata.name.as_deref().unwrap_or(""),
+		),
+		None => (None, "", ""),
+	};
 
-	if let Some(env) = env_spec {
-		// Sort by length descending to avoid partial matches
-		let mut sorted_refs: Vec<_> = all_label_refs.iter().collect();
-		sorted_refs.sort_by_key(|b| std::cmp::Reverse(b.len()));
-
-		let labels = env.metadata.labels.as_ref();
-
-		for label_key in sorted_refs {
-			let pattern = format!("env.metadata.labels.{}", label_key);
-			let replacement = if let Some(label_map) = labels {
-				if let Some(value) = label_map.get(label_key.as_str()) {
-					// Label exists - use its value as a quoted string
-					// All label values must be strings (not booleans) for template comparisons to work
-					format!("\"{}\"", value)
-				} else {
-					// Label doesn't exist - use empty string (falsy in Go templates)
-					// This ensures `not env.metadata.labels.X` evaluates to true (empty string is falsy)
-					// and `if env.metadata.labels.X` evaluates to false
-					"\"\"".to_string()
-				}
-			} else {
-				// No labels at all - use empty string (falsy in Go templates)
-				"\"\"".to_string()
-			};
-			result = result.replace(&pattern, &replacement);
-		}
-
-		// Replace env.spec.namespace
-		let namespace = &env.spec.namespace;
-		result = result.replace("env.spec.namespace", &format!("\"{}\"", namespace));
-
-		// Replace env.metadata.name if present
-		if let Some(name) = &env.metadata.name {
-			result = result.replace("env.metadata.name", &format!("\"{}\"", name));
+	let result = env_ref_pattern.replace_all(template, |caps: &regex::Captures<'_>| {
+		let matched = caps.get(0).expect("capture group 0 always exists").as_str();
+		let value: &str = if let Some(key) = matched.strip_prefix("env.metadata.labels.") {
+			labels
+				.and_then(|map| map.get(key))
+				.map(String::as_str)
+				.unwrap_or("")
+		} else if matched == "env.spec.namespace" {
+			namespace
 		} else {
-			result = result.replace("env.metadata.name", "\"\"");
-		}
-	} else {
-		// For None case, replace all env references with empty defaults
-		result = result.replace("env.spec.namespace", "\"\"");
-		result = result.replace("env.metadata.name", "\"\"");
-
-		// Replace all label references with empty string (falsy in Go templates)
-		for label_key in all_label_refs {
-			let pattern = format!("env.metadata.labels.{}", label_key);
-			result = result.replace(&pattern, "\"\"");
-		}
-	}
+			// env.metadata.name
+			name
+		};
+		let mut out = String::with_capacity(value.len() + 2);
+		out.push('"');
+		out.push_str(value);
+		out.push('"');
+		out
+	});
 
 	// Replace / with BEL_RUNE in template TEXT (outside {{ }} blocks)
 	// This preserves intentional subdirectory separators while allowing
 	// values containing / (like apps/v1) to be replaced with - later
-	let result = replace_tmpl_text(&result, "/", &BEL_RUNE.to_string());
+	let mut bel_buf = [0u8; 4];
+	let bel_str = BEL_RUNE.encode_utf8(&mut bel_buf);
+	let result = replace_tmpl_text(result.as_ref(), "/", bel_str);
 
 	Ok(result)
 }
