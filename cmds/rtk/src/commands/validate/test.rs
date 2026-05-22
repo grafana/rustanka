@@ -120,7 +120,46 @@ pub fn run<W: Write>(args: TestArgs, mut writer: W) -> Result<()> {
 		let import_paths = vec![tests_dir.clone()];
 		let mut file_results = Vec::new();
 
+		// `manifestTest` cases are filtered by the validation file's `kinds:` filter,
+		// mirroring how `rtk validate manifests` invokes them. A test case whose
+		// `input.kind` is not in the filter is reported as PASS without calling the
+		// validation function (the validation never sees that kind in production).
+		let kinds_filter = common::extract_kinds_filter(&validation_file, &import_paths)?;
+
 		for tc in &test_cases {
+			if tc.test_type == "manifestTest" {
+				if let Some(allowed_kinds) = &kinds_filter {
+					let input_kind = tc.input.get("kind").and_then(|v| v.as_str());
+					let kind_matches = input_kind.is_some_and(|k| allowed_kinds.contains(k));
+					if !kind_matches {
+						match &tc.expected_error {
+							None => {
+								file_results.push(TestCaseResult {
+									name: tc.name.clone(),
+									passed: true,
+									detail: None,
+								});
+								total_passed += 1;
+							}
+							Some(expected) => {
+								file_results.push(TestCaseResult {
+									name: tc.name.clone(),
+									passed: false,
+									detail: Some(format!(
+										"expected error '{}', but input kind {} is filtered out by kinds: {:?}",
+										expected,
+										input_kind.unwrap_or("<missing>"),
+										allowed_kinds,
+									)),
+								});
+								total_failed += 1;
+							}
+						}
+						continue;
+					}
+				}
+			}
+
 			let input_json = serde_json::to_string(&tc.input)?;
 
 			let actual_result = common::run_validation_function(

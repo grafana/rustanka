@@ -18,7 +18,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::Args;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use tracing::debug;
 use walkdir::WalkDir;
 
@@ -161,6 +161,8 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		"starting validate manifests"
 	);
 
+	let t_start = Instant::now();
+
 	if !export_dir.is_dir() {
 		anyhow::bail!("export directory does not exist: {}", export_dir.display());
 	}
@@ -169,7 +171,12 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 	}
 
 	// Step 1: Collect and parse all manifests from the export directory
+	let t_collect = Instant::now();
 	let manifests = collect_manifests(&export_dir, args.recursive)?;
+	debug!(
+		elapsed_ms = t_collect.elapsed().as_millis() as u64,
+		"collect_manifests"
+	);
 	if manifests.is_empty() {
 		writeln!(writer, "No manifests found in {}", export_dir.display())?;
 		return Ok(());
@@ -203,11 +210,15 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 	let by_namespace = group_by_namespace(&manifests);
 
 	debug!(
-		namespaces = ?by_namespace.keys().collect::<Vec<_>>(),
+		namespaces = ?by_namespace
+			.keys()
+			.map(|k| format!("{}/{}", k.parent, k.namespace))
+			.collect::<Vec<_>>(),
 		"grouped manifests by namespace"
 	);
 
 	// Step 4: Pre-process validation files (extract kinds, resolve paths)
+	let t_preprocess = Instant::now();
 	let import_paths = vec![tests_dir.clone()];
 	let mut validation_infos = Vec::new();
 
@@ -249,7 +260,7 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 			.replace('\\', "/");
 
 		let kinds_filter = if has_manifest_test {
-			extract_kinds_filter(validation_file, &import_paths)?
+			common::extract_kinds_filter(validation_file, &import_paths)?
 		} else {
 			None
 		};
@@ -269,7 +280,13 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		});
 	}
 
+	debug!(
+		elapsed_ms = t_preprocess.elapsed().as_millis() as u64,
+		"pre-process validations"
+	);
+
 	// Step 5: Build one work item per namespace — one eval runs namespaceTest(allManifests) and all applicable manifest tests
+	let t_build = Instant::now();
 	let ns_validations: Vec<&ValidationFileInfo> = validation_infos
 		.iter()
 		.filter(|v| v.has_namespace_test)
@@ -279,70 +296,181 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		.filter(|v| v.has_manifest_test)
 		.collect();
 
+	// Write manifests to a per-namespace temp JSON file. Each work item then imports
+	// the namespace's file rather than embedding the full manifest JSON in the snippet
+	// text. jrsonnet's per-State file cache (with the thread-local pooled State) parses
+	// each namespace's manifests at most once per worker thread, even when many work
+	// items reference it.
+	let scratch = tempfile::Builder::new()
+		.prefix("rtk-validate-")
+		.tempdir()
+		.context("creating scratch dir for manifests")?;
+	let scratch_path = scratch.path();
+
+	// Serialize + write per-namespace JSON files in parallel. The order doesn't
+	// matter; we just need the resulting path strings for the snippets.
+	let by_namespace_vec: Vec<(&NamespaceGroupKey, &Vec<&ParsedManifest>)> =
+		by_namespace.iter().collect();
+	let ns_file_paths: Vec<String> = (0..by_namespace_vec.len())
+		.into_par_iter()
+		.map(|ns_idx| -> Result<String> {
+			let (_, ns_manifests) = by_namespace_vec[ns_idx];
+			let manifests_json: Vec<&serde_json::Value> =
+				ns_manifests.iter().map(|m| &m.value).collect();
+			let json_text = serde_json::to_string(&manifests_json)?;
+			let ns_file = scratch_path.join(format!("ns_{}.json", ns_idx));
+			fs::write(&ns_file, &json_text)
+				.with_context(|| format!("writing scratch file {}", ns_file.display()))?;
+			Ok(ns_file.to_string_lossy().replace('\\', "/"))
+		})
+		.collect::<Result<Vec<_>>>()?;
+
 	let mut work_items: Vec<BatchWorkItem> = Vec::new();
-	for (namespace, ns_manifests) in &by_namespace {
-		let ns_display = if namespace.is_empty() {
+	for (ns_idx, (key, ns_manifests)) in by_namespace_vec.iter().enumerate() {
+		let ns_display = if key.namespace.is_empty() {
 			"(cluster-scoped)".to_string()
 		} else {
-			namespace.clone()
+			key.namespace.clone()
 		};
+		// `namespace` is the empty-string sentinel used by validations to skip
+		// namespaceTest for cluster-scoped resources.
+		let namespace = &key.namespace;
+		let ns_file_str = &ns_file_paths[ns_idx];
 
-		let manifests_json: Vec<&serde_json::Value> =
-			ns_manifests.iter().map(|m| &m.value).collect();
-		let all_manifests_json = serde_json::to_string(&manifests_json)?;
+		// Heuristic: count the number of manifestTest calls this namespace would emit
+		// in a single batched work item. If that exceeds `split_threshold`, split the
+		// namespace into per-validation work items so rayon can fan the work out.
+		// Small namespaces stay batched because the per-eval setup cost would dominate.
+		//
+		// The exact number isn't critical; smaller values add more per-eval overhead
+		// while larger values leave longer serial tails.
+		const SPLIT_THRESHOLD: usize = 512;
+		let manifest_test_calls: usize = ns_manifests
+			.iter()
+			.flat_map(|m| {
+				manifest_validations
+					.iter()
+					.filter(|v| match &v.kinds_filter {
+						Some(kinds) => kinds.contains(&m.kind),
+						None => true,
+					})
+			})
+			.count();
 
-		let mut snippet = format!("local allManifests = {};\n[\n", all_manifests_json);
-		let mut result_descriptors: Vec<ResultDescriptor> = Vec::new();
+		if manifest_test_calls <= SPLIT_THRESHOLD {
+			let mut snippet = format!("local ms = import '{}';\n[\n", ns_file_str);
+			let mut result_descriptors: Vec<ResultDescriptor> = Vec::new();
 
-		// namespaceTest(allManifests) for each validation file that has it (only for named namespaces)
-		if !namespace.is_empty() {
-			for v in &ns_validations {
-				snippet.push_str(&format!(
-					"  (import '{}').namespaceTest(allManifests),\n",
-					v.abs_import_path
-				));
-				result_descriptors.push(ResultDescriptor {
-					validation_file_name: v.display_name.clone(),
-					subject: ns_display.clone(),
-					test_kind: "namespaceTest",
+			if !namespace.is_empty() {
+				for v in &ns_validations {
+					snippet.push_str(&format!(
+						"  (import '{}').namespaceTest(ms),\n",
+						v.abs_import_path
+					));
+					result_descriptors.push(ResultDescriptor {
+						validation_file_name: v.display_name.clone(),
+						subject: ns_display.clone(),
+						test_kind: "namespaceTest",
+					});
+				}
+			}
+
+			for (idx, manifest) in ns_manifests.iter().enumerate() {
+				for v in &manifest_validations {
+					if let Some(kinds) = &v.kinds_filter {
+						if !kinds.contains(&manifest.kind) {
+							continue;
+						}
+					}
+					snippet.push_str(&format!(
+						"  (import '{}').manifestTest(ms[{}]),\n",
+						v.abs_import_path, idx
+					));
+					result_descriptors.push(ResultDescriptor {
+						validation_file_name: v.display_name.clone(),
+						subject: manifest.source_file.clone(),
+						test_kind: "manifestTest",
+					});
+				}
+			}
+
+			if result_descriptors.is_empty() {
+				continue;
+			}
+
+			snippet.push(']');
+
+			work_items.push(BatchWorkItem {
+				snippet,
+				subject: ns_display,
+				result_descriptors,
+			});
+		} else {
+			// Big namespace: emit one work item per validation file so rayon can spread
+			// the work across cores.
+			if !namespace.is_empty() {
+				for v in &ns_validations {
+					let snippet = format!(
+						"local ms = import '{}';\n[(import '{}').namespaceTest(ms)]\n",
+						ns_file_str, v.abs_import_path
+					);
+					work_items.push(BatchWorkItem {
+						snippet,
+						subject: format!("{} / {}", ns_display, v.display_name),
+						result_descriptors: vec![ResultDescriptor {
+							validation_file_name: v.display_name.clone(),
+							subject: ns_display.clone(),
+							test_kind: "namespaceTest",
+						}],
+					});
+				}
+			}
+
+			for v in &manifest_validations {
+				let applicable: Vec<(usize, &ParsedManifest)> = ns_manifests
+					.iter()
+					.enumerate()
+					.filter_map(|(idx, m)| match &v.kinds_filter {
+						Some(kinds) if !kinds.contains(&m.kind) => None,
+						_ => Some((idx, *m)),
+					})
+					.collect();
+				if applicable.is_empty() {
+					continue;
+				}
+
+				let mut idx_list = String::with_capacity(applicable.len() * 4 + 2);
+				idx_list.push('[');
+				for (i, (idx, _)) in applicable.iter().enumerate() {
+					if i > 0 {
+						idx_list.push(',');
+					}
+					use std::fmt::Write as _;
+					write!(idx_list, "{}", idx).expect("write to string");
+				}
+				idx_list.push(']');
+
+				let snippet = format!(
+					"local ms = import '{}';\nlocal v = import '{}';\n[v.manifestTest(ms[i]) for i in {}]\n",
+					ns_file_str, v.abs_import_path, idx_list
+				);
+
+				let result_descriptors: Vec<ResultDescriptor> = applicable
+					.iter()
+					.map(|(_, m)| ResultDescriptor {
+						validation_file_name: v.display_name.clone(),
+						subject: m.source_file.clone(),
+						test_kind: "manifestTest",
+					})
+					.collect();
+
+				work_items.push(BatchWorkItem {
+					snippet,
+					subject: format!("{} / {}", ns_display, v.display_name),
+					result_descriptors,
 				});
 			}
 		}
-
-		// manifestTest(allManifests[i]) for each manifest in this namespace, for each applicable validation file
-		for (idx, manifest) in ns_manifests.iter().enumerate() {
-			let applicable: Vec<&ValidationFileInfo> = manifest_validations
-				.iter()
-				.filter(|v| match &v.kinds_filter {
-					Some(kinds) => kinds.contains(&manifest.kind),
-					None => true,
-				})
-				.copied()
-				.collect();
-
-			for v in &applicable {
-				snippet.push_str(&format!(
-					"  (import '{}').manifestTest(allManifests[{}]),\n",
-					v.abs_import_path, idx
-				));
-				result_descriptors.push(ResultDescriptor {
-					validation_file_name: v.display_name.clone(),
-					subject: manifest.source_file.clone(),
-					test_kind: "manifestTest",
-				});
-			}
-		}
-
-		if result_descriptors.is_empty() {
-			continue;
-		}
-
-		snippet.push(']');
-		work_items.push(BatchWorkItem {
-			snippet,
-			subject: ns_display,
-			result_descriptors,
-		});
 	}
 
 	// Sort heaviest items first so rayon picks them up early
@@ -353,14 +481,25 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		"running batched tests in parallel"
 	);
 
+	{
+		let total_snippet_bytes: usize = work_items.iter().map(|w| w.snippet.len()).sum();
+		debug!(
+			elapsed_ms = t_build.elapsed().as_millis() as u64,
+			work_item_count = work_items.len(),
+			total_snippet_bytes,
+			"built work items"
+		);
+	}
+
 	// Execute all batched work items in parallel
+	let t_eval = Instant::now();
 	let slowest_tracker = args.log_slowest.map(SlowestTracker::new);
 	let results: Vec<TestResult> = work_items
 		.into_par_iter()
 		.flat_map_iter(|item| {
 			let start = slowest_tracker.as_ref().map(|_| Instant::now());
 
-			let eval_result = common::eval_jsonnet_snippet(&item.snippet, &import_paths);
+			let eval_result = common::eval_jsonnet_snippet_pooled(&item.snippet, &import_paths);
 
 			if let (Some(tracker), Some(start)) = (&slowest_tracker, start) {
 				let mut validation_file_names: Vec<String> = item
@@ -420,6 +559,11 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		})
 		.collect();
 
+	debug!(
+		elapsed_ms = t_eval.elapsed().as_millis() as u64,
+		"parallel eval"
+	);
+
 	// Step 5: Report results
 	let passed = results.iter().filter(|r| r.error.is_none()).count();
 	let failed = results.iter().filter(|r| r.error.is_some()).count();
@@ -472,6 +616,8 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		}
 	}
 
+	debug!(elapsed_ms = t_start.elapsed().as_millis() as u64, "total");
+
 	if failed > 0 {
 		anyhow::bail!("{} test(s) failed", failed);
 	}
@@ -480,15 +626,18 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 }
 
 /// Collect all YAML manifest files from the export directory.
+///
+/// File walking is sequential (cheap), but reading + parsing each file is fanned
+/// out to rayon since YAML parsing of large ConfigMaps (dashboards, helm values,
+/// etc.) is the dominant cost for sizeable export directories.
 fn collect_manifests(export_dir: &Path, recursive: bool) -> Result<Vec<ParsedManifest>> {
-	let mut manifests = Vec::new();
-
 	let walker = if recursive {
 		WalkDir::new(export_dir)
 	} else {
 		WalkDir::new(export_dir).max_depth(1)
 	};
 
+	let mut paths: Vec<PathBuf> = Vec::new();
 	for entry in walker
 		.into_iter()
 		.filter_map(|e| e.ok())
@@ -496,51 +645,56 @@ fn collect_manifests(export_dir: &Path, recursive: bool) -> Result<Vec<ParsedMan
 	{
 		let path = entry.path();
 		let ext = path.extension().and_then(|e| e.to_str());
-
 		match ext {
 			Some("yaml") | Some("yml") | Some("json") => {}
 			_ => continue,
 		}
-
-		// Skip manifest.json tracking file
 		if path.file_name().and_then(|n| n.to_str()) == Some("manifest.json") {
 			continue;
 		}
-
-		let content = fs::read_to_string(path)
-			.with_context(|| format!("reading manifest file {}", path.display()))?;
-
-		let relative = path
-			.strip_prefix(export_dir)
-			.unwrap_or(path)
-			.to_string_lossy()
-			.to_string();
-
-		// Parse YAML documents (a file may contain multiple documents separated by ---)
-		let values = parse_yaml_manifests(&content, &relative)?;
-		debug!(file = %relative, document_count = values.len(), "parsed manifest file");
-
-		for value in values {
-			let kind = value
-				.get("kind")
-				.and_then(|v| v.as_str())
-				.unwrap_or("")
-				.to_string();
-
-			let namespace = value
-				.pointer("/metadata/namespace")
-				.and_then(|v| v.as_str())
-				.unwrap_or("")
-				.to_string();
-
-			manifests.push(ParsedManifest {
-				source_file: relative.clone(),
-				kind,
-				namespace,
-				value,
-			});
-		}
+		paths.push(path.to_path_buf());
 	}
+
+	let manifests: Vec<ParsedManifest> = paths
+		.par_iter()
+		.map(|path| -> Result<Vec<ParsedManifest>> {
+			let content = fs::read_to_string(path)
+				.with_context(|| format!("reading manifest file {}", path.display()))?;
+
+			let relative = path
+				.strip_prefix(export_dir)
+				.unwrap_or(path)
+				.to_string_lossy()
+				.to_string();
+
+			let values = parse_yaml_manifests(&content, &relative)?;
+			debug!(file = %relative, document_count = values.len(), "parsed manifest file");
+
+			let mut out = Vec::with_capacity(values.len());
+			for value in values {
+				let kind = value
+					.get("kind")
+					.and_then(|v| v.as_str())
+					.unwrap_or("")
+					.to_string();
+				let namespace = value
+					.pointer("/metadata/namespace")
+					.and_then(|v| v.as_str())
+					.unwrap_or("")
+					.to_string();
+				out.push(ParsedManifest {
+					source_file: relative.clone(),
+					kind,
+					namespace,
+					value,
+				});
+			}
+			Ok(out)
+		})
+		.collect::<Result<Vec<Vec<ParsedManifest>>>>()?
+		.into_iter()
+		.flatten()
+		.collect();
 
 	Ok(manifests)
 }
@@ -609,63 +763,37 @@ fn parse_yaml_manifests(content: &str, file_path: &str) -> Result<Vec<serde_json
 	Ok(results)
 }
 
-/// Extract the optional `kinds` set from a validation file.
+/// Group manifests for `namespaceTest` evaluation.
 ///
-/// If the file defines a `kinds` field (array of strings), returns the set.
-/// If `kinds` is not defined, returns None (all kinds match).
-fn extract_kinds_filter(
-	validation_file: &Path,
-	import_paths: &[PathBuf],
-) -> Result<Option<HashSet<String>>> {
-	let file_abs = validation_file
-		.canonicalize()
-		.with_context(|| format!("resolving path {}", validation_file.display()))?;
-
-	let snippet = format!(
-		"local v = import '{}';\nif std.objectHas(v, 'kinds') then v.kinds else null",
-		file_abs.to_string_lossy().replace('\\', "/"),
-	);
-
-	let value = common::eval_jsonnet_snippet(&snippet, import_paths)?;
-
-	match value {
-		serde_json::Value::Null => Ok(None),
-		serde_json::Value::Array(arr) => {
-			let mut kinds = HashSet::new();
-			for item in &arr {
-				match item.as_str() {
-					Some(s) => {
-						kinds.insert(s.to_string());
-					}
-					None => {
-						anyhow::bail!(
-							"{}: kinds must be an array of strings, got: {}",
-							validation_file.display(),
-							item
-						);
-					}
-				}
-			}
-			Ok(Some(kinds))
-		}
-		other => {
-			anyhow::bail!(
-				"{}: kinds must be an array of strings, got: {}",
-				validation_file.display(),
-				other
-			);
-		}
-	}
-}
-
-/// Group manifests by namespace.
-fn group_by_namespace(manifests: &[ParsedManifest]) -> BTreeMap<String, Vec<&ParsedManifest>> {
-	let mut grouped: BTreeMap<String, Vec<&ParsedManifest>> = BTreeMap::new();
+/// Manifests are grouped by the directory containing the manifest file together
+/// with the manifest's `metadata.namespace`. This keeps semantically distinct
+/// namespaces (e.g. the same `karpenter` namespace exported from many clusters
+/// into different subdirectories) in their own group rather than collapsing
+/// them into one giant work item.
+///
+/// The map key is `(parent_directory, namespace)`. The display string returned
+/// in the `String` half of the entry is just the namespace name so user-facing
+/// output is unchanged for single-cluster exports.
+fn group_by_namespace(
+	manifests: &[ParsedManifest],
+) -> BTreeMap<NamespaceGroupKey, Vec<&ParsedManifest>> {
+	let mut grouped: BTreeMap<NamespaceGroupKey, Vec<&ParsedManifest>> = BTreeMap::new();
 	for manifest in manifests {
-		grouped
-			.entry(manifest.namespace.clone())
-			.or_default()
-			.push(manifest);
+		let parent = std::path::Path::new(&manifest.source_file)
+			.parent()
+			.map(|p| p.to_string_lossy().to_string())
+			.unwrap_or_default();
+		let key = NamespaceGroupKey {
+			parent,
+			namespace: manifest.namespace.clone(),
+		};
+		grouped.entry(key).or_default().push(manifest);
 	}
 	grouped
+}
+
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct NamespaceGroupKey {
+	parent: String,
+	namespace: String,
 }
