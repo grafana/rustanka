@@ -104,3 +104,13 @@ required-features = ["benchmarking"]
 name = "sanitize_path_component_memory"
 harness = false
 required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename_memory"
+harness = false
+required-features = ["benchmarking"]

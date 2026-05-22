@@ -1481,95 +1481,108 @@ pub(crate) fn specialize_template_for_env(
 
 /// Render filename using a specialized template (no env context needed)
 /// The template has already been specialized with environment values
-fn render_filename_simple(
+pub(crate) fn render_filename_simple(
 	tmpl: &gtmpl::Template,
 	manifest: &JsonValue,
 	env_spec: &Option<crate::spec::Environment>,
 ) -> Result<String> {
 	use gtmpl::Context;
 
-	// Create context with manifest fields
-	// Ensure metadata.labels exists as empty object and inject namespace if needed
-	let mut manifest_clone = manifest.clone();
-	if let JsonValue::Object(ref mut obj) = manifest_clone {
-		// Get kind and check if it's cluster-wide
-		let kind = obj
-			.get("kind")
-			.and_then(|v| v.as_str())
-			.unwrap_or("")
-			.to_string();
-		let is_cluster_wide = crate::spec::is_cluster_wide_kind(&kind);
+	// Build the template context directly from `&manifest` references. The
+	// previous implementation deep-cloned the entire manifest just to inject
+	// default `labels`/`namespace` before reading them back out — on the
+	// 2800-manifest hot path the caller has already run `inject_namespace`
+	// so the only mutation we actually need is the empty-`labels` default.
+	let manifest_obj = match manifest {
+		JsonValue::Object(obj) => Some(obj),
+		_ => None,
+	};
 
-		// Ensure metadata exists
-		if !obj.contains_key("metadata") {
-			obj.insert(
-				"metadata".to_string(),
-				JsonValue::Object(serde_json::Map::new()),
-			);
-		}
+	let metadata_obj = manifest_obj
+		.and_then(|obj| obj.get("metadata"))
+		.and_then(|v| match v {
+			JsonValue::Object(m) => Some(m),
+			_ => None,
+		});
 
-		if let Some(JsonValue::Object(ref mut metadata)) = obj.get_mut("metadata") {
-			// Ensure labels exists as empty object if not present
-			// This prevents template errors when accessing .metadata.labels.field
-			if !metadata.contains_key("labels") {
-				metadata.insert(
-					"labels".to_string(),
-					JsonValue::Object(serde_json::Map::new()),
-				);
-			}
-
-			// Check for annotation override (tanka.dev/namespaced)
-			let mut namespaced = !is_cluster_wide;
-			if let Some(JsonValue::Object(annotations)) = metadata.get("annotations") {
-				if let Some(JsonValue::String(ns_str)) = annotations.get("tanka.dev/namespaced") {
-					namespaced = ns_str == "true";
-				}
-			}
-
-			// Inject namespace if needed (matching Tanka's behavior)
-			if namespaced {
-				let has_namespace = metadata.contains_key("namespace")
-					&& metadata
-						.get("namespace")
-						.and_then(|v| v.as_str())
-						.map(|s| !s.is_empty())
-						.unwrap_or(false);
-
-				if !has_namespace {
-					if let Some(env) = env_spec {
-						if !env.spec.namespace.is_empty() {
-							metadata.insert(
-								"namespace".to_string(),
-								JsonValue::String(env.spec.namespace.clone()),
-							);
-						}
-					}
-				}
+	// Determine whether we should fall back to the env's namespace. The
+	// caller's `inject_namespace` already covers the export path, but this
+	// function is also reached via `format_filename_gtmpl` (used by
+	// `validate_filename_template`) where the manifest is passed in raw.
+	let kind = manifest_obj
+		.and_then(|obj| obj.get("kind"))
+		.and_then(|v| v.as_str())
+		.unwrap_or("");
+	let is_cluster_wide = crate::spec::is_cluster_wide_kind(kind);
+	let mut namespaced = !is_cluster_wide;
+	if let Some(meta) = metadata_obj {
+		if let Some(JsonValue::Object(annotations)) = meta.get("annotations") {
+			if let Some(JsonValue::String(ns_str)) = annotations.get("tanka.dev/namespaced") {
+				namespaced = ns_str == "true";
 			}
 		}
 	}
 
-	// OPTIMIZATION: Only convert fields that templates actually use
-	// Templates typically only access .kind, .metadata.name, .metadata.namespace, .metadata.labels
-	// Converting the entire manifest is expensive and unnecessary
-	let mut context_map = HashMap::new();
-	if let JsonValue::Object(obj) = manifest_clone {
-		// Only extract and convert the fields templates use
+	let has_namespace = metadata_obj
+		.and_then(|meta| meta.get("namespace"))
+		.and_then(|v| v.as_str())
+		.map(|s| !s.is_empty())
+		.unwrap_or(false);
+	let injected_namespace: Option<&str> = if namespaced && !has_namespace {
+		env_spec
+			.as_ref()
+			.map(|env| env.spec.namespace.as_str())
+			.filter(|ns| !ns.is_empty())
+	} else {
+		None
+	};
+
+	// Build the metadata map from references, applying the
+	// labels-default-empty-map and the optional namespace fallback inline
+	// (no manifest clone, no second pass).
+	let metadata_value = if let Some(meta) = metadata_obj {
+		let mut meta_map: HashMap<String, Value> = HashMap::with_capacity(meta.len() + 2);
+		let mut has_labels = false;
+		for (k, v) in meta {
+			if k == "labels" {
+				has_labels = true;
+			}
+			meta_map.insert(k.clone(), json_to_gtmpl(v));
+		}
+		if !has_labels {
+			meta_map.insert("labels".to_string(), Value::Map(HashMap::new()));
+		}
+		if let Some(ns) = injected_namespace {
+			meta_map
+				.entry("namespace".to_string())
+				.or_insert_with(|| Value::String(ns.to_string()));
+		}
+		Value::Map(meta_map)
+	} else {
+		// Manifest had no metadata at all — synthesize the minimum templates need.
+		let mut meta_map: HashMap<String, Value> = HashMap::with_capacity(2);
+		meta_map.insert("labels".to_string(), Value::Map(HashMap::new()));
+		if let Some(ns) = injected_namespace {
+			meta_map.insert("namespace".to_string(), Value::String(ns.to_string()));
+		}
+		Value::Map(meta_map)
+	};
+
+	// Only expose the manifest fields templates actually use (kind, metadata,
+	// apiVersion). Walking the whole manifest is unnecessary and expensive.
+	let mut context_map: HashMap<String, Value> = HashMap::with_capacity(3);
+	if let Some(obj) = manifest_obj {
 		if let Some(kind) = obj.get("kind") {
 			context_map.insert("kind".to_string(), json_to_gtmpl(kind));
 		}
-		if let Some(metadata) = obj.get("metadata") {
-			context_map.insert("metadata".to_string(), json_to_gtmpl(metadata));
-		}
-		// apiVersion might be used by some templates
 		if let Some(api_version) = obj.get("apiVersion") {
 			context_map.insert("apiVersion".to_string(), json_to_gtmpl(api_version));
 		}
 	}
+	context_map.insert("metadata".to_string(), metadata_value);
 
 	let context = Context::from(Value::Map(context_map));
 
-	// Render template (env values are already baked into the template)
 	let result = tmpl
 		.render(&context)
 		.map_err(|e| anyhow::anyhow!("Template error: {:?}", e))?;

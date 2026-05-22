@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use serde_json::json;
+
 use crate::spec::Environment;
 
 pub fn build_specialize_template_input(label_count: usize) -> (String, Option<Environment>) {
@@ -58,6 +60,88 @@ pub fn build_sanitize_path_component_input_kind(
 	component
 }
 
+/// Build inputs for benchmarking `render_filename_simple`. The template is
+/// pre-specialized via `specialize_template_for_env` and parsed by
+/// `gtmpl::Template`, matching what the parallel export loop feeds the function.
+/// The manifest is a Deployment-shaped object with the requested number of
+/// labels and annotations so we exercise the metadata sub-tree conversion.
+pub fn build_render_filename_input(
+	label_count: usize,
+	annotation_count: usize,
+) -> (gtmpl::Template, serde_json::Value, Option<Environment>) {
+	let mut env = Environment::new();
+	env.metadata.name = Some("my-environment".to_string());
+	env.spec.namespace = "mynamespace".to_string();
+
+	let mut env_labels = BTreeMap::new();
+	for idx in 0..label_count {
+		env_labels.insert(format!("envKey{idx}"), format!("envValue{idx}"));
+	}
+	env.metadata.labels = Some(env_labels);
+	let env_spec = Some(env);
+
+	let mut labels = serde_json::Map::new();
+	for idx in 0..label_count {
+		labels.insert(
+			format!("label{idx}"),
+			serde_json::Value::String(format!("label-value-{idx}")),
+		);
+	}
+
+	let mut annotations = serde_json::Map::new();
+	for idx in 0..annotation_count {
+		annotations.insert(
+			format!("annotation{idx}"),
+			serde_json::Value::String(format!("annotation-value-{idx}")),
+		);
+	}
+
+	let mut containers = Vec::with_capacity(4);
+	for idx in 0..4 {
+		containers.push(json!({
+			"name": format!("container-{idx}"),
+			"image": format!("registry.example.com/app:{idx}"),
+			"ports": [
+				{ "containerPort": 8080 + idx, "name": "http" },
+				{ "containerPort": 9090 + idx, "name": "metrics" },
+			],
+			"env": [
+				{ "name": "ENV_A", "value": "a" },
+				{ "name": "ENV_B", "value": "b" },
+			],
+		}));
+	}
+
+	let manifest = json!({
+		"apiVersion": "apps/v1",
+		"kind": "Deployment",
+		"metadata": {
+			"name": "my-deployment",
+			"namespace": "mynamespace",
+			"labels": labels,
+			"annotations": annotations,
+		},
+		"spec": {
+			"replicas": 3,
+			"selector": { "matchLabels": { "app": "my-app" } },
+			"template": {
+				"metadata": { "labels": { "app": "my-app" } },
+				"spec": { "containers": containers },
+			},
+		},
+	});
+
+	let format = "{{ env.spec.namespace }}/{{ .kind }}-{{ .metadata.name }}";
+	let specialized = crate::environments::export::specialize_template_for_env(format, &env_spec)
+		.expect("template specialization should succeed");
+	let mut template = gtmpl::Template::default();
+	template
+		.parse(&specialized)
+		.expect("specialized template should parse");
+
+	(template, manifest, env_spec)
+}
+
 #[cfg(feature = "benchmarking")]
 pub mod internal_bench {
 	use std::borrow::Cow;
@@ -75,5 +159,13 @@ pub mod internal_bench {
 		env_spec: &Option<Environment>,
 	) -> Result<String> {
 		crate::environments::export::specialize_template_for_env(template, env_spec)
+	}
+
+	pub fn render_filename_simple(
+		template: &gtmpl::Template,
+		manifest: &serde_json::Value,
+		env_spec: &Option<Environment>,
+	) -> Result<String> {
+		crate::environments::export::render_filename_simple(template, manifest, env_spec)
 	}
 }
