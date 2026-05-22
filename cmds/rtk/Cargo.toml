@@ -94,3 +94,13 @@ required-features = ["benchmarking"]
 name = "export_specialize_template_memory"
 harness = false
 required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_path_component"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_path_component_memory"
+harness = false
+required-features = ["benchmarking"]

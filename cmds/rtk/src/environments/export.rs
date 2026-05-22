@@ -4,6 +4,7 @@
 //! It evaluates environments and writes the resulting Kubernetes manifests to disk.
 
 use std::{
+	borrow::Cow,
 	collections::{BTreeMap, HashMap, HashSet},
 	fs,
 	path::PathBuf,
@@ -1001,7 +1002,7 @@ fn export_single_env(
 
 				// Split by / (now only intentional separators) and sanitize each path component
 				// Filter out empty components but keep <no value> (matches tk behavior for cluster-scoped resources)
-				let path_parts: Vec<String> = filename
+				let path_parts: Vec<Cow<'_, str>> = filename
 					.split('/')
 					.map(|part| part.trim())
 					.filter(|part| !part.is_empty())
@@ -1018,13 +1019,14 @@ fn export_single_env(
 
 				// Join path components and add extension to the last component
 				let mut relative_path = std::path::PathBuf::new();
+				let last_idx = path_parts.len() - 1;
 				for (i, part) in path_parts.iter().enumerate() {
-					if i == path_parts.len() - 1 {
+					if i == last_idx {
 						// Last component - add extension
 						relative_path.push(format!("{}.{}", part, opts.extension));
 					} else {
 						// Directory component
-						relative_path.push(part);
+						relative_path.push(part.as_ref());
 					}
 				}
 
@@ -1298,21 +1300,55 @@ fn collect_manifests_with_validation(
 	}
 }
 
-/// Sanitize a string for use as a path component
-fn sanitize_path_component(s: &str) -> String {
+/// Sanitize a string for use as a path component.
+///
+/// Returns a `Cow::Borrowed` view of the input when no replacement is needed
+/// (including the `<no value>` sentinel), avoiding an allocation on the hot path.
+pub(crate) fn sanitize_path_component(s: &str) -> Cow<'_, str> {
 	// Preserve <no value> exactly as tk outputs it for cluster-scoped resources
 	if s == "<no value>" {
-		return s.to_string();
+		return Cow::Borrowed(s);
 	}
-	s.chars()
-		.map(|c| {
-			if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' {
-				c
-			} else {
-				'-'
-			}
-		})
-		.collect()
+
+	if s.is_ascii() {
+		let bytes = s.as_bytes();
+		let first_bad = bytes.iter().position(|&b| !is_safe_ascii_byte(b));
+
+		let Some(start) = first_bad else {
+			return Cow::Borrowed(s);
+		};
+
+		let mut sanitized = Vec::with_capacity(s.len());
+		sanitized.extend_from_slice(&bytes[..start]);
+		sanitized.push(b'-');
+		for &byte in &bytes[start + 1..] {
+			sanitized.push(if is_safe_ascii_byte(byte) { byte } else { b'-' });
+		}
+
+		// ASCII input with ASCII replacements is always valid UTF-8.
+		return Cow::Owned(unsafe { String::from_utf8_unchecked(sanitized) });
+	}
+
+	// Non-ASCII fallback: walk chars once. If nothing needs replacement, borrow.
+	if s.chars().all(is_safe_char) {
+		return Cow::Borrowed(s);
+	}
+
+	Cow::Owned(
+		s.chars()
+			.map(|c| if is_safe_char(c) { c } else { '-' })
+			.collect(),
+	)
+}
+
+#[inline]
+fn is_safe_ascii_byte(byte: u8) -> bool {
+	byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')
+}
+
+#[inline]
+fn is_safe_char(c: char) -> bool {
+	c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')
 }
 
 /// Replace text only OUTSIDE of template action blocks ({{ }})
@@ -1977,6 +2013,9 @@ mod tests {
 		// Test: intentional subdir (BEL in input)
 		let result = apply_template_path_processing("namespace\x07apps/v1.Deployment-nginx");
 		assert_eq!(result, "namespace/apps-v1.Deployment-nginx");
+
+		let result = apply_template_path_processing("héllo\x07apps/v1.ConfigMap");
+		assert_eq!(result, "héllo/apps-v1.ConfigMap");
 	}
 
 	#[test]
