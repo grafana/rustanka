@@ -74,6 +74,9 @@ class BenchmarkConfig:
     prepare: str | None = None
     # Diff mode
     fixtures_dir: str | None = None
+    # When true, the benchmark has no tk equivalent: tk is not built, not run,
+    # outputs are not validated against tk, and the summary reports "-" for vs_tk.
+    skip_tk: bool = False
 
     @classmethod
     def from_yaml(cls, path: Path, repo_root: Path) -> "BenchmarkConfig":
@@ -102,6 +105,7 @@ class BenchmarkConfig:
             fixtures_dir=fixtures_dir,
             setup=data.get("setup"),
             prepare=data.get("prepare"),
+            skip_tk=data.get("skip_tk", False),
         )
 
 
@@ -138,7 +142,9 @@ class BenchmarkRunner:
 
     def check_dependencies(self) -> None:
         """Check that required commands are available."""
-        required = ["tk", "hyperfine"]
+        required = ["hyperfine"]
+        if not self.config.skip_tk:
+            required.append("tk")
         # Only need cargo if we're building rtk from source
         # (mock-k8s-server for diff mode may also need cargo, but we check that later)
         if not self.rtk_path:
@@ -328,6 +334,7 @@ class BenchmarkRunner:
         all_jsonnet_files = f"{all_static_main_files_rel} {all_inline_files_rel} {all_lib_files}"
 
         result = {
+            "repo_root": str(self.repo_root),
             "fixtures_dir": str(self.fixtures_dir),
             "single_static_dir": str(self.fixtures_dir / "static-0001"),
             "single_inline_dir": str(self.fixtures_dir / "inline-01"),
@@ -380,18 +387,25 @@ class BenchmarkRunner:
             return
 
         print("Clearing export directories...", file=sys.stderr, flush=True)
-        assert self.export_dir_tk and self.export_dir_rtk
-        self._clear_export_dir(self.export_dir_tk)
+        assert self.export_dir_rtk
+        if not self.config.skip_tk:
+            assert self.export_dir_tk
+            self._clear_export_dir(self.export_dir_tk)
         self._clear_export_dir(self.export_dir_rtk)
         if self.export_dir_rtk_base:
             self._clear_export_dir(self.export_dir_rtk_base)
 
-        for name, binary, export_dir in [
-            ("tk", "tk", self.export_dir_tk),
-            ("rtk", str(self.rtk), self.export_dir_rtk),
-            ("rtk-base", str(self.rtk_base)
-             if self.rtk_base else None, self.export_dir_rtk_base),
-        ]:
+        binaries = []
+        if not self.config.skip_tk:
+            binaries.append(("tk", "tk", self.export_dir_tk))
+        binaries.append(("rtk", str(self.rtk), self.export_dir_rtk))
+        binaries.append((
+            "rtk-base",
+            str(self.rtk_base) if self.rtk_base else None,
+            self.export_dir_rtk_base,
+        ))
+
+        for name, binary, export_dir in binaries:
             if binary is None or export_dir is None:
                 continue
             command = self.expand_command(self.config.setup, export_dir)
@@ -407,34 +421,44 @@ class BenchmarkRunner:
         print("Setup complete.", file=sys.stderr)
 
     def validate_test(self, test: Test) -> None:
-        """Validate that tk and rtk produce matching output."""
+        """Validate that tk and rtk produce matching output.
+
+        When `skip_tk` is set, only verifies rtk runs successfully.
+        """
         if self.config.prepare:
-            tk_prepare = self.expand_command(
-                self.config.prepare, self.export_dir_tk)
             rtk_prepare = self.expand_command(
                 self.config.prepare, self.export_dir_rtk)
-            subprocess.run(["sh", "-c", tk_prepare],
-                           cwd=self.fixtures_dir, check=True)
             subprocess.run(["sh", "-c", rtk_prepare],
                            cwd=self.fixtures_dir, check=True)
+            if not self.config.skip_tk:
+                tk_prepare = self.expand_command(
+                    self.config.prepare, self.export_dir_tk)
+                subprocess.run(["sh", "-c", tk_prepare],
+                               cwd=self.fixtures_dir, check=True)
 
-        tk_command = self.expand_command(test.command, self.export_dir_tk)
         rtk_command = self.expand_command(test.command, self.export_dir_rtk)
         print(f"Validating {test.name}... ",
               end="", file=sys.stderr, flush=True)
 
-        tk_result = self.run_command("tk", tk_command)
         rtk_result = self.run_command(str(self.rtk), rtk_command)
+        if rtk_result.returncode != 0:
+            print(
+                f"ERROR: rtk failed with exit code {rtk_result.returncode}", file=sys.stderr)
+            print(f"stderr: {rtk_result.stderr}", file=sys.stderr)
+            self._fail_validation(f"rtk command failed: {rtk_command}")
+
+        if self.config.skip_tk:
+            print("OK (rtk-only)", file=sys.stderr, flush=True)
+            return
+
+        tk_command = self.expand_command(test.command, self.export_dir_tk)
+        tk_result = self.run_command("tk", tk_command)
 
         if tk_result.returncode != 0:
             print(
                 f"ERROR: tk failed with exit code {tk_result.returncode}", file=sys.stderr)
+            print(f"stderr: {tk_result.stderr}", file=sys.stderr)
             self._fail_validation(f"tk command failed: {tk_command}")
-
-        if rtk_result.returncode != 0:
-            print(
-                f"ERROR: rtk failed with exit code {rtk_result.returncode}", file=sys.stderr)
-            self._fail_validation(f"rtk command failed: {rtk_command}")
 
         if test.command.startswith("export "):
             pass
@@ -481,7 +505,6 @@ class BenchmarkRunner:
 
     def run_generated_benchmark(self, test: Test, output_file: Path, index: int) -> dict:
         """Run benchmark for generated fixtures mode."""
-        tk_command = self.expand_command(test.command, self.export_dir_tk)
         rtk_command = self.expand_command(test.command, self.export_dir_rtk)
         description = self.expand_command(test.description)
 
@@ -499,23 +522,27 @@ class BenchmarkRunner:
 
         prepare_args = []
         if self.config.prepare:
-            tk_prepare = self.expand_command(
-                self.config.prepare, self.export_dir_tk)
+            if not self.config.skip_tk:
+                tk_prepare = self.expand_command(
+                    self.config.prepare, self.export_dir_tk)
+                prepare_args += [
+                    "--prepare", f"sh -c {shlex.quote(tk_prepare)}",
+                ]
             rtk_prepare = self.expand_command(
                 self.config.prepare, self.export_dir_rtk)
-            prepare_args = [
-                "--prepare", f"sh -c {shlex.quote(tk_prepare)}",
-                "--prepare", f"sh -c {shlex.quote(rtk_prepare)}"]
+            prepare_args += [
+                "--prepare", f"sh -c {shlex.quote(rtk_prepare)}",
+            ]
             if include_rtk_base:
                 rtk_base_prepare = self.expand_command(
                     self.config.prepare, self.export_dir_rtk_base)
-                prepare_args.extend(
-                    ["--prepare", f"sh -c {shlex.quote(rtk_base_prepare)}"])
+                prepare_args += [
+                    "--prepare", f"sh -c {shlex.quote(rtk_base_prepare)}",
+                ]
 
         # hyperfine -N (--shell=none) requires commands to be direct executables.
         # We wrap in sh -c and use shlex.quote() to properly escape inner quotes
         # (e.g., eval -e expressions with bracket notation and quoted keys).
-        tk_inner = f"{cd_prefix}tk {tk_command} >/dev/null"
         rtk_inner = f"{cd_prefix}{self.rtk} {rtk_command} >/dev/null"
         args = [
             "hyperfine", "-N",
@@ -525,9 +552,14 @@ class BenchmarkRunner:
             "--export-markdown", str(temp_md),
             "--export-json", str(temp_json),
             "--warmup", "1",
-            "-n", "tk", f"sh -c {shlex.quote(tk_inner)}",
-            "-n", "rtk", f"sh -c {shlex.quote(rtk_inner)}",
         ]
+
+        if not self.config.skip_tk:
+            tk_command = self.expand_command(test.command, self.export_dir_tk)
+            tk_inner = f"{cd_prefix}tk {tk_command} >/dev/null"
+            args.extend(["-n", "tk", f"sh -c {shlex.quote(tk_inner)}"])
+
+        args.extend(["-n", "rtk", f"sh -c {shlex.quote(rtk_inner)}"])
 
         if include_rtk_base:
             rtk_base_command = self.expand_command(
@@ -657,12 +689,14 @@ class BenchmarkRunner:
 
         summary = {"name": test_name}
 
+        if rtk_name in results:
+            summary["rtk_mean"] = results[rtk_name]["mean"]
+            summary["rtk_stddev"] = results[rtk_name]["stddev"]
+
         if tk_name in results and rtk_name in results:
             tk_mean = results[tk_name]["mean"]
             rtk_mean = results[rtk_name]["mean"]
             summary["vs_tk"] = round(tk_mean / rtk_mean, 2)
-            summary["rtk_mean"] = rtk_mean
-            summary["rtk_stddev"] = results[rtk_name]["stddev"]
 
         if rtk_base_name in results and rtk_name in results:
             base_mean = results[rtk_base_name]["mean"]
@@ -709,15 +743,16 @@ class BenchmarkRunner:
 
     def print_versions(self) -> None:
         """Print version information."""
-        tk_result = subprocess.run(
-            ["tk", "--version"], capture_output=True, text=True)
-        tk_version = (tk_result.stdout or tk_result.stderr).strip()
         rtk_version = subprocess.run(
             [str(self.rtk), "--version"], capture_output=True, text=True).stdout.strip()
 
         print("### Versions", flush=True)
         print(flush=True)
-        print(f"- tk: {tk_version}", flush=True)
+        if not self.config.skip_tk:
+            tk_result = subprocess.run(
+                ["tk", "--version"], capture_output=True, text=True)
+            tk_version = (tk_result.stdout or tk_result.stderr).strip()
+            print(f"- tk: {tk_version}", flush=True)
         print(f"- rtk: {rtk_version}", flush=True)
         if self.rtk_base:
             rtk_base_version = subprocess.run(
@@ -745,8 +780,9 @@ class BenchmarkRunner:
             with tempfile.TemporaryDirectory() as tmpdir:
                 self.generate_fixtures(Path(tmpdir))
 
-                self.export_dir_tk = Path(tmpdir) / "export-output-tk"
-                self.export_dir_tk.mkdir(exist_ok=True)
+                if not self.config.skip_tk:
+                    self.export_dir_tk = Path(tmpdir) / "export-output-tk"
+                    self.export_dir_tk.mkdir(exist_ok=True)
                 self.export_dir_rtk = Path(tmpdir) / "export-output-rtk"
                 self.export_dir_rtk.mkdir(exist_ok=True)
                 if self.rtk_base:

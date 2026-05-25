@@ -87,6 +87,9 @@ jobs:
           - name: "Diff"
             config: "rtk-benchmarks/diff.yaml"
             id: "diff"
+          - name: "Validate Manifests"
+            config: "rtk-benchmarks/validate-manifests.yaml"
+            id: "validate-manifests"
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
@@ -180,13 +183,14 @@ jobs:
             echo "| Benchmark | Test | vs tk | vs base |"
             echo "|:----------|:-----|------:|--------:|"
             
-            # Process each benchmark summary and generate table rows
+            # Process each benchmark summary and generate table rows.
+            # vs_tk is omitted from the JSON when the benchmark has no tk equivalent (skip_tk: true).
             for dir in artifacts/benchmark-*/; do
               if [ -f "$dir/benchmark-summary.json" ]; then
                 jq -r '
                   .benchmark_name as $bench |
                   .tests[] |
-                  "| \($bench) | \(.name) | \(.vs_tk)x faster | \(.vs_base // "-") |"
+                  "| \($bench) | \(.name) | \(if .vs_tk == null then "-" else "\(.vs_tk)x faster" end) | \(.vs_base // "-") |"
                 ' "$dir/benchmark-summary.json"
               fi
             done

@@ -1,0 +1,29 @@
+name: "Validate Manifests"
+id: "validate-manifests"
+description: "Benchmarking rtk validate manifests command. No Tanka equivalent exists."
+
+# rtk validate manifests has no `tk` counterpart, so we skip the tk comparison.
+# The summary reports "-" for vs_tk in this case.
+skip_tk: true
+
+fixtures:
+  static_envs: 100
+  inline_files: 5
+  envs_per_inline_file: 20
+  resources_per_env: 10
+
+# Export all environments once per binary; validate then runs over the exported manifests.
+setup: "export {export_dir} {all_static_env_paths} {all_inline_file_paths} --recursive --merge-strategy=fail-on-conflicts"
+
+tests:
+  - name: "All Validations"
+    description: "Running 4 validation rules (3 manifestTest + 1 namespaceTest, 2 kinds-filtered) against all exported manifests."
+    command: "validate manifests {export_dir} --tests-dir {repo_root}/rtk-benchmarks/validate-manifests/validations"
+
+  - name: "Manifest Tests Only"
+    description: "Running 3 manifestTest rules (no namespaceTest) against all exported manifests."
+    command: "validate manifests {export_dir} --tests-dir {repo_root}/rtk-benchmarks/validate-manifests/validations-manifest-only"
+
+  - name: "Namespace Test Only"
+    description: "Running 1 namespaceTest (no manifestTest) against all exported manifests."
+    command: "validate manifests {export_dir} --tests-dir {repo_root}/rtk-benchmarks/validate-manifests/validations-namespace-only"
