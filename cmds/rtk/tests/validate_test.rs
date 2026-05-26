@@ -136,6 +136,50 @@ mod manifests_tests {
 		);
 	}
 
+	/// Reproduces a parsing regression where an indented `---` inside a YAML
+	/// block-literal scalar (e.g. a `ConfigMap` embedding Prometheus alert rules
+	/// in `data.rules: |`) is misinterpreted as a document boundary, splitting
+	/// the document mid-scalar. The split halves then fail to parse.
+	#[test]
+	fn test_manifests_yaml_dashes_inside_block_scalar() {
+		let temp = tempfile::TempDir::new().unwrap();
+		let export_dir = temp.path().join("ns");
+		std::fs::create_dir_all(&export_dir).unwrap();
+
+		let yaml = "apiVersion: v1\n\
+		            kind: ConfigMap\n\
+		            metadata:\n  \
+		              name: cm-with-rules\n  \
+		              namespace: default\n  \
+		              labels:\n    \
+		                app: test\n\
+		            data:\n  \
+		              rules: |\n    \
+		                ---\n    \
+		                alert: SomeAlert\n    \
+		                expr: up == 0\n";
+		std::fs::write(export_dir.join("ConfigMap-cm-with-rules.yaml"), yaml).unwrap();
+
+		let args = manifests::ManifestsArgs {
+			export_dir: export_dir.to_string_lossy().to_string(),
+			recursive: false,
+			tests_dir: testdata_path("manifests_test/validations")
+				.to_string_lossy()
+				.to_string(),
+			log_slowest: None,
+		};
+
+		let mut output = Vec::new();
+		let result = manifests::run(args, &mut output);
+		let output_str = String::from_utf8(output).unwrap();
+
+		assert!(
+			result.is_ok(),
+			"indented `---` inside a block scalar must not split documents: {}",
+			output_str
+		);
+	}
+
 	/// Reproduces parsing failure seen with CustomResourceDefinition-scaledjobs.keda.sh.yaml:
 	/// "mapping values are not allowed in this context at line 3, column 45"
 	/// Trigger: unquoted scalar containing ": " is interpreted as start of a new mapping.
@@ -192,13 +236,17 @@ metadata:
 		);
 	}
 
-	/// Reproduces the exact failure using the real CustomResourceDefinition-scaledjobs.keda.sh.yaml
-	/// from kube-manifests (copied into testdata). Error: "mapping values are not allowed in this context at line 3, column 45"
+	/// The real CustomResourceDefinition-scaledjobs.keda.sh.yaml from kube-manifests
+	/// previously failed to parse with "mapping values are not allowed in this
+	/// context at line 3, column 45". The root cause was an indented `---` deep
+	/// inside the schema description being misread as a YAML document boundary,
+	/// which split the file into two halves that no longer parsed individually.
+	/// After fixing `is_document_boundary_line` to require column 0, the real
+	/// file parses cleanly.
 	#[test]
-	fn test_manifests_yaml_mapping_values_error_real_crd_file() {
+	fn test_manifests_yaml_real_scaledjobs_crd_parses() {
 		let export_dir = testdata_path("manifests_test/export_crd_failure");
 		if !export_dir.exists() {
-			// Testdata not populated (real file not copied)
 			return;
 		}
 
@@ -213,25 +261,12 @@ metadata:
 
 		let mut output = Vec::new();
 		let result = manifests::run(args, &mut output);
-		let _output_str = String::from_utf8(output).unwrap();
-
-		let err = result.unwrap_err();
-		let err_str = format!("{:#}", err);
+		let output_str = String::from_utf8(output).unwrap();
 
 		assert!(
-			err_str.contains("CustomResourceDefinition-scaledjobs.keda.sh.yaml"),
-			"should mention the file: {}",
-			err_str
-		);
-		assert!(
-			err_str.contains("mapping values are not allowed in this context"),
-			"should report mapping values error: {}",
-			err_str
-		);
-		assert!(
-			err_str.contains("line 3") && err_str.contains("column"),
-			"should report line 3 and column: {}",
-			err_str
+			result.is_ok(),
+			"real scaledjobs CRD must parse without error: {}",
+			output_str
 		);
 	}
 

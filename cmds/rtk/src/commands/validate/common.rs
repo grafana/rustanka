@@ -9,7 +9,7 @@ use std::{
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
 	manifest::JsonFormat, stack::set_stack_depth_limit, trace::PathResolver, FileImportResolver,
-	State,
+	State, Val,
 };
 use jrsonnet_stdlib::ContextInitializer;
 use walkdir::WalkDir;
@@ -142,16 +142,70 @@ thread_local! {
 	static POOLED_STATE: RefCell<Option<(Vec<PathBuf>, State)>> = const { RefCell::new(None) };
 }
 
-/// Evaluate a Jsonnet snippet using a thread-local pooled State.
+/// Per-element evaluation result.
 ///
-/// Unlike [`eval_jsonnet_snippet`], the State is kept alive between calls on the
-/// same thread so that jrsonnet's internal file/AST cache survives. This makes a
-/// large difference when many small snippets share the same set of imports
-/// (e.g., the validation manifests runner).
-pub fn eval_jsonnet_snippet_pooled(
+/// `Ok(value)` is a successfully manifested element; `Err(message)` is the
+/// per-element error string (e.g. a type error inside one of many `manifestTest`
+/// calls). Used when the validate manifests runner needs to attribute errors to
+/// the specific element/manifest that failed instead of failing the whole batch.
+pub type ElementResult = std::result::Result<serde_json::Value, String>;
+
+/// Evaluate a Jsonnet snippet that is expected to return an array, manifesting
+/// each element independently.
+///
+/// If the snippet's top-level value is an array, each element is forced and
+/// manifested separately. Forcing/manifest failures on a single element become
+/// `Err(message)` for that index only; other elements still produce values.
+/// If the snippet doesn't return an array, the function falls back to
+/// manifesting the whole value as before and returns a single-element vector.
+///
+/// Errors at this function's `Result` level mean the snippet itself failed
+/// to evaluate (e.g. parse error in the snippet) — distinct from per-element
+/// runtime errors which are reported through `ElementResult`.
+pub fn eval_jsonnet_snippet_array_pooled(
 	snippet: &str,
 	import_paths: &[PathBuf],
-) -> Result<serde_json::Value> {
+) -> Result<Vec<ElementResult>> {
+	with_pooled_state(import_paths, |state| {
+		let _state_guard = state.enter();
+
+		let result = state
+			.evaluate_snippet("<validate>", snippet)
+			.map_err(|e| anyhow::anyhow!("evaluation error:\n{}", e))?;
+
+		let arr = match result {
+			Val::Arr(arr) => arr,
+			other => {
+				let manifest = other
+					.manifest(JsonFormat::default())
+					.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
+				let value: serde_json::Value = serde_json::from_str(&manifest.to_string())
+					.context("failed to parse result as JSON")?;
+				return Ok(vec![Ok(value)]);
+			}
+		};
+
+		let mut out: Vec<ElementResult> = Vec::with_capacity(arr.len());
+		for idx in 0..arr.len() {
+			let elem_result: ElementResult = match arr.get(idx) {
+				Ok(Some(val)) => match val.manifest(JsonFormat::default()) {
+					Ok(rendered) => match serde_json::from_str::<serde_json::Value>(&rendered) {
+						Ok(v) => Ok(v),
+						Err(e) => Err(format!("failed to parse element as JSON: {e}")),
+					},
+					Err(e) => Err(format!("manifest error:\n{e}")),
+				},
+				Ok(None) => Err("element out of bounds (jrsonnet bug?)".to_string()),
+				Err(e) => Err(format!("evaluation error:\n{e}")),
+			};
+			out.push(elem_result);
+		}
+		Ok(out)
+	})
+}
+
+/// Run `f` against the thread-local pooled State, rebuilding it if `import_paths` changed.
+fn with_pooled_state<R>(import_paths: &[PathBuf], f: impl FnOnce(&State) -> R) -> R {
 	POOLED_STATE.with(|cell| {
 		let needs_new = match &*cell.borrow() {
 			Some((paths, _)) => paths.as_slice() != import_paths,
@@ -166,7 +220,7 @@ pub fn eval_jsonnet_snippet_pooled(
 			.as_ref()
 			.map(|(_, s)| s.clone())
 			.expect("just inserted");
-		run_snippet_in_state(&state, snippet, "<validate>")
+		f(&state)
 	})
 }
 

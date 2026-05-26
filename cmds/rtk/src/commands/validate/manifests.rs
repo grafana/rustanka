@@ -358,15 +358,62 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 			.count();
 
 		if manifest_test_calls <= SPLIT_THRESHOLD {
-			let mut snippet = format!("local ms = import '{}';\n[\n", ns_file_str);
+			// Build snippet with hoisted function references. Each validation
+			// file's `manifestTest` / `namespaceTest` is bound once (via
+			// `local`), then call sites in the result array reference the
+			// local. This avoids re-resolving `(import 'X').yyTest` at every
+			// call site, which matters in batched namespaces that emit
+			// hundreds of explicit call sites.
+			let mut head = format!("local ms = import '{}';\n", ns_file_str);
+			let mut body = String::from("[\n");
 			let mut result_descriptors: Vec<ResultDescriptor> = Vec::new();
+			// Maps abs_import_path -> (ns_local_name, mft_local_name). Each
+			// validation file gets at most one local per kind of test it
+			// defines, regardless of how many call sites use it.
+			let mut local_names: std::collections::HashMap<
+				String,
+				(Option<String>, Option<String>),
+			> = std::collections::HashMap::new();
+			let mut next_idx = 0usize;
+			fn ensure_local(
+				head: &mut String,
+				local_names: &mut std::collections::HashMap<
+					String,
+					(Option<String>, Option<String>),
+				>,
+				next_idx: &mut usize,
+				abs_import_path: &str,
+				kind: &'static str,
+			) -> String {
+				let entry = local_names.entry(abs_import_path.to_string()).or_default();
+				let slot = match kind {
+					"namespaceTest" => &mut entry.0,
+					"manifestTest" => &mut entry.1,
+					_ => unreachable!(),
+				};
+				if let Some(existing) = slot {
+					return existing.clone();
+				}
+				let name = format!("__rtk_{}_{}", *next_idx, kind);
+				*next_idx += 1;
+				head.push_str(&format!(
+					"local {} = (import '{}').{};\n",
+					name, abs_import_path, kind
+				));
+				*slot = Some(name.clone());
+				name
+			}
 
 			if !namespace.is_empty() {
 				for v in &ns_validations {
-					snippet.push_str(&format!(
-						"  (import '{}').namespaceTest(ms),\n",
-						v.abs_import_path
-					));
+					let local_name = ensure_local(
+						&mut head,
+						&mut local_names,
+						&mut next_idx,
+						&v.abs_import_path,
+						"namespaceTest",
+					);
+					body.push_str(&format!("  {}(ms),\n", local_name));
 					result_descriptors.push(ResultDescriptor {
 						validation_file_name: v.display_name.clone(),
 						subject: ns_display.clone(),
@@ -382,10 +429,14 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 							continue;
 						}
 					}
-					snippet.push_str(&format!(
-						"  (import '{}').manifestTest(ms[{}]),\n",
-						v.abs_import_path, idx
-					));
+					let local_name = ensure_local(
+						&mut head,
+						&mut local_names,
+						&mut next_idx,
+						&v.abs_import_path,
+						"manifestTest",
+					);
+					body.push_str(&format!("  {}(ms[{}]),\n", local_name, idx));
 					result_descriptors.push(ResultDescriptor {
 						validation_file_name: v.display_name.clone(),
 						subject: manifest.source_file.clone(),
@@ -398,7 +449,8 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 				continue;
 			}
 
-			snippet.push(']');
+			body.push(']');
+			let snippet = head + &body;
 
 			work_items.push(BatchWorkItem {
 				snippet,
@@ -499,7 +551,8 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		.flat_map_iter(|item| {
 			let start = slowest_tracker.as_ref().map(|_| Instant::now());
 
-			let eval_result = common::eval_jsonnet_snippet_pooled(&item.snippet, &import_paths);
+			let eval_result =
+				common::eval_jsonnet_snippet_array_pooled(&item.snippet, &import_paths);
 
 			if let (Some(tracker), Some(start)) = (&slowest_tracker, start) {
 				let mut validation_file_names: Vec<String> = item
@@ -520,32 +573,35 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 
 			let descriptors = item.result_descriptors;
 			match eval_result {
-				Ok(serde_json::Value::Array(arr)) => arr
-					.into_iter()
-					.zip(descriptors.iter())
-					.map(|(result_value, desc)| {
-						let error = match result_value {
-							serde_json::Value::Null => None,
-							serde_json::Value::String(s) => Some(s),
-							other => Some(format!("unexpected return type: {}", other)),
+				Ok(elements) => {
+					// Pair per-element results with descriptors. We expect the
+					// arrays to be the same length; if jrsonnet returned fewer
+					// elements than we requested we still report what we have
+					// and fall through with synthesized failures for the rest.
+					let mut out: Vec<TestResult> = Vec::with_capacity(descriptors.len());
+					let mut elem_iter = elements.into_iter();
+					for desc in descriptors {
+						let error = match elem_iter.next() {
+							Some(Ok(serde_json::Value::Null)) => None,
+							Some(Ok(serde_json::Value::String(s))) => Some(s),
+							Some(Ok(other)) => {
+								Some(format!("unexpected return type: {}", other))
+							}
+							Some(Err(msg)) => Some(msg),
+							None => Some(
+								"missing result element (jrsonnet returned fewer elements than expected)"
+									.to_string(),
+							),
 						};
-						TestResult {
-							test_file: desc.validation_file_name.clone(),
-							subject: desc.subject.clone(),
+						out.push(TestResult {
+							test_file: desc.validation_file_name,
+							subject: desc.subject,
 							test_kind: desc.test_kind,
 							error,
-						}
-					})
-					.collect::<Vec<_>>(),
-				Ok(other) => descriptors
-					.into_iter()
-					.map(|desc| TestResult {
-						test_file: desc.validation_file_name,
-						subject: desc.subject,
-						test_kind: desc.test_kind,
-						error: Some(format!("unexpected result type: {}", other)),
-					})
-					.collect(),
+						});
+					}
+					out
+				}
 				Err(e) => descriptors
 					.into_iter()
 					.map(|desc| TestResult {
@@ -699,11 +755,17 @@ fn collect_manifests(export_dir: &Path, recursive: bool) -> Result<Vec<ParsedMan
 	Ok(manifests)
 }
 
-/// Returns true if this line is a YAML document start marker ("---" at line start, optionally followed by whitespace).
+/// Returns true if this line is a YAML document start marker.
+///
+/// Per the YAML 1.2 spec the `---` directive end marker must start at column 0
+/// (no indentation). Indented `---` is part of a block scalar or list and must
+/// not be treated as a document boundary, otherwise valid manifests like
+/// `ConfigMap`s embedding rule files in `data.rules: |` fail to parse.
 fn is_document_boundary_line(line: &str) -> bool {
-	let trimmed = line.trim_start();
-	trimmed == "---"
-		|| (trimmed.starts_with("---") && trimmed[3..].chars().all(|c| c.is_whitespace()))
+	if !line.starts_with("---") {
+		return false;
+	}
+	line[3..].chars().all(|c| c.is_whitespace())
 }
 
 /// Parser options for manifest YAML. Use the same permissive options as helm/kustomize
