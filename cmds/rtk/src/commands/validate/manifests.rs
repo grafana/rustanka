@@ -8,11 +8,11 @@
 //! - `manifestTest(manifest)` - receives a single manifest, returns null on success or an error string
 
 use std::{
-	collections::{BTreeMap, BinaryHeap, HashSet},
+	collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
 	fs,
 	io::Write,
 	path::{Path, PathBuf},
-	sync::Mutex,
+	sync::{Arc, Mutex},
 	time::{Duration, Instant},
 };
 
@@ -296,34 +296,34 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		.filter(|v| v.has_manifest_test)
 		.collect();
 
-	// Write manifests to a per-namespace temp JSON file. Each work item then imports
-	// the namespace's file rather than embedding the full manifest JSON in the snippet
-	// text. jrsonnet's per-State file cache (with the thread-local pooled State) parses
-	// each namespace's manifests at most once per worker thread, even when many work
-	// items reference it.
-	let scratch = tempfile::Builder::new()
-		.prefix("rtk-validate-")
-		.tempdir()
-		.context("creating scratch dir for manifests")?;
-	let scratch_path = scratch.path();
-
-	// Serialize + write per-namespace JSON files in parallel. The order doesn't
-	// matter; we just need the resulting path strings for the snippets.
+	// Serialize per-namespace manifests as JSON and stash them in an in-memory
+	// resolver. Each work item imports a virtual path like
+	// `/__rtk_validate__/ns_<idx>.json`; jrsonnet's per-State file cache (with the
+	// thread-local pooled State) parses each namespace's manifests at most once
+	// per worker thread, even when many work items reference it. This avoids the
+	// disk write/read round-trip the previous on-disk implementation needed.
 	let by_namespace_vec: Vec<(&NamespaceGroupKey, &Vec<&ParsedManifest>)> =
 		by_namespace.iter().collect();
-	let ns_file_paths: Vec<String> = (0..by_namespace_vec.len())
+	let ns_entries: Vec<(PathBuf, Vec<u8>)> = (0..by_namespace_vec.len())
 		.into_par_iter()
-		.map(|ns_idx| -> Result<String> {
+		.map(|ns_idx| -> Result<(PathBuf, Vec<u8>)> {
 			let (_, ns_manifests) = by_namespace_vec[ns_idx];
 			let manifests_json: Vec<&serde_json::Value> =
 				ns_manifests.iter().map(|m| &m.value).collect();
-			let json_text = serde_json::to_string(&manifests_json)?;
-			let ns_file = scratch_path.join(format!("ns_{}.json", ns_idx));
-			fs::write(&ns_file, &json_text)
-				.with_context(|| format!("writing scratch file {}", ns_file.display()))?;
-			Ok(ns_file.to_string_lossy().replace('\\', "/"))
+			let json_bytes = serde_json::to_vec(&manifests_json)?;
+			let virtual_path = PathBuf::from(format!("/__rtk_validate__/ns_{}.json", ns_idx));
+			Ok((virtual_path, json_bytes))
 		})
 		.collect::<Result<Vec<_>>>()?;
+	let ns_file_paths: Vec<String> = ns_entries
+		.iter()
+		.map(|(p, _)| p.to_string_lossy().replace('\\', "/"))
+		.collect();
+	let mut memory_map: HashMap<PathBuf, Vec<u8>> = HashMap::with_capacity(ns_entries.len());
+	for (path, bytes) in ns_entries {
+		memory_map.insert(path, bytes);
+	}
+	let memory: common::MemoryFiles = Arc::new(memory_map);
 
 	let mut work_items: Vec<BatchWorkItem> = Vec::new();
 	for (ns_idx, (key, ns_manifests)) in by_namespace_vec.iter().enumerate() {
@@ -551,8 +551,11 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		.flat_map_iter(|item| {
 			let start = slowest_tracker.as_ref().map(|_| Instant::now());
 
-			let eval_result =
-				common::eval_jsonnet_snippet_array_pooled(&item.snippet, &import_paths);
+			let eval_result = common::eval_jsonnet_snippet_array_pooled(
+				&item.snippet,
+				&import_paths,
+				Some(&memory),
+			);
 
 			if let (Some(tracker), Some(start)) = (&slowest_tracker, start) {
 				let mut validation_file_names: Vec<String> = item
