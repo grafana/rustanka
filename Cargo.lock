@@ -3565,8 +3565,8 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.26"
-source = "git+https://github.com/CertainLach/serde-saphyr?branch=fix%2Flegacy-octal-handling#9666bd8d66a143b5e5d7a18d7915253696f5afe6"
+version = "0.0.27"
+source = "git+https://github.com/bourumir-wyngs/serde-saphyr?branch=master#299044dda14ea10f3cd01fefa8bdef0a0c95153e"
 dependencies = [
  "ahash",
  "annotate-snippets",
