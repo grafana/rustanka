@@ -10,7 +10,8 @@
 //! |------------|---------|
 //! | `lint`     | Check that validation files are syntactically valid and well-formed |
 //! | `test`     | Run unit tests for the validation rules themselves |
-//! | `manifests`| Run validation rules against real exported manifests |
+//! | `manifests`   | Run validation rules against real exported manifests |
+//! | `environments`| Export environments in memory, then run validations |
 //!
 //! # Directory layout
 //!
@@ -118,6 +119,9 @@
 //!
 //! # 4. Same, but recursively walk subdirectories in the export dir
 //! rtk validate manifests ./export-output --recursive --tests-dir ./validations
+//!
+//! # 5. Export environments in memory and validate (no export directory needed)
+//! rtk validate environments ./env-a ./env-b --tests-dir ./validations
 //! ```
 
 use std::io::Write;
@@ -126,6 +130,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 pub mod common;
+pub mod environments;
 pub mod lint;
 pub mod manifests;
 pub mod test;
@@ -141,6 +146,9 @@ pub enum ValidateCommands {
 	/// Validate exported manifests against validation files
 	Manifests(manifests::ManifestsArgs),
 
+	/// Export environments in memory and validate their manifests
+	Environments(environments::EnvironmentsArgs),
+
 	/// Check that validation files are valid Jsonnet and define required functions
 	Lint(lint::LintArgs),
 
@@ -152,6 +160,9 @@ pub enum ValidateCommands {
 pub fn run<W: Write>(args: ValidateArgs, writer: W) -> Result<()> {
 	match args.command {
 		ValidateCommands::Manifests(manifests_args) => manifests::run(manifests_args, writer),
+		ValidateCommands::Environments(environments_args) => {
+			environments::run(environments_args, writer)
+		}
 		ValidateCommands::Lint(lint_args) => lint::run(lint_args, writer),
 		ValidateCommands::Test(test_args) => test::run(test_args, writer),
 	}

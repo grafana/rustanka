@@ -1,8 +1,8 @@
-//! Integration tests for the validate command (manifests, lint, test).
+//! Integration tests for the validate command (manifests, lint, test, environments).
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
-use rtk::commands::validate::{lint, manifests, test as validate_test};
+use rtk::commands::validate::{environments, lint, manifests, test as validate_test};
 
 fn testdata_path(subpath: &str) -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -788,6 +788,172 @@ mod test_runner_tests {
 		assert!(
 			output_str.contains("check_namespace_test.jsonnet"),
 			"should run namespace tests: {}",
+			output_str
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// validate environments
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod environments_tests {
+	use super::*;
+	use rtk::jsonnet::evaluator::EvaluatorImplementation;
+
+	fn default_jsonnet_args() -> rtk::commands::JsonnetArgs {
+		rtk::commands::JsonnetArgs {
+			ext_code: vec![],
+			ext_str: vec![],
+			implementation: EvaluatorImplementation::default(),
+			max_stack: 500,
+			tla_code: vec![],
+			tla_str: vec![],
+		}
+	}
+
+	fn export_testdata_path(subpath: &str) -> PathBuf {
+		PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+			.join("testdata")
+			.join(subpath)
+	}
+
+	#[test]
+	fn test_environments_exports_and_validates() {
+		let temp = tempfile::TempDir::new().unwrap();
+		fs::write(temp.path().join("jsonnetfile.json"), "{}").unwrap();
+		let env_dir = temp.path().join("env");
+		fs::create_dir_all(&env_dir).unwrap();
+		fs::write(
+			env_dir.join("spec.json"),
+			r#"{
+  "apiVersion": "tanka.dev/v1alpha1",
+  "kind": "Environment",
+  "metadata": { "name": "test" },
+  "spec": { "namespace": "default" }
+}"#,
+		)
+		.unwrap();
+		fs::write(
+			env_dir.join("main.jsonnet"),
+			r#"{
+  cm: {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: 'ok', namespace: 'default', labels: { app: 'x' } },
+  },
+}"#,
+		)
+		.unwrap();
+
+		let args = environments::EnvironmentsArgs {
+			environments: vec![env_dir],
+			tests_dir: testdata_path("manifests_test/validations")
+				.to_string_lossy()
+				.to_string(),
+			log_slowest: None,
+			target: vec![],
+			jsonnet: default_jsonnet_args(),
+		};
+
+		let mut output = Vec::new();
+		let result = environments::run(args, &mut output);
+		let output_str = String::from_utf8(output).unwrap();
+
+		assert!(result.is_ok(), "should pass: {}", output_str);
+		assert!(
+			output_str.contains("Exporting 1 environment(s) in memory"),
+			"should report in-memory export: {}",
+			output_str
+		);
+		assert!(
+			output_str.contains("0 failed"),
+			"should have no failures: {}",
+			output_str
+		);
+	}
+
+	#[test]
+	fn test_environments_warns_on_namespace_test() {
+		let temp = tempfile::TempDir::new().unwrap();
+		fs::write(temp.path().join("jsonnetfile.json"), "{}").unwrap();
+		let env_dir = temp.path().join("env");
+		fs::create_dir_all(&env_dir).unwrap();
+		fs::write(
+			env_dir.join("spec.json"),
+			r#"{
+  "apiVersion": "tanka.dev/v1alpha1",
+  "kind": "Environment",
+  "metadata": { "name": "test" },
+  "spec": { "namespace": "default" }
+}"#,
+		)
+		.unwrap();
+		fs::write(
+			env_dir.join("main.jsonnet"),
+			r#"{
+  cm: {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: 'ok', namespace: 'default' },
+  },
+}"#,
+		)
+		.unwrap();
+
+		let args = environments::EnvironmentsArgs {
+			environments: vec![env_dir],
+			tests_dir: testdata_path("manifests_test/validations")
+				.to_string_lossy()
+				.to_string(),
+			log_slowest: None,
+			target: vec![],
+			jsonnet: default_jsonnet_args(),
+		};
+
+		let mut output = Vec::new();
+		let _ = environments::run(args, &mut output);
+		let output_str = String::from_utf8(output).unwrap();
+
+		assert!(
+			output_str.contains("namespaceTest")
+				&& output_str.contains("rtk export")
+				&& output_str.contains("rtk validate manifests"),
+			"should warn about namespaceTest accuracy: {}",
+			output_str
+		);
+	}
+
+	#[test]
+	fn test_environments_real_fixture() {
+		let mut jsonnet = default_jsonnet_args();
+		jsonnet.ext_str = vec![
+			("deploymentName".into(), "dep".into()),
+			("serviceName".into(), "svc".into()),
+		];
+		let args = environments::EnvironmentsArgs {
+			environments: vec![export_testdata_path("test-export-envs/static-env")],
+			tests_dir: testdata_path("manifests_test/validations")
+				.to_string_lossy()
+				.to_string(),
+			log_slowest: None,
+			target: vec![],
+			jsonnet,
+		};
+
+		let mut output = Vec::new();
+		let result = environments::run(args, &mut output);
+		let output_str = String::from_utf8(output).unwrap();
+
+		// static-env Deployment/Service lack labels; check_labels should fail
+		assert!(
+			result.is_err(),
+			"should fail without labels: {}",
+			output_str
+		);
+		assert!(
+			output_str.contains("missing labels"),
+			"should report label failure: {}",
 			output_str
 		);
 	}

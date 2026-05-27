@@ -43,7 +43,7 @@ pub struct ManifestsArgs {
 }
 
 /// A parsed manifest with its source file path and namespace.
-struct ParsedManifest {
+pub(crate) struct ParsedManifest {
 	/// Relative path of the source YAML file
 	source_file: String,
 	/// Kubernetes resource kind (e.g. "Deployment", "ConfigMap")
@@ -161,8 +161,6 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		"starting validate manifests"
 	);
 
-	let t_start = Instant::now();
-
 	if !export_dir.is_dir() {
 		anyhow::bail!("export directory does not exist: {}", export_dir.display());
 	}
@@ -187,6 +185,46 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 		manifest_count = manifests.len(),
 		"collected manifests from export directory"
 	);
+
+	run_on_manifests(manifests, &tests_dir, args.log_slowest, writer)
+}
+
+/// Build a [`ParsedManifest`] from exported JSON (in-memory export path).
+pub(crate) fn parsed_manifest_from_json(
+	source_file: String,
+	value: serde_json::Value,
+) -> ParsedManifest {
+	let kind = value
+		.get("kind")
+		.and_then(|v| v.as_str())
+		.unwrap_or("")
+		.to_string();
+	let namespace = value
+		.pointer("/metadata/namespace")
+		.and_then(|v| v.as_str())
+		.unwrap_or("")
+		.to_string();
+	ParsedManifest {
+		source_file,
+		kind,
+		namespace,
+		value,
+	}
+}
+
+/// Run validation rules against an already-collected manifest set.
+pub(crate) fn run_on_manifests<W: Write>(
+	manifests: Vec<ParsedManifest>,
+	tests_dir: &Path,
+	log_slowest: Option<usize>,
+	mut writer: W,
+) -> Result<()> {
+	let t_start = Instant::now();
+
+	if manifests.is_empty() {
+		writeln!(writer, "No manifests to validate")?;
+		return Ok(());
+	}
 
 	// Step 2: Collect validation files (*.jsonnet, excluding *_test.jsonnet)
 	let validation_files = common::collect_validation_files(&tests_dir)?;
@@ -219,7 +257,7 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 
 	// Step 4: Pre-process validation files (extract kinds, resolve paths)
 	let t_preprocess = Instant::now();
-	let import_paths = vec![tests_dir.clone()];
+	let import_paths = vec![tests_dir.to_path_buf()];
 	let mut validation_infos = Vec::new();
 
 	for validation_file in &validation_files {
@@ -545,7 +583,7 @@ pub fn run<W: Write>(args: ManifestsArgs, mut writer: W) -> Result<()> {
 
 	// Execute all batched work items in parallel
 	let t_eval = Instant::now();
-	let slowest_tracker = args.log_slowest.map(SlowestTracker::new);
+	let slowest_tracker = log_slowest.map(SlowestTracker::new);
 	let results: Vec<TestResult> = work_items
 		.into_par_iter()
 		.flat_map_iter(|item| {

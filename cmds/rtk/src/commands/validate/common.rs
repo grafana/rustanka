@@ -3,6 +3,7 @@
 use std::{
 	cell::RefCell,
 	collections::{HashMap, HashSet},
+	fs,
 	path::{Path, PathBuf},
 	sync::Arc,
 };
@@ -90,6 +91,18 @@ pub fn collect_validation_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 	files.sort();
 	Ok(files)
+}
+
+/// Returns true if any validation file in `dir` defines `namespaceTest`.
+pub fn any_validation_defines_namespace_test(dir: &Path) -> Result<bool> {
+	for path in collect_validation_files(dir)? {
+		let content = fs::read_to_string(&path)
+			.with_context(|| format!("reading validation file {}", path.display()))?;
+		if content.contains("namespaceTest") {
+			return Ok(true);
+		}
+	}
+	Ok(false)
 }
 
 /// Collect test files (*_test.jsonnet) from a directory.

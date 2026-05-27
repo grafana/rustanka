@@ -194,6 +194,15 @@ pub struct ExportTimingData {
 	pub manifest_count: usize,
 }
 
+/// A manifest produced by an in-memory export (post-injection, JSON).
+#[derive(Debug, Clone)]
+pub struct MemoryManifest {
+	/// Path relative to the environment export root (same layout as `rtk export`)
+	pub relative_path: PathBuf,
+	/// Manifest after namespace/label injection and metadata cleanup
+	pub value: JsonValue,
+}
+
 /// Result of exporting a single environment
 #[derive(Debug)]
 pub struct ExportEnvResult {
@@ -507,14 +516,19 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 					);
 				}
 
-				let result = match export_single_env(&env, opts) {
-					Ok((files, namespace, timing)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: files,
-						env_namespace: Some(namespace),
-						error: None,
-						timing: if show_timing { Some(timing) } else { None },
-					},
+				let result = match export_single_env(&env, opts, ExportDestination::Disk) {
+					Ok((ExportSingleEnvOutput::Disk(files), namespace, timing)) => {
+						ExportEnvResult {
+							env_path: env.path.clone(),
+							files_written: files,
+							env_namespace: Some(namespace),
+							error: None,
+							timing: if show_timing { Some(timing) } else { None },
+						}
+					}
+					Ok((ExportSingleEnvOutput::Memory(_), _, _)) => {
+						unreachable!("disk export must not return memory manifests")
+					}
 					Err(ExportError::Fatal(msg)) => {
 						abort.store(true, Ordering::Relaxed);
 						ExportEnvResult {
@@ -749,12 +763,43 @@ fn count_environment_objects(value: &JsonValue) -> usize {
 	count
 }
 
+/// Export a single environment to memory (no filesystem writes).
+///
+/// Returns `(environment_namespace, manifests)` where `environment_namespace` matches
+/// the key used in export `manifest.json` (path to `main.jsonnet`, usually relative to cwd).
+pub fn export_discovered_env_in_memory(
+	env: &Discovered,
+	opts: &ExportOpts,
+) -> Result<(String, Vec<MemoryManifest>)> {
+	match export_single_env(env, opts, ExportDestination::Memory) {
+		Ok((ExportSingleEnvOutput::Memory(manifests), env_namespace, _timing)) => {
+			Ok((env_namespace, manifests))
+		}
+		Ok((ExportSingleEnvOutput::Disk(_), _, _)) => {
+			unreachable!("memory export must not return disk paths")
+		}
+		Err(ExportError::Fatal(msg)) => bail!("{}", msg),
+		Err(ExportError::EnvError(_, msg)) => bail!("{}", msg),
+	}
+}
+
+enum ExportDestination {
+	Disk,
+	Memory,
+}
+
+enum ExportSingleEnvOutput {
+	Disk(Vec<PathBuf>),
+	Memory(Vec<MemoryManifest>),
+}
+
 /// Export a single environment
-/// Returns (files_written, environment_namespace, timing_data)
+/// Returns (files_written or memory manifests, environment_namespace, timing_data)
 fn export_single_env(
 	env: &Discovered,
 	opts: &ExportOpts,
-) -> Result<(Vec<PathBuf>, String, ExportTimingData), ExportError> {
+	destination: ExportDestination,
+) -> Result<(ExportSingleEnvOutput, String, ExportTimingData), ExportError> {
 	use std::time::Instant;
 
 	let env_start = Instant::now();
@@ -849,15 +894,22 @@ fn export_single_env(
 
 	if environments.is_empty() {
 		trace!("[{}] No environments to process, skipping", env_display);
-		return Ok((vec![], env_namespace, timing));
+		let empty = match destination {
+			ExportDestination::Disk => ExportSingleEnvOutput::Disk(vec![]),
+			ExportDestination::Memory => ExportSingleEnvOutput::Memory(vec![]),
+		};
+		return Ok((empty, env_namespace, timing));
 	}
 
-	// Use output directory directly (matching tk behavior)
-	// Note: tk writes directly to output_dir without creating env subdirectories
-	fs::create_dir_all(&opts.output_dir)
-		.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+	if matches!(destination, ExportDestination::Disk) {
+		// Use output directory directly (matching tk behavior)
+		// Note: tk writes directly to output_dir without creating env subdirectories
+		fs::create_dir_all(&opts.output_dir)
+			.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+	}
 
 	let mut files_written = Vec::new();
+	let mut memory_manifests = Vec::new();
 
 	// Process each Environment's manifests separately (matching Tanka's approach)
 	// This avoids loading all manifests into memory at once
@@ -1030,30 +1082,10 @@ fn export_single_env(
 					}
 				}
 
-				// Serialize manifest (CPU-intensive, good for parallelization)
-				// Always output YAML regardless of extension (matching tk behavior)
 				// Sort all object keys to match Go's yaml.v3 output order
 				let sorted_manifest = sort_json_keys(manifest);
 
-				// Use serializer options to match Go's yaml.v2 output (used by tk for manifest export)
-				let options = serde_saphyr::SerializerOptions {
-					indent_step: 2,
-					indent_array: Some(0),
-					prefer_block_scalars: true,
-					empty_map_as_braces: true,
-					empty_array_as_brackets: true,
-					line_width: Some(80),
-					scientific_notation_threshold: Some(1000000), // 1 million
-					scientific_notation_small_threshold: Some(0.0001), // Small floats like 0.00001 become 1e-05
-					quote_ambiguous_keys: true,                   // Quote y, n, yes, no, etc. to match Go yaml.v3
-					quote_numeric_strings: true, // Quote numeric string keys like "12", "12.5" to match Go yaml.v3
-					..Default::default()
-				};
-				let mut content = String::new();
-				serde_saphyr::to_fmt_writer_with_options(&mut content, &sorted_manifest, options)
-					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-
-				Ok((relative_path, content))
+				Ok((relative_path, sorted_manifest))
 			})
 			.collect();
 
@@ -1069,79 +1101,95 @@ fn export_single_env(
 			serialize_start.elapsed().as_millis() as f64 / manifest_count as f64
 		);
 
-		// Phase 2: Write files (I/O-bound, kept sequential for directory coordination)
-		// Note: File writes could also be parallelized with proper directory creation synchronization
-		trace!(
-			"[{}:{}] Starting sequential file writes for {} files",
-			env_display,
-			env_name,
-			manifest_count
-		);
-		let write_start = Instant::now();
-		let mut files_skipped = 0usize;
-		for (relative_path, content) in processed_manifests {
-			let filepath = opts.output_dir.join(&relative_path);
-
-			// Create parent directories if needed
-			if let Some(parent) = filepath.parent() {
-				fs::create_dir_all(parent)
-					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-			}
-
-			// PERFORMANCE: Skip write if file exists with identical content
-			// This is a significant optimization for re-exports where most files don't change.
-			// On slow storage (e.g., EBS), reading to compare is much faster than writing.
-			if filepath.exists() {
-				if let Ok(existing_content) = fs::read_to_string(&filepath) {
-					if existing_content == content {
-						files_written.push(relative_path);
-						files_skipped += 1;
-						continue;
-					}
+		match destination {
+			ExportDestination::Memory => {
+				for (relative_path, value) in processed_manifests {
+					memory_manifests.push(MemoryManifest {
+						relative_path,
+						value,
+					});
 				}
-				// File exists but content differs or couldn't be read - will be overwritten
 			}
+			ExportDestination::Disk => {
+				// Phase 2: Write files (I/O-bound, kept sequential for directory coordination)
+				trace!(
+					"[{}:{}] Starting sequential file writes for {} files",
+					env_display,
+					env_name,
+					manifest_count
+				);
+				let write_start = Instant::now();
+				let mut files_skipped = 0usize;
+				for (relative_path, sorted_manifest) in processed_manifests {
+					// Serialize manifest (CPU-intensive). Always output YAML regardless of
+					// extension (matching tk behavior).
+					let options = serde_saphyr::SerializerOptions {
+						indent_step: 2,
+						indent_array: Some(0),
+						prefer_block_scalars: true,
+						empty_map_as_braces: true,
+						empty_array_as_brackets: true,
+						line_width: Some(80),
+						scientific_notation_threshold: Some(1000000),
+						scientific_notation_small_threshold: Some(0.0001),
+						quote_ambiguous_keys: true,
+						quote_numeric_strings: true,
+						..Default::default()
+					};
+					let mut content = String::new();
+					serde_saphyr::to_fmt_writer_with_options(
+						&mut content,
+						&sorted_manifest,
+						options,
+					)
+					.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
 
-			// PERFORMANCE: Use BufWriter to reduce syscall overhead
-			//
-			// Without BufWriter, each write_all() would result in a direct write() syscall.
-			// BufWriter batches small writes into 8KB chunks (default buffer size),
-			// significantly reducing kernel transitions for typical manifest files (2-20KB).
-			//
-			// Benchmark context:
-			// - Direct write: ~1 syscall per file
-			// - BufWriter: ~1-3 syscalls per file (depending on size)
-			// - For 2800 files: saves ~2000+ syscalls
-			//
-			// The buffer is automatically flushed when the writer is dropped.
-			use std::io::Write;
-			let file = fs::File::create(&filepath)
-				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
-			let mut writer = std::io::BufWriter::new(file);
-			writer
-				.write_all(content.as_bytes())
-				.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+					let filepath = opts.output_dir.join(&relative_path);
 
-			// Track relative path for manifest.json
-			files_written.push(relative_path);
+					if let Some(parent) = filepath.parent() {
+						fs::create_dir_all(parent)
+							.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+					}
+
+					if filepath.exists() {
+						if let Ok(existing_content) = fs::read_to_string(&filepath) {
+							if existing_content == content {
+								files_written.push(relative_path);
+								files_skipped += 1;
+								continue;
+							}
+						}
+					}
+
+					use std::io::Write;
+					let file = fs::File::create(&filepath)
+						.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+					let mut writer = std::io::BufWriter::new(file);
+					writer
+						.write_all(content.as_bytes())
+						.map_err(|e| ExportError::EnvError(env.path.clone(), e.to_string()))?;
+
+					files_written.push(relative_path);
+				}
+				if files_skipped > 0 {
+					trace!(
+						"[{}:{}] Skipped {} unchanged files",
+						env_display,
+						env_name,
+						files_skipped
+					);
+				}
+				timing.write_ms += write_start.elapsed().as_millis();
+				trace!(
+					"[{}:{}] File writes completed in {}ms ({} files, {:.2}ms/file)",
+					env_display,
+					env_name,
+					write_start.elapsed().as_millis(),
+					manifest_count,
+					write_start.elapsed().as_millis() as f64 / manifest_count as f64
+				);
+			}
 		}
-		if files_skipped > 0 {
-			trace!(
-				"[{}:{}] Skipped {} unchanged files",
-				env_display,
-				env_name,
-				files_skipped
-			);
-		}
-		timing.write_ms += write_start.elapsed().as_millis();
-		trace!(
-			"[{}:{}] File writes completed in {}ms ({} files, {:.2}ms/file)",
-			env_display,
-			env_name,
-			write_start.elapsed().as_millis(),
-			manifest_count,
-			write_start.elapsed().as_millis() as f64 / manifest_count as f64
-		);
 	}
 
 	debug!(
@@ -1151,7 +1199,11 @@ fn export_single_env(
 		env_start.elapsed().as_millis()
 	);
 
-	Ok((files_written, env_namespace, timing))
+	let output = match destination {
+		ExportDestination::Disk => ExportSingleEnvOutput::Disk(files_written),
+		ExportDestination::Memory => ExportSingleEnvOutput::Memory(memory_manifests),
+	};
+	Ok((output, env_namespace, timing))
 }
 
 /// Export manifest file that maps exported files to their environment
