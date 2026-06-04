@@ -22,10 +22,29 @@ use jrsonnet_stdlib::RegexCacheInner;
 use serde_json;
 use sha2::{Digest, Sha256};
 
-// Global Helm template cache - caches raw YAML output from helm to avoid
-// redundant helm invocations (same optimization as Go Tanka)
-// We cache the raw YAML string rather than Val because Val doesn't implement Sync
+// Global Helm template cache - caches the rendered helm output to avoid
+// redundant helm invocations (same optimization as Go Tanka), shared across
+// all worker threads so identical helmTemplate calls in different environments
+// only run helm once.
+//
+// The cached value is the *manifested JSON* of the final keyed resource map
+// (the object that `helmTemplate` returns), NOT the raw YAML. Storing the
+// post-parse projection lets cache hits skip YAML parsing entirely - a hit is
+// a single `serde_json::from_str` into a `Val`. We cache a `String` rather than
+// a `Val` because `Val` is `Rc`-based and not `Send`/`Sync`. Because the JSON
+// map is keyed by `nameFormat`, the cache key must include `nameFormat` too.
 static HELM_TEMPLATE_CACHE: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
+
+/// When `Some`, every `helmTemplate` cache key touched by any worker thread (a
+/// hit or a freshly computed value) is recorded here. The export driver enables
+/// this once, for the whole run, so it can persist only the entries that were
+/// actually used back to the on-disk `helm-cache` directory (pruning stale
+/// entries that were preloaded but never referenced). When `None` (the
+/// default), disk caching is off and `helmTemplate` behaves exactly as before
+/// (process-global in-memory cache only). This is process-global rather than
+/// thread-local because a single `main.jsonnet` can expand into many
+/// environments evaluated across different worker threads.
+static HELM_DISK_TOUCHED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 /// Get or create the Helm template cache
 fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
@@ -49,6 +68,50 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 		}
 	}
 	&HELM_TEMPLATE_CACHE
+}
+
+/// Record that `key` was touched, if disk-cache recording is enabled. No-op
+/// otherwise. Safe to call from any worker thread.
+fn record_helm_disk_touch(key: &str) {
+	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
+	if let Some(set) = guard.as_mut() {
+		set.insert(key.to_owned());
+	}
+}
+
+/// Begin recording touched Helm cache keys for the whole process. Called once
+/// by the export driver before the parallel export loop. The previous state is
+/// overwritten; pair every call with [`helm_disk_cache_take`].
+pub fn helm_disk_cache_begin() {
+	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
+	*guard = Some(HashSet::new());
+}
+
+/// Stop recording and return the set of cache keys touched since
+/// [`helm_disk_cache_begin`]. Disables disk-cache recording.
+pub fn helm_disk_cache_take() -> HashSet<String> {
+	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
+	guard.take().unwrap_or_default()
+}
+
+/// Look up the manifested-JSON value cached for `key`, if present. Used by the
+/// export driver to persist touched entries to disk.
+pub fn helm_cache_get_json(key: &str) -> Option<String> {
+	let cache = get_helm_cache();
+	let read = cache.read().unwrap_or_else(|e| e.into_inner());
+	read.as_ref().and_then(|map| map.get(key).cloned())
+}
+
+/// Insert a manifested-JSON value into the global Helm cache under `key` unless
+/// an entry already exists. Used by the export driver to preload entries
+/// previously persisted to the on-disk `helm-cache` directory. Existing
+/// in-memory entries (e.g. computed earlier in this process) take precedence.
+pub fn helm_cache_put_json(key: String, json: String) {
+	let cache = get_helm_cache();
+	let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
+	if let Some(map) = write.as_mut() {
+		map.entry(key).or_insert(json);
+	}
 }
 
 /// State of a single `rtkMemoize` cache slot.
@@ -366,7 +429,13 @@ fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Resu
 	Ok(Val::Obj(builder.build()))
 }
 
-/// Generate a cache key for Helm template
+/// Generate a cache key for a Helm template invocation.
+///
+/// The key covers the full set of inputs that affect the rendered output: the
+/// release name, chart path, namespace, values, CRD/hook flags, API versions,
+/// the `nameFormat` (which determines the keys of the returned map), and the
+/// chart's `Chart.yaml` contents (so bumping a vendored chart's version
+/// invalidates stale cache entries even when the path is unchanged).
 fn helm_cache_key(
 	name: &str,
 	chart_path: &str,
@@ -375,6 +444,8 @@ fn helm_cache_key(
 	include_crds: bool,
 	no_hooks: bool,
 	api_versions: &[String],
+	name_format: Option<&str>,
+	chart_meta: Option<&str>,
 ) -> String {
 	let mut hasher = Sha256::new();
 	hasher.update(name.as_bytes());
@@ -397,7 +468,23 @@ fn helm_cache_key(
 		hasher.update(av.as_bytes());
 		hasher.update(b",");
 	}
+	hasher.update(b"|");
+	if let Some(nf) = name_format {
+		hasher.update(nf.as_bytes());
+	}
+	hasher.update(b"|");
+	if let Some(meta) = chart_meta {
+		hasher.update(meta.as_bytes());
+	}
 	format!("{:x}", hasher.finalize())
+}
+
+/// Read a chart's `Chart.yaml` contents for inclusion in the cache key. Returns
+/// `None` when the file is absent or unreadable; in that case the chart path
+/// alone participates in the key.
+fn read_chart_meta(chart_path: &str) -> Option<String> {
+	let chart_yaml = std::path::Path::new(chart_path).join("Chart.yaml");
+	std::fs::read_to_string(chart_yaml).ok()
 }
 
 /// Convert a string to snake_case (lowercase with underscores)
@@ -816,7 +903,14 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 		false
 	};
 
+	// Benchmarking escape hatch: when RTK_HELM_DISABLE_MEMOIZATION is set,
+	// bypass the in-memory cache entirely so every helmTemplate call invokes
+	// helm. Used to measure the true cost of helm rendering without any
+	// deduplication.
+	let cache_disabled = std::env::var_os("RTK_HELM_DISABLE_MEMOIZATION").is_some();
+
 	// Check cache first
+	let chart_meta = read_chart_meta(&chart_path);
 	let cache_key = helm_cache_key(
 		&name,
 		&chart_path,
@@ -825,14 +919,21 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 		include_crds,
 		no_hooks,
 		&api_versions,
+		name_format.as_deref(),
+		chart_meta.as_deref(),
 	);
-	{
+	if !cache_disabled {
 		let cache = get_helm_cache();
 		let read = cache.read().unwrap_or_else(|e| e.into_inner());
 		if let Some(ref map) = *read {
-			if let Some(cached_yaml) = map.get(&cache_key) {
-				// Cache hit - parse the cached YAML
-				return parse_helm_yaml_output(cached_yaml, name_format.as_deref());
+			if let Some(cached_json) = map.get(&cache_key) {
+				// Cache hit - deserialize the stored manifest map directly,
+				// skipping the helm invocation and YAML parsing entirely.
+				let val: Val = serde_json::from_str(cached_json).map_err(|e| {
+					RuntimeError(format!("failed to parse cached helm output: {e}").into())
+				})?;
+				record_helm_disk_touch(&cache_key);
+				return Ok(val);
 			}
 		}
 	}
@@ -937,17 +1038,27 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 	let yaml_content = String::from_utf8(stdout_buf)
 		.map_err(|e| RuntimeError(format!("invalid UTF-8 in helm output: {e}").into()))?;
 
-	// Store raw YAML in cache before parsing
-	{
-		let cache = get_helm_cache();
-		let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
-		if let Some(ref mut map) = *write {
-			map.insert(cache_key, yaml_content.clone());
+	// Parse the YAML output into the final keyed resource map.
+	let val = parse_helm_yaml_output(&yaml_content, name_format.as_deref())?;
+
+	// Store the manifested JSON projection of the map (not the raw YAML), so
+	// future hits skip YAML parsing. This is also the exact byte content the
+	// export driver persists to the on-disk `helm-cache` directory.
+	if !cache_disabled {
+		let json = val
+			.manifest(JsonFormat::default())
+			.map_err(|e| RuntimeError(format!("failed to manifest helm output: {e}").into()))?;
+		{
+			let cache = get_helm_cache();
+			let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
+			if let Some(ref mut map) = *write {
+				map.insert(cache_key.clone(), json);
+			}
 		}
+		record_helm_disk_touch(&cache_key);
 	}
 
-	// Parse and return the YAML output
-	parse_helm_yaml_output(&yaml_content, name_format.as_deref())
+	Ok(val)
 }
 
 /// Tanka-compatible kustomizeBuild
