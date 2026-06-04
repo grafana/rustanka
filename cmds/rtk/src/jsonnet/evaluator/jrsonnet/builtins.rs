@@ -122,6 +122,45 @@ impl Drop for MemoComputeGuard<'_> {
 	}
 }
 
+/// Recursively check whether a value contains any hidden object field.
+///
+/// The memoization cache stores values as JSON, which silently drops hidden
+/// (`::`) fields. To avoid surprising data loss we reject such values up front
+/// instead of caching a lossy projection. Hidden fields are detected by name
+/// (comparing the full field set against the visible one), so a hidden field's
+/// value is never evaluated.
+fn contains_hidden_field(val: &Val) -> Result<bool> {
+	match val {
+		Val::Obj(obj) => {
+			let visible: HashSet<IStr> = obj.fields_ex(false).into_iter().collect();
+			let all = obj.fields_ex(true);
+			// `all` is always a superset of `visible`; a size difference means
+			// at least one field is hidden.
+			if all.len() != visible.len() {
+				return Ok(true);
+			}
+			for name in all {
+				let field = obj
+					.get(name)?
+					.expect("field listed by fields_ex must exist");
+				if contains_hidden_field(&field)? {
+					return Ok(true);
+				}
+			}
+			Ok(false)
+		}
+		Val::Arr(arr) => {
+			for item in arr.iter() {
+				if contains_hidden_field(&item?)? {
+					return Ok(true);
+				}
+			}
+			Ok(false)
+		}
+		_ => Ok(false),
+	}
+}
+
 /// Tanka-incompatible (rtk extension) rtkMemoize
 ///
 /// Caches the result of `value` under `key` in a process-global cache shared
@@ -131,10 +170,11 @@ impl Drop for MemoComputeGuard<'_> {
 /// ready, then reuse it without re-evaluating their own thunk.
 ///
 /// The cached value is stored as JSON, so the returned value is always the
-/// JSON-manifested projection of the thunk (hidden fields and other
-/// non-manifestable data are dropped). This is true for the computing worker
-/// too, so every caller observes an identical value regardless of who wins the
-/// race to compute it.
+/// JSON-manifested projection of the thunk. Because that projection silently
+/// drops hidden (`::`) fields, a value containing any hidden field (at any
+/// depth) is rejected with an error rather than cached lossily. The same JSON
+/// value is returned to the computing worker too, so every caller observes an
+/// identical value regardless of who wins the race to compute it.
 #[builtin]
 pub fn rtk_memoize(key: String, value: Thunk<Val>) -> Result<Val> {
 	// Guard against a thunk that memoizes its own key on the same thread,
@@ -181,6 +221,16 @@ pub fn rtk_memoize(key: String, value: Thunk<Val>) -> Result<Val> {
 			// held during evaluation, so other keys make progress and waiters
 			// on this key simply block on the condvar.
 			let evaluated = value.evaluate()?;
+			if contains_hidden_field(&evaluated)? {
+				return Err(RuntimeError(
+					format!(
+						"rtkMemoize: value for key {key:?} contains hidden field(s), \
+						 which cannot be memoized (they would be dropped by JSON serialization)"
+					)
+					.into(),
+				)
+				.into());
+			}
 			let json = evaluated.manifest(JsonFormat::default())?;
 			let result: Val = serde_json::from_str(&json)
 				.map_err(|e| RuntimeError(format!("failed to parse memoized value: {e}").into()))?;

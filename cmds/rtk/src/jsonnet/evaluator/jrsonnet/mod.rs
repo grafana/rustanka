@@ -1276,4 +1276,35 @@ mod tests {
 			"error should mention re-entrant evaluation, got: {err}"
 		);
 	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_rejects_hidden_field() {
+		// A top-level hidden field would be dropped by JSON serialization, so
+		// memoizing such a value must error instead of silently losing data.
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_hidden", { visible: 1, hidden:: 2 })"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("hidden"),
+			"error should mention hidden field, got: {err}"
+		);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_rejects_nested_hidden_field() {
+		// Hidden fields are rejected at any depth, including inside arrays.
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_hidden_nested", { a: { b: [{ c:: 1 }] } })"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("hidden"),
+			"error should mention hidden field, got: {err}"
+		);
+	}
 }
