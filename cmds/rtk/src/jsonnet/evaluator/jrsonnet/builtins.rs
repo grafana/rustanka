@@ -3,17 +3,19 @@
 // Tanka-compatible API accessible via std.native()
 
 use std::{
-	collections::HashMap,
+	cell::RefCell,
+	collections::{HashMap, HashSet},
 	io::{BufReader, Read, Write},
 	process::{Command, Stdio},
 	rc::Rc,
-	sync::RwLock,
+	sync::{Arc, Condvar, Mutex, OnceLock, RwLock},
 	thread,
 };
 
 use jrsonnet_evaluator::{
 	error::{ErrorKind::*, Result},
-	IStr, ObjValue, Val,
+	manifest::JsonFormat,
+	IStr, ObjValue, Thunk, Val,
 };
 use jrsonnet_macros::builtin;
 use jrsonnet_stdlib::RegexCacheInner;
@@ -47,6 +49,171 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 		}
 	}
 	&HELM_TEMPLATE_CACHE
+}
+
+/// State of a single `rtkMemoize` cache slot.
+///
+/// The value is stored as a JSON string (not a `Val`) because `Val` is not
+/// `Send`/`Sync` (it uses `Rc` internally), while the cache is shared across
+/// worker threads.
+enum MemoState {
+	/// A worker is currently evaluating the value for this key.
+	Computing,
+	/// The value has been computed and is available as JSON.
+	Done(String),
+	/// Computation failed; the next waiter should retry the computation.
+	Failed,
+}
+
+/// A per-key slot guarding a single memoized value.
+///
+/// Only one worker computes the value for a given key. Other workers that
+/// request the same key block on the condvar until the result is available
+/// (or until the computation fails, in which case they retry).
+struct MemoSlot {
+	state: Mutex<MemoState>,
+	cond: Condvar,
+}
+
+/// Global cache for `rtkMemoize`, shared across all worker threads.
+static MEMO_CACHE: OnceLock<Mutex<HashMap<String, Arc<MemoSlot>>>> = OnceLock::new();
+
+fn memo_cache() -> &'static Mutex<HashMap<String, Arc<MemoSlot>>> {
+	MEMO_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+thread_local! {
+	/// Keys this worker thread is currently computing. Used to detect
+	/// same-thread re-entrancy (a thunk that memoizes its own key), which
+	/// would otherwise deadlock the thread against itself.
+	static MEMO_IN_PROGRESS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+/// RAII guard for the computing worker. On drop it always clears the
+/// thread-local in-progress marker, and if the computation did not complete
+/// (an error or a panic), it marks the slot as `Failed`, removes it from the
+/// global cache, and wakes any waiters so they can retry. This guarantees a
+/// slot is never left stuck in `Computing`, even on panic.
+struct MemoComputeGuard<'a> {
+	key: &'a str,
+	slot: Arc<MemoSlot>,
+	completed: bool,
+}
+
+impl Drop for MemoComputeGuard<'_> {
+	fn drop(&mut self) {
+		MEMO_IN_PROGRESS.with(|set| {
+			set.borrow_mut().remove(self.key);
+		});
+
+		if self.completed {
+			return;
+		}
+
+		// Computation did not finish: remove the slot so a future call can
+		// retry, then wake any waiters so they retry too.
+		{
+			let mut map = memo_cache().lock().unwrap_or_else(|e| e.into_inner());
+			map.remove(self.key);
+		}
+		let mut state = self.slot.state.lock().unwrap_or_else(|e| e.into_inner());
+		*state = MemoState::Failed;
+		self.slot.cond.notify_all();
+	}
+}
+
+/// Tanka-incompatible (rtk extension) rtkMemoize
+///
+/// Caches the result of `value` under `key` in a process-global cache shared
+/// across all worker threads. The second argument is lazy: it is only
+/// evaluated on a cache miss. If one worker is already computing the value for
+/// a key, other workers requesting the same key block until the result is
+/// ready, then reuse it without re-evaluating their own thunk.
+///
+/// The cached value is stored as JSON, so the returned value is always the
+/// JSON-manifested projection of the thunk (hidden fields and other
+/// non-manifestable data are dropped). This is true for the computing worker
+/// too, so every caller observes an identical value regardless of who wins the
+/// race to compute it.
+#[builtin]
+pub fn rtk_memoize(key: String, value: Thunk<Val>) -> Result<Val> {
+	// Guard against a thunk that memoizes its own key on the same thread,
+	// which would block the thread waiting on a result only it can produce.
+	let reentrant = MEMO_IN_PROGRESS.with(|set| set.borrow().contains(&key));
+	if reentrant {
+		return Err(RuntimeError(
+			format!("rtkMemoize: re-entrant evaluation of key {key:?}").into(),
+		)
+		.into());
+	}
+
+	loop {
+		// Decide whether this worker computes the value or waits for another
+		// worker that is already computing it.
+		let (slot, is_computer) = {
+			let mut map = memo_cache().lock().unwrap_or_else(|e| e.into_inner());
+			if let Some(existing) = map.get(&key) {
+				(existing.clone(), false)
+			} else {
+				let slot = Arc::new(MemoSlot {
+					state: Mutex::new(MemoState::Computing),
+					cond: Condvar::new(),
+				});
+				map.insert(key.clone(), slot.clone());
+				(slot, true)
+			}
+		};
+
+		if is_computer {
+			MEMO_IN_PROGRESS.with(|set| {
+				set.borrow_mut().insert(key.clone());
+			});
+			// The guard cleans up on every exit path (error or panic) unless
+			// we mark it completed after successfully storing the result.
+			let mut guard = MemoComputeGuard {
+				key: &key,
+				slot: slot.clone(),
+				completed: false,
+			};
+
+			// Evaluate the (lazy) thunk and fully manifest it to JSON so the
+			// result can be shared with other threads. The slot lock is NOT
+			// held during evaluation, so other keys make progress and waiters
+			// on this key simply block on the condvar.
+			let evaluated = value.evaluate()?;
+			let json = evaluated.manifest(JsonFormat::default())?;
+			let result: Val = serde_json::from_str(&json)
+				.map_err(|e| RuntimeError(format!("failed to parse memoized value: {e}").into()))?;
+
+			{
+				let mut state = slot.state.lock().unwrap_or_else(|e| e.into_inner());
+				*state = MemoState::Done(json);
+				slot.cond.notify_all();
+			}
+			guard.completed = true;
+			return Ok(result);
+		}
+
+		// Waiter path: block until the computing worker finishes (or fails).
+		let mut state = slot.state.lock().unwrap_or_else(|e| e.into_inner());
+		loop {
+			match &*state {
+				MemoState::Done(json) => {
+					return serde_json::from_str(json).map_err(|e| {
+						RuntimeError(format!("failed to parse memoized value: {e}").into()).into()
+					});
+				}
+				// The computing worker failed; retry the whole operation so
+				// this worker (or another) re-attempts the computation.
+				MemoState::Failed => break,
+				MemoState::Computing => {
+					state = slot.cond.wait(state).unwrap_or_else(|e| e.into_inner());
+				}
+			}
+		}
+		// The computation failed; drop the lock and retry the whole operation.
+		drop(state);
+	}
 }
 
 /// Generate a key for a manifest using the nameFormat template
