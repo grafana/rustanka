@@ -19,7 +19,6 @@ mod token_set;
 pub use ast::{AstChildren, AstNode, AstToken};
 pub use generated::{nodes, syntax_kinds::SyntaxKind};
 pub use language::*;
-pub use string_block::{collect_lexed_str_block, CollectStrBlock};
 pub use token_set::SyntaxKindSet;
 
 pub fn parse(input: &str) -> (SourceFile, Vec<LocatedSyntaxError>) {

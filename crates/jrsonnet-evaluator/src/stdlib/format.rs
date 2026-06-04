@@ -14,6 +14,7 @@ use thiserror::Error;
 use crate::{
 	Error, ObjValue, Result, Val, bail,
 	error::{ErrorKind::*, format_found, suggest_object_fields},
+	manifest,
 	typed::FromUntyped,
 };
 

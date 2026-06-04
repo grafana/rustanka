@@ -7,9 +7,6 @@ use std::{
 use educe::Educe;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
-use rustc_hash::FxHashMap;
-
-use jrsonnet_parser::Analysis;
 
 use crate::{
 	Result, SupThis, Thunk, Val,

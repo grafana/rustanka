@@ -10,7 +10,6 @@ use jrsonnet_evaluator::{
 	ResultExt, SourceDefaultIgnoreJpath, SourcePath, State, Val, apply_tla, bail,
 	error::{Error as JrError, ErrorKind},
 };
-use jrsonnet_parser::{SourceDefaultIgnoreJpath, SourcePath};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]

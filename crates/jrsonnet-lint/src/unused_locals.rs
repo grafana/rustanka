@@ -729,6 +729,11 @@ impl UnusedLocalsVisitor {
 					self.visit_expr(&expr);
 				}
 			}
+			CompSpec::ForObjSpec(f) => {
+				if let Some(expr) = f.expr() {
+					self.visit_expr(&expr);
+				}
+			}
 		}
 	}
 }

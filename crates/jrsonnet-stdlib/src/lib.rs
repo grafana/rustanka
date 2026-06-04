@@ -279,10 +279,7 @@ struct Builtins {
 	manifestJson: builtin_manifest_json,
 	#[typed(method)]
 	manifestJsonMinified: builtin_manifest_json_minified,
-	#[typed(method)]
-	manifestYamlDoc: builtin_manifest_yaml_doc,
-	#[typed(method)]
-	manifestYamlStream: builtin_manifest_yaml_stream,
+	// manifestYamlDoc and manifestYamlStream are registered separately below because they need settings
 	#[typed(method)]
 	manifestTomlEx: builtin_manifest_toml_ex,
 	#[typed(method)]
@@ -491,6 +488,44 @@ impl TracePrinter for StdTracePrinter {
 	}
 }
 
+/// Controls how quote_values is determined in manifestYamlDoc
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Trace)]
+pub enum QuoteValuesBehavior {
+	/// Values are always quoted regardless of quote_keys (matches go-jsonnet)
+	GoJsonnet,
+	/// quote_values follows quote_keys: when quote_keys=false, quote_values=false
+	/// This matches the jrsonnet binary behavior
+	#[default]
+	Jrsonnet,
+}
+
+/// Settings for std.manifestYamlDoc formatting
+/// These settings control how YAML is formatted when using std.manifestYamlDoc
+#[derive(Debug, Clone, Default, Trace)]
+pub struct ManifestYamlDocFormatting {
+	/// Controls how quote_values is determined.
+	/// - GoJsonnet (default): values are always quoted
+	/// - Jrsonnet: quote_values follows quote_keys
+	pub quote_values_behavior: QuoteValuesBehavior,
+}
+
+/// Controls how empty arrays are formatted in manifestYamlStream
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Trace)]
+pub enum ManifestYamlStreamEmptyBehavior {
+	/// Empty arrays produce "---\n\n" (document marker + empty line) - matches go-jsonnet
+	GoJsonnet,
+	/// Empty arrays produce "\n" (just a newline) - matches jrsonnet binary
+	#[default]
+	Jrsonnet,
+}
+
+/// Settings for std.manifestYamlStream formatting
+#[derive(Debug, Clone, Default, Trace)]
+pub struct ManifestYamlStreamFormatting {
+	/// Controls how empty arrays are formatted
+	pub empty_behavior: ManifestYamlStreamEmptyBehavior,
+}
+
 #[derive(Clone, Trace)]
 pub struct Settings {
 	/// Used for `std.extVar`
@@ -501,6 +536,10 @@ pub struct Settings {
 	pub trace_printer: Rc<dyn TracePrinter>,
 	/// Used for `std.thisFile`
 	pub path_resolver: PathResolver,
+	/// Used for `std.manifestYamlDoc` formatting options
+	pub manifest_yaml_doc_formatting: ManifestYamlDocFormatting,
+	/// Used for `std.manifestYamlStream` formatting options
+	pub manifest_yaml_stream_formatting: ManifestYamlStreamFormatting,
 }
 
 #[derive(Trace, Clone)]

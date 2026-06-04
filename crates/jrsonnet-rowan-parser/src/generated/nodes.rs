@@ -974,7 +974,6 @@ pub struct UnaryOperator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOperatorKind {
-	Plus,
 	Minus,
 	Not,
 	BitNot,
@@ -2502,7 +2501,6 @@ impl UnaryOperatorKind {
 	}
 	pub fn cast(kind: SyntaxKind) -> Option<Self> {
 		let res = match kind {
-			PLUS => Self::Plus,
 			MINUS => Self::Minus,
 			NOT => Self::Not,
 			BIT_NOT => Self::BitNot,

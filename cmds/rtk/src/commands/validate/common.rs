@@ -13,7 +13,7 @@ use jrsonnet_evaluator::{
 	FileImportResolver, ImportResolver, State, Val,
 };
 use jrsonnet_gcmodule::Acyclic;
-use jrsonnet_parser::{SourceFile, SourcePath};
+use jrsonnet_ir::{SourceFile, SourcePath};
 use jrsonnet_stdlib::ContextInitializer;
 use walkdir::WalkDir;
 

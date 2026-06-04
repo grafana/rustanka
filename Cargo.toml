@@ -36,6 +36,7 @@ jrsonnet-types = { path = "./crates/jrsonnet-types", version = "0.5.0-pre99" }
 jrsonnet-formatter = { path = "./crates/jrsonnet-formatter", version = "0.5.0-pre99" }
 jrsonnet-lexer = { path = "./crates/jrsonnet-lexer", version = "0.5.0-pre99" }
 jrsonnet-pkg = { path = "./crates/jrsonnet-pkg", version = "0.5.0-pre99" }
+jrsonnet-lint = { path = "./crates/jrsonnet-lint" }
 jrsonnet-gcmodule = { version = "0.5.0" }
 # Diagnostics.
 # hi-doc is my library, which handles text formatting very well, but isn't polished enough yet
@@ -51,11 +52,14 @@ clap = "4.5"
 clap_complete = "4.5"
 
 # Parsing, manifestification is implemented manually everywhere
-serde = "1.0.228"
-serde_json = "1.0.149"
-serde-saphyr = { version = "0.0.27", default-features = false, features = [
-  "deserialize",
-] }
+serde = { version = "1.0.228", features = ["derive"] }
+# preserve_order keeps JSON object key ordering deterministic (Tanka compatibility)
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
+# rustanka uses the grafana serde-saphyr fork for Go yaml.v3-compatible output
+serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "master" }
+# Note: serde_yaml_with_quirks is a fork of serde-yaml with legacy yaml 1.1 support:
+# https://github.com/dtolnay/serde-yaml/pull/225
+serde_yaml_with_quirks = "0.8.24"
 
 # Error handling
 anyhow = "1.0.101"

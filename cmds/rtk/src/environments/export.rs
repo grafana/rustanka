@@ -534,7 +534,7 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 					},
 				};
 
-				jrsonnet_gcmodule::collect_thread_cycles();
+				let _ = jrsonnet_gcmodule::collect_thread_cycles();
 
 				(idx, result)
 			})

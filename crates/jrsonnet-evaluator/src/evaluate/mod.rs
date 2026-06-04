@@ -4,7 +4,6 @@ use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::ImportKind;
 use jrsonnet_types::ValType;
-use rustc_hash::{FxHashMap, FxHashSet};
 
 use self::{
 	compspec::{evaluate_arr_comp, evaluate_obj_comp},

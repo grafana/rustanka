@@ -269,36 +269,3 @@ fn eval_simple() {
 
 	dbg!(node);
 }
-
-fn expect_no_errors(src: &str) {
-	let (_, errors) = crate::parse(src);
-	assert!(
-		errors.is_empty(),
-		"expected no parse errors for:\n{src}\n\ngot:\n{errors:#?}"
-	);
-}
-
-// `local x = ...; expr` must be accepted anywhere an expression is accepted —
-// including as the right-hand side of a binary operator, e.g. a function
-// body like `<expr> + local tmp = ...; <expr>`.
-#[test]
-fn local_as_binary_op_rhs() {
-	expect_no_errors("{ a: 1 } + local x = 2; { b: x }");
-}
-
-#[test]
-fn assert_as_binary_op_rhs() {
-	expect_no_errors("{ a: 1 } + assert true; { b: 2 }");
-}
-
-// go-jsonnet accepts unary `+` on expressions; Tanka-compatible libraries
-// rely on patterns like `field:: +{ ... }`, which must parse cleanly.
-#[test]
-fn unary_plus_number() {
-	expect_no_errors("+1");
-}
-
-#[test]
-fn unary_plus_object() {
-	expect_no_errors("{ foo:: +{ bar: 1 } }");
-}

@@ -60,30 +60,6 @@ impl Builtin for BuiltinFunc {
 	}
 }
 
-cc_dyn!(
-	#[derive(Clone)]
-	BuiltinFunc,
-	Builtin,
-	pub(crate) fn new() {...}
-);
-impl Builtin for BuiltinFunc {
-	fn name(&self) -> &str {
-		self.0.name()
-	}
-
-	fn params(&self) -> &[BuiltinParam] {
-		self.0.params()
-	}
-
-	fn call(&self, ctx: Context, loc: CallLocation<'_>, args: &dyn ArgsLike) -> Result<Val> {
-		self.0.call(ctx, loc, args)
-	}
-
-	fn as_any(&self) -> &dyn Any {
-		self.0.as_any()
-	}
-}
-
 /// Description of function defined by native code
 ///
 /// Prefer to use #[builtin] macro, instead of manual implementation of this trait

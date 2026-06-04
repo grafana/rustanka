@@ -222,10 +222,7 @@ impl<I: Unbound<Bound = T>, T: Clone + Trace> Unbound for CachedUnbound<I, T> {
 	fn bind(&self, sup_this: SupThis) -> Result<T> {
 		let cache_key = sup_this.clone().downgrade();
 		{
-			let mut cache = self.cache.borrow_mut();
-			// Prune entries whose weak keys reference collected objects.
-			cache.retain(|k: &WeakSupThis, _| k.is_alive());
-			if let Some(t) = cache.get(&cache_key) {
+			if let Some(t) = self.cache.borrow().get(&cache_key) {
 				return Ok(t.clone());
 			}
 		}

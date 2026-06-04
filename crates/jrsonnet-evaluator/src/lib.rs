@@ -236,18 +236,6 @@ impl_context_initializer! {
 	A @ B C D E F G
 }
 
-/// How an evaluated import result is cached.
-#[derive(Trace)]
-enum CachedEvaluation {
-	/// Object results are stored as weak references. The value stays alive
-	/// only while callers hold their own [`ObjValue`] references. When all
-	/// callers drop, the weak expires and a re-import will re-evaluate.
-	WeakObj(WeakObjValue),
-	/// Non-object results (strings, numbers, arrays, etc.) are small and
-	/// stored as strong references.
-	Other(Val),
-}
-
 #[derive(Trace)]
 struct FileData {
 	string: Option<IStr>,
@@ -401,16 +389,8 @@ impl State {
 				))
 			}
 		};
-		match &file.evaluated {
-			Some(CachedEvaluation::WeakObj(weak)) => {
-				if let Some(obj) = weak.upgrade() {
-					return Ok(Val::Obj(obj));
-				}
-				// Weak expired — fall through to re-evaluate
-				file.evaluated = None;
-			}
-			Some(CachedEvaluation::Other(val)) => return Ok(val.clone()),
-			None => {}
+		if let Some(val) = &file.evaluated {
+			return Ok(val.clone());
 		}
 		let code = file
 			.get_string()
@@ -470,10 +450,7 @@ impl State {
 		file.evaluating = false;
 		match res {
 			Ok(v) => {
-				file.evaluated = Some(match &v {
-					Val::Obj(obj) => CachedEvaluation::WeakObj(obj.clone().downgrade()),
-					other => CachedEvaluation::Other(other.clone()),
-				});
+				file.evaluated = Some(v.clone());
 				Ok(v)
 			}
 			Err(e) => Err(e),
@@ -521,7 +498,6 @@ impl State {
 	/// and other accumulated thread-local data.
 	pub fn clear_thread_local_state(&self) {
 		self.file_cache().clear();
-		reset_obj_thread_locals();
 		manifest::set_use_go_style_floats(false);
 	}
 }

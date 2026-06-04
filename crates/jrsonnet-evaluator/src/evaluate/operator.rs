@@ -9,6 +9,7 @@ use crate::{
 	bail, error,
 	error::ErrorKind::*,
 	evaluate::evaluate,
+	manifest::format_float_go_g17,
 	stdlib::std_format,
 	typed::IntoUntyped as _,
 	val::{StrValue, equals},

@@ -35,7 +35,7 @@ use jrsonnet_evaluator::{
 	AsPathLike, ImportResolver,
 };
 use jrsonnet_gcmodule::{Acyclic, Trace};
-use jrsonnet_parser::{SourceFile, SourcePath};
+use jrsonnet_ir::{SourceFile, SourcePath};
 
 /// A writer that simulates a broken pipe (SIGPIPE scenario).
 ///

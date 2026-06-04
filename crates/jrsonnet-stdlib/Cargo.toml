@@ -25,8 +25,8 @@ exp-preserve-order = ["jrsonnet-evaluator/exp-preserve-order"]
 exp-bigint = ["dep:num-bigint", "jrsonnet-evaluator/exp-bigint"]
 
 exp-null-coaelse = ["jrsonnet-evaluator/exp-null-coaelse"]
-# std.regexMatch and other helpers
-exp-regex = ["dep:regex", "dep:lru", "dep:rustc-hash"]
+# std.regexMatch and other helpers (regex deps are now always enabled)
+exp-regex = []
 
 [dependencies]
 jrsonnet-evaluator.workspace = true
@@ -54,7 +54,7 @@ serde-saphyr.workspace = true
 hex.workspace = true
 num-bigint = { workspace = true, optional = true }
 
-# regex
-regex = { workspace = true, optional = true }
-lru = { workspace = true, optional = true }
-rustc-hash = { workspace = true, optional = true }
+# regex (always enabled for Tanka compatibility)
+regex.workspace = true
+lru.workspace = true
+rustc-hash.workspace = true

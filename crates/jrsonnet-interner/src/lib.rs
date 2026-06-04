@@ -33,7 +33,6 @@ impl Trace for IStr {
 		false
 	}
 }
-unsafe impl Acyclic for IStr {}
 
 /// SAFETY:
 ///

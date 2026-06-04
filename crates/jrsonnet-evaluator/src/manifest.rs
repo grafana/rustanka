@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt::Write, hint::black_box, ptr};
+use std::{borrow::Cow, cell::Cell, fmt::Write, hint::black_box, ptr};
 
 use crate::{
 	Error, Result, ResultExt, Val, bail, evaluate::ensure_sufficient_stack, in_description_frame,
@@ -520,19 +520,27 @@ impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
 				val.value_type()
 			)
 		};
-		for (i, v) in arr.iter().enumerate() {
-			if i != 0 {
+		if arr.is_empty() {
+			if self.jrsonnet_empty {
+				// jrsonnet binary outputs "\n" for empty arrays (just a newline)
+				// or "...\n" when c_document_end is true
+				// (no document marker for empty arrays)
+			} else {
+				// go-jsonnet outputs "---\n\n" for empty arrays (document marker + empty document)
+				out.push_str("---\n\n");
+			}
+		} else {
+			for (i, v) in arr.iter().enumerate() {
+				let v = v.with_description(|| format!("elem <{i}> evaluation"))?;
+				out.push_str("---\n");
+				in_description_frame(
+					|| format!("elem <{i}> manifestification"),
+					|| self.inner.manifest_buf(&v, out),
+				)?;
 				out.push('\n');
 			}
-			let v = v.with_description(|| format!("elem <{i}> evaluation"))?;
-			out.push_str("---\n");
-			in_description_frame(
-				|| format!("elem <{i}> manifestification"),
-				|| self.inner.manifest_buf(&v, out),
-			)?;
 		}
 		if self.c_document_end {
-			out.push('\n');
 			out.push_str("...");
 		}
 		// For jrsonnet empty mode: always add trailing newline
