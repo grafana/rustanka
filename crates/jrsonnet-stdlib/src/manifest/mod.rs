@@ -8,9 +8,9 @@ use std::cell::RefCell;
 
 pub use ini::IniFormat;
 use jrsonnet_evaluator::{
-	function::builtin,
-	manifest::{escape_string_json, JsonFormat, YamlStreamFormat},
 	IStr, ObjValue, Result, Val,
+	function::builtin,
+	manifest::{JsonFormat, YamlStreamFormat, escape_string_json},
 };
 use jrsonnet_gcmodule::Cc;
 pub use python::{PythonFormat, PythonVarsFormat};

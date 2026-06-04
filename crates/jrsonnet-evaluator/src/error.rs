@@ -1,22 +1,31 @@
-use std::{
-	cmp::Ordering,
-	convert::Infallible,
-	fmt::{Debug, Display},
-};
+use std::{cmp::Ordering, convert::Infallible, fmt};
 
-use jrsonnet_gcmodule::Trace;
+use jrsonnet_gcmodule::{Acyclic, Trace};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{AnalyzedExpr, BinaryOpType, Source, SourcePath, Span, UnaryOpType};
+use jrsonnet_ir::{
+	BinaryOpType, ConvertNumValueError, Source, SourcePath, Span, Spanned, UnaryOpType,
+};
 use jrsonnet_types::ValType;
 use thiserror::Error;
 
 use crate::{
-	function::{builtin::ParamDefault, CallLocation},
+	ObjValue, ResolvePathOwned,
+	analyze::Diagnostic,
+	function::{CallLocation, FunctionSignature, ParamName},
 	stdlib::format::FormatError,
 	typed::TypeLocError,
-	val::ConvertNumValueError,
-	ObjValue, ResolvePathOwned,
 };
+
+#[derive(Debug, Clone, Acyclic)]
+pub struct SyntaxError {
+	pub message: String,
+	pub location: Span,
+}
+impl fmt::Display for SyntaxError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.message)
+	}
+}
 
 pub(crate) fn format_found(list: &[IStr], what: &str) -> String {
 	if list.is_empty() {
@@ -47,36 +56,6 @@ pub(crate) fn format_found(list: &[IStr], what: &str) -> String {
 	out
 }
 
-fn format_signature(sig: &FunctionSignature) -> String {
-	let mut out = String::new();
-	out.push_str("\nFunction has the following signature: ");
-	out.push('(');
-	if sig.is_empty() {
-		out.push_str("/*no arguments*/");
-	} else {
-		for (i, (name, default)) in sig.iter().enumerate() {
-			if i != 0 {
-				out.push_str(", ");
-			}
-			if let Some(name) = name {
-				out.push_str(name);
-			} else {
-				out.push_str("<unnamed>");
-			}
-			match default {
-				ParamDefault::None => {}
-				ParamDefault::Exists => out.push_str(" = <default>"),
-				ParamDefault::Literal(lit) => {
-					out.push_str(" = ");
-					out.push_str(lit);
-				}
-			}
-		}
-	}
-	out.push(')');
-	out
-}
-
 const fn format_empty_str(str: &str) -> &str {
 	if str.is_empty() {
 		"\"\" (empty string)"
@@ -85,30 +64,37 @@ const fn format_empty_str(str: &str) -> &str {
 	}
 }
 
-pub(crate) fn suggest_object_fields(v: &ObjValue, key: IStr) -> Vec<IStr> {
-	let mut heap = Vec::new();
-	for field in v.fields_ex(
-		true,
-		#[cfg(feature = "exp-preserve-order")]
-		false,
-	) {
-		let conf = strsim::jaro_winkler(field.as_str(), key.as_str());
-		if conf < 0.8 {
-			continue;
-		}
-		// Skip exact match: don't suggest the key itself. Compare by string content so we
-		// don't panic when string pooling fails (e.g. under heavy load with many envs).
-		if field.as_str() == key.as_str() {
-			continue;
-		}
+pub(crate) fn suggest_names<'a, 'b>(
+	name: &'a IStr,
+	names: impl IntoIterator<Item = &'b IStr>,
+) -> Vec<IStr> {
+	let mut heap: Vec<(f64, IStr)> = names
+		.into_iter()
+		.filter_map(|def| {
+			let conf = strsim::jaro_winkler(def.as_str(), name.as_str());
+			if conf < 0.8 {
+				return None;
+			}
+			debug_assert!(
+				def.as_str() != name.as_str(),
+				"string pooling failure: look for DOC(string-pooling) comment in jrsonnet-interner"
+			);
 
-		heap.push((conf, field));
-	}
+			Some((conf, def.clone()))
+		})
+		.collect();
 	heap.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 	heap.into_iter().map(|v| v.1).collect()
 }
 
-type FunctionSignature = Vec<(Option<IStr>, ParamDefault)>;
+pub(crate) fn suggest_object_fields(v: &ObjValue, key: IStr) -> Vec<IStr> {
+	let fields = v.fields_ex(
+		true,
+		#[cfg(feature = "exp-preserve-order")]
+		false,
+	);
+	suggest_names(&key, &fields)
+}
 
 /// Possible errors
 #[allow(missing_docs)]
@@ -125,24 +111,24 @@ pub enum ErrorKind {
 
 	#[error("self/super/$ are only usable inside objects")]
 	CantUseSelfSupOutsideOfObject,
+
+	#[error("static analysis errors: {}", .0.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; "))]
+	StaticAnalysisError(Vec<Diagnostic>),
 	#[error("no super found")]
 	NoSuperFound,
 
 	#[error("for loop can only iterate over arrays")]
 	InComprehensionCanOnlyIterateOverArray,
+	#[error("(should not be visible) eager compspec evaluation failed due to captured context")]
+	EagerCompspecCaptured,
 
 	#[error("array out of bounds: {0} is not within [0,{1})")]
-	ArrayBoundsError(isize, usize),
+	ArrayBoundsError(f64, u32),
 	#[error("string out of bounds: {0} is not within [0,{1})")]
-	StringBoundsError(usize, usize),
+	StringBoundsError(f64, u32),
 
 	#[error("assert failed: {}", format_empty_str(.0))]
 	AssertionFailed(IStr),
-
-	#[error("local is not defined: {0}{found}", found = format_found(.1, "local"))]
-	VariableIsNotDefined(IStr, Vec<IStr>),
-	#[error("duplicate local var: {0}")]
-	DuplicateLocalVar(IStr),
 
 	#[error("type mismatch: expected {expected}, got {2} {0}", expected = .1.iter().map(|e| format!("{e}")).collect::<Vec<_>>().join(", "))]
 	TypeMismatch(&'static str, Vec<ValType>, ValType),
@@ -152,13 +138,13 @@ pub enum ErrorKind {
 	#[error("only functions can be called, got {0}")]
 	OnlyFunctionsCanBeCalledGot(ValType),
 	#[error("parameter {0} is not defined")]
-	UnknownFunctionParameter(String),
+	UnknownFunctionParameter(IStr),
 	#[error("argument {0} is already bound")]
 	BindingParameterASecondTime(IStr),
-	#[error("too many args, function has {0}{sig}", sig = format_signature(.1))]
+	#[error("too many args, function has {0}\nFunction has the following signature: {1}")]
 	TooManyArgsFunctionHas(usize, FunctionSignature),
-	#[error("function argument is not passed: {}{}", .0.as_ref().map_or("<unnamed>", IStr::as_str), format_signature(.1))]
-	FunctionParameterNotBoundInCall(Option<IStr>, FunctionSignature),
+	#[error("function argument is not passed: {0}\nFunction has the following signature: {1}")]
+	FunctionParameterNotBoundInCall(ParamName, FunctionSignature),
 
 	#[error("external variable is not defined: {0}")]
 	UndefinedExternalVariable(IStr),
@@ -194,22 +180,10 @@ pub enum ErrorKind {
 	ImportNotSupported(SourcePath, ResolvePathOwned),
 	#[error("can't import from virtual file")]
 	CantImportFromVirtualFile,
-	#[error(
-		"syntax error: {}",
-		// Peg has no fancier way to handle critical parsing errors https://github.com/kevinmehall/rust-peg/issues/225
-		{.error.expected.tokens().find(|t| t.starts_with("!!!")).map_or_else(|| {
-			format!(
-				"expected {}, got {:?}",
-				.error.expected,
-				.path.code().chars().nth(error.location.offset)
-				.map_or_else(|| "EOF".into(), |c| c.to_string())
-			)
-		}, |v| v[3..].into())}
-	)]
+	#[error("syntax error: {error}")]
 	ImportSyntaxError {
 		path: Source,
-		#[trace(skip)]
-		error: Box<jrsonnet_parser::ParseError>,
+		error: Box<SyntaxError>,
 	},
 
 	#[error("runtime error: {}", format_empty_str(.0))]
@@ -269,6 +243,11 @@ impl From<ErrorKind> for Error {
 		Self::new(e)
 	}
 }
+impl From<ConvertNumValueError> for Error {
+	fn from(e: ConvertNumValueError) -> Self {
+		Self::new(ErrorKind::ConvertNumValue(e))
+	}
+}
 
 impl From<Infallible> for Error {
 	fn from(_value: Infallible) -> Self {
@@ -290,6 +269,10 @@ pub struct StackTrace(pub Vec<StackTraceElement>);
 
 #[derive(Clone, Trace)]
 pub struct Error(Box<(ErrorKind, StackTrace)>);
+
+#[cfg(target_pointer_width = "64")]
+static_assertions::assert_eq_size!(Error, usize);
+
 impl Error {
 	pub fn new(e: ErrorKind) -> Self {
 		Self(Box::new((e, StackTrace(vec![]))))
@@ -308,27 +291,22 @@ impl Error {
 		&mut (self.0).1
 	}
 }
-impl Display for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		writeln!(f, "{}", self.0 .0)?;
-		for el in &self.0 .1 .0 {
+impl fmt::Display for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		writeln!(f, "{}", self.0.0)?;
+		for el in &self.0.1.0 {
+			write!(f, "\t{}", el.desc)?;
 			if let Some(loc) = &el.location {
-				let [start, _end] = loc.0.map_source_locations(&[loc.1, loc.2]);
-				write!(
-					f,
-					"\t{}:{}:{}",
-					loc.0.source_path(),
-					start.line,
-					start.column
-				)?;
+				write!(f, "at {}", loc.0.0.0)?;
+				loc.0.map_source_locations(&[loc.1, loc.2]);
 			}
 			writeln!(f, "\t{}", el.desc)?;
 		}
 		Ok(())
 	}
 }
-impl Debug for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_tuple("LocError").field(&self.0).finish()
 	}
 }
@@ -337,9 +315,9 @@ impl std::error::Error for Error {}
 pub trait ErrorSource {
 	fn to_location(self) -> Option<Span>;
 }
-impl ErrorSource for &AnalyzedExpr {
+impl<T: Acyclic> ErrorSource for &Spanned<T> {
 	fn to_location(self) -> Option<Span> {
-		Some(self.span())
+		Some(self.span.clone())
 	}
 }
 impl ErrorSource for &Span {
@@ -413,10 +391,15 @@ macro_rules! bail {
 		return Err($crate::error::ErrorKind::RuntimeError($crate::jrsonnet_macros::format_istr!($l$(, $($tt)*)?)).into())
 	};
 }
-
 #[macro_export]
-macro_rules! runtime_error {
+macro_rules! error {
+	($w:ident$(::$i:ident)*$(($($tt:tt)*))?) => {
+		$crate::error::Error::from($w$(::$i)*$(($($tt)*))?)
+	};
+	($w:ident$(::$i:ident)*$({$($tt:tt)*})?) => {
+		$crate::error::Error::from($w$(::$i)*$({$($tt)*})?)
+	};
 	($l:literal$(, $($tt:tt)*)?) => {
-		$crate::error::Error::from($crate::error::ErrorKind::RuntimeError($crate::jrsonnet_macros::format_istr!($l$(, $($tt)*)?)))
+		<$crate::error::Error as From<$crate::error::ErrorKind>>::from($crate::error::ErrorKind::RuntimeError($crate::jrsonnet_macros::format_istr!($l$(, $($tt)*)?)).into())
 	};
 }

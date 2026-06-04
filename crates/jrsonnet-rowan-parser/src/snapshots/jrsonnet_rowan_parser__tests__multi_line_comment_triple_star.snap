@@ -1,0 +1,11 @@
+---
+source: crates/jrsonnet-rowan-parser/src/tests.rs
+expression: "/***/ 2\n"
+---
+SOURCE_FILE@0..8
+  MULTI_LINE_COMMENT@0..5 "/***/"
+  WHITESPACE@5..6 " "
+  EXPR@6..7
+    EXPR_NUMBER@6..7
+      FLOAT@6..7 "2"
+  WHITESPACE@7..8 "\n"

@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 
 use jrsonnet_evaluator::{
-	bail,
+	Either, IStr, Val, bail,
 	error::{ErrorKind::*, Result},
 	function::builtin,
-	typed::{Either2, Typed, M1},
+	typed::{Either2, FromUntyped, M1},
 	val::{ArrValue, IndexableVal},
-	Either, IStr, Val,
 };
 
 #[builtin]
@@ -27,7 +26,7 @@ pub fn builtin_char(n: u32) -> Result<char> {
 #[builtin]
 pub fn builtin_str_replace(str: String, from: IStr, to: IStr) -> Result<String> {
 	if from.is_empty() {
-		bail!("'from' string must not be zero length");
+		bail!("`from` string must not be zero length");
 	}
 	Ok(str.replace(&from as &str, &to as &str))
 }
@@ -53,7 +52,7 @@ pub fn builtin_is_empty(str: String) -> bool {
 
 #[builtin]
 pub fn builtin_equals_ignore_case(str1: String, str2: String) -> bool {
-	str1.to_ascii_lowercase() == str2.to_ascii_lowercase()
+	str1.eq_ignore_ascii_case(&str2)
 }
 
 #[builtin]
@@ -206,25 +205,23 @@ fn parse_nat<const BASE: u32>(raw: &str) -> Result<f64> {
 #[cfg(feature = "exp-bigint")]
 #[builtin]
 pub fn builtin_bigint(v: Either![f64, IStr]) -> Result<Val> {
-	use jrsonnet_evaluator::runtime_error;
 	use Either2::*;
+	use jrsonnet_evaluator::error;
 	Ok(match v {
-		A(a) => {
-			Val::BigInt(Box::new(a.to_string().parse().map_err(|e| {
-				runtime_error!("number is not convertible to bigint: {e}")
-			})?))
-		}
-		B(b) => Val::BigInt(Box::new(
-			b.as_str()
+		A(a) => Val::BigInt(Box::new(
+			a.to_string()
 				.parse()
-				.map_err(|e| runtime_error!("bad bigint: {e}"))?,
+				.map_err(|e| error!("number is not convertible to bigint: {e}"))?,
+		)),
+		B(b) => Val::BigInt(Box::new(
+			b.as_str().parse().map_err(|e| error!("bad bigint: {e}"))?,
 		)),
 	})
 }
 
 #[builtin]
 pub fn builtin_string_chars(str: IStr) -> ArrValue {
-	ArrValue::chars(str.chars())
+	str.chars().collect()
 }
 
 #[builtin]

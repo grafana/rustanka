@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use xshell::{cmd, Shell};
+use xshell::{Shell, cmd};
 
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+mod bench;
 mod sourcegen;
 
 #[derive(Parser)]
@@ -35,8 +37,19 @@ enum Opts {
 		test_file: String,
 		args: Vec<String>,
 	},
-	/// Update C++/Golang golden testsuites from git
-	UpdateTestsuites,
+	/// Benchmark a command: repeated runs, reports time + RSS stats (Linux only)
+	#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+	Bench {
+		#[arg(long, default_value_t = 10)]
+		runs: u32,
+		#[arg(long, default_value_t = 1)]
+		warmup: u32,
+		/// Show command output
+		#[arg(long, short = 'q')]
+		output: bool,
+		#[arg(trailing_var_arg = true, required = true)]
+		args: Vec<String>,
+	},
 }
 
 fn main() -> Result<()> {
@@ -52,12 +65,7 @@ fn main() -> Result<()> {
 		} => {
 			let out = sh.create_temp_dir()?;
 
-			// build-std
-			cmd!(
-				sh,
-				"cargo build -Zbuild-std --target={target} --profile releasedebug"
-			)
-			.run()?;
+			cmd!(sh, "cargo build --target={target} --profile releasedebug").run()?;
 			let built = format!("./target/{target}/releasedebug/jrsonnet");
 			let bench_cmd = format!("{built} {}", args.join(" "));
 			if hyperfine {
@@ -73,7 +81,11 @@ fn main() -> Result<()> {
 			if cachegrind {
 				let mut cachegrind_out = out.path().to_owned();
 				cachegrind_out.push("cachegrind.out.1");
-				cmd!(sh, "valgrind --tool=cachegrind --cachegrind-out-file={cachegrind_out} {built} {args...}").run()?;
+				cmd!(
+					sh,
+					"valgrind --tool=cachegrind --cachegrind-out-file={cachegrind_out} {built} {args...}"
+				)
+				.run()?;
 				cmd!(sh, "kcachegrind {cachegrind_out}").run()?;
 			}
 
@@ -108,26 +120,12 @@ fn main() -> Result<()> {
 
 			Ok(())
 		}
-		Opts::UpdateTestsuites => {
-			let _pushd = sh.push_dir("tests");
-			let git_dir = sh.create_temp_dir()?;
-			let git_dir_path = git_dir.path();
-			cmd!(
-				sh,
-				"git clone https://github.com/google/jsonnet.git --depth=1 {git_dir_path}/jsonnet"
-			)
-			.run()?;
-			cmd!(
-				sh,
-				"git clone https://github.com/google/go-jsonnet.git --depth=1 {git_dir_path}/go-jsonnet"
-			)
-			.run()?;
-			sh.remove_path("cpp_test_suite")?;
-			sh.remove_path("go_testdata")?;
-			cmd!(sh, "mv {git_dir_path}/jsonnet/test_suite cpp_test_suite").run()?;
-			cmd!(sh, "mv {git_dir_path}/go-jsonnet/testdata go_testdata").run()?;
-
-			Ok(())
-		}
+		#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+		Opts::Bench {
+			runs,
+			warmup,
+			output,
+			args,
+		} => bench::bench_cmd(&args, runs, warmup, output),
 	}
 }

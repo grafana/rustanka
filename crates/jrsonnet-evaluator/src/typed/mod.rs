@@ -2,21 +2,22 @@ use std::{fmt::Display, rc::Rc};
 
 pub(crate) mod conversions;
 pub use conversions::*;
-use jrsonnet_gcmodule::Trace;
+use jrsonnet_gcmodule::Acyclic;
 pub use jrsonnet_types::{ComplexValType, ValType};
 use thiserror::Error;
 
 use crate::{
+	Val,
 	error::{Error, ErrorKind, Result},
-	in_description_frame, Val,
+	in_description_frame,
 };
 
-#[derive(Debug, Error, Clone, Trace)]
+#[derive(Debug, Error, Clone, Acyclic)]
 pub enum TypeError {
 	#[error("expected {0}, got {1}")]
 	ExpectedGot(ComplexValType, ValType),
 	#[error("missing property {0} from {1}")]
-	MissingProperty(#[trace(skip)] Rc<str>, ComplexValType),
+	MissingProperty(Rc<str>, ComplexValType),
 	#[error("every failed from {0}:\n{1}")]
 	UnionFailed(ComplexValType, TypeLocErrorList),
 	#[error(
@@ -32,7 +33,7 @@ impl From<TypeError> for Error {
 	}
 }
 
-#[derive(Debug, Clone, Trace)]
+#[derive(Debug, Clone, Acyclic)]
 pub struct TypeLocError(Box<TypeError>, ValuePathStack);
 impl From<TypeError> for TypeLocError {
 	fn from(e: TypeError) -> Self {
@@ -54,7 +55,7 @@ impl Display for TypeLocError {
 	}
 }
 
-#[derive(Debug, Clone, Trace)]
+#[derive(Debug, Clone, Acyclic)]
 pub struct TypeLocErrorList(Vec<TypeLocError>);
 impl Display for TypeLocErrorList {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -116,9 +117,9 @@ impl CheckType for ValType {
 	}
 }
 
-#[derive(Clone, Debug, Trace)]
+#[derive(Clone, Debug, Acyclic)]
 enum ValuePathItem {
-	Field(#[trace(skip)] Rc<str>),
+	Field(Rc<str>),
 	Index(u64),
 }
 impl Display for ValuePathItem {
@@ -131,7 +132,7 @@ impl Display for ValuePathItem {
 	}
 }
 
-#[derive(Clone, Debug, Trace)]
+#[derive(Clone, Debug, Acyclic)]
 struct ValuePathStack(Vec<ValuePathItem>);
 impl Display for ValuePathStack {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -156,9 +157,7 @@ impl CheckType for ComplexValType {
 			Self::BoundedNumber(from, to) => {
 				if let Val::Num(n) = value {
 					let n = n.get();
-					if from.map(|from| from > n).unwrap_or(false)
-						|| to.map(|to| to < n).unwrap_or(false)
-					{
+					if from.is_some_and(|from| from > n) || to.is_some_and(|to| to < n) {
 						return Err(TypeError::BoundsFailed(n, *from, *to).into());
 					}
 					Ok(())

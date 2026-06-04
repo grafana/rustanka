@@ -1,0 +1,21 @@
+[package]
+name = "jrsonnet-deps"
+description = "Command-line tool that lists imports of a jsonnet file"
+keywords = ["jsonnet", "dependencies", "cli"]
+categories = ["command-line-utilities"]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jrsonnet-evaluator.workspace = true
+jrsonnet-ir.workspace = true
+jrsonnet-ir-parser.workspace = true
+jrsonnet-cli.workspace = true
+
+clap = { workspace = true, features = ["derive"] }

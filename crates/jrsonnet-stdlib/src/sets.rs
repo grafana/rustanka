@@ -1,29 +1,21 @@
 use std::cmp::Ordering;
 
-use jrsonnet_evaluator::{
-	function::{builtin, FuncVal},
-	operator::evaluate_compare_op,
-	val::ArrValue,
-	Result, Thunk, Val,
-};
-use jrsonnet_parser::BinaryOpType;
+use jrsonnet_evaluator::{Result, Thunk, Val, function::builtin, val::ArrValue};
+
+use crate::keyf::KeyF;
 
 #[builtin]
 #[allow(non_snake_case)]
-pub fn builtin_set_member(x: Thunk<Val>, arr: ArrValue, keyF: Option<FuncVal>) -> Result<bool> {
+pub fn builtin_set_member(x: Thunk<Val>, arr: ArrValue, #[default] keyF: KeyF) -> Result<bool> {
 	let mut low = 0;
-	let mut high = arr.len();
+	let mut high = arr.len32();
 
-	let keyF = keyF
-		.unwrap_or(FuncVal::Id)
-		.into_native::<((Thunk<Val>,), Val)>();
-
-	let x = keyF(x)?;
+	let x = keyF.eval(x)?;
 
 	while low < high {
-		let middle = (high + low) / 2;
-		let comp = keyF(arr.get_lazy(middle).expect("in bounds"))?;
-		match evaluate_compare_op(&comp, &x, BinaryOpType::Lt)? {
+		let middle = u32::midpoint(high, low);
+		let comp = keyF.eval(arr.get_lazy32(middle).expect("in bounds"))?;
+		match Val::try_cmp(&comp, &x)? {
 			Ordering::Less => low = middle + 1,
 			Ordering::Equal => return Ok(true),
 			Ordering::Greater => high = middle,
@@ -34,14 +26,15 @@ pub fn builtin_set_member(x: Thunk<Val>, arr: ArrValue, keyF: Option<FuncVal>) -
 
 #[builtin]
 #[allow(non_snake_case, clippy::redundant_closure)]
-pub fn builtin_set_inter(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Result<ArrValue> {
+pub fn builtin_set_inter(
+	a: ArrValue,
+	b: ArrValue,
+	#[default] keyF: KeyF,
+) -> Result<Vec<Thunk<Val>>> {
 	let mut a = a.iter_lazy();
 	let mut b = b.iter_lazy();
 
-	let keyF = keyF
-		.unwrap_or(FuncVal::identity())
-		.into_native::<((Thunk<Val>,), Val)>();
-	let keyF = |v| keyF(v);
+	let keyF = |v| keyF.eval(v);
 
 	let mut av = a.next();
 	let mut bv = b.next();
@@ -50,7 +43,7 @@ pub fn builtin_set_inter(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Res
 
 	let mut out = Vec::new();
 	while let (Some(ac), Some(bc)) = (&ak, &bk) {
-		match evaluate_compare_op(ac, bc, BinaryOpType::Lt)? {
+		match Val::try_cmp(ac, bc)? {
 			Ordering::Less => {
 				av = a.next();
 				ak = av.clone().map(keyF).transpose()?;
@@ -66,21 +59,22 @@ pub fn builtin_set_inter(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Res
 				bv = b.next();
 				bk = bv.map(keyF).transpose()?;
 			}
-		};
+		}
 	}
-	Ok(ArrValue::lazy(out))
+	Ok(out)
 }
 
 #[builtin]
 #[allow(non_snake_case, clippy::redundant_closure)]
-pub fn builtin_set_diff(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Result<ArrValue> {
+pub fn builtin_set_diff(
+	a: ArrValue,
+	b: ArrValue,
+	#[default] keyF: KeyF,
+) -> Result<Vec<Thunk<Val>>> {
 	let mut a = a.iter_lazy();
 	let mut b = b.iter_lazy();
 
-	let keyF = keyF
-		.unwrap_or(FuncVal::identity())
-		.into_native::<((Thunk<Val>,), Val)>();
-	let keyF = |v| keyF(v);
+	let keyF = |v| keyF.eval(v);
 
 	let mut av = a.next();
 	let mut bv = b.next();
@@ -89,7 +83,7 @@ pub fn builtin_set_diff(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Resu
 
 	let mut out = Vec::new();
 	while let (Some(ac), Some(bc)) = (&ak, &bk) {
-		match evaluate_compare_op(ac, bc, BinaryOpType::Lt)? {
+		match Val::try_cmp(ac, bc)? {
 			Ordering::Less => {
 				// In a, but not in b
 				out.push(av.clone().expect("ak != None"));
@@ -106,7 +100,7 @@ pub fn builtin_set_diff(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Resu
 				bv = b.next();
 				bk = bv.map(keyF).transpose()?;
 			}
-		};
+		}
 	}
 	while let Some(_ac) = &ak {
 		// In a, but not in b
@@ -114,19 +108,20 @@ pub fn builtin_set_diff(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Resu
 		av = a.next();
 		ak = av.clone().map(keyF).transpose()?;
 	}
-	Ok(ArrValue::lazy(out))
+	Ok(out)
 }
 
 #[builtin]
 #[allow(non_snake_case, clippy::redundant_closure)]
-pub fn builtin_set_union(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Result<ArrValue> {
+pub fn builtin_set_union(
+	a: ArrValue,
+	b: ArrValue,
+	#[default] keyF: KeyF,
+) -> Result<Vec<Thunk<Val>>> {
 	let mut a = a.iter_lazy();
 	let mut b = b.iter_lazy();
 
-	let keyF = keyF
-		.unwrap_or(FuncVal::identity())
-		.into_native::<((Thunk<Val>,), Val)>();
-	let keyF = |v| keyF(v);
+	let keyF = |v| keyF.eval(v);
 
 	let mut av = a.next();
 	let mut bv = b.next();
@@ -135,7 +130,7 @@ pub fn builtin_set_union(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Res
 
 	let mut out = Vec::new();
 	while let (Some(ac), Some(bc)) = (&ak, &bk) {
-		match evaluate_compare_op(ac, bc, BinaryOpType::Lt)? {
+		match Val::try_cmp(ac, bc)? {
 			Ordering::Less => {
 				out.push(av.clone().expect("ak != None"));
 				av = a.next();
@@ -154,7 +149,7 @@ pub fn builtin_set_union(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Res
 				bv = b.next();
 				bk = bv.clone().map(keyF).transpose()?;
 			}
-		};
+		}
 	}
 	// a.len() > b.len()
 	while let Some(_ac) = &ak {
@@ -168,5 +163,5 @@ pub fn builtin_set_union(a: ArrValue, b: ArrValue, keyF: Option<FuncVal>) -> Res
 		bv = b.next();
 		bk = bv.clone().map(keyF).transpose()?;
 	}
-	Ok(ArrValue::lazy(out))
+	Ok(out)
 }

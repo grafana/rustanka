@@ -1,0 +1,12 @@
+---
+source: crates/jrsonnet-rowan-parser/src/tests.rs
+expression: "!false\n"
+---
+SOURCE_FILE@0..7
+  EXPR@0..6
+    EXPR_UNARY@0..6
+      NOT@0..1 "!"
+      EXPR@1..6
+        EXPR_LITERAL@1..6
+          FALSE_KW@1..6 "false"
+  WHITESPACE@6..7 "\n"

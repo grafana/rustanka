@@ -5,8 +5,8 @@ use quote::format_ident;
 use ungrammar::{Grammar, Rule};
 
 use super::{
-	util::{pluralize, to_lower_snake_case},
 	KindsSrc,
+	util::{pluralize, to_lower_snake_case},
 };
 
 impl AstNodeSrc {
@@ -282,9 +282,11 @@ fn lower_comma_list(
 		_ => return false,
 	};
 	let (node, repeat, trailing_comma) = match rule.as_slice() {
-		[Rule::Node(node), Rule::Rep(repeat), Rule::Opt(trailing_comma)] => {
-			(node, repeat, trailing_comma)
-		}
+		[
+			Rule::Node(node),
+			Rule::Rep(repeat),
+			Rule::Opt(trailing_comma),
+		] => (node, repeat, trailing_comma),
 		_ => return false,
 	};
 	let repeat = match &**repeat {

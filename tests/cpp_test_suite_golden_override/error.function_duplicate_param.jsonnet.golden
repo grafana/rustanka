@@ -1,1 +1,3 @@
-runtime error: tried to manifest function
+static analysis errors
+    error.function_duplicate_param.jsonnet:17:13  error: local is already defined in the current frame: x
+    error.function_duplicate_param.jsonnet:17:1-8 warning: do not define identity functions manually, use std.id instead

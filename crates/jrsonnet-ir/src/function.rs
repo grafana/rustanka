@@ -1,0 +1,149 @@
+//! Function signature definition.
+//!
+//! TODO: To be moved to analyzer.
+//! TODO: Unify the anonymous/unnamed/positional naming.
+
+use std::{fmt, ops::Deref, rc::Rc};
+
+use jrsonnet_gcmodule::Acyclic;
+use jrsonnet_interner::IStr;
+
+/// Function parameter name.
+#[derive(Clone, Acyclic, Debug, PartialEq, Eq)]
+pub enum ParamName {
+	/// Unnamed (only possible with `exp-destruct`).
+	Unnamed,
+	/// Named.
+	Named(IStr),
+}
+impl ParamName {
+	/// Get the named parameter name as string.
+	pub fn as_str(&self) -> Option<&str> {
+		match self {
+			ParamName::Unnamed => None,
+			ParamName::Named(istr) => Some(istr),
+		}
+	}
+	/// Is the parameter positional.
+	pub fn is_anonymous(&self) -> bool {
+		matches!(self, Self::Unnamed)
+	}
+	/// Is the parameter named.
+	pub fn is_named(&self) -> bool {
+		matches!(self, Self::Named(_))
+	}
+}
+impl PartialEq<IStr> for ParamName {
+	fn eq(&self, other: &IStr) -> bool {
+		match self {
+			ParamName::Unnamed => false,
+			ParamName::Named(istr) => istr == other,
+		}
+	}
+}
+
+impl fmt::Display for ParamName {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self {
+			Self::Named(v) => write!(f, "{v}"),
+			Self::Unnamed => write!(f, "<unnamed>"),
+		}
+	}
+}
+
+/// Parameter default value description.
+#[derive(Clone, Copy, Debug, Acyclic, PartialEq, Eq)]
+pub enum ParamDefault {
+	/// No default exists.
+	None,
+	/// Default exists, but omitted from the error details (e.g handled in native code).
+	Exists,
+	/// Default exists, stringified.
+	Literal(&'static str),
+}
+impl ParamDefault {
+	/// Createn optional [`ParamDefault`] without the stringified value for the error messages.
+	pub const fn exists(is_exists: bool) -> Self {
+		if is_exists { Self::Exists } else { Self::None }
+	}
+}
+impl fmt::Display for ParamDefault {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			ParamDefault::None => Ok(()),
+			ParamDefault::Exists => write!(f, " = <default>"),
+			ParamDefault::Literal(lit) => write!(f, " = {lit}"),
+		}
+	}
+}
+
+/// Function parameter for argument matching purposes.
+#[derive(Clone, Acyclic, Debug, PartialEq, Eq)]
+pub struct ParamParse {
+	name: ParamName,
+	default: ParamDefault,
+}
+impl ParamParse {
+	/// Construct the function parameter definition.
+	pub fn new(name: ParamName, default: ParamDefault) -> Self {
+		Self { name, default }
+	}
+	/// Parameter name for named call parsing.
+	pub fn name(&self) -> &ParamName {
+		&self.name
+	}
+	/// Default value for error reporting.
+	pub fn default(&self) -> ParamDefault {
+		self.default
+	}
+	/// Can this parameter be derived implicitly?
+	pub fn has_default(&self) -> bool {
+		!matches!(self.default, ParamDefault::None)
+	}
+}
+impl fmt::Display for ParamParse {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}{}", self.name, self.default)
+	}
+}
+
+/// Function definition signature internals.
+#[derive(Debug, Clone, Acyclic, PartialEq, Eq)]
+pub struct FunctionSignature(Rc<[ParamParse]>);
+impl Deref for FunctionSignature {
+	type Target = [ParamParse];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+thread_local! {
+	static EMPTY_SIGNATURE: FunctionSignature = FunctionSignature::new([].into());
+}
+
+impl FunctionSignature {
+	/// Construct a function signature.
+	pub fn new(v: Rc<[ParamParse]>) -> Self {
+		Self(v)
+	}
+	/// Function signature of a degenerate function `function() value`.
+	pub fn empty() -> Self {
+		EMPTY_SIGNATURE.with(|p| p.clone())
+	}
+}
+impl fmt::Display for FunctionSignature {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if self.0.is_empty() {
+			return write!(f, "(/*no arguments*/)");
+		}
+		write!(f, "(")?;
+		for (i, par) in self.0.iter().enumerate() {
+			if i != 0 {
+				write!(f, ", ")?;
+			}
+			write!(f, "{par}")?;
+		}
+		write!(f, ")")
+	}
+}

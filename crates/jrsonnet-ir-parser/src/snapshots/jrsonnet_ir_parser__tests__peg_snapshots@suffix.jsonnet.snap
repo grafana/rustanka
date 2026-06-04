@@ -1,0 +1,84 @@
+---
+source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1184
+expression: v
+input_file: crates/jrsonnet-peg-parser/src/tests/suffix.jsonnet
+---
+Arr(
+    [
+        Index {
+            indexable: Var(
+                "std" from virtual:<test>:2-5,
+            ),
+            parts: [
+                IndexPart {
+                    span: virtual:<test>:6-10,
+                    value: Trivial(
+                        Str(
+                            "test",
+                        ),
+                    ),
+                },
+            ],
+        },
+        Apply(
+            Var(
+                "std" from virtual:<test>:12-15,
+            ),
+            ArgsDesc {
+                unnamed: [
+                    Trivial(
+                        Num(
+                            2.0,
+                        ),
+                    ),
+                ],
+                names: [],
+                values: [],
+            } from virtual:<test>:15-18,
+            false,
+        ),
+        Apply(
+            Index {
+                indexable: Var(
+                    "std" from virtual:<test>:20-23,
+                ),
+                parts: [
+                    IndexPart {
+                        span: virtual:<test>:24-28,
+                        value: Trivial(
+                            Str(
+                                "test",
+                            ),
+                        ),
+                    },
+                ],
+            },
+            ArgsDesc {
+                unnamed: [
+                    Trivial(
+                        Num(
+                            2.0,
+                        ),
+                    ),
+                ],
+                names: [],
+                values: [],
+            } from virtual:<test>:28-31,
+            false,
+        ),
+        Index {
+            indexable: Var(
+                "a" from virtual:<test>:33-34,
+            ),
+            parts: [
+                IndexPart {
+                    span: virtual:<test>:35-36,
+                    value: Var(
+                        "b" from virtual:<test>:35-36,
+                    ),
+                },
+            ],
+        },
+    ],
+)

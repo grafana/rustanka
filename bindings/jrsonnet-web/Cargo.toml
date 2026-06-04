@@ -1,0 +1,55 @@
+[package]
+name = "jrsonnet-web"
+description = "WebAssembly JavaScript bindings for jrsonnet"
+keywords = ["jsonnet", "wasm", "web"]
+categories = ["wasm"]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+experimental = [
+  "exp-preserve-order",
+  "exp-destruct",
+  "exp-null-coaelse",
+  "exp-object-iteration",
+  "exp-bigint",
+]
+exp-preserve-order = [
+  "jrsonnet-evaluator/exp-preserve-order",
+  "jrsonnet-stdlib/exp-preserve-order",
+]
+exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
+exp-object-iteration = ["jrsonnet-evaluator/exp-object-iteration"]
+exp-bigint = [
+  "dep:num-bigint",
+  "jrsonnet-stdlib/exp-bigint",
+  "jrsonnet-types/exp-bigint",
+]
+exp-regex = ["jrsonnet-stdlib/exp-regex"]
+exp-null-coaelse = ["jrsonnet-stdlib/exp-null-coaelse"]
+
+[dependencies]
+console_error_panic_hook.workspace = true
+getrandom = { workspace = true, features = ["wasm_js"] }
+hi-doc.workspace = true
+jrsonnet-evaluator.workspace = true
+jrsonnet-formatter.workspace = true
+jrsonnet-gcmodule.workspace = true
+jrsonnet-stdlib.workspace = true
+jrsonnet-types.workspace = true
+js-sys.workspace = true
+num-bigint = { workspace = true, optional = true }
+rustc-hash.workspace = true
+url.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "jsonnet_web"
+crate-type = ["cdylib"]

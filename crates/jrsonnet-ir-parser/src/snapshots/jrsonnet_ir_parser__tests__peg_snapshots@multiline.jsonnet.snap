@@ -1,0 +1,30 @@
+---
+source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1184
+expression: v
+input_file: crates/jrsonnet-peg-parser/src/tests/multiline.jsonnet
+---
+Arr(
+    [
+        Trivial(
+            Str(
+                "Hello world!\na\n",
+            ),
+        ),
+        Trivial(
+            Str(
+                "Hello world!\na\n",
+            ),
+        ),
+        Trivial(
+            Str(
+                "Hello world!\n\ta\n",
+            ),
+        ),
+        Trivial(
+            Str(
+                "Hello world!\n a\n",
+            ),
+        ),
+    ],
+)

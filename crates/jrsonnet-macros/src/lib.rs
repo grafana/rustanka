@@ -1,18 +1,48 @@
+//! Helper macros to support `jrsonnet-evaluator` usage.
+#![deny(missing_docs)]
+
 use std::string::String;
 
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
-	parenthesized,
+	Attribute, DeriveInput, Error, Expr, ExprClosure, FnArg, GenericArgument, Ident, ItemFn,
+	LitStr, Meta, Pat, Path, PathArguments, Result, ReturnType, Token, Type, parenthesized,
 	parse::{Parse, ParseStream},
 	parse_macro_input,
 	punctuated::Punctuated,
 	spanned::Spanned,
-	token::{self, Comma},
-	Attribute, DeriveInput, Error, Expr, ExprClosure, FnArg, GenericArgument, Ident, ItemFn,
-	LitStr, Pat, Path, PathArguments, Result, ReturnType, Token, Type,
+	token::Comma,
 };
 
+use self::typed::{derive_from_untyped_inner, derive_into_untyped_inner, derive_typed_inner};
+
+mod names;
+mod typed;
+
+fn try_parse_attr_noargs<I>(attrs: &[Attribute], ident: I) -> Result<bool>
+where
+	Ident: PartialEq<I>,
+{
+	let attrs = attrs
+		.iter()
+		.filter(|a| a.path().is_ident(&ident))
+		.collect::<Vec<_>>();
+	if attrs.len() > 1 {
+		return Err(Error::new(
+			attrs[1].span(),
+			"this attribute may be specified only once",
+		));
+	} else if attrs.is_empty() {
+		return Ok(false);
+	}
+	let attr = attrs[0];
+
+	match attr.meta {
+		Meta::Path(_) => Ok(true),
+		_ => Ok(false),
+	}
+}
 fn parse_attr<A: Parse, I>(attrs: &[Attribute], ident: I) -> Result<Option<A>>
 where
 	Ident: PartialEq<I>,
@@ -100,6 +130,7 @@ mod kw {
 	syn::custom_keyword!(flatten);
 	syn::custom_keyword!(add);
 	syn::custom_keyword!(hide);
+	syn::custom_keyword!(method);
 	syn::custom_keyword!(ok);
 }
 
@@ -125,9 +156,13 @@ enum Optionality {
 	Required,
 	Optional,
 	Default(Expr),
+	TypeDefault,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[allow(
+	clippy::large_enum_variant,
+	reason = "this macro is not that hot for it to matter"
+)]
 enum ArgInfo {
 	Normal {
 		ty: Box<Type>,
@@ -170,7 +205,10 @@ impl ArgInfo {
 			_ => {}
 		}
 
-		let (optionality, ty) = if let Some(default) = parse_attr::<_, _>(&arg.attrs, "default")? {
+		let (optionality, ty) = if try_parse_attr_noargs(&arg.attrs, "default")? {
+			remove_attr(&mut arg.attrs, "default");
+			(Optionality::TypeDefault, ty.clone())
+		} else if let Some(default) = parse_attr::<_, _>(&arg.attrs, "default")? {
 			remove_attr(&mut arg.attrs, "default");
 			(Optionality::Default(default), ty.clone())
 		} else if let Some(ty) = extract_type_from_option(ty)? {
@@ -202,6 +240,23 @@ impl ArgInfo {
 	}
 }
 
+/// Create a `Builtin` implementation with the corresponding struct with the same name for the function definition.
+///
+/// Builtin functions might be used like closures by defining fields.
+///
+/// ```jsonnet
+/// #[builtin(fields(
+///   a: u32
+/// ))]
+/// fn curried_add(this: &curried_add, b: u32) -> u32 {
+///   this.a + b
+/// }
+///
+/// #[builtin]
+/// fn curry_add(a: u32) -> FuncVal {
+///   FuncVal::builtin(curried_add { a })
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn builtin(
 	attr: proc_macro::TokenStream,
@@ -242,23 +297,23 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 		} => {
 			let name = name
 				.as_ref()
-				.map_or_else(|| quote! {None}, |n| quote! {ParamName::new_static(#n)});
+				.map_or_else(|| quote! {unnamed}, |n| quote! {named(#n)});
 			let default = match optionality {
 				Optionality::Required => quote!(ParamDefault::None),
-				Optionality::Optional => quote!(ParamDefault::Exists),
+				Optionality::Optional | Optionality::TypeDefault => quote!(ParamDefault::Exists),
 				Optionality::Default(e) => quote!(ParamDefault::Literal(stringify!(#e))),
 			};
 			Some(quote! {
 				#(#cfg_attrs)*
-				BuiltinParam::new(#name, #default),
+				[#name => #default],
 			})
 		}
 		ArgInfo::Lazy { is_option, name } => {
 			let name = name
 				.as_ref()
-				.map_or_else(|| quote! {None}, |n| quote! {ParamName::new_static(#n)});
+				.map_or_else(|| quote! {unnamed}, |n| quote! {named(#n)});
 			Some(quote! {
-				BuiltinParam::new(#name, ParamDefault::exists(#is_option)),
+				[#name => ParamDefault::exists(#is_option)],
 			})
 		}
 		ArgInfo::Context | ArgInfo::Location | ArgInfo::This => None,
@@ -287,7 +342,7 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 				let name = name.as_ref().map_or("<unnamed>", String::as_str);
 				let eval = quote! {jrsonnet_evaluator::in_description_frame(
 					|| format!("argument <{}> evaluation", #name),
-					|| <#ty>::from_untyped(value.evaluate()?),
+					|| <#ty as FromUntyped>::from_untyped(value.evaluate()?),
 				)?};
 				let value = match optionality {
 					Optionality::Required => quote! {{
@@ -303,6 +358,12 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 						#eval
 					} else {
 						let v: #ty = #expr;
+						v
+					},},
+					Optionality::TypeDefault => quote! {if let Some(value) = &parsed[#id] {
+						#eval
+					} else {
+						let v: #ty = Default::default();
 						v
 					},},
 				};
@@ -341,18 +402,8 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 
 	let name = &fun.sig.ident;
 	let vis = &fun.vis;
-	let static_ext = if attr.fields.is_empty() {
-		quote! {
-			impl #name {
-				pub const INST: &'static dyn StaticBuiltin = &#name {};
-			}
-			impl StaticBuiltin for #name {}
-		}
-	} else {
-		quote! {}
-	};
 	let static_derive_copy = if attr.fields.is_empty() {
-		quote! {, Copy}
+		quote! {, Copy, Default}
 	} else {
 		quote! {}
 	};
@@ -369,15 +420,14 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 		const _: () = {
 			use ::jrsonnet_evaluator::{
 				State, Val,
-				function::{builtin::{Builtin, StaticBuiltin, BuiltinParam, ParamName, ParamDefault}, CallLocation, ArgsLike, parse::parse_builtin_call},
-				Result, Context, typed::Typed,
-				parser::Span,
+				function::{builtin::Builtin, FunctionSignature, ParamParse, ParamName, ParamDefault, CallLocation},
+				Result, Context, typed::{Typed, FromUntyped, IntoUntypedResult},
+				Span, params, Thunk,
 			};
-			const PARAMS: &'static [BuiltinParam] = &[
+			params!(
 				#(#params_desc)*
-			];
+			);
 
-			#static_ext
 			impl Builtin for #name
 			where
 				Self: 'static
@@ -385,15 +435,13 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 				fn name(&self) -> &str {
 					stringify!(#name)
 				}
-				fn params(&self) -> &[BuiltinParam] {
-					PARAMS
+				fn params(&self) -> FunctionSignature {
+					PARAMS.with(|p| p.clone())
 				}
 				#[allow(unused_variables)]
-				fn call(&self, ctx: Context, location: CallLocation, args: &dyn ArgsLike) -> Result<Val> {
-					let parsed = parse_builtin_call(ctx.clone(), &PARAMS, args, false)?;
-
+				fn call(&self, location: CallLocation<'_>, parsed: &[Option<Thunk<Val>>]) -> Result<Val> {
 					let result: #result = #name(#(#pass)*);
-					<_ as Typed>::into_result(result)
+					<_ as IntoUntypedResult>::into_untyped_result(result)
 				}
 				fn as_any(&self) -> &dyn ::std::any::Any {
 					self
@@ -403,278 +451,7 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 	})
 }
 
-#[derive(Default)]
-#[allow(clippy::struct_excessive_bools)]
-struct TypedAttr {
-	rename: Option<String>,
-	aliases: Vec<String>,
-	flatten: bool,
-	/// flatten(ok) strategy for flattened optionals
-	/// field would be None in case of any parsing error (as in serde)
-	flatten_ok: bool,
-	// Should it be `field+:` instead of `field:`
-	add: bool,
-	// Should it be `field::` instead of `field:`
-	hide: bool,
-}
-impl Parse for TypedAttr {
-	fn parse(input: ParseStream) -> syn::Result<Self> {
-		let mut out = Self::default();
-		loop {
-			let lookahead = input.lookahead1();
-			if lookahead.peek(kw::rename) {
-				input.parse::<kw::rename>()?;
-				input.parse::<Token![=]>()?;
-				let name = input.parse::<LitStr>()?;
-				if out.rename.is_some() {
-					return Err(Error::new(
-						name.span(),
-						"rename attribute may only be specified once",
-					));
-				}
-				out.rename = Some(name.value());
-			} else if lookahead.peek(kw::alias) {
-				input.parse::<kw::alias>()?;
-				input.parse::<Token![=]>()?;
-				let alias = input.parse::<LitStr>()?;
-				out.aliases.push(alias.value());
-			} else if lookahead.peek(kw::flatten) {
-				input.parse::<kw::flatten>()?;
-				out.flatten = true;
-				if input.peek(token::Paren) {
-					let content;
-					parenthesized!(content in input);
-					let lookahead = content.lookahead1();
-					if lookahead.peek(kw::ok) {
-						content.parse::<kw::ok>()?;
-						out.flatten_ok = true;
-					} else {
-						return Err(lookahead.error());
-					}
-				}
-			} else if lookahead.peek(kw::add) {
-				input.parse::<kw::add>()?;
-				out.add = true;
-			} else if lookahead.peek(kw::hide) {
-				input.parse::<kw::hide>()?;
-				out.hide = true;
-			} else if input.is_empty() {
-				break;
-			} else {
-				return Err(lookahead.error());
-			}
-			if input.peek(Token![,]) {
-				input.parse::<Token![,]>()?;
-			} else {
-				break;
-			}
-		}
-		Ok(out)
-	}
-}
-
-struct TypedField {
-	attr: TypedAttr,
-	ident: Ident,
-	ty: Type,
-	is_option: bool,
-	is_lazy: bool,
-}
-impl TypedField {
-	fn parse(field: &syn::Field) -> Result<Self> {
-		let attr = parse_attr::<TypedAttr, _>(&field.attrs, "typed")?.unwrap_or_default();
-		let Some(ident) = field.ident.clone() else {
-			return Err(Error::new(
-				field.span(),
-				"this field should appear in output object, but it has no visible name",
-			));
-		};
-		let (is_option, ty) = extract_type_from_option(&field.ty)?
-			.map_or_else(|| (false, field.ty.clone()), |ty| (true, ty.clone()));
-		if is_option && attr.flatten {
-			if !attr.flatten_ok {
-				return Err(Error::new(
-					field.span(),
-					"strategy should be set when flattening Option",
-				));
-			}
-		} else if attr.flatten_ok {
-			return Err(Error::new(
-				field.span(),
-				"flatten(ok) is only useable on optional fields",
-			));
-		}
-
-		let is_lazy = type_is_path(&ty, "Thunk").is_some();
-
-		Ok(Self {
-			attr,
-			ident,
-			ty,
-			is_option,
-			is_lazy,
-		})
-	}
-	/// None if this field is flattened in jsonnet output
-	fn name(&self) -> Option<String> {
-		if self.attr.flatten {
-			return None;
-		}
-		Some(
-			self.attr
-				.rename
-				.clone()
-				.unwrap_or_else(|| self.ident.to_string()),
-		)
-	}
-
-	fn expand_field(&self) -> Option<TokenStream> {
-		if self.is_option {
-			return None;
-		}
-		let name = self.name()?;
-		let ty = &self.ty;
-		Some(quote! {
-			(#name, <#ty as Typed>::TYPE)
-		})
-	}
-
-	fn expand_parse(&self) -> TokenStream {
-		if self.is_option {
-			self.expand_parse_optional()
-		} else {
-			self.expand_parse_mandatory()
-		}
-	}
-
-	fn expand_parse_optional(&self) -> TokenStream {
-		let ident = &self.ident;
-		let ty = &self.ty;
-
-		// optional flatten is handled in same way as serde
-		if self.attr.flatten {
-			return quote! {
-				#ident: <#ty as TypedObj>::parse(&obj).ok(),
-			};
-		}
-
-		let name = self.name().unwrap();
-		let aliases = &self.attr.aliases;
-
-		quote! {
-			#ident: {
-				let __value = if let Some(__v) = obj.get(#name.into())? {
-					Some(__v)
-				} #(else if let Some(__v) = obj.get(#aliases.into())? {
-					Some(__v)
-				})* else {
-					None
-				};
-
-				__value.map(<#ty as Typed>::from_untyped).transpose()?
-			},
-		}
-	}
-
-	fn expand_parse_mandatory(&self) -> TokenStream {
-		let ident = &self.ident;
-		let ty = &self.ty;
-
-		// optional flatten is handled in same way as serde
-		if self.attr.flatten {
-			return quote! {
-				#ident: <#ty as TypedObj>::parse(&obj)?,
-			};
-		}
-
-		let name = self.name().unwrap();
-		let aliases = &self.attr.aliases;
-
-		let error_text = if aliases.is_empty() {
-			// clippy does not understand name variable usage in quote! macro
-			#[allow(clippy::redundant_clone)]
-			name.clone()
-		} else {
-			format!("{name} (alias {})", aliases.join(", "))
-		};
-
-		quote! {
-			#ident: {
-				let __value = if let Some(__v) = obj.get(#name.into())? {
-					__v
-				} #(else if let Some(__v) = obj.get(#aliases.into())? {
-					__v
-				})* else {
-					return Err(ErrorKind::NoSuchField(#error_text.into(), vec![]).into());
-				};
-
-				<#ty as Typed>::from_untyped(__value)?
-			},
-		}
-	}
-
-	fn expand_serialize(&self) -> TokenStream {
-		let ident = &self.ident;
-		let ty = &self.ty;
-		self.name().map_or_else(
-			|| {
-				if self.is_option {
-					quote! {
-						if let Some(value) = self.#ident {
-							<#ty as TypedObj>::serialize(value, out)?;
-						}
-					}
-				} else {
-					quote! {
-						<#ty as TypedObj>::serialize(self.#ident, out)?;
-					}
-				}
-			},
-			|name| {
-				let hide = if self.attr.hide {
-					quote! {.hide()}
-				} else {
-					quote! {}
-				};
-				let add = if self.attr.add {
-					quote! {.add()}
-				} else {
-					quote! {}
-				};
-				let value = if self.is_lazy {
-					quote! {
-						out.field(#name)
-							#hide
-							#add
-							.try_thunk(<#ty as Typed>::into_lazy_untyped(value))?;
-					}
-				} else {
-					quote! {
-						out.field(#name)
-							#hide
-							#add
-							.try_value(<#ty as Typed>::into_untyped(value)?)?;
-					}
-				};
-				if self.is_option {
-					quote! {
-						if let Some(value) = self.#ident {
-							#value
-						}
-					}
-				} else {
-					quote! {
-						{
-							let value = self.#ident;
-							#value
-						}
-					}
-				}
-			},
-		)
-	}
-}
-
+/// Derive for `Typed` macro, describes the object structure in jrsonnet type system.
 #[proc_macro_derive(Typed, attributes(typed))]
 pub fn derive_typed(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(item as DeriveInput);
@@ -684,78 +461,25 @@ pub fn derive_typed(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 		Err(e) => e.to_compile_error().into(),
 	}
 }
+/// Implement `IntoUntyped` for a struct, all the field values will be copied and converted using `IntoUntyped`.
+#[proc_macro_derive(IntoUntyped, attributes(typed))]
+pub fn derive_into_untyped(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+	let input = parse_macro_input!(item as DeriveInput);
 
-fn derive_typed_inner(input: DeriveInput) -> Result<TokenStream> {
-	let syn::Data::Struct(data) = &input.data else {
-		return Err(Error::new(input.span(), "only structs supported"));
-	};
+	match derive_into_untyped_inner(input) {
+		Ok(v) => v.into(),
+		Err(e) => e.to_compile_error().into(),
+	}
+}
+/// Implement `FromUntyped` for a struct, all the field values will be populated from jsonnet values using `FromUntyped`.
+#[proc_macro_derive(FromUntyped, attributes(typed))]
+pub fn derive_from_untyped(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+	let input = parse_macro_input!(item as DeriveInput);
 
-	let ident = &input.ident;
-	let fields = data
-		.fields
-		.iter()
-		.map(TypedField::parse)
-		.collect::<Result<Vec<_>>>()?;
-
-	let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-
-	let typed = {
-		let fields = fields
-			.iter()
-			.filter_map(TypedField::expand_field)
-			.collect::<Vec<_>>();
-		quote! {
-			impl #impl_generics Typed for #ident #ty_generics #where_clause {
-				const TYPE: &'static ComplexValType = &ComplexValType::ObjectRef(&[
-					#(#fields,)*
-				]);
-
-				fn from_untyped(value: Val) -> JrResult<Self> {
-					let obj = value.as_obj().expect("shape is correct");
-					Self::parse(&obj)
-				}
-
-				fn into_untyped(value: Self) -> JrResult<Val> {
-					let mut out = ObjValueBuilder::new();
-					value.serialize(&mut out)?;
-					Ok(Val::Obj(out.build()))
-				}
-
-			}
-		}
-	};
-
-	let fields_parse = fields.iter().map(TypedField::expand_parse);
-	let fields_serialize = fields
-		.iter()
-		.map(TypedField::expand_serialize)
-		.collect::<Vec<_>>();
-
-	Ok(quote! {
-		const _: () = {
-			use ::jrsonnet_evaluator::{
-				typed::{ComplexValType, Typed, TypedObj, CheckType},
-				Val, State,
-				error::{ErrorKind, Result as JrResult},
-				ObjValueBuilder, ObjValue,
-			};
-
-			#typed
-
-			impl #impl_generics TypedObj for #ident #ty_generics #where_clause {
-				fn serialize(self, out: &mut ObjValueBuilder) -> JrResult<()> {
-					#(#fields_serialize)*
-
-					Ok(())
-				}
-				fn parse(obj: &ObjValue) -> JrResult<Self> {
-					Ok(Self {
-						#(#fields_parse)*
-					})
-				}
-			}
-		};
-	})
+	match derive_from_untyped_inner(input) {
+		Ok(v) => v.into(),
+		Err(e) => e.to_compile_error().into(),
+	}
 }
 
 struct FormatInput {
@@ -850,14 +574,18 @@ impl FormatInput {
 ///
 /// Using `format!("literal with no codes").into()` is slower than just `"literal with no codes".into()`
 /// This macro looks for formatting codes in the input string, and uses
-/// `format!()` only when necessary
+/// `format!()` only when necessary.
 #[proc_macro]
 pub fn format_istr(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(input as FormatInput);
 	input.expand().into()
 }
 
-/// Create Thunk using closure syntax
+/// Create `Thunk` value using closure syntax.
+///
+/// ```jsonnet
+/// Thunk!(move || evaluaate(ctx, expr))
+/// ```
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn Thunk(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

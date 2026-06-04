@@ -14,12 +14,14 @@ use std::{
 	str,
 };
 
-use hashbrown::{hash_map::RawEntryMut, HashMap};
+use hashbrown::{HashMap, hash_map::RawEntryMut};
 use jrsonnet_gcmodule::{Acyclic, Trace};
 use rustc_hash::FxBuildHasher;
 
 mod inner;
 use inner::Inner;
+
+mod names;
 
 /// Interned string
 ///
@@ -31,6 +33,11 @@ impl Trace for IStr {
 		false
 	}
 }
+unsafe impl Acyclic for IStr {}
+
+/// SAFETY:
+///
+/// `IStr` is acyclic
 unsafe impl Acyclic for IStr {}
 
 impl IStr {
@@ -46,6 +53,10 @@ impl IStr {
 	#[must_use]
 	pub fn cast_bytes(self) -> IBytes {
 		IBytes(self.0.clone())
+	}
+
+	pub fn len32(&self) -> u32 {
+		self.0.len32()
 	}
 }
 
@@ -165,14 +176,14 @@ fn maybe_unpool(inner: &Inner) {
 			let mut pool = pool.borrow_mut();
 
 			if pool.remove(inner).is_none() {
+				// DOC(string-pooling)
 				// On some platforms (i.e i686-windows), try_with will not fail after TLS
 				// destructor is called, but instead re-initialize the TLS with the empty pool.
 				// Allow non-pooled Drop in this case.
-				// https://github.com/CertainLach/jrsonnet/issues/98#issuecomment-1591624016
-				//
-				// However, if pool is not empty, most likely this is issue #113, and then I don't
-				// have any explainations for now.
-				assert!(pool.is_empty(), "received an unpooled string not during the program termination, please write any info regarding this crash to https://github.com/CertainLach/jrsonnet/issues/113, thanks!");
+				// https://github.com/deltarocks/jrsonnet/issues/98#issuecomment-1591624016
+				// Another cause might be that you have improperly used jrsonnet in multi-threaded environment:
+				// https://github.com/deltarocks/jrsonnet/issues/113
+				debug_assert!(pool.is_empty(), "if you have landed here - you most likely did something naughty with multi-threading. jrsonnet string pooling uses thread_local pool");
 			}
 		});
 	}
@@ -223,10 +234,10 @@ impl From<&[u8]> for IBytes {
 type PoolMap = HashMap<Inner, (), FxBuildHasher>;
 
 thread_local! {
-	static POOL: RefCell<PoolMap> = RefCell::new(HashMap::with_capacity_and_hasher(200, FxBuildHasher::default()));
+	static POOL: RefCell<PoolMap> = RefCell::new(HashMap::with_capacity_and_hasher(200, FxBuildHasher));
 }
 
-/// Interop utilities for cross-thread VM migration.
+/// Utils for embedding jrsonnet in non-rust.
 ///
 /// Jrsonnet golang bindings require that it is possible to move jsonnet
 /// VM between OS threads, and this is not possible due to usage of
@@ -236,7 +247,7 @@ thread_local! {
 pub mod interop {
 	use std::mem;
 
-	use crate::{PoolMap, POOL};
+	use crate::{POOL, PoolMap};
 
 	/// Type-erased interned string pool
 	pub enum PoolState {}

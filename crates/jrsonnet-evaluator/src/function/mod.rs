@@ -1,26 +1,31 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
-pub use arglike::{ArgLike, ArgsLike, TlaArg};
+use educe::Educe;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
+use jrsonnet_ir::{BinaryOpType, Span};
 pub use jrsonnet_macros::builtin;
-use jrsonnet_parser::{AnalyzedExpr, Destruct, Expr, ParamsDesc, Span};
 
 use self::{
-	arglike::OptionalContext,
-	builtin::{Builtin, BuiltinParam, ParamDefault, ParamName, StaticBuiltin},
-	native::NativeDesc,
-	parse::{parse_default_function_call, parse_function_call},
+	builtin::Builtin,
+	prepared::{PreparedCall, parse_prepared_builtin_call},
 };
 use crate::{
-	bail, error::ErrorKind::*, evaluate, evaluate_trivial, function::builtin::BuiltinFunc, Context,
-	ContextBuilder, Result, Thunk, Val,
+	Context, PackedContextSupThis, Result, Thunk, Val,
+	analyze::{LDestruct, LExpr, LFunction, LSlot, LVisitor, LocalSlot, visit_lexpr},
+	arr::arridx,
+	ensure_sufficient_stack,
+	evaluate::{destructure::destruct, evaluate, evaluate_trivial},
+	function::builtin::BuiltinFunc,
 };
 
-pub mod arglike;
 pub mod builtin;
-pub mod native;
-pub mod parse;
+mod native;
+pub(crate) mod prepared;
+
+pub use jrsonnet_ir::function::*;
+pub use native::NativeFn;
+pub(crate) use prepared::PreparedFuncVal;
 
 /// Function callsite location.
 /// Either from other jsonnet code, specified by expression location, or from native (without location).
@@ -40,7 +45,8 @@ impl CallLocation<'static> {
 }
 
 /// Represents Jsonnet function defined in code.
-#[derive(Debug, Trace, PartialEq)]
+#[derive(Trace, Educe)]
+#[educe(Debug, PartialEq)]
 pub struct FuncDesc {
 	/// # Example
 	///
@@ -52,40 +58,62 @@ pub struct FuncDesc {
 	/// { a() = ... }
 	/// ```
 	pub name: IStr,
-	/// Context, in which this function was evaluated.
-	///
-	/// # Example
-	/// In
-	/// ```jsonnet
-	/// local a = 2;
-	/// function() ...
-	/// ```
-	/// context will contain `a`.
-	pub ctx: Context,
+	pub(crate) body_captures: PackedContextSupThis,
 
-	/// Function parameter definition
-	pub params: ParamsDesc,
-	/// Function body
-	pub body: AnalyzedExpr,
+	#[educe(PartialEq(method = Rc::ptr_eq))]
+	pub func: Rc<LFunction>,
 }
+
 impl FuncDesc {
-	/// Create body context, but fill arguments without defaults with lazy error
-	pub fn default_body_context(&self) -> Result<Context> {
-		parse_default_function_call(self.ctx.clone(), &self.params)
+	pub fn signature(&self) -> FunctionSignature {
+		self.func.signature.clone()
 	}
 
-	/// Create context, with which body code will run
-	pub fn call_body_context(
+	fn call(
 		&self,
-		call_ctx: Context,
-		args: &dyn ArgsLike,
-		tailstrict: bool,
-	) -> Result<Context> {
-		parse_function_call(call_ctx, self.ctx.clone(), &self.params, args, tailstrict)
+		unnamed: &[Thunk<Val>],
+		named: &[Thunk<Val>],
+		prepared: &PreparedCall,
+	) -> Result<Val> {
+		let body_ctx = self.body_captures.clone().enter(|fill, ctx| {
+			// Place each provided arg-thunk into its destructured slots.
+			for (param_idx, thunk) in unnamed.iter().enumerate() {
+				destruct(
+					&self.func.params[param_idx].destruct,
+					fill,
+					thunk.clone(),
+					ctx,
+				);
+			}
+			for &(param_idx, arg_idx) in prepared.named() {
+				destruct(
+					&self.func.params[param_idx].destruct,
+					fill,
+					named[arg_idx].clone(),
+					ctx,
+				);
+			}
+
+			for &param_idx in prepared.defaults() {
+				let param = &self.func.params[param_idx];
+				let (shape, expr) = param.default.as_ref().expect("default exists");
+				let expr = expr.clone();
+				let env = Context::enter_using(ctx, shape);
+
+				destruct(
+					&param.destruct,
+					fill,
+					Thunk!(move || evaluate(env, &expr)),
+					ctx,
+				);
+			}
+		});
+
+		ensure_sufficient_stack(|| evaluate(body_ctx, &self.func.body))
 	}
 
 	pub fn evaluate_trivial(&self) -> Option<Val> {
-		evaluate_trivial(&self.body)
+		evaluate_trivial(&self.func.body)
 	}
 }
 
@@ -93,14 +121,8 @@ impl FuncDesc {
 #[allow(clippy::module_name_repetitions)]
 #[derive(Trace, Clone)]
 pub enum FuncVal {
-	/// Identity function, kept this way for comparsions.
-	Id,
 	/// Plain function implemented in jsonnet.
 	Normal(Cc<FuncDesc>),
-	/// Function without arguments works just as a fancy thunk value.
-	Thunk(Thunk<Val>),
-	/// Standard library function.
-	StaticBuiltin(#[trace(skip)] &'static dyn StaticBuiltin),
 	/// User-provided function.
 	Builtin(BuiltinFunc),
 }
@@ -108,12 +130,7 @@ pub enum FuncVal {
 impl Debug for FuncVal {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Self::Id => f.debug_tuple("Id").finish(),
-			Self::Thunk(arg0) => f.debug_tuple("Thunk").field(arg0).finish(),
 			Self::Normal(arg0) => f.debug_tuple("Normal").field(arg0).finish(),
-			Self::StaticBuiltin(arg0) => {
-				f.debug_tuple("StaticBuiltin").field(&arg0.name()).finish()
-			}
 			Self::Builtin(arg0) => f.debug_tuple("Builtin").field(&arg0.name()).finish(),
 		}
 	}
@@ -121,139 +138,68 @@ impl Debug for FuncVal {
 
 #[allow(clippy::unnecessary_wraps)]
 #[builtin]
-const fn builtin_id(x: Val) -> Val {
+pub const fn builtin_id(x: Thunk<Val>) -> Thunk<Val> {
 	x
 }
-static ID: &builtin_id = &builtin_id {};
 
 impl FuncVal {
 	pub fn builtin(builtin: impl Builtin) -> Self {
 		Self::Builtin(BuiltinFunc::new(builtin))
 	}
-	pub fn static_builtin(static_builtin: &'static dyn StaticBuiltin) -> Self {
-		Self::StaticBuiltin(static_builtin)
+
+	pub fn identity() -> Self {
+		Self::builtin(builtin_id {})
 	}
 
-	pub fn params(&self) -> Vec<BuiltinParam> {
+	pub fn params(&self) -> FunctionSignature {
 		match self {
-			Self::Id => ID.params().to_vec(),
-			Self::StaticBuiltin(i) => i.params().to_vec(),
-			Self::Builtin(i) => i.params().to_vec(),
-			Self::Normal(p) => p
-				.params
-				.iter()
-				.map(|p| {
-					BuiltinParam::new(
-						p.0.name()
-							.as_ref()
-							.map(IStr::to_string)
-							.map_or(ParamName::ANONYMOUS, ParamName::new_dynamic),
-						ParamDefault::exists(p.1.is_some()),
-					)
-				})
-				.collect(),
-			Self::Thunk(_) => vec![],
+			Self::Builtin(i) => i.params(),
+			Self::Normal(p) => p.signature(),
 		}
 	}
 	/// Amount of non-default required arguments
-	pub fn params_len(&self) -> usize {
-		match self {
-			Self::Id => 1,
-			Self::Normal(n) => n.params.iter().filter(|p| p.1.is_none()).count(),
-			Self::StaticBuiltin(i) => i.params().iter().filter(|p| !p.has_default()).count(),
-			Self::Builtin(i) => i.params().iter().filter(|p| !p.has_default()).count(),
-			Self::Thunk(_) => 0,
-		}
+	pub fn params_len32(&self) -> u32 {
+		arridx(self.params().iter().filter(|p| !p.has_default()).count())
 	}
 	/// Function name, as defined in code.
 	pub fn name(&self) -> IStr {
 		match self {
-			Self::Id => "id".into(),
 			Self::Normal(normal) => normal.name.clone(),
-			Self::StaticBuiltin(builtin) => builtin.name().into(),
 			Self::Builtin(builtin) => builtin.name().into(),
-			Self::Thunk(_) => "thunk".into(),
 		}
-	}
-	/// Call function using arguments evaluated in specified `call_ctx` [`Context`].
-	///
-	/// If `tailstrict` is specified - then arguments will be evaluated before being passed to function body.
-	pub fn evaluate(
-		&self,
-		call_ctx: Context,
-		loc: CallLocation<'_>,
-		args: &dyn ArgsLike,
-		tailstrict: bool,
-	) -> Result<Val> {
-		match self {
-			Self::Id => ID.call(call_ctx, loc, args),
-			Self::Normal(func) => {
-				let body_ctx = func.call_body_context(call_ctx, args, tailstrict)?;
-				evaluate(body_ctx, &func.body)
-			}
-			Self::Thunk(thunk) => {
-				if args.is_empty() {
-					bail!(TooManyArgsFunctionHas(0, vec![],))
-				}
-				thunk.evaluate()
-			}
-			Self::StaticBuiltin(b) => b.call(call_ctx, loc, args),
-			Self::Builtin(b) => b.call(call_ctx, loc, args),
-		}
-	}
-	pub fn evaluate_simple<A: ArgsLike + OptionalContext>(
-		&self,
-		args: &A,
-		tailstrict: bool,
-	) -> Result<Val> {
-		self.evaluate(
-			ContextBuilder::new().build(),
-			CallLocation::native(),
-			args,
-			tailstrict,
-		)
-	}
-	/// Convert jsonnet function to plain `Fn` value.
-	pub fn into_native<D: NativeDesc>(self) -> D::Value {
-		D::into_native(self)
 	}
 
-	/// Is this function an indentity function.
-	///
-	/// Currently only works for builtin `std.id`, aka `Self::Id` value, and `function(x) x`.
+	pub(crate) fn evaluate_prepared(
+		&self,
+		prepared: &PreparedCall,
+		loc: CallLocation<'_>,
+		unnamed: &[Thunk<Val>],
+		named: &[Thunk<Val>],
+		_tailstrict: bool,
+	) -> Result<Val> {
+		match self {
+			FuncVal::Normal(func) => func.call(unnamed, named, prepared),
+			FuncVal::Builtin(b) => {
+				let args = parse_prepared_builtin_call(prepared, b.params(), unnamed, named);
+				b.call(loc, &args)
+			}
+		}
+	}
+
+	/// Is this function an identity function.
 	///
 	/// This function should only be used for optimization, not for the conditional logic, i.e code should work with syntetic identity function too
 	pub fn is_identity(&self) -> bool {
 		match self {
-			Self::Id => true,
-			Self::Normal(desc) => {
-				if desc.params.len() != 1 {
-					return false;
-				}
-				let param = &desc.params[0];
-				if param.1.is_some() {
-					return false;
-				}
-				#[allow(clippy::infallible_destructuring_match)]
-				let id = match &param.0 {
-					Destruct::Full(id) => id,
-					#[cfg(feature = "exp-destruct")]
-					_ => return false,
-				};
-				desc.body.expr() == &Expr::Var(id.clone())
-			}
-			_ => false,
+			Self::Builtin(b) => b.as_any().downcast_ref::<builtin_id>().is_some(),
+			Self::Normal(_) => false,
 		}
-	}
-	/// Identity function value.
-	pub const fn identity() -> Self {
-		Self::Id
 	}
 
 	pub fn evaluate_trivial(&self) -> Option<Val> {
 		match self {
 			Self::Normal(n) => n.evaluate_trivial(),
-			_ => None,
+			Self::Builtin(_) => None,
 		}
 	}
 }
@@ -266,8 +212,111 @@ where
 		Self::builtin(value)
 	}
 }
-impl From<&'static dyn StaticBuiltin> for FuncVal {
-	fn from(value: &'static dyn StaticBuiltin) -> Self {
-		Self::static_builtin(value)
+
+#[derive(Clone, Copy, Debug)]
+pub enum FoldKind {
+	/// `function(acc, x) acc + <expr>`
+	Left,
+	/// `function(x, acc) <expr> + acc`
+	Right,
+}
+
+/// A folding lambda specialised to `acc + <expr>` (or `<expr> + acc`)
+///
+///  `<expr>` does not reference `acc`. Lets the caller skip building an
+/// intermediate accumulator value per step and instead append each
+/// per-element result directly to an output buffer.
+pub struct Folder<'f> {
+	func: &'f FuncDesc,
+	value_destruct: &'f LDestruct,
+	expr: &'f LExpr,
+}
+
+impl Folder<'_> {
+	/// Evaluate `<expr>` with the current element bound to the non-acc param.
+	pub fn eval(&self, x: Thunk<Val>) -> Result<Val> {
+		let body_ctx = self.func.body_captures.clone().enter(|fill, ctx| {
+			destruct(self.value_destruct, fill, x, ctx);
+		});
+		ensure_sufficient_stack(|| evaluate(body_ctx, self.expr))
+	}
+}
+
+struct ReferencesLocal {
+	slot: LocalSlot,
+	found: bool,
+}
+
+impl LVisitor for ReferencesLocal {
+	fn visit_lslot(&mut self, slot: LSlot) {
+		if let LSlot::Local(s) = slot
+			&& s.0 == self.slot.0
+		{
+			self.found = true;
+		}
+	}
+	fn visit_lexpr(&mut self, e: &LExpr) {
+		if self.found {
+			return;
+		}
+		visit_lexpr(self, e);
+	}
+}
+
+fn references_local(expr: &LExpr, slot: LocalSlot) -> bool {
+	let mut v = ReferencesLocal { slot, found: false };
+	v.visit_lexpr(expr);
+	v.found
+}
+
+impl FuncVal {
+	pub fn as_folder(&self, kind: FoldKind) -> Option<Folder<'_>> {
+		let Self::Normal(desc) = self else {
+			return None;
+		};
+		let func = &desc.func;
+		if func.params.len() != 2 {
+			return None;
+		}
+		if func.params.iter().any(|p| p.default.is_some()) {
+			return None;
+		}
+
+		let (acc_idx, value_idx) = match kind {
+			FoldKind::Left => (0, 1),
+			FoldKind::Right => (1, 0),
+		};
+
+		let acc_slot = match &func.params[acc_idx].destruct {
+			LDestruct::Full(s) => *s,
+			#[cfg(feature = "exp-destruct")]
+			_ => return None,
+		};
+
+		let LExpr::BinaryOp { lhs, op, rhs } = &*func.body else {
+			return None;
+		};
+		if *op != BinaryOpType::Add {
+			return None;
+		}
+		let (acc_side, expr_side) = match kind {
+			FoldKind::Left => (lhs, rhs),
+			FoldKind::Right => (rhs, lhs),
+		};
+		let LExpr::Slot(LSlot::Local(s)) = &**acc_side else {
+			return None;
+		};
+		if s.0 != acc_slot.0 {
+			return None;
+		}
+		if references_local(expr_side, acc_slot) {
+			return None;
+		}
+
+		Some(Folder {
+			func: desc,
+			value_destruct: &func.params[value_idx].destruct,
+			expr: expr_side,
+		})
 	}
 }

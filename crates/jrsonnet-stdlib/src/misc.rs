@@ -1,26 +1,25 @@
 use std::{cell::RefCell, collections::BTreeSet};
 
 use jrsonnet_evaluator::{
-	bail,
+	Either, IStr, ObjValue, ObjValueBuilder, ResultExt, Thunk, Val, bail,
 	error::{ErrorKind::*, Result},
-	function::{builtin, CallLocation, FuncVal},
+	function::{CallLocation, FuncVal, builtin},
 	manifest::JsonFormat,
 	typed::{Either2, Either4},
-	val::{equals, ArrValue},
-	Either, IStr, ObjValue, ObjValueBuilder, ResultExt, Thunk, Val,
+	val::{ArrValue, equals},
 };
 use jrsonnet_gcmodule::Cc;
 
 use crate::Settings;
 
 #[builtin]
-pub fn builtin_length(x: Either![IStr, ArrValue, ObjValue, FuncVal]) -> usize {
+pub fn builtin_length(x: Either![IStr, ArrValue, ObjValue, FuncVal]) -> u32 {
 	use Either4::*;
 	match x {
-		A(x) => x.chars().count(),
-		B(x) => x.len(),
-		C(x) => x.len(),
-		D(f) => f.params_len(),
+		A(x) => u32::try_from(x.chars().count()).expect("4g limit"),
+		B(x) => x.len32(),
+		C(x) => x.len32(),
+		D(f) => f.params_len32(),
 	}
 }
 
@@ -69,7 +68,7 @@ pub fn builtin_native(this: &builtin_native, x: IStr) -> Val {
 		.ext_natives
 		.get(&x)
 		.cloned()
-		.map_or(Val::Null, Val::Func)
+		.unwrap_or(Val::Null)
 }
 
 #[builtin(fields(
@@ -172,7 +171,7 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 	let Some(patch) = patch.as_obj() else {
 		return Ok(patch);
 	};
-	let target = target.as_obj().unwrap_or_else(|| ObjValue::empty());
+	let target = target.as_obj().unwrap_or_else(ObjValue::empty);
 	let target_fields = target
 		.fields(
 			// FIXME: Makes no sense to preserve order for BTreeSet, it would be better to use IndexSet here?
@@ -202,7 +201,9 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 	for field in target_fields.union(&patch_fields) {
 		let Some(field_patch) = patch.get(field.clone())? else {
 			// All lazy fields might be unified into a single filtered object core instead of creating a thunk per, but this implementation is good enough.
-			let target_field = target.get_lazy(field.clone()).expect("we're iterating over fields union, if field is missing in patch - it exists in target");
+			let target_field = target.get_lazy(field.clone()).expect(
+				"we're iterating over fields union, if field is missing in patch - it exists in target",
+			);
 			out.field(field.clone()).thunk(target_field);
 			continue;
 		};

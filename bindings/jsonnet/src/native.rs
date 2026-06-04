@@ -1,13 +1,13 @@
 use std::{
-	ffi::{c_void, CStr},
+	ffi::{CStr, c_void},
 	os::raw::{c_char, c_int},
 };
 
 use jrsonnet_evaluator::{
+	IStr, Val,
 	error::{Error, ErrorKind},
 	function::builtin::{NativeCallback, NativeCallbackHandler},
-	typed::Typed,
-	IStr, Val,
+	typed::FromUntyped as _,
 };
 
 use crate::VM;
@@ -43,7 +43,7 @@ impl NativeCallbackHandler for JsonnetNativeCallbackHandler {
 		}
 		n_args.push(None);
 		let mut success = 1;
-		let v = unsafe { (self.cb)(self.ctx, n_args.as_ptr().cast(), &mut success) };
+		let v = unsafe { (self.cb)(self.ctx, n_args.as_ptr().cast(), &raw mut success) };
 		let v = unsafe { *Box::from_raw(v) };
 		if success == 1 {
 			Ok(v)
@@ -62,7 +62,7 @@ impl NativeCallbackHandler for JsonnetNativeCallbackHandler {
 /// `name` should be a NUL-terminated string
 /// `cb` should be a function pointer
 /// `raw_params` should point to a NULL-terminated array of NUL-terminated strings
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn jsonnet_native_callback(
 	vm: &VM,
 	name: *const c_char,
@@ -82,7 +82,7 @@ pub unsafe extern "C" fn jsonnet_native_callback(
 				.expect("param name is not utf-8")
 		};
 		params.push(param.into());
-		raw_params = unsafe { raw_params.offset(1) };
+		raw_params = unsafe { raw_params.add(1) };
 	}
 
 	let any_resolver = vm.state.context_initializer();

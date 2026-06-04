@@ -1,11 +1,14 @@
 [package]
 name = "jrsonnet"
-description = "Rust jsonnet implementation"
+description = "Rust implementation of the jsonnet command-line interpreter"
+keywords = ["jsonnet", "json", "config", "cli"]
+categories = ["command-line-utilities", "config", "template-engine"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 version.workspace = true
+default-run = "jrsonnet"
 
 [lints]
 workspace = true
@@ -13,38 +16,36 @@ workspace = true
 [features]
 default = []
 experimental = [
-    "exp-preserve-order",
-    "exp-destruct",
-    "exp-null-coaelse",
-    "exp-object-iteration",
-    "exp-bigint",
-    "exp-apply",
+  "exp-preserve-order",
+  "exp-destruct",
+  "exp-null-coaelse",
+  "exp-object-iteration",
+  "exp-bigint",
+  "exp-apply",
 ]
 # Use mimalloc as allocator
 mimalloc = ["mimallocator"]
 # Experimental feature, which allows to preserve order of object fields
 exp-preserve-order = [
-    "jrsonnet-evaluator/exp-preserve-order",
-    "jrsonnet-cli/exp-preserve-order",
+  "jrsonnet-evaluator/exp-preserve-order",
+  "jrsonnet-cli/exp-preserve-order",
 ]
 # Destructuring of locals
 exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
-# Iteration over objects yields [key, value] elements
+# Iteration over objects using [key]: value syntax
 exp-object-iteration = ["jrsonnet-evaluator/exp-object-iteration"]
 # Bigint type
 exp-bigint = ["jrsonnet-evaluator/exp-bigint", "jrsonnet-cli/exp-bigint"]
 # obj?.field, obj?.['field']
 exp-null-coaelse = [
-    "jrsonnet-evaluator/exp-null-coaelse",
-    "jrsonnet-parser/exp-null-coaelse",
-    "jrsonnet-cli/exp-null-coaelse",
+  "jrsonnet-evaluator/exp-null-coaelse",
+  "jrsonnet-cli/exp-null-coaelse",
 ]
 # --exp-apply
 exp-apply = []
 
 [dependencies]
 jrsonnet-evaluator.workspace = true
-jrsonnet-parser.workspace = true
 jrsonnet-cli.workspace = true
 jrsonnet-gcmodule.workspace = true
 

@@ -4,7 +4,7 @@
 
 use std::{ffi::CStr, os::raw::c_char};
 
-use jrsonnet_evaluator::{val::ArrValue, Thunk, Val};
+use jrsonnet_evaluator::{Thunk, Val};
 
 use crate::VM;
 
@@ -14,7 +14,7 @@ use crate::VM;
 ///
 /// `arr` should be a pointer to array value allocated by `make_array`, or returned by other library call
 /// `val` should be a pointer to value allocated using this library
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn jsonnet_json_array_append(_vm: &VM, arr: &mut Val, val: &Val) {
 	match arr {
 		Val::Arr(old) => {
@@ -24,7 +24,7 @@ pub unsafe extern "C" fn jsonnet_json_array_append(_vm: &VM, arr: &mut Val, val:
 			}
 
 			new.push(Thunk::evaluated(val.clone()));
-			*arr = Val::Arr(ArrValue::lazy(new));
+			*arr = Val::arr(new);
 		}
 		_ => panic!("should receive array"),
 	}
@@ -38,7 +38,7 @@ pub unsafe extern "C" fn jsonnet_json_array_append(_vm: &VM, arr: &mut Val, val:
 ///
 /// `obj` should be a pointer to object value allocated by `make_object`, or returned by other library call
 /// `name` should be NUL-terminated string
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn jsonnet_json_object_append(
 	_vm: &VM,
 	obj: &mut Val,

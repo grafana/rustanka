@@ -1,17 +1,17 @@
 use std::cmp::Ordering;
 
-use jrsonnet_parser::{AnalyzedExpr, BinaryOpType, UnaryOpType};
+use jrsonnet_ir::{BinaryOpType, UnaryOpType};
 
 use crate::{
-	arr::ArrValue,
-	bail,
-	error::ErrorKind::*,
-	evaluate,
-	manifest::format_float_go_g17,
-	stdlib::std_format,
-	typed::Typed,
-	val::{equals, StrValue},
 	Context, Result, Val,
+	analyze::LExpr,
+	arr::ArrValue,
+	bail, error,
+	error::ErrorKind::*,
+	evaluate::evaluate,
+	stdlib::std_format,
+	typed::IntoUntyped as _,
+	val::{StrValue, equals},
 };
 
 /// Format a number like Go's unparseNumber: %.0f for integers, %.17g for floats
@@ -30,7 +30,8 @@ pub fn evaluate_unary_op(op: UnaryOpType, b: &Val) -> Result<Val> {
 		(Plus, Num(n)) => Val::Num(*n),
 		(Minus, Num(n)) => Val::try_num(-n.get())?,
 		(Not, Bool(v)) => Bool(!v),
-		(BitNot, Num(n)) => Val::try_num(!(n.get() as i64) as f64)?,
+		#[expect(clippy::cast_precision_loss, reason = "as spec")]
+		(BitNot, Num(n)) => Val::try_num(!n.truncate_for_bitwise()? as f64)?,
 		(op, o) => bail!(UnaryOperatorDoesNotOperateOnType(op, o.value_type())),
 	})
 }
@@ -49,7 +50,9 @@ pub fn evaluate_add_op(a: &Val, b: &Val) -> Result<Val> {
 		(o, Str(a)) => Val::string(format!("{}{a}", o.clone().to_string()?)),
 
 		(Obj(v1), Obj(v2)) => Obj(v2.extend_from(v1.clone())),
-		(Arr(a), Arr(b)) => Val::Arr(ArrValue::extended(a.clone(), b.clone())),
+		(Arr(a), Arr(b)) => Val::Arr(
+			ArrValue::extended(a.clone(), b.clone()).ok_or_else(|| error!("array is too large"))?,
+		),
 
 		(Num(v1), Num(v2)) => Val::try_num(v1.get() + v2.get())?,
 
@@ -84,7 +87,17 @@ pub fn evaluate_sub_op(a: &Val, b: &Val) -> Result<Val> {
 pub fn evaluate_mul_op(a: &Val, b: &Val) -> Result<Val> {
 	use Val::*;
 	Ok(match (a, b) {
+		#[expect(
+			clippy::cast_possible_truncation,
+			clippy::cast_sign_loss,
+			reason = "should not be used with values too large, negative == 0"
+		)]
 		(Str(s), Num(c)) => Val::string(s.to_string().repeat(c.get() as usize)),
+		#[expect(
+			clippy::cast_possible_truncation,
+			clippy::cast_sign_loss,
+			reason = "should not be used with values too large"
+		)]
 		(Num(c), Str(s)) => Val::string(s.to_string().repeat(c.get() as usize)),
 
 		(Num(v1), Num(v2)) => Val::try_num(v1.get() * v2.get())?,
@@ -106,9 +119,9 @@ fn is_attempt_to_divide_by_zero(a: &Val, b: &Val) -> bool {
 		// string format
 		(Str(_), _) => false,
 
-		(_, Num(b)) => return **b == 0.,
+		(_, Num(b)) => **b == 0.,
 		#[cfg(feature = "exp-bigint")]
-		(_, BigInt(b)) => return **b == num_bigint::BigInt::ZERO,
+		(_, BigInt(b)) => **b == num_bigint::BigInt::ZERO,
 
 		// something else
 		_ => false,
@@ -158,19 +171,27 @@ pub fn evaluate_mod_op(a: &Val, b: &Val) -> Result<Val> {
 
 pub fn evaluate_binary_op_special(
 	ctx: Context,
-	a: &AnalyzedExpr,
+	a: &LExpr,
 	op: BinaryOpType,
-	b: &AnalyzedExpr,
+	b: &LExpr,
 ) -> Result<Val> {
 	use BinaryOpType::*;
 	use Val::*;
+
 	Ok(match (evaluate(ctx.clone(), a)?, op, b) {
-		(Bool(true), Or, _o) => Val::Bool(true),
-		(Bool(false), And, _o) => Val::Bool(false),
+		(Bool(true), Or, _) => Val::Bool(true),
+		(Bool(false), And, _) => Val::Bool(false),
 		#[cfg(feature = "exp-null-coaelse")]
 		(Null, NullCoaelse, eb) => evaluate(ctx, eb)?,
 		#[cfg(feature = "exp-null-coaelse")]
-		(a, NullCoaelse, _o) => a,
+		(a, NullCoaelse, _) => a,
+		(a, In, LExpr::Super) => {
+			let sup_this = ctx.try_sup_this()?;
+			if !sup_this.has_super() {
+				return Ok(Val::Bool(false));
+			}
+			return Ok(Val::Bool(sup_this.field_in_super(a.to_string()?)));
+		}
 		(a, op, eb) => evaluate_binary_op_normal(&a, op, &evaluate(ctx, eb)?)?,
 	})
 }
@@ -229,13 +250,28 @@ pub fn evaluate_binary_op_normal(a: &Val, op: BinaryOpType, b: &Val) -> Result<V
 		(a, Div, b) => evaluate_div_op(a, b)?,
 		(a, Mod, b) => evaluate_mod_op(a, b)?,
 
-		(Num(v1), BitAnd, Num(v2)) => {
+		(Num(v1), BitAnd, Num(v2)) =>
+		{
+			#[expect(
+				clippy::cast_precision_loss,
+				reason = "values are within safe integer ranges"
+			)]
 			Val::try_num((v1.truncate_for_bitwise()? & v2.truncate_for_bitwise()?) as f64)?
 		}
-		(Num(v1), BitOr, Num(v2)) => {
+		(Num(v1), BitOr, Num(v2)) =>
+		{
+			#[expect(
+				clippy::cast_precision_loss,
+				reason = "values are within safe integer ranges"
+			)]
 			Val::try_num((v1.truncate_for_bitwise()? | v2.truncate_for_bitwise()?) as f64)?
 		}
-		(Num(v1), BitXor, Num(v2)) => {
+		(Num(v1), BitXor, Num(v2)) =>
+		{
+			#[expect(
+				clippy::cast_precision_loss,
+				reason = "values are within safe integer ranges"
+			)]
 			Val::try_num((v1.truncate_for_bitwise()? ^ v2.truncate_for_bitwise()?) as f64)?
 		}
 		(Num(v1), Lhs, Num(v2)) => {
@@ -245,16 +281,28 @@ pub fn evaluate_binary_op_normal(a: &Val, op: BinaryOpType, b: &Val) -> Result<V
 			let base = v1.truncate_for_bitwise()?;
 			let exp = v2.truncate_for_bitwise()? % 64;
 
+			#[expect(clippy::cast_sign_loss, reason = "exp is positive")]
 			if exp >= 1 && base >= (1i64 << (63 - exp as u32)) {
 				bail!("left shift would overflow")
 			}
+			#[expect(
+				clippy::cast_precision_loss,
+				clippy::cast_sign_loss,
+				reason = "checked as original impl"
+			)]
 			Val::try_num(base.wrapping_shl(exp as u32) as f64)?
 		}
 		(Num(v1), Rhs, Num(v2)) => {
 			if v2.get() < 0.0 {
 				bail!("shift by negative exponent")
 			}
+			#[expect(
+				clippy::cast_sign_loss,
+				clippy::cast_possible_truncation,
+				reason = "checked as original impl"
+			)]
 			let exp = ((v2.get() as i64) & 63) as u32;
+			#[expect(clippy::cast_precision_loss, reason = "checked as upstream impl")]
 			Val::try_num(v1.truncate_for_bitwise()?.wrapping_shr(exp) as f64)?
 		}
 

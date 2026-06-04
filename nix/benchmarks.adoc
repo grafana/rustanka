@@ -1,0 +1,7 @@
+= Benchmarks
+
+There are multiple implementations of jsonnet implemented in different languages: Rust (this repo), https://github.com/google/go-jsonnet/[Go], https://github.com/databricks/sjsonnet[Scala], https://github.com/google/jsonnet[C++], https://github.com/moleike/haskell-jsonnet[Haskell].
+
+For simplicity, I will call these implementations by the language of their implementation.
+
+Unfortunately, I haven't managed to measure performance of Haskell implementation, because I wasn't able to build it, and there is no binaries published anywhere, so this implementation is omitted from the following benchmarks

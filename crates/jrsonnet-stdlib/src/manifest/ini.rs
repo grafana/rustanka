@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
 use jrsonnet_evaluator::{
+	IStr, ObjValue, Result, ResultExt, Val,
 	manifest::{ManifestFormat, ToStringFormat},
-	typed::Typed,
-	ObjValue, Result, ResultExt, Val,
+	typed::{FromUntyped, Typed},
 };
-use jrsonnet_parser::IStr;
 
 pub struct IniFormat {
 	#[cfg(feature = "exp-preserve-order")]
@@ -31,10 +30,10 @@ impl IniFormat {
 }
 
 impl ManifestFormat for IniFormat {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
 		manifest_ini_obj(
 			self,
-			IniObj::from_untyped(val).description("ini object structure")?,
+			IniObj::from_untyped(val.clone()).description("ini object structure")?,
 			buf,
 		)
 	}
@@ -68,21 +67,21 @@ fn manifest_ini_body(
 				out.push_str(&key);
 				out.push_str(" = ");
 				ToStringFormat
-					.manifest_buf(ele, out)
+					.manifest_buf(&ele, out)
 					.with_description(manifest_desc)?;
 			}
 		} else {
 			out.push_str(&key);
 			out.push_str(" = ");
 			ToStringFormat
-				.manifest_buf(value, out)
+				.manifest_buf(&value, out)
 				.with_description(manifest_desc)?;
 		}
 	}
 	Ok(())
 }
 
-#[derive(Typed)]
+#[derive(Typed, FromUntyped)]
 struct IniObj {
 	main: Option<ObjValue>,
 	// TODO: Preserve section order?

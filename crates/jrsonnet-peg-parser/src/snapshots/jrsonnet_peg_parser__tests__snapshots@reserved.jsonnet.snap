@@ -1,0 +1,34 @@
+---
+source: crates/jrsonnet-peg-parser/src/lib.rs
+assertion_line: 459
+expression: v
+input_file: crates/jrsonnet-peg-parser/src/tests/reserved.jsonnet
+---
+Arr(
+    [
+        Trivial(
+            Null,
+        ),
+        Var(
+            "nulla" from virtual:<test>:8-13,
+        ),
+        Apply(
+            Var(
+                "a" from virtual:<test>:15-16,
+            ),
+            ArgsDesc {
+                unnamed: [
+                    Var(
+                        "b" from virtual:<test>:17-18,
+                    ),
+                    Var(
+                        "null_fields" from virtual:<test>:20-31,
+                    ),
+                ],
+                names: [],
+                values: [],
+            } from virtual:<test>:16-32,
+            false,
+        ),
+    ],
+)

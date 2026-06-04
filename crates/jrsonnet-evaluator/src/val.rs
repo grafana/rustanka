@@ -5,25 +5,25 @@ use std::{
 	marker::PhantomData,
 	mem::replace,
 	num::NonZeroU32,
-	ops::Deref,
 	rc::Rc,
 };
 
-use jrsonnet_gcmodule::{cc_dyn, Acyclic, Cc, Trace};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
 use jrsonnet_interner::IStr;
+use jrsonnet_ir::{BinaryOpType, TrivialVal};
 pub use jrsonnet_macros::Thunk;
 use jrsonnet_types::ValType;
 use rustc_hash::FxHashMap;
-use thiserror::Error;
 
 pub use crate::arr::{ArrValue, ArrayLike};
 use crate::{
-	bail,
+	NumValue, ObjValue, Result, SupThis, Unbound, WeakSupThis, bail,
 	error::{Error, ErrorKind::*},
+	evaluate::operator::{evaluate_compare_op, evaluate_mod_op},
 	function::FuncVal,
+	gc::WithCapacityExt as _,
 	manifest::{ManifestFormat, ToStringFormat},
-	typed::{BoundedUsize, MAX_SAFE_INTEGER, MIN_SAFE_INTEGER},
-	ObjValue, Result, SupThis, Unbound, WeakSupThis,
+	typed::BoundedUsize,
 };
 
 pub trait ThunkValue: Trace {
@@ -64,7 +64,7 @@ impl<D: Trace, T: Trace + Clone> ThunkValue for MemoizedClosureThunk<D, T> {
 			MemoizedClusureThunkInner::Errored(e) => return Err(e.clone()),
 			MemoizedClusureThunkInner::Pending => return Err(InfiniteRecursionDetected.into()),
 			MemoizedClusureThunkInner::Waiting { .. } => (),
-		};
+		}
 		let MemoizedClusureThunkInner::Waiting { env, closure } = replace(
 			&mut *self.0.borrow_mut(),
 			MemoizedClusureThunkInner::Pending,
@@ -137,7 +137,7 @@ impl<T: Trace> Thunk<T> {
 
 impl<T> Thunk<T>
 where
-	T: Clone + Trace,
+	T: Trace,
 {
 	pub fn force(&self) -> Result<()> {
 		self.evaluate()?;
@@ -161,7 +161,7 @@ pub trait ThunkMapper<Input>: Trace {
 }
 impl<Input> Thunk<Input>
 where
-	Input: Trace + Clone,
+	Input: Trace,
 {
 	pub fn map<M>(self, mapper: M) -> Thunk<M::Output>
 	where
@@ -212,7 +212,7 @@ where
 impl<I: Unbound<Bound = T>, T: Trace> CachedUnbound<I, T> {
 	pub fn new(value: I) -> Self {
 		Self {
-			cache: Cc::new(RefCell::new(FxHashMap::default())),
+			cache: Cc::new(RefCell::new(FxHashMap::new())),
 			value,
 		}
 	}
@@ -269,7 +269,7 @@ impl IndexableVal {
 
 	pub fn to_array(self) -> ArrValue {
 		match self {
-			Self::Str(s) => ArrValue::chars(s.chars()),
+			Self::Str(s) => s.chars().collect(),
 			Self::Arr(arr) => arr,
 		}
 	}
@@ -280,7 +280,7 @@ impl IndexableVal {
 	/// For strings, will create a copy of specified interval.
 	///
 	/// For arrays, nothing will be copied on this call, instead [`ArrValue::Slice`] view will be returned.
-	pub fn slice(
+	pub fn slice32(
 		self,
 		index: Option<i32>,
 		end: Option<i32>,
@@ -290,19 +290,18 @@ impl IndexableVal {
 			Self::Str(s) => {
 				let mut computed_len = None;
 				let mut get_len = || {
-					computed_len.map_or_else(
-						|| {
-							let len = s.chars().count();
-							let _ = computed_len.insert(len);
-							len
-						},
-						|len| len,
-					)
+					computed_len.unwrap_or_else(|| {
+						let len = s.chars().count();
+						let _ = computed_len.insert(len);
+						len
+					})
 				};
 				let mut get_idx = |pos: Option<i32>, default| {
 					match pos {
-						Some(v) if v < 0 => get_len().saturating_sub((-v) as usize),
+						#[expect(clippy::cast_sign_loss, reason = "abs value is used")]
+						Some(v) if v < 0 => get_len().saturating_sub((-v as isize) as usize),
 						// No need to clamp, as iterator interface is used
+						#[expect(clippy::cast_sign_loss, reason = "abs value is used")]
 						Some(v) => v as usize,
 						None => default,
 					}
@@ -325,9 +324,13 @@ impl IndexableVal {
 					.into(),
 				))
 			}
-			Self::Arr(arr) => Ok(Self::Arr(arr.clone().slice(
+			Self::Arr(arr) => Ok(Self::Arr(arr.clone().slice32(
 				index,
 				end,
+				#[expect(
+					clippy::cast_possible_truncation,
+					reason = "overflow will result with skip too large which would be equivalent"
+				)]
 				step.map(|v| NonZeroU32::new(v.value() as u32).expect("bounded != 0")),
 			))),
 		}
@@ -355,8 +358,19 @@ impl StrValue {
 			Self::Tree(Rc::new((a, b, len)))
 		}
 	}
-	pub fn into_flat(self) -> IStr {
-		#[cold]
+	pub fn chunks(&self, c: &mut impl FnMut(&IStr)) {
+		fn write_buf(s: &StrValue, c: &mut impl FnMut(&IStr)) {
+			match s {
+				StrValue::Flat(f) => c(f),
+				StrValue::Tree(t) => {
+					write_buf(&t.0, c);
+					write_buf(&t.1, c);
+				}
+			}
+		}
+		write_buf(self, c);
+	}
+	pub fn into_flat_in(&self, out: &mut String) {
 		fn write_buf(s: &StrValue, out: &mut String) {
 			match s {
 				StrValue::Flat(f) => out.push_str(f),
@@ -366,11 +380,15 @@ impl StrValue {
 				}
 			}
 		}
+		out.reserve(self.len());
+		write_buf(self, out);
+	}
+	pub fn into_flat(&self) -> IStr {
 		match self {
-			Self::Flat(f) => f,
+			Self::Flat(f) => f.clone(),
 			Self::Tree(_) => {
 				let mut buf = String::with_capacity(self.len());
-				write_buf(&self, &mut buf);
+				Self::into_flat_in(self, &mut buf);
 				buf.into()
 			}
 		}
@@ -431,132 +449,6 @@ impl Ord for StrValue {
 	}
 }
 
-/// Represents jsonnet number
-/// Jsonnet numbers are finite f64, with NaNs disallowed
-#[derive(Trace, Clone, Copy)]
-#[repr(transparent)]
-pub struct NumValue(f64);
-impl NumValue {
-	/// Creates a [`NumValue`], if value is finite and not NaN
-	pub fn new(v: f64) -> Option<Self> {
-		if !v.is_finite() {
-			return None;
-		}
-		Some(Self(v))
-	}
-	#[inline]
-	pub const fn get(&self) -> f64 {
-		self.0
-	}
-	pub(crate) fn truncate_for_bitwise(&self) -> Result<i64> {
-		if self.0 < MIN_SAFE_INTEGER || self.0 > MAX_SAFE_INTEGER {
-			bail!("numberic value outside of safe integer range for bitwise operation");
-		}
-		Ok(self.0 as i64)
-	}
-}
-impl PartialEq for NumValue {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
-}
-impl Eq for NumValue {}
-impl Ord for NumValue {
-	#[inline]
-	fn cmp(&self, other: &Self) -> Ordering {
-		// Can't use `total_cmp`: its behavior for `-0` and `0`
-		// is not following wanted.
-		unsafe { self.0.partial_cmp(&other.0).unwrap_unchecked() }
-	}
-}
-impl PartialOrd for NumValue {
-	#[inline]
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-impl Debug for NumValue {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		Debug::fmt(&self.0, f)
-	}
-}
-impl Display for NumValue {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		Display::fmt(&self.0, f)
-	}
-}
-impl Deref for NumValue {
-	type Target = f64;
-
-	#[inline]
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-macro_rules! impl_num {
-	($($ty:ty),+) => {$(
-		impl From<$ty> for NumValue {
-			#[inline]
-			fn from(value: $ty) -> Self {
-				Self(value.into())
-			}
-		}
-	)+};
-}
-impl_num!(i8, u8, i16, u16, i32, u32);
-
-#[derive(Clone, Copy, Debug, Error, Trace)]
-pub enum ConvertNumValueError {
-	#[error("overflow")]
-	Overflow,
-	#[error("underflow")]
-	Underflow,
-	#[error("non-finite")]
-	NonFinite,
-}
-impl From<ConvertNumValueError> for Error {
-	fn from(e: ConvertNumValueError) -> Self {
-		Self::new(e.into())
-	}
-}
-
-macro_rules! impl_try_num {
-	($($ty:ty),+) => {$(
-		impl TryFrom<$ty> for NumValue {
-			type Error = ConvertNumValueError;
-			#[inline]
-			fn try_from(value: $ty) -> Result<Self, ConvertNumValueError> {
-				let value = value as f64;
-				if value < MIN_SAFE_INTEGER {
-					return Err(ConvertNumValueError::Underflow)
-				} else if value > MAX_SAFE_INTEGER {
-					return Err(ConvertNumValueError::Overflow)
-				}
-				// Number is finite.
-				Ok(Self(value))
-			}
-		}
-	)+};
-}
-impl_try_num!(usize, isize, i64, u64);
-
-impl TryFrom<f64> for NumValue {
-	type Error = ConvertNumValueError;
-
-	#[inline]
-	fn try_from(value: f64) -> Result<Self, Self::Error> {
-		Self::new(value).ok_or(ConvertNumValueError::NonFinite)
-	}
-}
-impl TryFrom<f32> for NumValue {
-	type Error = ConvertNumValueError;
-
-	#[inline]
-	fn try_from(value: f32) -> Result<Self, Self::Error> {
-		Self::new(f64::from(value)).ok_or(ConvertNumValueError::NonFinite)
-	}
-}
-
 /// Represents any valid Jsonnet value.
 #[derive(Debug, Clone, Trace, Default)]
 pub enum Val {
@@ -607,9 +499,9 @@ impl Val {
 			_ => None,
 		}
 	}
-	pub fn as_str(&self) -> Option<IStr> {
+	pub fn as_str(&self) -> Option<&StrValue> {
 		match self {
-			Self::Str(s) => Some(s.clone().into_flat()),
+			Self::Str(s) => Some(s),
 			_ => None,
 		}
 	}
@@ -661,7 +553,7 @@ impl Val {
 
 	pub fn manifest(&self, format: impl ManifestFormat) -> Result<String> {
 		fn manifest_dyn(val: &Val, manifest: &dyn ManifestFormat) -> Result<String> {
-			manifest.manifest(val.clone())
+			manifest.manifest(val)
 		}
 		manifest_dyn(self, &format)
 	}
@@ -699,6 +591,16 @@ impl Val {
 	{
 		Ok(Self::Num(num.try_into()?))
 	}
+	pub fn arr(a: impl ArrayLike) -> Self {
+		Self::Arr(ArrValue::new(a))
+	}
+
+	pub fn try_cmp(a: &Val, b: &Val) -> Result<Ordering> {
+		evaluate_compare_op(a, b, BinaryOpType::Lt)
+	}
+	pub fn try_mod(a: &Val, b: &Val) -> Result<Val> {
+		evaluate_mod_op(a, b)
+	}
 }
 
 impl From<IStr> for Val {
@@ -719,6 +621,21 @@ impl From<&str> for Val {
 impl From<ObjValue> for Val {
 	fn from(value: ObjValue) -> Self {
 		Self::Obj(value)
+	}
+}
+impl From<bool> for Val {
+	fn from(value: bool) -> Self {
+		Self::Bool(value)
+	}
+}
+impl From<TrivialVal> for Val {
+	fn from(tv: TrivialVal) -> Self {
+		match tv {
+			TrivialVal::Null => Self::Null,
+			TrivialVal::Bool(b) => Self::Bool(b),
+			TrivialVal::Num(n) => Self::Num(n),
+			TrivialVal::Str(s) => Self::string(s),
+		}
 	}
 }
 
@@ -758,7 +675,7 @@ pub fn equals(val_a: &Val, val_b: &Val) -> Result<bool> {
 			if ArrValue::ptr_eq(a, b) {
 				return Ok(true);
 			}
-			if a.len() != b.len() {
+			if a.len32() != b.len32() {
 				return Ok(false);
 			}
 			for (a, b) in a.iter().zip(b.iter()) {

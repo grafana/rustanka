@@ -4,6 +4,23 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+default = ["ir-parser"]
+experimental = [
+  "exp-destruct",
+  "exp-null-coaelse",
+  "exp-preserve-order",
+  "exp-bigint",
+  "exp-regex",
+]
+ir-parser = ["jrsonnet-evaluator/ir-parser"]
+peg-parser = ["jrsonnet-evaluator/peg-parser"]
+exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
+exp-null-coaelse = ["jrsonnet-evaluator/exp-null-coaelse"]
+exp-preserve-order = ["jrsonnet-stdlib/exp-preserve-order"]
+exp-bigint = ["jrsonnet-stdlib/exp-bigint"]
+exp-regex = ["jrsonnet-stdlib/exp-regex"]
+
 [lints]
 workspace = true
 
@@ -11,9 +28,17 @@ workspace = true
 jrsonnet-evaluator.workspace = true
 jrsonnet-gcmodule.workspace = true
 jrsonnet-stdlib.workspace = true
+mimallocator.workspace = true
 serde.workspace = true
-json-structural-diff.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "cpp_test_suite"
+harness = false

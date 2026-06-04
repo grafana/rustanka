@@ -7,10 +7,10 @@ use std::{env, marker::PhantomData, path::PathBuf};
 
 use clap::Parser;
 use jrsonnet_evaluator::{
-	stack::{limit_stack_depth, StackDepthLimitOverrideGuard},
 	FileImportResolver,
+	stack::{StackDepthLimitOverrideGuard, limit_stack_depth},
 };
-use jrsonnet_gcmodule::{with_thread_object_space, ObjectSpace};
+use jrsonnet_gcmodule::{ObjectSpace, with_thread_object_space};
 pub use manifest::*;
 pub use stdlib::*;
 pub use tla::*;

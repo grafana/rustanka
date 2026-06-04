@@ -1,0 +1,26 @@
+[package]
+name = "jrsonnet-ir-parser"
+description = "Hand-rolled recursive-descent parser that produces jrsonnet IR directly"
+keywords = ["jsonnet", "parser"]
+categories = ["parser-implementations"]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = []
+experimental = ["exp-null-coaelse", "exp-destruct", "exp-object-iteration"]
+exp-null-coaelse = ["jrsonnet-ir/exp-null-coaelse"]
+exp-destruct = ["jrsonnet-ir/exp-destruct"]
+exp-object-iteration = ["jrsonnet-ir/exp-object-iteration"]
+
+[dependencies]
+insta.workspace = true
+jrsonnet-gcmodule.workspace = true
+jrsonnet-ir.workspace = true
+jrsonnet-lexer.workspace = true
+
+[lints]
+workspace = true

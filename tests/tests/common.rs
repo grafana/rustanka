@@ -1,8 +1,7 @@
 use jrsonnet_evaluator::{
-	ContextBuilder, ContextInitializer as ContextInitializerT, ObjValueBuilder, Result, Thunk, Val,
-	bail,
+	ContextInitializer as ContextInitializerT, InitialContextBuilder, ObjValueBuilder, Result,
+	Source, Thunk, Val, bail,
 	function::{FuncVal, builtin},
-	parser::Source,
 };
 use jrsonnet_gcmodule::Trace;
 
@@ -30,7 +29,7 @@ macro_rules! ensure {
 macro_rules! ensure_val_eq {
 	($a:expr, $b:expr) => {{
 		if !::jrsonnet_evaluator::val::equals(&$a.clone(), &$b.clone())? {
-			use ::jrsonnet_evaluator::manifest::JsonFormat;
+			use jrsonnet_evaluator::manifest::JsonFormat;
 			::jrsonnet_evaluator::bail!(
 				"assertion failed: a != b\na={:#?}\nb={:#?}",
 				$a.manifest(JsonFormat::default())?,
@@ -59,7 +58,7 @@ fn assert_throw(lazy: Thunk<Val>, message: String) -> Result<bool> {
 #[allow(dead_code)]
 fn param_names(fun: FuncVal) -> Vec<String> {
 	fun.params()
-		.into_iter()
+		.iter()
 		.map(|v| v.name().as_str().unwrap_or("<unnamed>").to_owned())
 		.collect()
 }
@@ -68,10 +67,14 @@ fn param_names(fun: FuncVal) -> Vec<String> {
 #[allow(dead_code)]
 pub struct ContextInitializer;
 impl ContextInitializerT for ContextInitializer {
-	fn populate(&self, _for_file: Source, builder: &mut ContextBuilder) {
+	fn populate(&self, _for_file: Source, builder: &mut InitialContextBuilder) {
 		let mut bobj = ObjValueBuilder::new();
-		bobj.method("assertThrow", assert_throw::INST);
-		bobj.method("paramNames", param_names::INST);
+		bobj.method("assertThrow", assert_throw {});
+		bobj.method("paramNames", param_names {});
+		bobj.field("expPreserveOrder")
+			.value(cfg!(feature = "exp-preserve-order"));
+		bobj.field("expBigint").value(cfg!(feature = "exp-bigint"));
+		bobj.field("expRegexp").value(cfg!(feature = "exp-regex"));
 
 		builder.bind("test", Thunk::evaluated(Val::Obj(bobj.build())));
 	}

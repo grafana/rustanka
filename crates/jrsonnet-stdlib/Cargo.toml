@@ -1,6 +1,8 @@
 [package]
 name = "jrsonnet-stdlib"
-description = "jsonnet standard library packaged as crate"
+description = "Jsonnet standard library implementation for jrsonnet"
+keywords = ["jsonnet", "stdlib"]
+categories = ["template-engine"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,17 +13,24 @@ version.workspace = true
 workspace = true
 
 [features]
+experimental = [
+  "exp-preserve-order",
+  "exp-bigint",
+  "exp-null-coaelse",
+  "exp-regex",
+]
 # Add order preservation flag to some functions
 exp-preserve-order = ["jrsonnet-evaluator/exp-preserve-order"]
 # Bigint type
 exp-bigint = ["dep:num-bigint", "jrsonnet-evaluator/exp-bigint"]
 
-exp-null-coaelse = ["jrsonnet-parser/exp-null-coaelse", "jrsonnet-evaluator/exp-null-coaelse"]
+exp-null-coaelse = ["jrsonnet-evaluator/exp-null-coaelse"]
+# std.regexMatch and other helpers
+exp-regex = ["dep:regex", "dep:lru", "dep:rustc-hash"]
 
 [dependencies]
 jrsonnet-evaluator.workspace = true
 jrsonnet-macros.workspace = true
-jrsonnet-parser.workspace = true
 jrsonnet-gcmodule.workspace = true
 
 # Used for std.parseJson/std.parseYaml
@@ -39,17 +48,13 @@ sha3.workspace = true
 base64.workspace = true
 # std.parseJson
 serde_json.workspace = true
-# std.parseYaml, custom library fork is used for C++/golang compatibility
-serde_yaml_with_quirks.workspace = true
 # std.parseYaml
 serde-saphyr.workspace = true
 
+hex.workspace = true
 num-bigint = { workspace = true, optional = true }
 
-# regex (always enabled)
-regex.workspace = true
-lru.workspace = true
-rustc-hash.workspace = true
-
-[build-dependencies]
-jrsonnet-parser.workspace = true
+# regex
+regex = { workspace = true, optional = true }
+lru = { workspace = true, optional = true }
+rustc-hash = { workspace = true, optional = true }

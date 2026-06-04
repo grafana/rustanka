@@ -1,198 +1,224 @@
-use jrsonnet_interner::IStr;
-use jrsonnet_parser::{BindSpec, Destruct};
-use rustc_hash::FxHashMap;
+use std::rc::Rc;
+
+use jrsonnet_gcmodule::Trace;
 
 use crate::{
+	Context, LocalsFrame, PackedContext, Result, SupThis, Thunk, Unbound, Val,
+	analyze::{ClosureShape, LBind, LDestruct, LDestructField, LDestructRest, LocalSlot},
 	bail,
-	error::{ErrorKind::*, Result},
-	evaluate, evaluate_method, evaluate_named, Context, Pending, Thunk, Val,
+	evaluate::evaluate,
 };
 
-#[allow(clippy::too_many_lines)]
-#[allow(unused_variables)]
-pub fn destruct(
-	d: &Destruct,
-	parent: Thunk<Val>,
-	fctx: Pending<Context>,
-	new_bindings: &mut FxHashMap<IStr, Thunk<Val>>,
-) -> Result<()> {
-	match d {
-		Destruct::Full(v) => {
-			let old = new_bindings.insert(v.clone(), parent);
-			if old.is_some() {
-				bail!(DuplicateLocalVar(v.clone()))
+#[allow(dead_code, reason = "not dead in exp-destruct")]
+fn destruct_array(
+	start: &[LDestruct],
+	rest: Option<&LDestructRest>,
+	end: &[LDestruct],
+
+	fill: &LocalsFrame,
+	value: Thunk<Val>,
+	ctx: &Context,
+) {
+	let min_len = start.len() + end.len();
+	let has_rest = rest.is_some();
+	let full = Thunk!(move || {
+		let v = value.evaluate()?;
+		let Val::Arr(arr) = v else {
+			bail!("expected array");
+		};
+		if !has_rest {
+			if arr.len() != min_len {
+				bail!("expected {} elements, got {}", min_len, arr.len32())
 			}
+		} else if arr.len() < min_len {
+			bail!(
+				"expected at least {} elements, but array was only {}",
+				min_len,
+				arr.len32()
+			)
 		}
-		#[cfg(feature = "exp-destruct")]
-		Destruct::Skip => {}
-		#[cfg(feature = "exp-destruct")]
-		Destruct::Array { start, rest, end } => {
-			use jrsonnet_parser::DestructRest;
+		Ok(arr)
+	});
 
-			let min_len = start.len() + end.len();
-			let has_rest = rest.is_some();
-			let full = Thunk!(move || {
-				let v = parent.evaluate()?;
-				let Val::Arr(arr) = v else {
-					bail!("expected array");
-				};
-				if !has_rest {
-					if arr.len() != min_len {
-						bail!("expected {} elements, got {}", min_len, arr.len())
-					}
-				} else if arr.len() < min_len {
-					bail!(
-						"expected at least {} elements, but array was only {}",
-						min_len,
-						arr.len()
-					)
-				}
-				Ok(arr)
-			});
-
-			{
-				for (i, d) in start.iter().enumerate() {
-					let full = full.clone();
-					destruct(
-						d,
-						Thunk!(move || Ok(full.evaluate()?.get(i)?.expect("length is checked"))),
-						fctx.clone(),
-						new_bindings,
-					)?;
-				}
-			}
-
-			match rest {
-				Some(DestructRest::Keep(v)) => {
-					let start = start.len();
-					let end = end.len();
-					let full = full.clone();
-					destruct(
-						&Destruct::Full(v.clone()),
-						Thunk!(move || {
-							let full = full.evaluate()?;
-							let to = full.len() - end;
-							Ok(Val::Arr(full.slice(
-								Some(start as i32),
-								Some(to as i32),
-								None,
-							)))
-						}),
-						fctx.clone(),
-						new_bindings,
-					)?;
-				}
-				Some(DestructRest::Drop) | None => {}
-			}
-
-			{
-				for (i, d) in end.iter().enumerate() {
-					let full = full.clone();
-					let end = end.len();
-					destruct(
-						d,
-						Thunk!(move || {
-							let full = full.evaluate()?;
-							Ok(full.get(full.len() - end + i)?.expect("length is checked"))
-						}),
-						fctx.clone(),
-						new_bindings,
-					)?;
-				}
-			}
-		}
-		#[cfg(feature = "exp-destruct")]
-		Destruct::Object { fields, rest } => {
-			let field_names: Vec<_> = fields
-				.iter()
-				.map(|f| (f.0.clone(), f.2.is_some()))
-				.collect();
-			let has_rest = rest.is_some();
-			let full = Thunk!(move || {
-				let v = parent.evaluate()?;
-				let Val::Obj(obj) = v else {
-					bail!("expected object");
-				};
-				for (field, has_default) in &field_names {
-					if !has_default && !obj.has_field_ex(field.clone(), true) {
-						bail!("missing field: {field}");
-					}
-				}
-				if !has_rest {
-					let len = obj.len();
-					if len > field_names.len() {
-						bail!("too many fields, and rest not found");
-					}
-				}
-				Ok(obj)
-			});
-
-			for (field, d, default) in fields {
-				let default = default.clone().map(|e| (fctx.clone(), e));
-				let value = {
-					let field = field.clone();
-					let full = full.clone();
-					Thunk!(move || {
-						let full = full.evaluate()?;
-						if let Some(field) = full.get(field)? {
-							Ok(field)
-						} else {
-							let (fctx, expr) = default.as_ref().expect("shape is checked");
-							Ok(evaluate(fctx.clone().unwrap(), expr)?)
-						}
-					})
-				};
-
-				if let Some(d) = d {
-					destruct(d, value, fctx.clone(), new_bindings)?;
-				} else {
-					destruct(
-						&Destruct::Full(field.clone()),
-						value,
-						fctx.clone(),
-						new_bindings,
-					)?;
-				}
-			}
-		}
+	for (i, d) in start.iter().enumerate() {
+		let full = full.clone();
+		destruct(
+			d,
+			fill,
+			Thunk!(move || Ok(full.evaluate()?.get(i)?.expect("length is checked"))),
+			ctx,
+		);
 	}
-	Ok(())
+
+	let start_len = start.len();
+	let end_len = end.len();
+
+	if let Some(LDestructRest::Keep(slot)) = rest {
+		let full = full.clone();
+		fill.set(
+			*slot,
+			Thunk!(move || {
+				let full = full.evaluate()?;
+				let to = full.len() - end_len;
+				Ok(Val::Arr(full.slice(start_len..to)))
+			}),
+		);
+	}
+
+	for (i, d) in end.iter().enumerate() {
+		let full = full.clone();
+		destruct(
+			d,
+			fill,
+			Thunk!(move || {
+				let full = full.evaluate()?;
+				Ok(full
+					.get(full.len() - end_len + i)?
+					.expect("length is checked"))
+			}),
+			ctx,
+		);
+	}
 }
 
-pub fn evaluate_dest(
-	d: &BindSpec,
-	fctx: Pending<Context>,
-	new_bindings: &mut FxHashMap<IStr, Thunk<Val>>,
-) -> Result<()> {
-	match d {
-		BindSpec::Field { into, value } => {
-			let name = into.name();
-			let value = value.clone();
-			let data = {
-				let fctx = fctx.clone();
-				Thunk!(move || name.map_or_else(
-					|| evaluate(fctx.unwrap(), &value),
-					|name| evaluate_named(fctx.unwrap(), &value, name),
-				))
-			};
-			destruct(into, data, fctx, new_bindings)?;
-		}
-		BindSpec::Function {
-			name,
-			params,
-			value,
-		} => {
-			let params = params.clone();
-			let name = name.clone();
-			let value = value.clone();
-			let old = new_bindings.insert(name.clone(), {
-				let name = name.clone();
-				Thunk!(move || Ok(evaluate_method(fctx.unwrap(), name, params, value)))
-			});
-			if old.is_some() {
-				bail!(DuplicateLocalVar(name))
+#[allow(dead_code, reason = "not dead in exp-destruct")]
+fn destruct_object(
+	fields: &[LDestructField],
+	rest: Option<&LDestructRest>,
+
+	fill: &LocalsFrame,
+	value: Thunk<Val>,
+	ctx: &Context,
+) {
+	use jrsonnet_interner::IStr;
+	use rustc_hash::FxHashSet;
+
+	use crate::{ObjValueBuilder, bail};
+
+	let captured_fields: FxHashSet<IStr> = fields.iter().map(|f| f.name.clone()).collect();
+	let field_names: Vec<(IStr, bool)> = fields
+		.iter()
+		.map(|f| (f.name.clone(), f.default.is_some()))
+		.collect();
+	let has_rest = rest.is_some();
+	let full = Thunk!(move || {
+		let v = value.evaluate()?;
+		let Val::Obj(obj) = v else {
+			bail!("expected object");
+		};
+		for (field, has_default) in &field_names {
+			if !has_default && !obj.has_field_ex(field.clone(), true) {
+				bail!("missing field: {field}");
 			}
 		}
+		if !has_rest {
+			let len = obj.len32();
+			if len as usize > field_names.len() {
+				bail!("too many fields, and rest not found");
+			}
+		}
+		Ok(obj)
+	});
+
+	if let Some(LDestructRest::Keep(slot)) = rest {
+		let full = full.clone();
+		fill.set(
+			*slot,
+			Thunk!(move || {
+				let full = full.evaluate()?;
+				let mut out = ObjValueBuilder::new();
+				out.extend_with_core(full.as_standalone());
+				out.with_fields_omitted(captured_fields);
+				Ok(Val::Obj(out.build()))
+			}),
+		);
 	}
-	Ok(())
+
+	for field in fields {
+		let field_name = field.name.clone();
+		let default_thunk: Option<Thunk<Val>> = field.default.as_ref().map(|(shape, expr)| {
+			let expr = expr.clone();
+			let env = Context::enter_using(ctx, shape);
+			Thunk!(move || evaluate(env, &expr))
+		});
+
+		let field_full = full.clone();
+		let value_thunk = Thunk!(move || {
+			let obj = field_full.evaluate()?;
+			obj.get(field_name)?.map_or_else(
+				|| default_thunk.as_ref().expect("shape is checked").evaluate(),
+				Ok,
+			)
+		});
+
+		if let Some(into) = &field.into {
+			destruct(into, fill, value_thunk, ctx);
+		} else {
+			unreachable!("analyzer lowers object-destruct shorthands into `into`");
+		}
+	}
+}
+
+#[allow(unused_variables)]
+pub fn destruct(d: &LDestruct, fill: &LocalsFrame, value: Thunk<Val>, a_ctx: &Context) {
+	match d {
+		LDestruct::Full(slot) => fill.set(*slot, value),
+		#[cfg(feature = "exp-destruct")]
+		LDestruct::Skip => {}
+		#[cfg(feature = "exp-destruct")]
+		LDestruct::Array { start, rest, end } => {
+			destruct_array(start, rest.as_ref(), end, fill, value, a_ctx)
+		}
+		#[cfg(feature = "exp-destruct")]
+		LDestruct::Object { fields, rest } => destruct_object(fields, rest.as_ref(), fill, value, a_ctx),
+	}
+}
+
+pub fn fill_letrec_binds(fill: &LocalsFrame, ctx: &Context, binds: &[LBind]) {
+	for bind in binds {
+		let expr = bind.value.clone();
+		let env = Context::enter_using(ctx, &bind.value_shape);
+		destruct(
+			&bind.destruct,
+			fill,
+			Thunk!(move || evaluate(env, &expr)),
+			ctx,
+		);
+	}
+}
+
+pub trait CloneableUnbound<T>: Unbound<Bound = T> + Clone {}
+impl<V, T> CloneableUnbound<T> for V where V: Unbound<Bound = T> + Clone {}
+
+pub fn evaluate_locals_unbound(
+	outer: &Context,
+	frame_shape: &ClosureShape,
+	this_slot: Option<LocalSlot>,
+	locals: Rc<Vec<LBind>>,
+) -> impl CloneableUnbound<Context> {
+	#[derive(Trace, Clone)]
+	struct UnboundLocals {
+		captures: PackedContext,
+		this_slot: Option<LocalSlot>,
+		locals: Rc<Vec<LBind>>,
+	}
+	impl Unbound for UnboundLocals {
+		type Bound = Context;
+
+		fn bind(&self, sup_this: SupThis) -> Result<Context> {
+			Ok(self.captures.clone().enter(sup_this, |fill, ctx| {
+				if let Some(slot) = self.this_slot {
+					let this_obj = ctx.sup_this().expect("sup_this set above").this().clone();
+					fill.set(slot, Thunk::evaluated(Val::Obj(this_obj)));
+				}
+				fill_letrec_binds(fill, ctx, &self.locals);
+			}))
+		}
+	}
+
+	UnboundLocals {
+		captures: outer.pack_captures(frame_shape),
+		this_slot,
+		locals,
+	}
 }
