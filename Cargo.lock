@@ -5338,7 +5338,6 @@ dependencies = [
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
  "jrsonnet-stdlib",
- "mimallocator",
  "serde",
  "serde_json",
 ]

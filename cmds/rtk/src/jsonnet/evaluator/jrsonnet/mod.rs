@@ -11,9 +11,7 @@ use anyhow::{Context, Result};
 use jrsonnet_evaluator::rustc_hash::{FxBuildHasher, FxHashMap};
 use jrsonnet_evaluator::stack::set_stack_depth_limit;
 use jrsonnet_evaluator::trace::PathResolver;
-use jrsonnet_evaluator::{
-	tla::TlaArg, FileImportResolver, IStr, ImportResolver, State,
-};
+use jrsonnet_evaluator::{tla::TlaArg, FileImportResolver, IStr, ImportResolver, State};
 use jrsonnet_stdlib::ContextInitializer;
 
 use crate::config::{uses_jrsonnet_binary, JsonnetImplementation, RtkConfig};

@@ -269,6 +269,29 @@ fn finish_asserting(obj: &ObjValue) {
 	});
 }
 
+// Tracks whether we are currently evaluating any object's assertions. go-jsonnet
+// evaluates assertions in a way that tolerates field self-references that jrsonnet
+// would otherwise flag as infinite recursion; while any assertion is running we
+// relax the recursion check to match go-jsonnet/Tanka behavior.
+thread_local! {
+	static ASSERTION_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+fn is_in_assertion() -> bool {
+	ASSERTION_DEPTH.with(|v| v.get() > 0)
+}
+struct AssertionGuard;
+impl AssertionGuard {
+	fn new() -> Self {
+		ASSERTION_DEPTH.with(|v| v.set(v.get() + 1));
+		AssertionGuard
+	}
+}
+impl Drop for AssertionGuard {
+	fn drop(&mut self) {
+		ASSERTION_DEPTH.with(|v| v.set(v.get() - 1));
+	}
+}
+
 thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
 		cores: vec![],
@@ -626,7 +649,7 @@ impl ObjValue {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
 					CacheValue::Pending => {
-						if !is_asserting(self) {
+						if !is_asserting(self) && !is_in_assertion() {
 							bail!(InfiniteRecursionDetected);
 						}
 					}
@@ -743,12 +766,19 @@ impl ObjValue {
 	}
 
 	pub fn run_assertions(&self) -> Result<()> {
+		// While already evaluating assertions, skip running more; the in-flight
+		// assertion evaluation will complete the work. This keeps go-jsonnet/Tanka
+		// compatible behavior for self-referential assertions.
+		if is_in_assertion() {
+			return Ok(());
+		}
 		if self.0.assertions_ran.get() {
 			return Ok(());
 		}
 		if !start_asserting(self) {
 			return Ok(());
 		}
+		let _guard = AssertionGuard::new();
 		for (idx, ele) in self.0.cores.iter().enumerate() {
 			let sup_this = SupThis {
 				sup: CoreIdx { idx },

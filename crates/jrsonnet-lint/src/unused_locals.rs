@@ -7,7 +7,7 @@ use jrsonnet_rowan_parser::nodes::{
 	MemberComp, Name, ObjBody, SourceFile, Stmt, Suffix,
 };
 use jrsonnet_rowan_parser::nodes::{ExprBase::*, Suffix::*};
-use jrsonnet_rowan_parser::{parse, AstNode};
+use jrsonnet_rowan_parser::{AstNode, parse};
 use rowan::TextRange;
 
 use crate::checks::UNUSED_LOCALS;
@@ -398,15 +398,8 @@ impl UnusedLocalsVisitor {
 				}
 			}
 			ExprUnary(e) => {
-				// ExprUnary's operand is parsed WITHOUT an EXPR wrapper, so direct children are
-				// ExprBase nodes (e.g. EXPR_VAR for `!this`) and Suffix nodes (e.g. `.x` for
-				// `!this.x`). Neither is an EXPR, so we must cast to ExprBase and Suffix explicitly.
-				for child in e.syntax().children() {
-					if let Some(base) = ExprBase::cast(child.clone()) {
-						self.visit_expr_base(&base);
-					} else if let Some(suffix) = Suffix::cast(child) {
-						self.visit_suffix(&suffix);
-					}
+				if let Some(expr) = e.rhs() {
+					self.visit_expr(&expr);
 				}
 			}
 			ExprObjExtend(e) => {

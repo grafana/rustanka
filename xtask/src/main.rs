@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use xshell::{Shell, cmd};
+use xshell::{cmd, Shell};
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 mod bench;

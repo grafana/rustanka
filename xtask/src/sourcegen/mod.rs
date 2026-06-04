@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Result;
-use ast::{AstSrc, lower};
+use ast::{lower, AstSrc};
 use itertools::Itertools;
 use kinds::{KindsSrc, TokenKind};
 use proc_macro2::{Ident, Punct, Spacing, Span, TokenStream};

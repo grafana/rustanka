@@ -7,7 +7,7 @@ use std::{
 	time::Instant,
 };
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use nix::{libc, sys::wait::WaitStatus, unistd::Pid};
 
 #[derive(Debug, Clone)]
