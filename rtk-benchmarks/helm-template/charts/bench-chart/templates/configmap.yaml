@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-bench
+data:
+  level: {{ .Values.config.level | quote }}
+  message: {{ .Values.config.message | quote }}
