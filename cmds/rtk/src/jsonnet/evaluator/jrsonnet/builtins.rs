@@ -46,6 +46,12 @@ static HELM_TEMPLATE_CACHE: RwLock<Option<HashMap<String, String>>> = RwLock::ne
 /// environments evaluated across different worker threads.
 static HELM_DISK_TOUCHED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// Serializes tests that touch the process-global Helm caches above. Cargo runs
+/// tests in parallel within a single process, so without this lock concurrent
+/// tests would clobber the shared `HELM_DISK_TOUCHED` recording state.
+#[cfg(test)]
+pub(crate) static HELM_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Get or create the Helm template cache
 fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 	// Initialize the cache if needed
@@ -72,7 +78,7 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 
 /// Record that `key` was touched, if disk-cache recording is enabled. No-op
 /// otherwise. Safe to call from any worker thread.
-fn record_helm_disk_touch(key: &str) {
+pub(crate) fn record_helm_disk_touch(key: &str) {
 	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
 	if let Some(set) = guard.as_mut() {
 		set.insert(key.to_owned());
@@ -1279,6 +1285,187 @@ mod tests {
 			}
 		} else {
 			panic!("Expected array");
+		}
+	}
+
+	#[test]
+	fn test_helm_cache_put_get_is_or_insert() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		let key = "test_put_get_key".to_string();
+		assert_eq!(helm_cache_get_json(&key), None);
+
+		helm_cache_put_json(key.clone(), "first".to_string());
+		assert_eq!(helm_cache_get_json(&key), Some("first".to_string()));
+
+		// Existing in-memory entries take precedence over later inserts (this is
+		// what lets fresh in-process values win over preloaded disk entries).
+		helm_cache_put_json(key.clone(), "second".to_string());
+		assert_eq!(helm_cache_get_json(&key), Some("first".to_string()));
+	}
+
+	#[test]
+	fn test_helm_disk_touch_recording() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		// Recording disabled by default: touches are dropped.
+		helm_disk_cache_take(); // ensure clean state
+		record_helm_disk_touch("ignored_when_disabled");
+		assert!(helm_disk_cache_take().is_empty());
+
+		// After begin, touches are recorded (and deduplicated).
+		helm_disk_cache_begin();
+		record_helm_disk_touch("a");
+		record_helm_disk_touch("b");
+		record_helm_disk_touch("a");
+		let touched = helm_disk_cache_take();
+		assert_eq!(touched.len(), 2);
+		assert!(touched.contains("a"));
+		assert!(touched.contains("b"));
+
+		// take() also disables recording: subsequent touches are dropped.
+		record_helm_disk_touch("c");
+		assert!(helm_disk_cache_take().is_empty());
+	}
+
+	#[test]
+	fn test_helm_cache_key_sensitivity() {
+		let base = helm_cache_key(
+			"rel",
+			"/charts/foo",
+			Some("ns"),
+			Some("{\"a\":1}"),
+			true,
+			false,
+			&["v1".to_string()],
+			Some("{{.kind}}"),
+			Some("version: 1.0.0"),
+		);
+
+		// Identical inputs produce identical keys.
+		assert_eq!(
+			base,
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			)
+		);
+
+		// Each parameter that affects rendering changes the key.
+		let variants = [
+			helm_cache_key(
+				"REL2",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/bar",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("other"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":2}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				false,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				true,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v2".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.metadata.name}}"),
+				Some("version: 1.0.0"),
+			),
+			helm_cache_key(
+				"rel",
+				"/charts/foo",
+				Some("ns"),
+				Some("{\"a\":1}"),
+				true,
+				false,
+				&["v1".to_string()],
+				Some("{{.kind}}"),
+				Some("version: 2.0.0"),
+			),
+		];
+		for variant in variants {
+			assert_ne!(base, variant);
 		}
 	}
 }

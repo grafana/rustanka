@@ -129,3 +129,106 @@ pub fn save(dir: &Path) {
 	}
 	debug!("helm-cache: wrote {written} entries to {}", dir.display());
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::jsonnet::evaluator::jrsonnet::builtins::{
+		helm_disk_cache_begin, helm_disk_cache_take, record_helm_disk_touch, HELM_CACHE_TEST_LOCK,
+	};
+
+	#[test]
+	fn test_cache_dir() {
+		assert_eq!(
+			cache_dir(std::path::Path::new("/out")),
+			std::path::PathBuf::from("/out/helm-cache"),
+		);
+	}
+
+	#[test]
+	fn test_save_writes_only_touched_present_entries() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		let tmp = tempfile::tempdir().unwrap();
+		let dir = tmp.path().join("helm-cache");
+
+		// Unique keys so other tests' global-cache entries cannot interfere.
+		let touched_present = "save_present_0001";
+		let touched_absent = "save_absent_0001";
+
+		builtins::helm_cache_put_json(touched_present.to_string(), "{\"k\":1}".to_string());
+
+		helm_disk_cache_begin();
+		record_helm_disk_touch(touched_present);
+		// Touched but never stored in the cache: must be skipped, not error.
+		record_helm_disk_touch(touched_absent);
+		save(&dir);
+
+		let present_file = dir.join(format!("{touched_present}.json"));
+		assert_eq!(std::fs::read_to_string(&present_file).unwrap(), "{\"k\":1}");
+		assert!(!dir.join(format!("{touched_absent}.json")).exists());
+	}
+
+	#[test]
+	fn test_save_empty_touched_creates_nothing() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		let tmp = tempfile::tempdir().unwrap();
+		let dir = tmp.path().join("helm-cache");
+
+		helm_disk_cache_begin();
+		save(&dir);
+
+		assert!(!dir.exists());
+	}
+
+	#[test]
+	fn test_load_and_clear_preloads_and_removes() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		let tmp = tempfile::tempdir().unwrap();
+		let dir = tmp.path().join("helm-cache");
+		std::fs::create_dir_all(&dir).unwrap();
+
+		// A unique key not present in the global cache, plus a non-json file
+		// that must be ignored.
+		let key = "load_key_0001";
+		std::fs::write(dir.join(format!("{key}.json")), "{\"loaded\":true}").unwrap();
+		std::fs::write(dir.join("README.txt"), "ignore me").unwrap();
+		assert_eq!(builtins::helm_cache_get_json(key), None);
+
+		load_and_clear(&dir);
+
+		// Entry is now in the global in-memory cache, and the directory is gone.
+		assert_eq!(
+			builtins::helm_cache_get_json(key),
+			Some("{\"loaded\":true}".to_string())
+		);
+		assert!(!dir.exists());
+
+		// Recording was enabled by load_and_clear; clean it up for other tests.
+		helm_disk_cache_take();
+	}
+
+	#[test]
+	fn test_load_and_clear_missing_dir_is_ok() {
+		let _guard = HELM_CACHE_TEST_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+
+		let tmp = tempfile::tempdir().unwrap();
+		let dir = tmp.path().join("does-not-exist");
+
+		// Must not panic, and recording is still enabled.
+		load_and_clear(&dir);
+		assert!(!dir.exists());
+
+		helm_disk_cache_take();
+	}
+}
