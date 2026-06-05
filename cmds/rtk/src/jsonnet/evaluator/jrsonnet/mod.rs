@@ -463,7 +463,8 @@ impl JrsonnetEvaluator {
 
 		use builtins::{
 			escape_string_regex, helm_template, kustomize_build, manifest_json_from_json,
-			manifest_yaml_from_json, parse_json, parse_yaml, regex_match, regex_subst, sha256,
+			manifest_yaml_from_json, parse_json, parse_yaml, regex_match, regex_subst, rtk_memoize,
+			sha256,
 		};
 
 		// Core parsing/manifest functions
@@ -491,6 +492,9 @@ impl JrsonnetEvaluator {
 		// Helm and Kustomize
 		context.add_native("helmTemplate", helm_template::INST);
 		context.add_native("kustomizeBuild", kustomize_build::INST);
+
+		// rtk extension: cross-worker global memoization cache
+		context.add_native("rtkMemoize", rtk_memoize::INST);
 	}
 }
 
@@ -1173,6 +1177,134 @@ mod tests {
 		assert_eq!(
 			result.value["hash"],
 			"2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+		);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_basic() {
+		// First evaluation of a key computes and returns the value.
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"{ value: std.native("rtkMemoize")("rtk_memoize_basic", { a: 1, b: [2, 3] }) }"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value["value"]["a"], 1);
+		assert_eq!(result.value["value"]["b"][1], 3);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_returns_cached_value() {
+		// The second call with the same key returns the first cached value,
+		// even though the second thunk would produce a different result. This
+		// also proves the second thunk is never evaluated (it would error
+		// otherwise).
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"{
+					first: std.native("rtkMemoize")("rtk_memoize_cached", "winner"),
+					second: std.native("rtkMemoize")("rtk_memoize_cached", error "should not be evaluated"),
+				}"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value["first"], "winner");
+		assert_eq!(result.value["second"], "winner");
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_cross_worker() {
+		// Many worker threads request the same key concurrently. Exactly one
+		// computation wins and all workers observe the same cached value,
+		// proving the cache is global and thread-safe.
+		use std::thread;
+
+		let evaluator = std::sync::Arc::new(default_evaluator());
+		let mut handles = Vec::new();
+		for i in 0..16u32 {
+			let evaluator = evaluator.clone();
+			handles.push(thread::spawn(move || {
+				evaluator
+					.eval_snippet(
+						&format!(r#"std.native("rtkMemoize")("rtk_memoize_cross_worker", {i})"#),
+						&EvaluatorOptions::default(),
+					)
+					.unwrap()
+					.value
+			}));
+		}
+
+		let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+		let winner = results[0].clone();
+		assert!(winner.is_number());
+		for r in &results {
+			assert_eq!(*r, winner, "all workers must observe the same cached value");
+		}
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_failure_allows_retry() {
+		// A failed computation must not poison the key: a later call with the
+		// same key can recompute successfully.
+		let err = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_retry", error "boom")"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(err.is_err());
+
+		let ok = default_evaluator()
+			.eval_snippet(
+				r#"std.native("rtkMemoize")("rtk_memoize_retry", "recovered")"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(ok.value, "recovered");
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_reentrant_same_key_errors() {
+		// A thunk that memoizes its own key on the same thread must error
+		// instead of deadlocking the worker against itself.
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_reentrant", std.native("rtkMemoize")("rtk_memoize_reentrant", 1))"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("re-entrant"),
+			"error should mention re-entrant evaluation, got: {err}"
+		);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_rejects_hidden_field() {
+		// A top-level hidden field would be dropped by JSON serialization, so
+		// memoizing such a value must error instead of silently losing data.
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_hidden", { visible: 1, hidden:: 2 })"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("hidden"),
+			"error should mention hidden field, got: {err}"
+		);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_rejects_nested_hidden_field() {
+		// Hidden fields are rejected at any depth, including inside arrays.
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_memoize_hidden_nested", { a: { b: [{ c:: 1 }] } })"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("hidden"),
+			"error should mention hidden field, got: {err}"
 		);
 	}
 }
