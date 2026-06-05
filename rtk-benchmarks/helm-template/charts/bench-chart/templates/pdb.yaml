@@ -1,0 +1,12 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $.Release.Name }}-pdb-{{ $i }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-bench-{{ $i }}
+{{- end }}

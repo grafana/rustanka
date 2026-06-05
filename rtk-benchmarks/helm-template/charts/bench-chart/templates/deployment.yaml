@@ -1,0 +1,36 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-bench-{{ $i }}
+  labels:
+    app: {{ $.Release.Name }}-bench-{{ $i }}
+    {{- range $k := until (int $.Values.labelCount) }}
+    label-{{ $k }}: {{ sha256sum (printf "%s-%d-%d" $.Release.Name $i $k) | trunc 32 }}
+    {{- end }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-bench-{{ $i }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-bench-{{ $i }}
+      annotations:
+        checksum/config: {{ include "bench.heavyHash" (dict "seed" (printf "%s-%d-pod" $.Release.Name $i) "rounds" $.Values.hashRounds) }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          ports:
+            - containerPort: {{ $.Values.service.port }}
+          env:
+            {{- range $e := until (int $.Values.envVars) }}
+            - name: VAR_{{ $e }}
+              value: {{ sha256sum (printf "%s-%d-env-%d" $.Release.Name $i $e) | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- end }}

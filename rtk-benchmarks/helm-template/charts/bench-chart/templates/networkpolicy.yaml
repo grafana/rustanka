@@ -1,0 +1,22 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $.Release.Name }}-netpol-{{ $i }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ $.Release.Name }}-bench-{{ $i }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ $.Release.Name }}-bench-{{ $i }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.service.port }}
+{{- end }}

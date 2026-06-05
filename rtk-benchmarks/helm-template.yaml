@@ -1,0 +1,17 @@
+name: "Helm Template"
+id: "helm-template"
+description: "Comparing rtk with tk for exporting an environment that renders a Helm chart across many inline environments."
+
+# Static mode: a pre-existing fixtures directory with explicit export commands
+# (no mock Kubernetes server). The fixture defines 60 inline environments that
+# each render the same local chart, so rtk's in-memory helm cache collapses them
+# to a single helm invocation.
+fixtures_dir: "rtk-benchmarks/helm-template"
+
+# Clear the export dir before each benchmark iteration.
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Full Export"
+    description: "Exporting 60 inline environments that each render the same local Helm chart."
+    command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"

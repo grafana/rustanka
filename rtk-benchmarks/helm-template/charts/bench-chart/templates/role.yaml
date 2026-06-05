@@ -1,0 +1,15 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $.Release.Name }}-role-{{ $i }}
+rules:
+  {{- range $r := until (int $.Values.labelCount) }}
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    resourceNames:
+      - {{ sha256sum (printf "%s-%d-rule-%d" $.Release.Name $i $r) | trunc 24 }}
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+{{- end }}

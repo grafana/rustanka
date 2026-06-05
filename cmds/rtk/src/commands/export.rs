@@ -68,6 +68,11 @@ pub struct ExportArgs {
 	#[arg(long)]
 	pub skip_manifest: bool,
 
+	/// Experimental: maintain a `helm-cache/` directory in the output dir to
+	/// cache helmTemplate results across runs and environments.
+	#[arg(long)]
+	pub helm_cache: bool,
+
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -170,6 +175,7 @@ fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, ExportOpts)> {
 		merge_strategy,
 		merge_deleted_envs: args.merge_deleted_envs,
 		show_timing: false,
+		helm_cache: args.helm_cache,
 	};
 	Ok((paths, opts))
 }

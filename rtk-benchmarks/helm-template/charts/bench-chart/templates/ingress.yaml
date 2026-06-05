@@ -1,0 +1,23 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $.Release.Name }}-ing-{{ $i }}
+  annotations:
+    checksum/config: {{ include "bench.heavyHash" (dict "seed" (printf "%s-%d-ing" $.Release.Name $i) "rounds" $.Values.hashRounds) }}
+spec:
+  rules:
+    {{- range $h := until (int $.Values.labelCount) }}
+    - host: {{ sha256sum (printf "%s-%d-host-%d" $.Release.Name $i $h) | trunc 16 }}.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Release.Name }}-bench-{{ $i }}
+                port:
+                  number: {{ $.Values.service.port }}
+    {{- end }}
+{{- end }}

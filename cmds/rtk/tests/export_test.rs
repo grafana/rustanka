@@ -409,6 +409,7 @@ fn test_export_merge_strategies() {
 		merge_strategy: ExportMergeStrategy::ReplaceEnvs,
 		merge_deleted_envs: vec![inline_env_path.to_string_lossy().into_owned()],
 		show_timing: false,
+		helm_cache: false,
 	};
 
 	let result = export(&[(*static_envs[0].path).clone()], delete_opts).unwrap();

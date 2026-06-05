@@ -83,12 +83,21 @@ class BenchmarkConfig:
         with open(path) as f:
             data = yaml.safe_load(f)
 
-        # Detect mode based on config
+        # Detect mode based on config:
+        #   - generated: synthetic fixtures generated on the fly
+        #   - static:    pre-existing fixtures_dir with explicit test commands
+        #                (e.g. helm), benchmarked rtk-vs-tk-vs-base, no mock server
+        #   - diff:      pre-existing fixtures_dir with implicit `diff` commands
+        #                and a mock Kubernetes server
         if "fixtures_dir" in data:
-            mode = "diff"
             fixtures = None
             fixtures_dir = str(repo_root / data["fixtures_dir"])
-            tests = [Test(name=t["name"]) for t in data["tests"]]
+            if any("command" in t for t in data["tests"]):
+                mode = "static"
+                tests = [Test(**t) for t in data["tests"]]
+            else:
+                mode = "diff"
+                tests = [Test(name=t["name"]) for t in data["tests"]]
         else:
             mode = "generated"
             fixtures = GeneratedFixtures(**data["fixtures"])
@@ -151,6 +160,9 @@ class BenchmarkRunner:
             required.append("cargo")
         if self.config.mode == "generated":
             required.append("jq")
+        if self.config.mode == "static":
+            # Static-mode fixtures (e.g. helm) shell out to these tools.
+            required.append("helm")
 
         for cmd in required:
             result = subprocess.run(["which", cmd], capture_output=True)
@@ -297,7 +309,18 @@ class BenchmarkRunner:
     def get_path_vars(self, export_dir: Path | None = None) -> dict[str, str]:
         """Get path variables for command substitution."""
         assert self.fixtures_dir is not None
-        assert self.config.fixtures is not None
+
+        # Static mode has no generated fixtures: commands cd into fixtures_dir
+        # and reference the environment as "." plus the {export_dir} target.
+        if self.config.fixtures is None:
+            result = {
+                "repo_root": str(self.repo_root),
+                "fixtures_dir": str(self.fixtures_dir),
+                "env_dir": ".",
+            }
+            if export_dir:
+                result["export_dir"] = str(export_dir)
+            return result
 
         all_static_env_paths = " ".join(
             str(self.fixtures_dir / f"static-{i:04d}")
@@ -780,6 +803,36 @@ class BenchmarkRunner:
             with tempfile.TemporaryDirectory() as tmpdir:
                 self.generate_fixtures(Path(tmpdir))
 
+                if not self.config.skip_tk:
+                    self.export_dir_tk = Path(tmpdir) / "export-output-tk"
+                    self.export_dir_tk.mkdir(exist_ok=True)
+                self.export_dir_rtk = Path(tmpdir) / "export-output-rtk"
+                self.export_dir_rtk.mkdir(exist_ok=True)
+                if self.rtk_base:
+                    self.export_dir_rtk_base = Path(
+                        tmpdir) / "export-output-rtk-base"
+                    self.export_dir_rtk_base.mkdir(exist_ok=True)
+
+                self.run_setup()
+
+                print("Validating outputs match before benchmarking...",
+                      file=sys.stderr)
+                for test in self.config.tests:
+                    self.validate_test(test)
+                print(file=sys.stderr)
+
+                print("## Benchmarks")
+                print()
+
+                for i, test in enumerate(self.config.tests, 1):
+                    summary = self.run_generated_benchmark(
+                        test, output_file, i)
+                    summaries.append(summary)
+        elif self.config.mode == "static":
+            assert self.config.fixtures_dir is not None
+            self.fixtures_dir = Path(self.config.fixtures_dir)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
                 if not self.config.skip_tk:
                     self.export_dir_tk = Path(tmpdir) / "export-output-tk"
                     self.export_dir_tk.mkdir(exist_ok=True)

@@ -25,6 +25,7 @@ use tracing::{debug, trace};
 use super::{compile_target_matchers, keep_target, manifest_kind_name, TargetMatcher};
 use crate::{
 	environments::discover::{Discover, Discovered},
+	environments::helm_cache,
 	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	yaml::sort_json_keys,
 };
@@ -128,6 +129,9 @@ pub struct ExportOpts {
 	pub merge_deleted_envs: Vec<String>,
 	/// Show detailed timing breakdown
 	pub show_timing: bool,
+	/// Maintain a `helm-cache/` metadata directory in the output dir to cache
+	/// `helmTemplate` results across runs and environments (experimental).
+	pub helm_cache: bool,
 }
 
 impl Default for ExportOpts {
@@ -147,6 +151,7 @@ impl Default for ExportOpts {
 			merge_strategy: ExportMergeStrategy::default(),
 			merge_deleted_envs: vec![],
 			show_timing: false,
+			helm_cache: false,
 		}
 	}
 }
@@ -421,6 +426,18 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	fs::create_dir_all(&opts.output_dir)
 		.context(format!("creating output directory {:?}", opts.output_dir))?;
 
+	// Experimental helm-cache: load the single global on-disk cache exactly
+	// once, before the parallel loop. Entries are preloaded into the
+	// process-global in-memory cache (shared across all worker threads) and the
+	// directory is removed so only entries touched this run are written back.
+	// Done before the emptiness check so a stale cache dir does not trip it.
+	let helm_cache_dir = opts
+		.helm_cache
+		.then(|| helm_cache::cache_dir(&opts.output_dir));
+	if let Some(ref dir) = helm_cache_dir {
+		helm_cache::load_and_clear(dir);
+	}
+
 	// Check if directory is empty (if required by merge strategy)
 	if opts.merge_strategy == ExportMergeStrategy::None {
 		trace!("Checking if output directory is empty (merge_strategy=none)");
@@ -550,6 +567,12 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 		"Parallel export completed in {}ms",
 		parallel_start.elapsed().as_millis()
 	);
+
+	// Experimental helm-cache: persist the touched entries exactly once, now
+	// that the parallel loop is done (single-threaded, so writes never race).
+	if let Some(ref dir) = helm_cache_dir {
+		helm_cache::save(dir);
+	}
 
 	// Summarize results
 	let total_envs = results.len();
@@ -777,6 +800,19 @@ fn export_single_env(
 		..Default::default()
 	};
 
+	// Environment identifier: the path to main.jsonnet (relative to the working
+	// directory when possible).
+	let main_jsonnet_path = env.path.join("main.jsonnet");
+	let env_namespace = if let Ok(cwd) = std::env::current_dir() {
+		main_jsonnet_path
+			.strip_prefix(&cwd)
+			.unwrap_or(&main_jsonnet_path)
+			.to_string_lossy()
+			.to_string()
+	} else {
+		main_jsonnet_path.to_string_lossy().to_string()
+	};
+
 	trace!("[{}] Starting Jsonnet evaluation", env_display);
 	let eval_start = Instant::now();
 	let evaluator = DefaultEvaluator::new(opts.eval_opts.clone());
@@ -801,20 +837,6 @@ fn export_single_env(
 			),
 		));
 	}
-
-	// Extract environment identifier for manifest.json tracking
-	// This should be the path to main.jsonnet (relative to working directory if possible)
-	let main_jsonnet_path = env.path.join("main.jsonnet");
-	let env_namespace = if let Ok(cwd) = std::env::current_dir() {
-		// Make path relative to current directory if possible
-		main_jsonnet_path
-			.strip_prefix(&cwd)
-			.unwrap_or(&main_jsonnet_path)
-			.to_string_lossy()
-			.to_string()
-	} else {
-		main_jsonnet_path.to_string_lossy().to_string()
-	};
 
 	// Extract Environment objects (matching Tanka's inline.go/static.go pattern)
 	// Move result.value and result.spec to avoid cloning the entire JSON tree

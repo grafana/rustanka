@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bench-chart
+description: A small chart used for benchmarking rtk helmTemplate performance.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,18 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $.Release.Name }}-sm-{{ $i }}
+  labels:
+    {{- range $k := until (int $.Values.labelCount) }}
+    label-{{ $k }}: {{ sha256sum (printf "%s-%d-sm-%d" $.Release.Name $i $k) | trunc 32 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-bench-{{ $i }}
+  endpoints:
+    - port: http
+      interval: 30s
+{{- end }}
