@@ -1,7 +1,18 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-bench
+  name: {{ $.Release.Name }}-cfg-{{ $i }}
+  labels:
+    {{- range $k := until (int $.Values.labelCount) }}
+    label-{{ $k }}: {{ sha256sum (printf "%s-%d-%d" $.Release.Name $i $k) | trunc 32 }}
+    {{- end }}
+  annotations:
+    bench/big-config: |
+      {{- toYaml $.Values.bigConfig | nindent 6 }}
 data:
-  level: {{ .Values.config.level | quote }}
-  message: {{ .Values.config.message | quote }}
+  digest: {{ include "bench.heavyHash" (dict "seed" (printf "%s-%d" $.Release.Name $i) "rounds" $.Values.hashRounds) }}
+  payload: |
+    {{- include "bench.payload" (dict "seed" (printf "%s-%d" $.Release.Name $i) "lines" $.Values.payloadLines) | nindent 4 }}
+{{- end }}

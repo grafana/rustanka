@@ -1,0 +1,25 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $.Release.Name }}-sts-{{ $i }}
+spec:
+  serviceName: {{ $.Release.Name }}-bench-{{ $i }}
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-sts-{{ $i }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-sts-{{ $i }}
+      annotations:
+        checksum/config: {{ include "bench.heavyHash" (dict "seed" (printf "%s-%d-sts" $.Release.Name $i) "rounds" $.Values.hashRounds) }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- end }}

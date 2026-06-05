@@ -5,6 +5,43 @@ image:
 service:
   type: ClusterIP
   port: 8080
-config:
-  level: info
-  message: "benchmark configmap payload"
+
+# Benchmark knobs. The cost is concentrated in CPU-bound *rendering* (chained
+# sha256sum), NOT in output volume: rtk's cache only avoids re-rendering, while
+# large YAML output would just add per-environment (de)serialization where Go's
+# yaml is faster, eroding the cache's advantage. So we keep the resource count /
+# output small and make a single render burn CPU.
+itemCount: 6       # ConfigMaps + Deployments + Services emitted per render (x3 objects each)
+hashRounds: 20000  # sha256sum iterations chained per heavyHash call (dominates render cost)
+labelCount: 4      # hashed labels per object
+payloadLines: 4    # hashed lines per ConfigMap payload
+envVars: 4         # hashed env vars per Deployment container
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Inflate output and exercise toYaml on a non-trivial structure.
+bigConfig:
+  featureFlags:
+    - name: alpha
+      enabled: true
+    - name: beta
+      enabled: false
+    - name: gamma
+      enabled: true
+  tuning:
+    timeoutSeconds: 30
+    retries: 5
+    backoff: exponential
+    thresholds:
+      warning: 0.7
+      critical: 0.9
+  endpoints:
+    - https://example.com/a
+    - https://example.com/b
+    - https://example.com/c

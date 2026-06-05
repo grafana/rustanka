@@ -1,0 +1,24 @@
+{{- range $i := until (int .Values.itemCount) }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $.Release.Name }}-ds-{{ $i }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-ds-{{ $i }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-ds-{{ $i }}
+    spec:
+      containers:
+        - name: app
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          env:
+            {{- range $e := until (int $.Values.envVars) }}
+            - name: VAR_{{ $e }}
+              value: {{ sha256sum (printf "%s-%d-dsenv-%d" $.Release.Name $i $e) | quote }}
+            {{- end }}
+{{- end }}
