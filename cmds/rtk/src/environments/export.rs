@@ -20,7 +20,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use super::{compile_target_matchers, keep_target, manifest_kind_name, TargetMatcher};
 use crate::{
@@ -132,6 +132,13 @@ pub struct ExportOpts {
 	/// Maintain a `helm-cache/` metadata directory in the output dir to cache
 	/// `helmTemplate` results across runs and environments (experimental).
 	pub helm_cache: bool,
+	/// Override the location used for the `helmTemplate` cache. Accepts a local
+	/// path, a `file://` URL, or an `s3://bucket/prefix` URL. Defaults to
+	/// `<output_dir>/helm-cache`. When set, the helm cache is enabled even if
+	/// `helm_cache` is false (experimental).
+	pub helm_cache_path: Option<String>,
+	/// What to do when loading or saving the helm cache fails (experimental).
+	pub helm_cache_on_error: helm_cache::OnError,
 }
 
 impl Default for ExportOpts {
@@ -152,6 +159,8 @@ impl Default for ExportOpts {
 			merge_deleted_envs: vec![],
 			show_timing: false,
 			helm_cache: false,
+			helm_cache_path: None,
+			helm_cache_on_error: helm_cache::OnError::default(),
 		}
 	}
 }
@@ -325,6 +334,47 @@ fn matches_target_patterns(manifest: &JsonValue, matchers: &[TargetMatcher]) -> 
 }
 
 /// Export environments from given paths to the output directory
+/// Resolve the helm-cache location from the options, if caching is enabled.
+///
+/// An explicit `helm_cache_path` enables caching at that location (local or
+/// `s3://`); otherwise `helm_cache` enables the default `<output_dir>/helm-cache`
+/// directory. A bad `helm_cache_path` is treated according to `helm_cache_on_error`.
+fn resolve_helm_cache_location(opts: &ExportOpts) -> Result<Option<helm_cache::CacheLocation>> {
+	if let Some(ref raw) = opts.helm_cache_path {
+		match helm_cache::parse_location(raw) {
+			Ok(loc) => Ok(Some(loc)),
+			Err(err) => {
+				handle_helm_cache_error(opts.helm_cache_on_error, "configure", err)?;
+				Ok(None)
+			}
+		}
+	} else if opts.helm_cache {
+		Ok(Some(helm_cache::CacheLocation::Local(
+			helm_cache::cache_dir(&opts.output_dir),
+		)))
+	} else {
+		Ok(None)
+	}
+}
+
+/// Apply the configured severity to a helm-cache failure: either warn and
+/// continue, or propagate the error to abort the export.
+fn handle_helm_cache_error(
+	on_error: helm_cache::OnError,
+	action: &str,
+	err: anyhow::Error,
+) -> Result<()> {
+	match on_error {
+		helm_cache::OnError::Warn => {
+			warn!("helm-cache: failed to {action} cache: {err:#}");
+			Ok(())
+		}
+		helm_cache::OnError::Fail => {
+			Err(err.context(format!("helm-cache: failed to {action} cache")))
+		}
+	}
+}
+
 pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	use std::time::Instant;
 	let export_start = Instant::now();
@@ -431,11 +481,14 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	// process-global in-memory cache (shared across all worker threads) and the
 	// directory is removed so only entries touched this run are written back.
 	// Done before the emptiness check so a stale cache dir does not trip it.
-	let helm_cache_dir = opts
-		.helm_cache
-		.then(|| helm_cache::cache_dir(&opts.output_dir));
-	if let Some(ref dir) = helm_cache_dir {
-		helm_cache::load_and_clear(dir);
+	// An explicit --helm-cache-path enables caching and overrides the default
+	// `<output_dir>/helm-cache` location. It may point at a local directory or
+	// an `s3://` prefix.
+	let helm_cache_location = resolve_helm_cache_location(&opts)?;
+	if let Some(ref loc) = helm_cache_location {
+		if let Err(err) = helm_cache::load_and_clear(loc) {
+			handle_helm_cache_error(opts.helm_cache_on_error, "load", err)?;
+		}
 	}
 
 	// Check if directory is empty (if required by merge strategy)
@@ -570,8 +623,10 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 
 	// Experimental helm-cache: persist the touched entries exactly once, now
 	// that the parallel loop is done (single-threaded, so writes never race).
-	if let Some(ref dir) = helm_cache_dir {
-		helm_cache::save(dir);
+	if let Some(ref loc) = helm_cache_location {
+		if let Err(err) = helm_cache::save(loc) {
+			handle_helm_cache_error(opts.helm_cache_on_error, "save", err)?;
+		}
 	}
 
 	// Summarize results

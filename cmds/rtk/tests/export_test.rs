@@ -410,6 +410,8 @@ fn test_export_merge_strategies() {
 		merge_deleted_envs: vec![inline_env_path.to_string_lossy().into_owned()],
 		show_timing: false,
 		helm_cache: false,
+		helm_cache_path: None,
+		helm_cache_on_error: rtk::environments::helm_cache::OnError::Warn,
 	};
 
 	let result = export(&[(*static_envs[0].path).clone()], delete_opts).unwrap();

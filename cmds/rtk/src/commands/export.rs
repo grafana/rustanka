@@ -73,6 +73,16 @@ pub struct ExportArgs {
 	#[arg(long)]
 	pub helm_cache: bool,
 
+	/// Experimental: location to store the helmTemplate cache. Accepts a local
+	/// path, a `file://` URL, or an `s3://bucket/prefix` URL. Defaults to
+	/// `<output_dir>/helm-cache`. Setting this enables the helm cache.
+	#[arg(long)]
+	pub helm_cache_path: Option<String>,
+
+	/// Experimental: what to do when loading or saving the helm cache fails.
+	#[arg(long, default_value = "warn")]
+	pub helm_cache_on_error: String,
+
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -176,6 +186,8 @@ fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, ExportOpts)> {
 		merge_deleted_envs: args.merge_deleted_envs,
 		show_timing: false,
 		helm_cache: args.helm_cache,
+		helm_cache_path: args.helm_cache_path,
+		helm_cache_on_error: args.helm_cache_on_error.parse()?,
 	};
 	Ok((paths, opts))
 }

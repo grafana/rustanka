@@ -55,6 +55,10 @@ http = "1.4.0"
 tempfile = "3.10"
 either = "1.15.0"
 
+# S3 backend for the experimental helmTemplate cache
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 mimallocator = { workspace = true, optional = true }
 
