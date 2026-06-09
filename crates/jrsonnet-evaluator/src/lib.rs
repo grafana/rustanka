@@ -19,6 +19,7 @@ mod integrations;
 pub mod manifest;
 mod map;
 mod obj;
+pub mod profile;
 pub mod stack;
 pub mod stdlib;
 mod tla;

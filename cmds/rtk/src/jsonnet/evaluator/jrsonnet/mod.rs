@@ -400,6 +400,8 @@ impl JrsonnetEvaluator {
 		drop(result);
 		jrsonnet_gcmodule::collect_thread_cycles();
 
+		jrsonnet_evaluator::profile::flush_thread_local();
+
 		Ok(manifest)
 	}
 
@@ -424,6 +426,8 @@ impl JrsonnetEvaluator {
 
 		drop(result);
 		jrsonnet_gcmodule::collect_thread_cycles();
+
+		jrsonnet_evaluator::profile::flush_thread_local();
 
 		Ok(manifest.to_string())
 	}

@@ -132,6 +132,8 @@ pub struct ExportOpts {
 	/// Maintain a `helm-cache/` metadata directory in the output dir to cache
 	/// `helmTemplate` results across runs and environments (experimental).
 	pub helm_cache: bool,
+	/// Profile Jsonnet function calls and print a ranked report after export.
+	pub analyze: bool,
 }
 
 impl Default for ExportOpts {
@@ -152,6 +154,7 @@ impl Default for ExportOpts {
 			merge_deleted_envs: vec![],
 			show_timing: false,
 			helm_cache: false,
+			analyze: false,
 		}
 	}
 }
@@ -329,6 +332,10 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	use std::time::Instant;
 	let export_start = Instant::now();
 
+	if opts.analyze {
+		jrsonnet_evaluator::profile::set_enabled(true);
+	}
+
 	trace!(
 		"Starting export: {} paths, parallelism={}, output_dir={:?}",
 		paths.len(),
@@ -473,9 +480,16 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 	// Build a rayon thread pool with the requested parallelism.
 	// The lazy Discover iterator is consumed via par_bridge(), which pulls
 	// work items on-demand as pool threads become free.
+	// Profiling adds per-frame native stack cost, so give workers extra
+	// headroom for deeply recursive Jsonnet when --analyze-config is used.
+	let stack_size = if opts.analyze {
+		64 * 1024 * 1024
+	} else {
+		8 * 1024 * 1024
+	};
 	let pool = rayon::ThreadPoolBuilder::new()
 		.num_threads(opts.parallelism)
-		.stack_size(8 * 1024 * 1024)
+		.stack_size(stack_size)
 		.build()
 		.context("building export thread pool")?;
 

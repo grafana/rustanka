@@ -185,21 +185,40 @@ impl FuncVal {
 		args: &dyn ArgsLike,
 		tailstrict: bool,
 	) -> Result<Val> {
-		match self {
+		// Profiling is gated by a single relaxed atomic. The whole body is kept
+		// in one stack frame (no helper call) to avoid adding native stack
+		// depth to deep Jsonnet recursion.
+		let profiling = crate::profile::is_enabled();
+		if profiling {
+			let name = self.name();
+			let file = match self {
+				Self::Normal(func) => Some(func.body.span().0.source_path().clone()),
+				_ => None,
+			};
+			crate::profile::enter(name, file);
+		}
+		let res = match self {
 			Self::Id => ID.call(call_ctx, loc, args),
-			Self::Normal(func) => {
-				let body_ctx = func.call_body_context(call_ctx, args, tailstrict)?;
-				evaluate(body_ctx, &func.body)
-			}
+			Self::Normal(func) => match func.call_body_context(call_ctx, args, tailstrict) {
+				Ok(body_ctx) => evaluate(body_ctx, &func.body),
+				Err(e) => Err(e),
+			},
 			Self::Thunk(thunk) => {
 				if args.is_empty() {
+					if profiling {
+						crate::profile::exit();
+					}
 					bail!(TooManyArgsFunctionHas(0, vec![],))
 				}
 				thunk.evaluate()
 			}
 			Self::StaticBuiltin(b) => b.call(call_ctx, loc, args),
 			Self::Builtin(b) => b.call(call_ctx, loc, args),
+		};
+		if profiling {
+			crate::profile::exit();
 		}
+		res
 	}
 	pub fn evaluate_simple<A: ArgsLike + OptionalContext>(
 		&self,
