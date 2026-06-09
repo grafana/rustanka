@@ -1278,33 +1278,330 @@ mod tests {
 	}
 
 	#[test]
-	fn test_eval_native_rtk_memoize_rejects_hidden_field() {
-		// A top-level hidden field would be dropped by JSON serialization, so
-		// memoizing such a value must error instead of silently losing data.
+	fn test_eval_native_rtk_memoize_preserves_hidden_field() {
+		// Hidden (`::`) fields survive memoization: the snapshot records field
+		// visibility, so the rebuilt value still exposes them to jsonnet (they
+		// are only dropped by the final JSON manifest, as usual).
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"
+				local m = std.native("rtkMemoize")("rtk_memoize_hidden", { visible: 1, hidden:: 2 });
+				{ sum: m.visible + m.hidden, fields: std.objectFieldsAll(m) }
+				"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value["sum"], 3);
+		assert_eq!(result.value["fields"][0], "hidden");
+		assert_eq!(result.value["fields"][1], "visible");
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_preserves_nested_hidden_field() {
+		// Hidden fields are preserved at any depth, including inside arrays.
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"
+				local m = std.native("rtkMemoize")("rtk_memoize_hidden_nested", { a: { b: [{ c:: 1 }] } });
+				m.a.b[0].c
+				"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value, 1);
+	}
+
+	#[test]
+	fn test_eval_native_rtk_memoize_rejects_function_lists_paths() {
+		// Functions capture a thread-local closure context and cannot be
+		// snapshotted. The error must list the path of every function found, not
+		// just the first one.
 		let result = default_evaluator().eval_snippet(
-			r#"std.native("rtkMemoize")("rtk_memoize_hidden", { visible: 1, hidden:: 2 })"#,
+			r#"std.native("rtkMemoize")("rtk_memoize_func", {
+				a: 1,
+				f:: function(x) x + 1,
+				nested: { g(y):: y, arr: [function() 0] },
+			})"#,
 			&EvaluatorOptions::default(),
 		);
 		assert!(result.is_err());
 		let err = result.unwrap_err().to_string();
 		assert!(
-			err.contains("hidden"),
-			"error should mention hidden field, got: {err}"
+			err.contains("function"),
+			"error should mention function, got: {err}"
+		);
+		assert!(err.contains("f"), "error should list f, got: {err}");
+		assert!(
+			err.contains("nested.g"),
+			"error should list nested.g, got: {err}"
+		);
+		assert!(
+			err.contains("nested.arr[0]"),
+			"error should list nested.arr[0], got: {err}"
+		);
+	}
+
+	/// Memoize `value_expr` under a unique key and return the manifested JSON of
+	/// `{ out: <consumer applied to the memoized value> }`. The consumer runs in
+	/// jsonnet against the rebuilt value, so it can observe hidden fields that
+	/// the final manifest would otherwise drop.
+	fn memoize_roundtrip(key: &str, value_expr: &str, consumer: &str) -> serde_json::Value {
+		let snippet = format!(
+			r#"local m = std.native("rtkMemoize")("{key}", {value_expr}); {{ out: {consumer} }}"#
+		);
+		default_evaluator()
+			.eval_snippet(&snippet, &EvaluatorOptions::default())
+			.unwrap()
+			.value["out"]
+			.clone()
+	}
+
+	#[test]
+	fn test_rtk_memoize_scalar_null() {
+		assert!(memoize_roundtrip("rtk_mz_null", "null", "m == null")
+			.as_bool()
+			.unwrap());
+	}
+
+	#[test]
+	fn test_rtk_memoize_scalar_bools() {
+		assert_eq!(memoize_roundtrip("rtk_mz_true", "true", "m"), true);
+		assert_eq!(memoize_roundtrip("rtk_mz_false", "false", "m"), false);
+	}
+
+	#[test]
+	fn test_rtk_memoize_scalar_numbers() {
+		assert_eq!(memoize_roundtrip("rtk_mz_int", "42", "m"), 42);
+		assert_eq!(memoize_roundtrip("rtk_mz_neg", "-17", "m"), -17);
+		assert_eq!(memoize_roundtrip("rtk_mz_zero", "0", "m"), 0);
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_float", "3.5", "m")
+				.as_f64()
+				.unwrap(),
+			3.5
+		);
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_bignum", "1000000000000", "m"),
+			1_000_000_000_000_i64
 		);
 	}
 
 	#[test]
-	fn test_eval_native_rtk_memoize_rejects_nested_hidden_field() {
-		// Hidden fields are rejected at any depth, including inside arrays.
+	fn test_rtk_memoize_scalar_strings() {
+		assert_eq!(memoize_roundtrip("rtk_mz_str", r#""hello""#, "m"), "hello");
+		assert_eq!(memoize_roundtrip("rtk_mz_empty_str", r#""""#, "m"), "");
+		// Special characters, unicode and emoji must survive the round-trip.
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_special", r#""a\nb\t\"c\" é\u00e9 😀""#, "m"),
+			"a\nb\t\"c\" éé 😀"
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_empty_containers() {
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_empty_obj", "{}", "std.length(m)"),
+			0
+		);
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_empty_arr", "[]", "std.length(m)"),
+			0
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_array_of_scalars() {
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_arr", "[1, 2, 3]", "m[0] + m[1] + m[2]"),
+			6
+		);
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_arr_mixed",
+				r#"[1, "a", true, null, [2]]"#,
+				r#"[m[1], m[2], m[3], m[4][0]]"#
+			),
+			serde_json::json!(["a", true, null, 2])
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_nested_objects() {
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_nested",
+				r#"{ a: { b: { c: [10, 20] } } }"#,
+				"m.a.b.c[1]"
+			),
+			20
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_array_of_objects_with_hidden() {
+		// Hidden fields inside array elements survive.
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_arr_obj_hidden",
+				r#"[{ v: 1, h:: 2 }, { v: 3, h:: 4 }]"#,
+				"m[0].h + m[1].h + m[0].v + m[1].v"
+			),
+			10
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_preserves_field_order() {
+		// Object field order (including hidden) is preserved as jsonnet's sorted
+		// order via objectFieldsAll.
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_order",
+				r#"{ zebra: 1, alpha:: 2, mango: 3 }"#,
+				"std.objectFieldsAll(m)"
+			),
+			serde_json::json!(["alpha", "mango", "zebra"])
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_deeply_nested_hidden() {
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_deep_hidden",
+				r#"{ a:: { b:: { c:: { d: 99 } } } }"#,
+				"m.a.b.c.d"
+			),
+			99
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_hidden_field_is_array() {
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_hidden_arr",
+				r#"{ items:: [1, 2, 3] }"#,
+				"std.length(m.items)"
+			),
+			3
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_unicode_field_names() {
+		assert_eq!(
+			memoize_roundtrip(
+				"rtk_mz_unicode_keys",
+				r#"{ "clé": 1, "名前":: 2 }"#,
+				r#"m["clé"] + m["名前"]"#
+			),
+			3
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_unhide_collapses_to_visible() {
+		// `:::` (unhide) has no further super to act on in a flat snapshot, so it
+		// is reconstructed as a plain visible field.
+		let result = memoize_roundtrip(
+			"rtk_mz_unhide",
+			r#"{ x::: 5 }"#,
+			r#"{ has: std.objectHas(m, "x"), val: m.x }"#,
+		);
+		assert_eq!(result["has"], true);
+		assert_eq!(result["val"], 5);
+	}
+
+	#[test]
+	fn test_rtk_memoize_self_reference_in_data() {
+		// A data field referencing `self` is forced to a concrete value before
+		// snapshotting, so it round-trips.
+		assert_eq!(
+			memoize_roundtrip("rtk_mz_selfref", r#"{ a: 1, b: self.a + 10 }"#, "m.a + m.b"),
+			12
+		);
+	}
+
+	#[test]
+	fn test_rtk_memoize_top_level_scalar_cached() {
+		// A non-container value is cached and the second call reuses it (the
+		// second thunk would error if evaluated).
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"{
+					first: std.native("rtkMemoize")("rtk_mz_scalar_cache", 123),
+					second: std.native("rtkMemoize")("rtk_mz_scalar_cache", error "nope"),
+				}"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value["first"], 123);
+		assert_eq!(result.value["second"], 123);
+	}
+
+	#[test]
+	fn test_rtk_memoize_hidden_dropped_by_final_manifest() {
+		// Hidden fields are preserved through memoization but, as always, the
+		// final JSON manifest drops them.
+		let result = default_evaluator()
+			.eval_snippet(
+				r#"std.native("rtkMemoize")("rtk_mz_manifest", { visible: 1, hidden:: 2 })"#,
+				&EvaluatorOptions::default(),
+			)
+			.unwrap();
+		assert_eq!(result.value["visible"], 1);
+		assert!(result.value.get("hidden").is_none());
+	}
+
+	#[test]
+	fn test_rtk_memoize_forcing_hidden_field_propagates_error() {
+		// Snapshotting forces every field, including hidden ones, so a hidden
+		// field that errors fails the memoization even if it is never used.
 		let result = default_evaluator().eval_snippet(
-			r#"std.native("rtkMemoize")("rtk_memoize_hidden_nested", { a: { b: [{ c:: 1 }] } })"#,
+			r#"std.native("rtkMemoize")("rtk_mz_hidden_err", { ok: 1, bad:: (error "boom") }).ok"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		assert!(result.unwrap_err().to_string().contains("boom"));
+	}
+
+	#[test]
+	fn test_rtk_memoize_function_at_root() {
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_mz_func_root", function(x) x)"#,
 			&EvaluatorOptions::default(),
 		);
 		assert!(result.is_err());
 		let err = result.unwrap_err().to_string();
-		assert!(
-			err.contains("hidden"),
-			"error should mention hidden field, got: {err}"
+		assert!(err.contains("<root>"), "expected <root> path, got: {err}");
+	}
+
+	#[test]
+	fn test_rtk_memoize_function_in_array() {
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_mz_func_arr", [1, function() 0, 3])"#,
+			&EvaluatorOptions::default(),
 		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("[1]"), "expected [1] path, got: {err}");
+	}
+
+	#[test]
+	fn test_rtk_memoize_multiple_functions_sorted_deduped() {
+		let result = default_evaluator().eval_snippet(
+			r#"std.native("rtkMemoize")("rtk_mz_func_multi", {
+				zeta:: function() 0,
+				alpha:: function() 0,
+				data: 1,
+			})"#,
+			&EvaluatorOptions::default(),
+		);
+		assert!(result.is_err());
+		let err = result.unwrap_err().to_string();
+		let alpha = err.find("alpha").expect("alpha listed");
+		let zeta = err.find("zeta").expect("zeta listed");
+		assert!(alpha < zeta, "paths should be sorted, got: {err}");
 	}
 }
