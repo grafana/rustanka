@@ -256,7 +256,7 @@ pub trait Evaluator: Clone + Send {
 		options: &EvaluatorOptions,
 		name_filter: Option<&str>,
 	) -> Result<crate::spec::EnvironmentData> {
-		use crate::environments::{filter_environments_by_name, get_environment_names};
+		use crate::environments::{env_name, filter_environments_by_name, get_environment_names};
 
 		let mut options = options.clone();
 		options.env_name = name_filter.map(|s| s.to_owned());
@@ -288,11 +288,25 @@ pub trait Evaluator: Clone + Send {
 		}
 
 		let [env_data] = <[_; 1]>::try_from(environments).map_err(|envs: Vec<_>| {
-			anyhow::anyhow!(
-				"multiple inline environments found ({}). Use --name to select one: {}",
-				envs.len(),
-				get_environment_names(&envs)
-			)
+			// Match Tanka's `ErrMultipleEnvs` formatting: sorted names, one per
+			// line, so the list stays readable when many environments match.
+			let mut names: Vec<&str> = envs.iter().filter_map(env_name).collect();
+			names.sort_unstable();
+			let list = names.join("\n - ");
+			let path = format!("{:?}", path.display().to_string());
+			match name_filter {
+				Some(target_name) => anyhow::anyhow!(
+					"found multiple Environments in {} matching {:?}. Provide a more specific name that matches a single one: \n - {}",
+					path,
+					target_name,
+					list
+				),
+				None => anyhow::anyhow!(
+					"found multiple Environments in {}. Use `--name` to select a single one: \n - {}",
+					path,
+					list
+				),
+			}
 		})?;
 
 		Ok(env_data)

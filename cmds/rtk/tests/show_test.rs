@@ -115,7 +115,7 @@ mod error_tests {
 		run_show_test_expect_error(
 			&test_dir,
 			ShowOpts::default(),
-			"multiple inline environments found",
+			"found multiple Environments in",
 		);
 	}
 
