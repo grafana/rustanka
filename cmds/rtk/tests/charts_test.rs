@@ -184,6 +184,28 @@ fn test_config_output_matches_manifest() {
 	assert_eq!(parsed.requires.len(), loaded.requires.len());
 }
 
+// ----- OCI repo update (no helm binary needed) -----
+
+#[test]
+fn test_repo_update_oci_only_skips_helm() {
+	use rtk::commands::tool::helm_exec::helm_repo_update;
+
+	let repos = vec![
+		Repo {
+			name: "karpenter".to_string(),
+			url: "oci://public.ecr.aws/karpenter".to_string(),
+			..Default::default()
+		},
+		Repo {
+			name: "jetstack".to_string(),
+			url: "oci://quay.io/jetstack/charts".to_string(),
+			..Default::default()
+		},
+	];
+	// Should return Ok without invoking helm, since all repos are OCI
+	helm_repo_update(&repos).unwrap();
+}
+
 // ----- Tests that require helm + network (ignored by default) -----
 
 #[test]
