@@ -90,9 +90,17 @@ fn chart_pull_path(chart: &str, repos: &[Repo]) -> String {
 	chart.to_string()
 }
 
-/// Run helm repo update.
+/// Run helm repo update, skipping OCI registries which do not use index-based updates.
 pub fn helm_repo_update(repos: &[Repo]) -> Result<()> {
-	let repo_file = write_repo_tmp_file(repos)?;
+	let repos: Vec<Repo> = repos
+		.iter()
+		.filter(|r| !r.url.starts_with("oci://"))
+		.cloned()
+		.collect();
+	if repos.is_empty() {
+		return Ok(());
+	}
+	let repo_file = write_repo_tmp_file(&repos)?;
 	let out = Command::new(helm_bin())
 		.args([
 			"repo",
