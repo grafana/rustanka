@@ -93,22 +93,22 @@ impl<T: ?Sized> DebugRefCell<T> {
 impl<T: ?Sized> DebugRefCell<T> {
 	#[inline]
 	pub fn borrow<'a>(&'a self) -> DebugRef<'a, T> {
-		unsafe { DebugRef(self.0.get().as_ref_unchecked()) }
+		unsafe { DebugRef(self.0.get().as_ref().expect("pointer will not be null")) }
 	}
 
 	#[inline]
 	pub fn borrow_mut<'a>(&'a self) -> DebugRefMut<'a, T> {
-		unsafe { DebugRefMut(self.0.get().as_mut_unchecked()) }
+		unsafe { DebugRefMut(self.0.get().as_mut().expect("pointer will not be null")) }
 	}
 
 	#[inline]
 	pub fn try_borrow<'a>(&'a self) -> Result<DebugRef<'a, T>, BorrowError> {
-		Ok(unsafe { DebugRef(self.0.get().as_ref_unchecked()) })
+		Ok(unsafe { DebugRef(self.0.get().as_ref().expect("pointer will not be null")) })
 	}
 
 	#[inline]
 	pub fn try_borrow_mut<'a>(&'a self) -> Result<DebugRefMut<'a, T>, BorrowMutError> {
-		Ok(unsafe { DebugRefMut(self.0.get().as_mut_unchecked()) })
+		Ok(unsafe { DebugRefMut(self.0.get().as_mut().expect("pointer will not be null")) })
 	}
 }
 
