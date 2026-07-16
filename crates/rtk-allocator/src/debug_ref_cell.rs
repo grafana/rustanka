@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[cfg(not(debug_assertions))]
 use std::cell::UnsafeCell;
 #[cfg(debug_assertions)]
