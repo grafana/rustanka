@@ -13,13 +13,9 @@ mod telemetry;
 pub mod test_utils;
 mod yaml;
 
-#[cfg(all(
-	target_os = "linux",
-	feature = "mimalloc",
-	not(feature = "system-alloc")
-))]
+#[cfg(all(feature = "mimalloc", not(feature = "system-alloc")))]
 #[global_allocator]
-static GLOBAL: mimallocator::Mimalloc = mimallocator::Mimalloc;
+static GLOBAL: rtk_allocator::GenerationalAllocator = rtk_allocator::GenerationalAllocator;
 
 #[derive(Parser)]
 #[command(name = "rtk")]

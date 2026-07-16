@@ -66,6 +66,7 @@ ungrammar = "1.16.1"
 rowan = "0.16.1"
 
 mimallocator = "0.1.3"
+rtk-allocator = { path = "./crates/rtk-allocator" }
 indoc = "2.0"
 insta = { version = "1.46", features = ["glob"] }
 tempfile = "3.24"

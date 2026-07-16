@@ -524,34 +524,45 @@ pub fn export(paths: &[PathBuf], opts: ExportOpts) -> Result<ExportResult> {
 					);
 				}
 
-				let result = match export_single_env(&env, opts) {
-					Ok((files, namespace, timing)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: files,
-						env_namespace: Some(namespace),
-						error: None,
-						timing: if show_timing { Some(timing) } else { None },
-					},
-					Err(ExportError::Fatal(msg)) => {
-						abort.store(true, Ordering::Relaxed);
-						ExportEnvResult {
-							env_path: env.path.clone(),
-							files_written: vec![],
-							env_namespace: None,
-							error: Some(format!("FATAL: {}", msg)),
-							timing: None,
-						}
-					}
-					Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
-						env_path: env.path.clone(),
-						files_written: vec![],
-						env_namespace: None,
-						error: Some(msg),
-						timing: None,
-					},
-				};
+				let (generation, result) =
+					rtk_allocator::GenerationalAllocator::with_generation(|| {
+						let result = match export_single_env(&env, opts) {
+							Ok((files, namespace, timing)) => ExportEnvResult {
+								env_path: env.path.clone(),
+								files_written: files,
+								env_namespace: Some(namespace),
+								error: None,
+								timing: if show_timing { Some(timing) } else { None },
+							},
+							Err(ExportError::Fatal(msg)) => {
+								abort.store(true, Ordering::Relaxed);
+								ExportEnvResult {
+									env_path: env.path.clone(),
+									files_written: vec![],
+									env_namespace: None,
+									error: Some(format!("FATAL: {}", msg)),
+									timing: None,
+								}
+							}
+							Err(ExportError::EnvError(_, msg)) => ExportEnvResult {
+								env_path: env.path.clone(),
+								files_written: vec![],
+								env_namespace: None,
+								error: Some(msg),
+								timing: None,
+							},
+						};
 
-				jrsonnet_gcmodule::collect_thread_cycles();
+						jrsonnet_gcmodule::collect_thread_cycles();
+
+						result
+					});
+				tracing::debug!(
+					env = %env.path.display(),
+					live_allocations = generation.live_allocations(),
+					live_bytes = generation.live_bytes(),
+					"allocator generation finished"
+				);
 
 				(idx, result)
 			})

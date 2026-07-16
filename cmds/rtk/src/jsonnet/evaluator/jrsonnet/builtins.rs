@@ -19,6 +19,7 @@ use jrsonnet_evaluator::{
 };
 use jrsonnet_macros::builtin;
 use jrsonnet_stdlib::RegexCacheInner;
+use rtk_allocator::GenerationalAllocator;
 use serde_json;
 use sha2::{Digest, Sha256};
 
@@ -766,7 +767,7 @@ pub fn escape_string_regex(pattern: String) -> String {
     cache: Rc<RegexCacheInner>,
 ))]
 pub fn regex_match(this: &regex_match, regex: IStr, string: String) -> Result<bool> {
-	let regex = this.cache.parse(regex)?;
+	let regex = GenerationalAllocator::without_generation(|| this.cache.parse(regex))?;
 	Ok(regex.is_match(&string))
 }
 
@@ -776,7 +777,7 @@ pub fn regex_match(this: &regex_match, regex: IStr, string: String) -> Result<bo
     cache: Rc<RegexCacheInner>,
 ))]
 pub fn regex_subst(this: &regex_subst, regex: IStr, src: String, repl: String) -> Result<String> {
-	let regex = this.cache.parse(regex)?;
+	let regex = GenerationalAllocator::without_generation(|| this.cache.parse(regex))?;
 	let replaced = regex.replace_all(&src, repl.as_str());
 	Ok(replaced.to_string())
 }
@@ -1054,13 +1055,15 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 		let json = val
 			.manifest(JsonFormat::default())
 			.map_err(|e| RuntimeError(format!("failed to manifest helm output: {e}").into()))?;
-		{
+		// The cache is process-lifetime global memory, so keep its resident
+		// copies out of the current allocation-tracking generation.
+		GenerationalAllocator::without_generation(|| {
 			let cache = get_helm_cache();
 			let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
 			if let Some(ref mut map) = *write {
-				map.insert(cache_key.clone(), json);
+				map.insert(cache_key.clone(), json.clone());
 			}
-		}
+		});
 		record_helm_disk_touch(&cache_key);
 	}
 

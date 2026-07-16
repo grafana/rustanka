@@ -74,7 +74,15 @@ to bypass this check."
 		target: args.target,
 		name: args.name,
 	};
-	let output = show_environment(&args.path, global_opts, opts)?;
+	let (generation, output) = rtk_allocator::GenerationalAllocator::with_generation(|| {
+		show_environment(&args.path, global_opts, opts)
+	});
+	tracing::debug!(
+		live_allocations = generation.live_allocations(),
+		live_bytes = generation.live_bytes(),
+		"allocator generation finished"
+	);
+	let output = output?;
 
 	write!(writer, "{}", output)?;
 	Ok(())

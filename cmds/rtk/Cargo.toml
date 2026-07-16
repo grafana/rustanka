@@ -54,9 +54,7 @@ dirs = "6.0.0"
 http = "1.4.0"
 tempfile = "3.10"
 either = "1.15.0"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-mimallocator = { workspace = true, optional = true }
+rtk-allocator.workspace = true
 
 [dev-dependencies]
 tempfile = "3.10"
@@ -79,8 +77,8 @@ k8s-mock = { path = "../../crates/k8s-mock" }
 
 [features]
 default = ["mimalloc"]
-# Use mimalloc as allocator (enabled by default, Linux only)
-mimalloc = ["mimallocator"]
+# Install the generational allocator (mimalloc-backed) as global allocator (enabled by default)
+mimalloc = []
 # Use the system allocator instead of mimalloc
 system-alloc = []
 benchmarking = []
