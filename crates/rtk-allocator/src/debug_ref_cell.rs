@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 #[cfg(not(debug_assertions))]
-use std::cell::UnsafeCell;
+use std::cell::{BorrowError, BorrowMutError, UnsafeCell};
 #[cfg(debug_assertions)]
 use std::cell::{BorrowError, BorrowMutError, Ref, RefCell, RefMut};
 use std::fmt::{self, Formatter};
