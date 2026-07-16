@@ -93,29 +93,29 @@ impl<T: ?Sized> DebugRefCell<T> {
 impl<T: ?Sized> DebugRefCell<T> {
 	#[inline]
 	pub fn borrow<'a>(&'a self) -> DebugRef<'a, T> {
-		unsafe { DebugRef(self.0.get().as_ref()) }
+		unsafe { DebugRef(self.0.get().as_ref_unchecked()) }
 	}
 
 	#[inline]
 	pub fn borrow_mut<'a>(&'a self) -> DebugRefMut<'a, T> {
-		unsafe { DebugRefMut(self.0.get().as_mut()) }
+		unsafe { DebugRefMut(self.0.get().as_mut_unchecked()) }
 	}
 
 	#[inline]
 	pub fn try_borrow<'a>(&'a self) -> Result<DebugRef<'a, T>, BorrowError> {
-		Ok(unsafe { DebugRef(self.0.get().as_ref()) })
+		Ok(unsafe { DebugRef(self.0.get().as_ref_unchecked()) })
 	}
 
 	#[inline]
 	pub fn try_borrow_mut<'a>(&'a self) -> Result<DebugRefMut<'a, T>, BorrowMutError> {
-		Ok(unsafe { DebugRefMut(self.0.get().as_mut()) })
+		Ok(unsafe { DebugRefMut(self.0.get().as_mut_unchecked()) })
 	}
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for DebugRefCell<T> {
 	#[inline]
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		fmt::Debug::fmt(&*self.0.borrow(), f)
+		fmt::Debug::fmt(&*self.borrow(), f)
 	}
 }
 
