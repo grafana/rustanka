@@ -1,0 +1,2 @@
+#[cold]
+pub fn unlikely() {}

@@ -1,0 +1,15 @@
+[package]
+name = "rtk-allocator"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+allocator-api2 = "0.3.1"
+brie-tree = "0.1.2"
+mimallocator.workspace = true
+
+[lints]
+workspace = true
