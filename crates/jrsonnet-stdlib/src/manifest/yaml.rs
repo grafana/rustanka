@@ -493,10 +493,7 @@ fn manifest_yaml_ex_buf(
 
 #[cfg(test)]
 mod tests {
-	use jrsonnet_evaluator::{
-		val::{ArrValue, NumValue},
-		ObjValueBuilder,
-	};
+	use jrsonnet_evaluator::{val::ArrValue, NumValue, ObjValueBuilder};
 
 	use super::*;
 
@@ -512,7 +509,7 @@ mod tests {
 
 	/// Helper to create a Val::Arr
 	fn arr(items: Vec<Val>) -> Val {
-		Val::Arr(ArrValue::eager(items))
+		Val::Arr(ArrValue::from(items))
 	}
 
 	/// Helper to manifest a value to YAML string using std_to_yaml options

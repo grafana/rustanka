@@ -1,12 +1,16 @@
-use jrsonnet_evaluator::function::{CallLocation, FuncVal, PreparedFuncVal};
-use jrsonnet_evaluator::typed::{ComplexValType, FromUntyped, Typed, ValType};
-use jrsonnet_evaluator::{Error, Result, Thunk, Val};
+use jrsonnet_evaluator::{
+	function::{FuncVal, NativeFn},
+	typed::{ComplexValType, FromUntyped, Typed, ValType},
+	Error, Result, Thunk, Val,
+};
+
+type PreparedKeyF = NativeFn!((Thunk<Val>) -> Val);
 
 #[derive(Default, Clone)]
 pub enum KeyF {
 	#[default]
 	Identity,
-	Prepared(PreparedFuncVal),
+	Prepared(PreparedKeyF),
 	PrepareFailure(Error),
 }
 impl KeyF {
@@ -17,13 +21,13 @@ impl KeyF {
 		if val.is_identity() {
 			Self::Identity
 		} else {
-			PreparedFuncVal::new(val, 1, &[]).map_or_else(Self::PrepareFailure, Self::Prepared)
+			PreparedKeyF::try_from(val).map_or_else(Self::PrepareFailure, Self::Prepared)
 		}
 	}
 	pub fn eval(&self, val: impl Into<Thunk<Val>>) -> Result<Val> {
 		match self {
 			KeyF::Identity => val.into().evaluate(),
-			KeyF::Prepared(p) => p.call(CallLocation::native(), &[val.into()], &[]),
+			KeyF::Prepared(p) => p.call(val.into()),
 			KeyF::PrepareFailure(e) => Err(e.clone()),
 		}
 	}

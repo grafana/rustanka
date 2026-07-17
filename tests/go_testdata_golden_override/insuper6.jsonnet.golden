@@ -1,2 +1,1 @@
-assert failed: null
-    insuper6.jsonnet:1:10-30: assertion failure
+static analysis errors: undefined local: undeclared

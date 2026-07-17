@@ -122,13 +122,14 @@ impl TraceFormat for CompactFormat {
 				|| path.source_path().to_string(),
 				|r| self.resolver.resolve(r),
 			);
-			let mut offset = error.location.offset;
+			let mut offset = error.location.1 as usize;
 			let is_eof = if offset >= path.code().len() {
 				offset = path.code().len().saturating_sub(1);
 				true
 			} else {
 				false
 			};
+			#[expect(clippy::cast_possible_truncation, reason = "code is limited by 4gb")]
 			let mut location = path
 				.map_source_locations(&[offset as u32])
 				.into_iter()
@@ -263,15 +264,57 @@ impl TraceFormat for HiDocFormat {
 		write!(out, "{}", error.error())?;
 		if let ErrorKind::ImportSyntaxError { path, error } = error.error() {
 			writeln!(out)?;
-			let offset = error.location.offset;
 			let mut builder = SnippetBuilder::new(path.code());
 			builder
 				.error(Text::fragment("syntax error", Formatting::default()))
-				.range(offset..=offset)
+				.range(error.location.range())
 				.build();
 			let source = builder.build();
 			let ansi = source_to_ansi(&source);
 			write!(out, "{ansi}")?;
+		}
+		if let ErrorKind::StaticAnalysisError(diagnostics) = error.error() {
+			use crate::analyze::DiagLevel;
+			let mut builder: Option<SnippetBuilder> = None;
+			let mut current_src: Option<&str> = None;
+			let flush = |builder: Option<SnippetBuilder>,
+			             out: &mut dyn std::fmt::Write|
+			 -> Result<(), std::fmt::Error> {
+				if let Some(b) = builder {
+					let ansi = source_to_ansi(&b.build());
+					write!(out, "\n{}", ansi.trim_end())?;
+				}
+				Ok(())
+			};
+			for diag in diagnostics {
+				if let Some(span) = &diag.span {
+					let src = span.0.code();
+					if current_src != Some(src) {
+						flush(builder.take(), out)?;
+						builder = Some(SnippetBuilder::new(src));
+						current_src = Some(src);
+					}
+					let b = builder.as_mut().unwrap();
+					let ab = match diag.level {
+						DiagLevel::Error => {
+							b.error(Text::fragment(diag.message.clone(), Formatting::default()))
+						}
+						DiagLevel::Warning => {
+							b.warning(Text::fragment(diag.message.clone(), Formatting::default()))
+						}
+					};
+					ab.range(span.range()).build();
+				} else {
+					flush(builder.take(), out)?;
+					current_src = None;
+					let prefix = match diag.level {
+						DiagLevel::Error => "error",
+						DiagLevel::Warning => "warning",
+					};
+					write!(out, "\n{prefix}: {}", diag.message)?;
+				}
+			}
+			flush(builder, out)?;
 		}
 		let trace = &error.trace();
 		let snippet_builder: RefCell<Option<SnippetBuilder>> = RefCell::new(None);

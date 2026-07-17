@@ -1,2 +1,2 @@
-syntax error: unexpected token: ERROR_STRING_BLOCK_MISSING_NEW_LINE
+syntax error: text block requires new line after |||
     error.parse.string_multi_no_newline.jsonnet:17:1

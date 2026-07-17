@@ -398,11 +398,13 @@ impl UnusedLocalsVisitor {
 				}
 			}
 			ExprUnary(e) => {
-				// ExprUnary's operand is parsed WITHOUT an EXPR wrapper, so direct children are
-				// ExprBase nodes (e.g. EXPR_VAR for `!this`) and Suffix nodes (e.g. `.x` for
-				// `!this.x`). Neither is an EXPR, so we must cast to ExprBase and Suffix explicitly.
+				// Since upstream 66126184 ("fix(rowan): unary wrapping"), the unary operand is
+				// wrapped in an EXPR node; older trees exposed bare ExprBase/Suffix children.
+				// Handle both shapes.
 				for child in e.syntax().children() {
-					if let Some(base) = ExprBase::cast(child.clone()) {
+					if let Some(expr) = Expr::cast(child.clone()) {
+						self.visit_expr(&expr);
+					} else if let Some(base) = ExprBase::cast(child.clone()) {
 						self.visit_expr_base(&base);
 					} else if let Some(suffix) = Suffix::cast(child) {
 						self.visit_suffix(&suffix);

@@ -1,2 +1,2 @@
-syntax error: unexpected token: ERROR_STRING_BLOCK_UNEXPECTED_END
+syntax error: unexpected end of text block
     error.parse.text_block_not_terminated.jsonnet:17:1

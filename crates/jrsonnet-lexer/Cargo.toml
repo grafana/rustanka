@@ -1,5 +1,6 @@
 [package]
 name = "jrsonnet-lexer"
+description = "Jrsonnet lexer shared between rowan and hand-rolled parser"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

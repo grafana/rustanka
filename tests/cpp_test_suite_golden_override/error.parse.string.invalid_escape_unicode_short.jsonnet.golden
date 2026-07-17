@@ -1,2 +1,2 @@
-syntax error: unexpected token: ERROR_STRING_DOUBLE_UNTERMINATED
+syntax error: unterminated double-quoted string
     error.parse.string.invalid_escape_unicode_short.jsonnet:17:1

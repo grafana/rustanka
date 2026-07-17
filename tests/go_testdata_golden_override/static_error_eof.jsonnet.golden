@@ -1,2 +1,2 @@
-syntax error: expected one of "(", ",", ".", ";", "?", "[", "{", <binary op>, got "EOF"
-    static_error_eof.jsonnet:1:13
+syntax error: expected ';', got end of file
+    static_error_eof.jsonnet:1:12

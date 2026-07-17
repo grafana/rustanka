@@ -1,2 +1,2 @@
-syntax error: numbers are finite
-    error.overflow3.jsonnet:17:6
+syntax error: invalid number value: non-finite
+    error.overflow3.jsonnet:17:1

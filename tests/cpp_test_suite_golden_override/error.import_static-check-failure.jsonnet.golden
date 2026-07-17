@@ -1,3 +1,2 @@
-local is not defined: x
-    static_check_failure.jsonnet:2:1-3:              local <x> access
-    error.import_static-check-failure.jsonnet:1:1-8: import "lib/static_check_failure.jsonnet"
+static analysis errors: undefined local: x
+    error.import_static-check-failure.jsonnet:1:1-8: import

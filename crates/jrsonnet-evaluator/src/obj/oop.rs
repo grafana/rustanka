@@ -1,21 +1,26 @@
-use std::cell::{Cell, RefCell};
-use std::ops::ControlFlow;
-use std::{fmt, mem};
-
-use crate::function::{CallLocation, FuncVal};
-use crate::gc::WithCapacityExt as _;
-use crate::{
-	bail, error::ErrorKind::*, in_frame, CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
+use std::{
+	cell::{Cell, RefCell},
+	fmt, mem,
+	ops::ControlFlow,
 };
+
+use im_rc::Vector;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_ir::IStr;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::ordering::{FieldIndex, SuperDepth};
 use super::{
+	ordering::{FieldIndex, SuperDepth},
 	CcObjectAssertion, CcObjectCore, EnumFields, EnumFieldsHandler, FieldVisibility, GetFor,
 	HasFieldIncludeHidden, ObjMember, ObjMemberBuilder, ObjValue, ObjValueInner, ObjectAssertion,
 	ObjectCore, OmitFieldsCore, SupThis,
+};
+use crate::{
+	bail,
+	error::ErrorKind::*,
+	function::{CallLocation, FuncVal},
+	gc::WithCapacityExt as _,
+	in_frame, CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
 };
 
 #[allow(clippy::module_name_repetitions)]
@@ -113,7 +118,7 @@ impl ObjectCore for OopObject {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct ObjValueBuilder {
-	sup: Vec<CcObjectCore>,
+	sup: Vector<CcObjectCore>,
 	has_assertions: bool,
 
 	new: OopObject,
@@ -125,19 +130,18 @@ impl ObjValueBuilder {
 	}
 	pub fn with_capacity(capacity: usize) -> Self {
 		Self {
-			sup: vec![],
+			sup: Vector::new(),
 			has_assertions: false,
 			new: OopObject::new(FxHashMap::with_capacity(capacity), None),
 			next_field_index: FieldIndex::default(),
 		}
 	}
-	pub fn reserve_cores(&mut self, capacity: usize) -> &mut Self {
-		self.sup.reserve_exact(capacity);
-		self
+	pub fn reserve_fields(&mut self, capacity: usize) {
+		self.new.this_entries.reserve(capacity);
 	}
 	pub fn with_super(&mut self, super_obj: ObjValue) -> &mut Self {
 		self.has_assertions |= super_obj.0.has_assertions;
-		self.sup.clone_from(&super_obj.0.cores);
+		self.sup = super_obj.0.cores.clone();
 		self
 	}
 
@@ -174,19 +178,20 @@ impl ObjValueBuilder {
 
 	pub fn extend_with_core(&mut self, core: impl ObjectCore) {
 		self.commit();
-		self.sup.push(CcObjectCore::new(core));
+		self.sup.push_back(CcObjectCore::new(core));
 	}
 
 	fn commit(&mut self) {
 		if !self.new.is_empty() {
-			self.sup.push(CcObjectCore::new(mem::take(&mut self.new)));
+			self.sup
+				.push_back(CcObjectCore::new(mem::take(&mut self.new)));
 		}
 		self.next_field_index = FieldIndex::default();
 	}
 
 	pub fn with_fields_omitted(&mut self, omit: FxHashSet<IStr>) {
 		self.commit();
-		self.sup.push(CcObjectCore::new(OmitFieldsCore {
+		self.sup.push_back(CcObjectCore::new(OmitFieldsCore {
 			omit,
 			prev_layers: self.sup.len(),
 		}));

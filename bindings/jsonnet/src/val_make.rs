@@ -5,10 +5,7 @@ use std::{
 	os::raw::{c_char, c_double, c_int},
 };
 
-use jrsonnet_evaluator::{
-	val::{ArrValue, NumValue},
-	ObjValue, Val,
-};
+use jrsonnet_evaluator::{NumValue, ObjValue, Val};
 
 use crate::VM;
 
@@ -50,7 +47,7 @@ pub extern "C" fn jsonnet_json_make_null(_vm: &VM) -> *mut Val {
 /// Assign elements with [`jsonnet_json_array_append`].
 #[no_mangle]
 pub extern "C" fn jsonnet_json_make_array(_vm: &VM) -> *mut Val {
-	Box::into_raw(Box::new(Val::Arr(ArrValue::eager(Vec::new()))))
+	Box::into_raw(Box::new(Val::arr(())))
 }
 
 /// Make a `JsonnetJsonValue` representing an object.

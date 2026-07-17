@@ -1,16 +1,11 @@
 use std::rc::Rc;
 
 use jrsonnet_gcmodule::{Acyclic, Trace};
-use jrsonnet_ir::function::FunctionSignature;
-use jrsonnet_ir::{ExprParams, IStr};
-use rustc_hash::{FxHashMap, FxHashSet};
-
-use crate::destructure::destruct;
-use crate::gc::WithCapacityExt;
-use crate::{bail, error::ErrorKind::*, Result};
-use crate::{evaluate_named_param, Context, ContextBuilder, Pending, Thunk, Val};
+use jrsonnet_ir::{function::FunctionSignature, IStr};
+use rustc_hash::FxHashSet;
 
 use super::{CallLocation, FuncVal};
+use crate::{bail, error::ErrorKind::*, Result, Thunk, Val};
 
 #[derive(Debug, Trace, Clone)]
 pub struct PreparedFuncVal {
@@ -44,6 +39,15 @@ pub struct PreparedCall {
 	defaults: Vec<usize>,
 }
 
+impl PreparedCall {
+	pub fn named(&self) -> &[(usize, usize)] {
+		&self.named
+	}
+	pub fn defaults(&self) -> &[usize] {
+		&self.defaults
+	}
+}
+
 pub fn prepare_call(
 	params: FunctionSignature,
 	unnamed: usize,
@@ -51,6 +55,25 @@ pub fn prepare_call(
 ) -> Result<PreparedCall> {
 	if unnamed > params.len() {
 		bail!(TooManyArgsFunctionHas(params.len(), params))
+	}
+
+	// Fast path: positional-only (no named args). Avoids HashMap entirely.
+	if named.is_empty() {
+		let mut defaults = Vec::new();
+		for (param_id, param) in params.iter().enumerate().skip(unnamed) {
+			if param.has_default() {
+				defaults.push(param_id);
+			} else {
+				bail!(FunctionParameterNotBoundInCall(
+					param.name().clone(),
+					params.clone(),
+				))
+			}
+		}
+		return Ok(PreparedCall {
+			named: Vec::new(),
+			defaults,
+		});
 	}
 
 	let expected_defaults = (params.len() - unnamed).saturating_sub(named.len());
@@ -112,68 +135,6 @@ pub fn prepare_call(
 	}
 
 	Ok(ops)
-}
-pub fn parse_prepared_function_call(
-	body_ctx: Context,
-	prepared: &PreparedCall,
-	params: &ExprParams,
-	unnamed: &[Thunk<Val>],
-	named: &[Thunk<Val>],
-) -> Result<Context> {
-	let mut passed_args = FxHashMap::with_capacity(params.binds_len());
-
-	let destruct_ctx = Pending::new();
-
-	for (param_idx, unnamed) in unnamed.iter().enumerate() {
-		destruct(
-			&params.exprs[param_idx].destruct,
-			unnamed.clone(),
-			destruct_ctx.clone(),
-			&mut passed_args,
-		)?;
-	}
-
-	for (param_idx, arg_idx) in prepared.named.iter().copied() {
-		destruct(
-			&params.exprs[param_idx].destruct,
-			named[arg_idx].clone(),
-			destruct_ctx.clone(),
-			&mut passed_args,
-		)?;
-	}
-
-	if prepared.defaults.is_empty() {
-		let body_ctx = body_ctx
-			.extend_bindings(passed_args)
-			.into_future(destruct_ctx);
-		Ok(body_ctx)
-	} else {
-		let fctx = Context::new_future();
-		let mut defaults = FxHashMap::with_capacity(params.binds_len() - passed_args.len());
-		for param_idx in prepared.defaults.iter().copied() {
-			// let param = params.0.rc_idx(param_idx);
-			destruct(
-				&params.exprs[param_idx].destruct,
-				{
-					let ctx = fctx.clone();
-					let params = params.clone();
-					Thunk!(move || {
-						let param = &params.exprs[param_idx];
-						let name = param.destruct.name();
-						let value = param.default.as_ref().expect("default exists");
-						evaluate_named_param(ctx.unwrap(), value, name)
-					})
-				},
-				fctx.clone(),
-				&mut defaults,
-			)?;
-		}
-
-		let mut ctx = ContextBuilder::extend(body_ctx);
-		ctx.binds(passed_args);
-		ctx.binds(defaults);
-		Ok(ctx.build().into_future(fctx).into_future(destruct_ctx))
-	}
 }
 pub fn parse_prepared_builtin_call(
 	prepared: &PreparedCall,

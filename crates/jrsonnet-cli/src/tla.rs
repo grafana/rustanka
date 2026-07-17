@@ -1,6 +1,7 @@
 use clap::Parser;
-use jrsonnet_evaluator::tla::TlaArg;
-use jrsonnet_evaluator::{error::Result, gc::WithCapacityExt as _, rustc_hash::FxHashMap, IStr};
+use jrsonnet_evaluator::{
+	error::Result, gc::WithCapacityExt as _, rustc_hash::FxHashMap, tla::TlaArg, IStr,
+};
 
 use crate::{ExtFile, ExtStr};
 

@@ -1,2 +1,0 @@
-syntax error: text block requires new line after |||
-    error.parse.string_multi_no_newline.jsonnet:17:1

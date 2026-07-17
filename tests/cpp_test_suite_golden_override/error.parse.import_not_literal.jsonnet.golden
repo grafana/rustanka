@@ -1,1 +1,1 @@
-runtime error: computed imports are not supported
+static analysis errors: import path must be a string literal

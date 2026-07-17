@@ -216,6 +216,18 @@ mk_test!(
 			unhide::: 3,
 		}
 	"#
+
+	unary_not => r#"
+		!false
+	"#
+
+	unary_not_in_call => r#"
+		std.assertEqual(!false, true)
+	"#
+
+	local_in_binop_rhs => r#"
+		a + local x = 1; x
+	"#
 );
 
 #[test]

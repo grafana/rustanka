@@ -1,8 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use jrsonnet_evaluator::tla::TlaArg;
-use jrsonnet_evaluator::{trace::PathResolver, Result};
+use jrsonnet_evaluator::{tla::TlaArg, trace::PathResolver, Result};
 use jrsonnet_stdlib::ContextInitializer;
 
 #[derive(Clone)]

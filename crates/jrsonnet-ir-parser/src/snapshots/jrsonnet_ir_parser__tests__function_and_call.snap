@@ -10,13 +10,13 @@ LocalExpr(
                 exprs: [
                     ExprParam {
                         destruct: Full(
-                            "x",
+                            "x" from virtual:<test>:8-9,
                         ),
                         default: None,
                     },
                     ExprParam {
                         destruct: Full(
-                            "y",
+                            "y" from virtual:<test>:11-12,
                         ),
                         default: Some(
                             Num(
@@ -66,12 +66,12 @@ LocalExpr(
                     2.0,
                 ),
             ],
-            named: [
-                (
-                    "y",
-                    Num(
-                        3.0,
-                    ),
+            names: [
+                "y",
+            ],
+            values: [
+                Num(
+                    3.0,
                 ),
             ],
         } from virtual:<test>:26-34,

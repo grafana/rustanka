@@ -1,8 +1,7 @@
 use jrsonnet_evaluator::{
-	ContextBuilder, ContextInitializer as ContextInitializerT, ObjValueBuilder, Result, Thunk, Val,
-	bail,
+	ContextBuilder, ContextInitializer as ContextInitializerT, InitialContextBuilder,
+	ObjValueBuilder, Result, Source, Thunk, Val, bail,
 	function::{FuncVal, builtin},
-	parser::Source,
 };
 use jrsonnet_gcmodule::Trace;
 
@@ -68,10 +67,10 @@ fn param_names(fun: FuncVal) -> Vec<String> {
 #[allow(dead_code)]
 pub struct ContextInitializer;
 impl ContextInitializerT for ContextInitializer {
-	fn populate(&self, _for_file: Source, builder: &mut ContextBuilder) {
+	fn populate(&self, _for_file: Source, builder: &mut InitialContextBuilder) {
 		let mut bobj = ObjValueBuilder::new();
-		bobj.method("assertThrow", assert_throw::INST);
-		bobj.method("paramNames", param_names::INST);
+		bobj.method("assertThrow", assert_throw {});
+		bobj.method("paramNames", param_names {});
 
 		builder.bind("test", Thunk::evaluated(Val::Obj(bobj.build())));
 	}

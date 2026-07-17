@@ -4,7 +4,7 @@
 
 use std::{ffi::CStr, os::raw::c_char};
 
-use jrsonnet_evaluator::{val::ArrValue, Thunk, Val};
+use jrsonnet_evaluator::{Thunk, Val};
 
 use crate::VM;
 
@@ -24,7 +24,7 @@ pub unsafe extern "C" fn jsonnet_json_array_append(_vm: &VM, arr: &mut Val, val:
 			}
 
 			new.push(Thunk::evaluated(val.clone()));
-			*arr = Val::Arr(ArrValue::lazy(new));
+			*arr = Val::arr(new);
 		}
 		_ => panic!("should receive array"),
 	}

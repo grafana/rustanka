@@ -1,2 +1,3 @@
 runtime error: xxx
-    error_from_array.jsonnet:1:2-8: error statement
+    error_from_array.jsonnet:1:2-8:   error statement
+    error_from_array.jsonnet:1:15-17: element <0> access

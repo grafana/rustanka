@@ -1,1 +1,1 @@
-type error: expected boolean, got number
+type mismatch: expected boolean, got number if spec condition

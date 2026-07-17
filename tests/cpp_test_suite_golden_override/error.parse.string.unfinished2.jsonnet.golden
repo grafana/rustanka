@@ -1,2 +1,2 @@
-syntax error: unexpected token: ERROR_STRING_SINGLE_UNTERMINATED
+syntax error: unterminated single-quoted string
     error.parse.string.unfinished2.jsonnet:17:1

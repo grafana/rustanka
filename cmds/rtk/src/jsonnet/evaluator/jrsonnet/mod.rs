@@ -468,16 +468,16 @@ impl JrsonnetEvaluator {
 		};
 
 		// Core parsing/manifest functions
-		context.add_native("parseJson", parse_json::INST);
-		context.add_native("parseYaml", parse_yaml::INST);
-		context.add_native("manifestJsonFromJson", manifest_json_from_json::INST);
-		context.add_native("manifestYamlFromJson", manifest_yaml_from_json::INST);
+		context.add_native("parseJson", parse_json {});
+		context.add_native("parseYaml", parse_yaml {});
+		context.add_native("manifestJsonFromJson", manifest_json_from_json {});
+		context.add_native("manifestYamlFromJson", manifest_yaml_from_json {});
 
 		// Hash function
-		context.add_native("sha256", sha256::INST);
+		context.add_native("sha256", sha256 {});
 
 		// Regex functions
-		context.add_native("escapeStringRegex", escape_string_regex::INST);
+		context.add_native("escapeStringRegex", escape_string_regex {});
 
 		// regexMatch and regexSubst need a shared regex cache
 		let regex_cache = RegexCache::default();
@@ -490,11 +490,11 @@ impl JrsonnetEvaluator {
 		context.add_native("regexSubst", regex_subst { cache: regex_cache });
 
 		// Helm and Kustomize
-		context.add_native("helmTemplate", helm_template::INST);
-		context.add_native("kustomizeBuild", kustomize_build::INST);
+		context.add_native("helmTemplate", helm_template {});
+		context.add_native("kustomizeBuild", kustomize_build {});
 
 		// rtk extension: cross-worker global memoization cache
-		context.add_native("rtkMemoize", rtk_memoize::INST);
+		context.add_native("rtkMemoize", rtk_memoize {});
 	}
 }
 

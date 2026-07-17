@@ -1,2 +1,2 @@
-syntax error: expected one of "(", ".", "?", "[", "{", <binary op>, EOF, got "x"
+syntax error: expected end of file, got identifier "x42"
     error_hexnumber.jsonnet:1:2

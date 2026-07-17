@@ -1,12 +1,13 @@
+use std::rc::Rc;
+
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{
 	unescape, ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BindSpec, CompSpec, Destruct,
 	DestructRest, Expr, ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse,
-	IfSpecData, ImportKind, IndexPart, LiteralType, Member, ObjBody, ObjComp, ObjMembers, Slice,
-	SliceDesc, Source, Span, Spanned, Visibility,
+	IfSpecData, ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers,
+	Slice, SliceDesc, Source, Span, Spanned, Visibility,
 };
 use peg::parser;
-use std::rc::Rc;
 
 pub struct ParserSettings {
 	pub source: Source,
@@ -28,7 +29,7 @@ macro_rules! expr_un {
 }
 
 parser! {
-	grammar jsonnet_parser() for str {
+	pub grammar jsonnet_parser() for str {
 		use peg::ParseLiteral;
 
 		rule eof() = quiet!{![_]} / expected!("<eof>")
@@ -51,33 +52,35 @@ parser! {
 		/// Sequence of digits
 		rule uint_str() -> &'input str = a:$(digit()+ ("_" digit()+)*) { a }
 		/// Number in scientific notation format
-		rule number() -> f64 = quiet!{a:$(uint_str() ("." uint_str())? (['e'|'E'] (s:['+'|'-'])? uint_str())?) {? a.replace("_","").parse().map_err(|_| "<number>") }} / expected!("<number>")
+		rule number() -> f64 = quiet!{a:$(uint_str() ("." uint_str())? (['e'|'E'] (s:['+'|'-'])? uint_str())?) {? a.replace('_',"").parse().map_err(|_| "<number>") }} / expected!("<number>")
 
 		/// Reserved word followed by any non-alphanumberic
 		rule reserved() = ("assert" / "else" / "error" / "false" / "for" / "function" / "if" / "import" / "importstr" / "importbin" / "in" / "local" / "null" / "tailstrict" / "then" / "self" / "super" / "true") end_of_ident()
 		rule id() -> IStr = v:$(quiet!{ !reserved() alpha() (alpha() / digit())*} / expected!("<identifier>")) { v.into() }
 
 		rule keyword(id: &'static str) -> ()
-			= ##parse_string_literal(id) end_of_ident()
+			= #{|input, pos| input.parse_string_literal(pos, id)} end_of_ident()
 
-		pub rule param(s: &ParserSettings) -> ExprParam = destruct:destruct(s) expr:(_ "=" _ expr:expr(s){expr})? { ExprParam { destruct, default: expr.map(Rc::new) } }
+		pub rule param(s: &ParserSettings) -> ExprParam = destruct:destruct(s) default:(_ "=" _ default:expr(s){default})? { ExprParam { destruct, default } }
 		pub rule params(s: &ParserSettings) -> ExprParams
 			= params:param(s) ** comma() comma()? { ExprParams::new(params) }
 			/ { ExprParams::new(Vec::new()) }
 
-		pub rule arg(s: &ParserSettings) -> (Option<IStr>, Rc<Expr>)
-			= name:(quiet! { (s:id() _ "=" !['='] _ {s})? } / expected!("<argument name>")) expr:expr(s) {(name, Rc::new(expr))}
+		pub rule arg(s: &ParserSettings) -> (Option<IStr>, Expr)
+			= name:(quiet! { (s:id() _ "=" !['='] _ {s})? } / expected!("<argument name>")) expr:expr(s) {(name, expr)}
 
 		pub rule args(s: &ParserSettings) -> ArgsDesc
 			= args:arg(s)**comma() comma()? {?
 				let unnamed_count = args.iter().take_while(|(n, _)| n.is_none()).count();
 				let mut unnamed = Vec::with_capacity(unnamed_count);
-				let mut named = Vec::with_capacity(args.len() - unnamed_count);
+				let mut names = Vec::with_capacity(args.len() - unnamed_count);
+				let mut values = Vec::with_capacity(args.len() - unnamed_count);
 				let mut named_started = false;
 				for (name, value) in args {
 					if let Some(name) = name {
 						named_started = true;
-						named.push((name, value));
+						names.push(name);
+						values.push(value);
 					} else {
 						if named_started {
 							return Err("<named argument>")
@@ -85,13 +88,11 @@ parser! {
 						unnamed.push(value);
 					}
 				}
-				Ok(ArgsDesc::new(unnamed, named))
+				Ok(ArgsDesc{unnamed, names, values})
 			}
 
 		pub rule destruct_rest() -> DestructRest
-			= "..." into:(_ into:id() {into})? {if let Some(into) = into {
-				DestructRest::Keep(into)
-			} else {DestructRest::Drop}}
+			= "..." into:(_ into:id() {into})? {into.map_or_else(|| DestructRest::Drop, DestructRest::Keep)}
 		pub rule destruct_array(s: &ParserSettings) -> Destruct
 			= "[" _ start:destruct(s)**comma() rest:(
 				comma() _ rest:destruct_rest()? end:(
@@ -100,7 +101,7 @@ parser! {
 				) {(rest, end)}
 				/ comma()? {(None, Vec::new())}
 			) _ "]" {?
-				#[cfg(feature = "exp-destruct")] return Ok(expr::Destruct::Array {
+				#[cfg(feature = "exp-destruct")] return Ok(Destruct::Array {
 					start,
 					rest: rest.0,
 					end: rest.1,
@@ -109,33 +110,33 @@ parser! {
 			}
 		pub rule destruct_object(s: &ParserSettings) -> Destruct
 			= "{" _
-				fields:(name:id() into:(_ ":" _ into:destruct(s) {into})? default:(_ "=" _ v:expr(s) {v})? {(name, into, default.map(Rc::new))})**comma()
+				fields:(name:id() into:(_ ":" _ into:destruct(s) {into})? default:(_ "=" _ v:spanned(<expr(s)>, s) {v})? {(name, into, default.map(Rc::new))})**comma()
 				rest:(
 					comma() rest:destruct_rest()? {rest}
 					/ comma()? {None}
 				)
 			_ "}" {?
-				#[cfg(feature = "exp-destruct")] return Ok(expr::Destruct::Object {
+				#[cfg(feature = "exp-destruct")] return Ok(Destruct::Object {
 					fields,
 					rest,
 				});
 				#[cfg(not(feature = "exp-destruct"))] Err("!!!experimental destructuring was not enabled")
 			}
 		pub rule destruct(s: &ParserSettings) -> Destruct
-			= v:id() {Destruct::Full(v)}
+			= v:spanned(<id()>, s) {Destruct::Full(v)}
 			/ "?" {?
-				#[cfg(feature = "exp-destruct")] return Ok(expr::Destruct::Skip);
+				#[cfg(feature = "exp-destruct")] return Ok(Destruct::Skip);
 				#[cfg(not(feature = "exp-destruct"))] Err("!!!experimental destructuring was not enabled")
 			}
 			/ arr:destruct_array(s) {arr}
 			/ obj:destruct_object(s) {obj}
 
 		pub rule bind(s: &ParserSettings) -> BindSpec
-			= into:destruct(s) _ "=" _ value:expr(s) {BindSpec::Field{into, value: Rc::new(value)}}
-			/ name:id() _ "(" _ params:params(s) _ ")" _ "=" _ value:expr(s) {BindSpec::Function{name, params, value: Rc::new(value)}}
+			= into:destruct(s) _ "=" _ value:expr(s) {BindSpec::Field{into, value}}
+			/ name:id() _ "(" _ params:params(s) _ ")" _ "=" _ value:expr(s) {BindSpec::Function{name, params, value}}
 
 		pub rule assertion(s: &ParserSettings) -> AssertStmt
-			= keyword("assert") _ cond:spanned(<expr(s)>, s) msg:(_ ":" _ e:spanned(<expr(s)>, s) {e})? { AssertStmt(cond, msg) }
+			= keyword("assert") _ assertion:spanned(<expr(s)>, s) message:(_ ":" _ e:expr(s) {e})? { AssertStmt{assertion, message} }
 
 		pub rule whole_line() -> &'input str
 			= str:$((!['\n'][_])* "\n") {str}
@@ -186,14 +187,14 @@ parser! {
 				plus: plus.is_some(),
 				params: None,
 				visibility,
-				value: Rc::new(value),
+				value,
 			}}
 			/ name:spanned(<field_name(s)>, s) _ "(" _ params:params(s) _ ")" _ visibility:visibility() _ value:expr(s) {FieldMember{
 				name,
 				plus: false,
 				params: Some(params),
 				visibility,
-				value: Rc::new(value),
+				value,
 			}}
 		pub rule obj_local(s: &ParserSettings) -> BindSpec
 			= keyword("local") _ bind:bind(s) {bind}
@@ -216,8 +217,8 @@ parser! {
 						}
 					}
 					ObjBody::ObjComp(ObjComp {
-						locals: Rc::new(locals),
-						field: field.map(Rc::new).ok_or("<missing object comprehension field>")?,
+						locals,
+						field: Box::new(field.ok_or("<missing object comprehension field>")?),
 						compspecs
 					})
 				} else {
@@ -232,8 +233,8 @@ parser! {
 						}
 					}
 					ObjBody::MemberList(ObjMembers {
-						locals: Rc::new(locals),
-						asserts: Rc::new(asserts),
+						locals,
+						asserts,
 						fields
 					})
 				})
@@ -258,13 +259,13 @@ parser! {
 		pub rule obj_expr(s: &ParserSettings) -> Expr
 			= "{" _ body:objinside(s) _ "}" {Expr::Obj(body)}
 		pub rule array_expr(s: &ParserSettings) -> Expr
-			= "[" _ elems:(expr(s) ** comma()) _ comma()? "]" {Expr::Arr(Rc::new(elems))}
+			= "[" _ elems:(expr(s) ** comma()) _ comma()? "]" {Expr::Arr(elems)}
 		pub rule array_comp_expr(s: &ParserSettings) -> Expr
 			= "[" _ expr:expr(s) _ comma()? _ specs:(r: compspecs(s) _ {r}) "]" {
-				Expr::ArrComp(Rc::new(expr), specs)
+				Expr::ArrComp(Box::new(expr), specs)
 			}
 		pub rule number_expr(s: &ParserSettings) -> Expr
-			= n:number() {? if n.is_finite() {
+			= n:number() {? if let Some(n) = NumValue::new(n) {
 				Ok(Expr::Num(n))
 			} else {
 				Err("!!!numbers are finite")
@@ -314,8 +315,8 @@ parser! {
 			/ local_expr(s)
 			/ if_then_else_expr(s)
 
-			/ keyword("function") _ "(" _ params:params(s) _ ")" _ expr:expr(s) {Expr::Function(params, Rc::new(expr))}
-			/ assert:assertion(s) _ ";" _ rest:expr(s) { Expr::AssertExpr(Rc::new(AssertExpr{
+			/ keyword("function") _ "(" _ params:params(s) _ ")" _ expr:expr(s) {Expr::Function(params, Box::new(expr))}
+			/ assert:assertion(s) _ ";" _ rest:expr(s) { Expr::AssertExpr(Box::new(AssertExpr{
 				assert, rest
 			})) }
 
@@ -389,7 +390,7 @@ parser! {
 				value:(@) _ "[" _ slice:slice_desc(s) _ "]" {Expr::Slice(Box::new(Slice{value, slice}))}
 				indexable:(@) _ parts:index_part(s)+ {Expr::Index{indexable: Box::new(indexable), parts}}
 				a:(@) _ args:spanned(<"(" _ a:args(s) _ ")" {a}>, s) ts:(_ keyword("tailstrict"))? {Expr::Apply(Box::new(a), args, ts.is_some())}
-				a:(@) _ "{" _ body:objinside(s) _ "}" {Expr::ObjExtend(Rc::new(a), body)}
+				a:(@) _ "{" _ body:objinside(s) _ "}" {Expr::ObjExtend(Box::new(a), body)}
 				--
 				e:expr_basic(s) {e}
 				"(" _ e:expr(s) _ ")" {e}

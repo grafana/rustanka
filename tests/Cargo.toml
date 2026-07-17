@@ -18,9 +18,17 @@ workspace = true
 jrsonnet-evaluator.workspace = true
 jrsonnet-gcmodule.workspace = true
 jrsonnet-stdlib.workspace = true
+mimallocator.workspace = true
 serde.workspace = true
-json-structural-diff.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "cpp_test_suite"
+harness = false

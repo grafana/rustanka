@@ -284,29 +284,29 @@ impl SyntaxKind {
 			ERROR_FLOAT_JUNK_AFTER_POINT => "junk after decimal point in number literal",
 			ERROR_FLOAT_JUNK_AFTER_EXPONENT => "junk after exponent in number literal",
 			ERROR_FLOAT_JUNK_AFTER_EXPONENT_SIGN => "junk after exponent sign in number literal",
-			STRING_DOUBLE => "string",
+			STRING_DOUBLE => "\"string\"",
 			ERROR_STRING_DOUBLE_UNTERMINATED => "unterminated double-quoted string",
-			STRING_SINGLE => "string",
+			STRING_SINGLE => "'string'",
 			ERROR_STRING_SINGLE_UNTERMINATED => "unterminated single-quoted string",
-			STRING_DOUBLE_VERBATIM => "string",
+			STRING_DOUBLE_VERBATIM => "@\"string\"",
 			ERROR_STRING_DOUBLE_VERBATIM_UNTERMINATED => {
 				"unterminated verbatim double-quoted string"
 			}
-			STRING_SINGLE_VERBATIM => "string",
+			STRING_SINGLE_VERBATIM => "@'string'",
 			ERROR_STRING_SINGLE_VERBATIM_UNTERMINATED => {
 				"unterminated verbatim single-quoted string"
 			}
 			ERROR_STRING_VERBATIM_MISSING_QUOTES => "verbatim string missing opening quotes",
-			STRING_BLOCK => "string",
+			STRING_BLOCK => "|||string|||",
 			ERROR_STRING_BLOCK_UNEXPECTED_END => "unexpected end of text block",
 			ERROR_STRING_BLOCK_MISSING_NEW_LINE => "text block requires new line after |||",
 			ERROR_STRING_BLOCK_MISSING_TERMINATION => "unterminated text block",
 			ERROR_STRING_BLOCK_MISSING_INDENT => "text block first line must be indented",
 			IDENT => "identifier",
 			WHITESPACE => "whitespace",
-			SINGLE_LINE_SLASH_COMMENT => "comment",
-			SINGLE_LINE_HASH_COMMENT => "comment",
-			MULTI_LINE_COMMENT => "comment",
+			SINGLE_LINE_SLASH_COMMENT => "//comment",
+			SINGLE_LINE_HASH_COMMENT => "#comment",
+			MULTI_LINE_COMMENT => "/*comment*/",
 			ERROR_COMMENT_TOO_SHORT => "comment too short",
 			ERROR_COMMENT_UNTERMINATED => "unterminated multi-line comment",
 			ERROR_NO_OPERATOR => "expected operator",

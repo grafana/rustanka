@@ -9,9 +9,11 @@ use jrsonnet_evaluator::{
 	gc::WithCapacityExt as _,
 	manifest::JsonFormat,
 	rustc_hash::FxHashMap,
+	stack::limit_stack_depth,
 	tla::TlaArg,
 	trace::{CompactFormat, PathResolver, TraceFormat},
 };
+use jrsonnet_gcmodule::ObjectSpace;
 use jrsonnet_stdlib::ContextInitializer;
 mod common;
 use common::ContextInitializer as TestContextInitializer;
@@ -144,31 +146,6 @@ const SKIPPED: &[&str] = &[
 	"pow6.jsonnet",
 	// golang escapes "e" yaml key, does it think it is float?
 	"builtin_manifestYamlDoc.jsonnet",
-	// Wtf?..
-	// Result
-	// [
-	//   {},
-	//   {},
-	//   []
-	// ]
-	// and golden
-	// [
-	//   {},
-	//   {},
-	//   []
-	// ]
-	// did not match structurally:
-	//  [
-	//    ...
-	// -  {
-	// -  }
-	// +  {
-	// +  }
-	//    [
-	//    ]
-	//  ]
-	"empty_object_comp.jsonnet",
-	"object_hidden.jsonnet",
 	// multi output is a CLI part, not an interpreter.
 	"multi.jsonnet",
 	"multi_no_newline.jsonnet",
@@ -181,23 +158,18 @@ const SKIPPED: &[&str] = &[
 	"native6.jsonnet",
 	// Since when parser should throw an error for that?..
 	"number_leading_zero.jsonnet",
-	// Jrsonnet has this overload
-	"number_times_string.jsonnet",
-	// Jrsonnet has stricter implementations, this is a dumb thing that the filter value might not be
-	// evaluated anyway...
-	"std.filter7.jsonnet",
 	// Golang fails with max stack frames exceeded error
 	"std.makeArray_recursive_evalutation_order_matters.jsonnet",
-	// Jrsonnet has this overload
-	"string_times_number.jsonnet",
 	// Tailstrict semantics is partially unspecified
 	"tailstrict3.jsonnet",
+	// Jrsonnet has this overload
+	"number_times_string.jsonnet",
+	// Jrsonnet has this overload
+	"string_times_number.jsonnet",
 ];
 
 #[test]
 fn cpp_test_suite() -> io::Result<()> {
-	use json_structural_diff::JsonDiff;
-
 	for root_dir in ["cpp_test_suite", "go_testdata"] {
 		let root_tests = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 		let root = root_tests.join(root_dir);
@@ -261,7 +233,10 @@ fn cpp_test_suite() -> io::Result<()> {
 			// Otherwise assume test should just not fail and return true.
 			let golden = golden.unwrap_or_else(|| "true".to_owned());
 
-			match (serde_json::from_str(&result), serde_json::from_str(&golden)) {
+			match (
+				serde_json::from_str::<serde_json::Value>(&result),
+				serde_json::from_str::<serde_json::Value>(&golden),
+			) {
 				(Err(_), Ok(_)) => panic!(
 					"unexpected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
 					entry.path().display()
@@ -270,17 +245,15 @@ fn cpp_test_suite() -> io::Result<()> {
 					"expected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
 					entry.path().display()
 				),
-				(Ok(result_v), Ok(golden)) => {
-					// Show diff relative to golden`.
-					let diff = JsonDiff::diff_string(&golden, &result_v, false);
-					if let Some(diff) = diff {
+				(Ok(result_v), Ok(golden_v)) => {
+					if result_v != golden_v {
 						if env::var_os("UPDATE_GOLDEN").is_some() {
 							fs::write(golden_override, result)?;
 						} else {
 							panic!(
 								"Result \n{result_v:#}\n\
-								and golden \n{golden:#}\n\
-								did not match structurally:\n{diff:#}\n\
+								and golden \n{golden_v:#}\n\
+								did not match structurally\n\
 								for golden {}",
 								entry.path().display()
 							);
@@ -301,7 +274,10 @@ fn cpp_test_suite() -> io::Result<()> {
 				}
 			};
 		}
+		println!("done!");
 	}
+
+	jrsonnet_gcmodule::with_thread_object_space(ObjectSpace::leak);
 
 	Ok(())
 }

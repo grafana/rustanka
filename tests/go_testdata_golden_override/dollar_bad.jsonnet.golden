@@ -1,1 +1,1 @@
-self/super/$ are only usable inside objects
+static analysis errors: `$` used outside of object

@@ -67,7 +67,7 @@ impl Inner {
 			.cast();
 			assert!(!data.is_null());
 			*data = InnerHeader::new(bytes.len().try_into().expect("bytes > 4GB"), is_utf8);
-			ptr::copy_nonoverlapping(bytes.as_ptr(), data.offset(1).cast::<u8>(), bytes.len());
+			ptr::copy_nonoverlapping(bytes.as_ptr(), data.add(1).cast::<u8>(), bytes.len());
 			Self(UnsafeCell::new(NonNull::new_unchecked(data)))
 		}
 	}
@@ -89,10 +89,7 @@ impl Inner {
 		let size = unsafe { (*header).size };
 		// SAFETY: bytes after data is allocated to be exactly data.size in length
 		unsafe {
-			slice::from_raw_parts(
-				(*self.0.get()).as_ptr().offset(1).cast::<u8>(),
-				size as usize,
-			)
+			slice::from_raw_parts((*self.0.get()).as_ptr().add(1).cast::<u8>(), size as usize)
 		}
 	}
 
@@ -156,7 +153,7 @@ impl Inner {
 	}
 	pub fn as_ptr(this: &Self) -> *const u8 {
 		// SAFETY: data is initialized
-		unsafe { (*this.0.get()).as_ptr().offset(1).cast() }
+		unsafe { (*this.0.get()).as_ptr().add(1).cast() }
 	}
 
 	pub fn strong_count(this: &Self) -> u32 {

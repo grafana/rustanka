@@ -1,2 +1,2 @@
-syntax error: unexpected token in expression: EOF
+syntax error: unexpected end of file
     error.parse.index_unterminated.jsonnet:17:3

@@ -37,6 +37,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
 
 [[package]]
+name = "alloca"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a7d05ea6aea7e9e64d25b9156ba2fee3fdd659e34e41063cd2fc7cd020d7f4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -275,6 +284,15 @@ name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+
+[[package]]
+name = "bitmaps"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "031043d04099746d8db04daf1fa424b2bc8bd69d92b25962dcde24da39ab64a2"
+dependencies = [
+ "typenum",
+]
 
 [[package]]
 name = "block-buffer"
@@ -552,10 +570,35 @@ dependencies = [
  "cast",
  "ciborium",
  "clap",
- "criterion-plot",
+ "criterion-plot 0.6.0",
  "itertools 0.13.0",
  "num-traits",
  "oorandom",
+ "plotters",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
+name = "criterion"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "950046b2aa2492f9a536f5f4f9a3de7b9e2476e575e05bd6c333371add4d98f3"
+dependencies = [
+ "alloca",
+ "anes",
+ "cast",
+ "ciborium",
+ "clap",
+ "criterion-plot 0.8.2",
+ "itertools 0.13.0",
+ "num-traits",
+ "oorandom",
+ "page_size",
  "plotters",
  "rayon",
  "regex",
@@ -570,6 +613,16 @@ name = "criterion-plot"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b1bcc0dc7dfae599d84ad0b1a55f80cde8af3725da8313b528da95ef783e338"
+dependencies = [
+ "cast",
+ "itertools 0.13.0",
+]
+
+[[package]]
+name = "criterion-plot"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8d80a2f4f5b554395e47b5d8305bc3d27813bacb73493eb1001e8f76dae29ea"
 dependencies = [
  "cast",
  "itertools 0.13.0",
@@ -688,12 +741,6 @@ dependencies = [
  "rustc_version",
  "syn",
 ]
-
-[[package]]
-name = "difflib"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 
 [[package]]
 name = "digest"
@@ -1526,6 +1573,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "im-rc"
+version = "15.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af1955a75fa080c677d3972822ec4bad316169ab1cfc6c257a942c2265dbe5fe"
+dependencies = [
+ "bitmaps",
+ "rand_core 0.6.4",
+ "rand_xoshiro",
+ "refpool",
+ "sized-chunks",
+ "typenum",
+ "version_check",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1655,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1672,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-cli"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "clap",
  "jrsonnet-evaluator",
@@ -1682,13 +1744,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "jrsonnet-deps"
+version = "0.5.0-pre98"
+dependencies = [
+ "clap",
+ "jrsonnet-cli",
+ "jrsonnet-evaluator",
+ "jrsonnet-ir",
+ "jrsonnet-ir-parser",
+]
+
+[[package]]
 name = "jrsonnet-evaluator"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "annotate-snippets",
  "anyhow",
+ "drop_bomb",
  "educe",
  "hi-doc",
+ "im-rc",
+ "insta",
  "jrsonnet-gcmodule",
  "jrsonnet-interner",
  "jrsonnet-ir",
@@ -1701,15 +1777,17 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustversion",
  "serde",
+ "smallvec 1.15.1",
  "stacker",
  "static_assertions",
+ "strip-ansi-escapes",
  "strsim",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "jrsonnet-fmt"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "clap",
  "hi-doc",
@@ -1721,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-formatter"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "dprint-core",
  "hi-doc",
@@ -1733,16 +1811,19 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-gcmodule"
-version = "0.4.1"
-source = "git+https://github.com/grafana/jrsonnet-gcmodule?branch=jj%2Fv0.4.1%2Ffix-memory-leak#c2fd883d560af7106db665671a7a510792a85cb7"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb04c12f50f954e1d8b3b5a7e99c448da97af2e1f7435a88f3c9b9f2a677015a"
 dependencies = [
+ "im-rc",
  "jrsonnet-gcmodule-derive",
 ]
 
 [[package]]
 name = "jrsonnet-gcmodule-derive"
-version = "0.4.1"
-source = "git+https://github.com/grafana/jrsonnet-gcmodule?branch=jj%2Fv0.4.1%2Ffix-memory-leak#c2fd883d560af7106db665671a7a510792a85cb7"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "454a895e7c0b7ea3584966e8b346c6c80fdd33acb0224ad7e3fbd80cf8171601"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1751,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-interner"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "hashbrown 0.16.1",
  "jrsonnet-gcmodule",
@@ -1760,18 +1841,19 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-ir"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
  "jrsonnet-interner",
  "peg",
  "static_assertions",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "jrsonnet-ir-parser"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
@@ -1781,14 +1863,14 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-lexer"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "jrsonnet-lint"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "clap",
  "jrsonnet-rowan-parser",
@@ -1798,7 +1880,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-macros"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1808,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-peg-parser"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
@@ -1818,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-rowan-parser"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "anyhow",
  "drop_bomb",
@@ -1833,12 +1915,11 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-stdlib"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "base64 0.22.1",
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
- "jrsonnet-ir",
  "jrsonnet-macros",
  "lru",
  "md5",
@@ -1856,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-types"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "jrsonnet-gcmodule",
  "peg",
@@ -1882,17 +1963,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "json-structural-diff"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e878e36a8a44c158505c2c818abdc1350413ad83dcb774a0459f6a7ef2b65cbf"
-dependencies = [
- "difflib",
- "regex",
- "serde_json",
 ]
 
 [[package]]
@@ -2093,7 +2163,7 @@ checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
 name = "libjsonnet"
-version = "0.5.0-pre97"
+version = "0.5.0-pre98"
 dependencies = [
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
@@ -2521,6 +2591,16 @@ dependencies = [
  "proc-macro2-diagnostics",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "page_size"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2954,7 +3034,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha",
- "rand_core",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -2964,8 +3044,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.9.5",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
 name = "rand_core"
@@ -2974,6 +3060,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
+dependencies = [
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -3053,6 +3148,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "refpool"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "369e86b80fa7dc8c561dd9613a5bf25c59d2d3073cd66c47fd9e39802f0ecb58"
 
 [[package]]
 name = "regex"
@@ -3193,7 +3294,7 @@ dependencies = [
  "bon",
  "bytes 1.11.1",
  "clap",
- "criterion",
+ "criterion 0.7.0",
  "dirs",
  "either",
  "gtmpl",
@@ -3651,6 +3752,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
+name = "sized-chunks"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16d69225bde7a69b235da73377861095455d298f2b970996eec25ddbb42b3d1e"
+dependencies = [
+ "bitmaps",
+ "refpool",
+ "typenum",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3828,11 +3940,12 @@ dependencies = [
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "criterion 0.8.2",
  "insta",
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
  "jrsonnet-stdlib",
- "json-structural-diff",
+ "mimallocator",
  "serde",
  "serde_json",
 ]
@@ -4623,6 +4736,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "winapi"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+dependencies = [
+ "winapi-i686-pc-windows-gnu",
+ "winapi-x86_64-pc-windows-gnu",
+]
+
+[[package]]
+name = "winapi-i686-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4630,6 +4759,12 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "winapi-x86_64-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"

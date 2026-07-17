@@ -1,5 +1,10 @@
 //! faster std.format impl
 #![allow(clippy::too_many_arguments)]
+#![expect(
+	clippy::cast_possible_truncation,
+	clippy::cast_sign_loss,
+	reason = "many safe integer casts, behavior on overflow is not specified"
+)]
 
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_interner::IStr;
@@ -849,7 +854,7 @@ pub fn format_obj(str: &str, values: &ObjValue) -> Result<String> {
 #[cfg(test)]
 pub mod test_format {
 	use super::*;
-	use crate::val::NumValue;
+	use crate::NumValue;
 
 	#[test]
 	fn parse() {

@@ -19,6 +19,23 @@ macro_rules! params {
 	};
 }
 
+#[macro_export]
+macro_rules! names {
+	($($name:ident: $val:literal),* $(,)?) => {
+		struct Names {
+			$($name: $crate::IStr,)*
+		}
+		thread_local! {
+			static NAMES: Names = Names {
+				$($name: $crate::IStr::from($val)),*
+			};
+		}
+		$(pub fn $name() -> $crate::IStr {
+			NAMES.with(|n| n.$name.clone())
+		})*
+	}
+}
+
 cc_dyn!(
 	#[derive(Clone)]
 	BuiltinFunc,
@@ -55,14 +72,6 @@ pub trait Builtin: Trace {
 	fn call(&self, loc: CallLocation<'_>, args: &[Option<Thunk<Val>>]) -> Result<Val>;
 
 	fn as_any(&self) -> &dyn Any;
-}
-
-pub trait StaticBuiltin: Builtin + Send + Sync
-where
-	Self: 'static,
-{
-	// In impl, to make it object safe:
-	// const INST: &'static Self;
 }
 
 #[derive(Trace)]

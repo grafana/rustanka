@@ -124,6 +124,7 @@ fn frexp(s: f64) -> (f64, i16) {
 		let lg = s.abs().log2();
 		let x = (lg - lg.floor() - 1.0).exp2();
 		let exp = lg.floor() + 1.0;
+		#[expect(clippy::cast_possible_truncation, reason = "exponent can fit in i16")]
 		(s.signum() * x, exp as i16)
 	}
 }

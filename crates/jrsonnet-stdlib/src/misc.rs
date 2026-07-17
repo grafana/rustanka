@@ -14,10 +14,10 @@ use jrsonnet_gcmodule::Cc;
 use crate::Settings;
 
 #[builtin]
-pub fn builtin_length(x: Either![IStr, ArrValue, ObjValue, FuncVal]) -> usize {
+pub fn builtin_length(x: Either![IStr, ArrValue, ObjValue, FuncVal]) -> u32 {
 	use Either4::*;
 	match x {
-		A(x) => x.chars().count(),
+		A(x) => x.chars().count() as u32,
 		B(x) => x.len(),
 		C(x) => x.len(),
 		D(f) => f.params_len(),
@@ -103,7 +103,7 @@ pub fn builtin_starts_with(a: Either![IStr, ArrValue], b: Either![IStr, ArrValue
 			} else if b.len() == a.len() {
 				return equals(&Val::Arr(a), &Val::Arr(b));
 			}
-			for (a, b) in a.iter().take(b.len()).zip(b.iter()) {
+			for (a, b) in a.iter().take(b.len() as usize).zip(b.iter()) {
 				let a = a?;
 				let b = b?;
 				if !equals(&a, &b)? {
@@ -128,7 +128,7 @@ pub fn builtin_ends_with(a: Either![IStr, ArrValue], b: Either![IStr, ArrValue])
 				return equals(&Val::Arr(a), &Val::Arr(b));
 			}
 			let a_len = a.len();
-			for (a, b) in a.iter().skip(a_len - b.len()).zip(b.iter()) {
+			for (a, b) in a.iter().skip((a_len - b.len()) as usize).zip(b.iter()) {
 				let a = a?;
 				let b = b?;
 				if !equals(&a, &b)? {
@@ -202,7 +202,9 @@ pub fn builtin_merge_patch(target: Val, patch: Val) -> Result<Val> {
 	for field in target_fields.union(&patch_fields) {
 		let Some(field_patch) = patch.get(field.clone())? else {
 			// All lazy fields might be unified into a single filtered object core instead of creating a thunk per, but this implementation is good enough.
-			let target_field = target.get_lazy(field.clone()).expect("we're iterating over fields union, if field is missing in patch - it exists in target");
+			let target_field = target.get_lazy(field.clone()).expect(
+				"we're iterating over fields union, if field is missing in patch - it exists in target",
+			);
 			out.field(field.clone()).thunk(target_field);
 			continue;
 		};

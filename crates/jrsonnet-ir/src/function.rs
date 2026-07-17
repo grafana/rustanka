@@ -1,6 +1,4 @@
-use std::fmt;
-use std::ops::Deref;
-use std::rc::Rc;
+use std::{fmt, ops::Deref, rc::Rc};
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;

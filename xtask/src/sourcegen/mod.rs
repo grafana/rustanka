@@ -56,7 +56,9 @@ pub fn generate_ungrammar() -> Result<()> {
 						});
 					}
 					SpecialName::Error => {
-						panic!("error token ERROR_{name} must be explicitly defined in jsonnet_kinds()");
+						panic!(
+							"error token ERROR_{name} must be explicitly defined in jsonnet_kinds()"
+						);
 					}
 				}
 				continue;

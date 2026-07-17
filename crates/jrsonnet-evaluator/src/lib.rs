@@ -7,7 +7,7 @@
 extern crate self as jrsonnet_evaluator;
 
 mod arr;
-// pub mod async_import;
+pub mod async_import;
 mod ctx;
 mod dynamic;
 pub mod error;
@@ -17,7 +17,6 @@ pub mod gc;
 mod import;
 mod integrations;
 pub mod manifest;
-mod map;
 mod obj;
 pub mod stack;
 pub mod stdlib;
@@ -39,20 +38,20 @@ use std::{
 pub use ctx::*;
 pub use dynamic::*;
 pub use error::{Error, ErrorKind::*, Result, ResultExt};
-pub use evaluate::*;
+pub use evaluate::ensure_sufficient_stack;
 use function::CallLocation;
 pub use import::*;
 use jrsonnet_gcmodule::{cc_dyn, Cc, Trace};
 pub use jrsonnet_interner::{IBytes, IStr};
-pub use jrsonnet_ir as parser;
-use jrsonnet_ir::{Expr, Source, SourcePath};
+use jrsonnet_ir::Expr;
+pub use jrsonnet_ir::{NumValue, Source, SourcePath, Span};
 #[doc(hidden)]
 pub use jrsonnet_macros;
 
 #[cfg(not(any(feature = "ir-parser", feature = "peg-parser")))]
 compile_error!("at least one of `ir-parser` or `peg-parser` features must be enabled");
 
-pub use error::{SyntaxError, SyntaxErrorLocation};
+pub use error::SyntaxError;
 pub use obj::*;
 pub use rustc_hash;
 use rustc_hash::FxHashMap;
@@ -60,16 +59,18 @@ use stack::check_depth;
 pub use tla::apply_tla;
 pub use val::{Thunk, Val};
 
+pub mod analyze;
 use crate::gc::WithCapacityExt as _;
 
 #[allow(clippy::needless_return)]
 pub(crate) fn parse_jsonnet(code: &str, source: Source) -> Result<Expr, SyntaxError> {
 	#[cfg(feature = "peg-parser")]
 	{
+		use std::sync::LazyLock;
 		static USE_LEGACY_PARSER: LazyLock<bool> =
 			LazyLock::new(|| std::env::var_os("JRSONNET_LEGACY_PARSER").is_some());
 
-		if USE_LEGACY_PARSER {
+		if *USE_LEGACY_PARSER {
 			return parse_peg(code, source);
 		}
 	}
@@ -88,9 +89,7 @@ fn parse_ir(code: &str, source: Source) -> Result<Expr, SyntaxError> {
 	jrsonnet_ir_parser::parse(code, &jrsonnet_ir_parser::ParserSettings { source }).map_err(|e| {
 		SyntaxError {
 			message: e.message,
-			location: SyntaxErrorLocation {
-				offset: e.location.offset,
-			},
+			location: e.location,
 		}
 	})
 }
@@ -108,7 +107,7 @@ fn parse_peg(code: &str, source: Source) -> Result<Expr, SyntaxError> {
 						"expected {}, got {:?}",
 						e.expected,
 						code.chars()
-							.nth(e.location.offset)
+							.nth(e.location.0)
 							.map_or_else(|| "EOF".into(), |c: char| c.to_string())
 					)
 				},
@@ -116,9 +115,7 @@ fn parse_peg(code: &str, source: Source) -> Result<Expr, SyntaxError> {
 			);
 		SyntaxError {
 			message,
-			location: SyntaxErrorLocation {
-				offset: e.location.offset,
-			},
+			location: e.location,
 		}
 	})
 }
@@ -167,30 +164,30 @@ cc_dyn!(CcContextInitializer, ContextInitializer);
 
 /// During import, this trait will be called to create initial context for file.
 /// It may initialize global variables, stdlib for example.
-pub trait ContextInitializer: Trace {
-	/// For which size the builder should be preallocated
-	fn reserve_vars(&self) -> usize {
-		0
-	}
-	/// Initialize default file context.
-	/// Has default implementation, which calls `populate`.
-	/// Prefer to always implement `populate` instead.
-	fn initialize(&self, for_file: Source) -> Context {
-		let mut builder = ContextBuilder::with_capacity(self.reserve_vars());
-		self.populate(for_file, &mut builder);
-		builder.build()
-	}
+pub trait ContextInitializer {
 	/// For composability: extend builder. May panic if this initialization is not supported,
 	/// and the context may only be created via `initialize`.
-	fn populate(&self, for_file: Source, builder: &mut ContextBuilder);
+	fn populate(&self, for_file: Source, builder: &mut InitialContextBuilder);
 	/// Allows upcasting from abstract to concrete context initializer.
 	/// jrsonnet by itself doesn't use this method, it is allowed for it to panic.
 	fn as_any(&self) -> &dyn Any;
 }
+impl<T> ContextInitializer for &T
+where
+	T: ContextInitializer,
+{
+	fn populate(&self, for_file: Source, builder: &mut InitialContextBuilder) {
+		(*self).populate(for_file, builder);
+	}
+
+	fn as_any(&self) -> &dyn Any {
+		(*self).as_any()
+	}
+}
 
 /// Context initializer which adds nothing.
 impl ContextInitializer for () {
-	fn populate(&self, _for_file: Source, _builder: &mut ContextBuilder) {}
+	fn populate(&self, _for_file: Source, _builder: &mut InitialContextBuilder) {}
 	fn as_any(&self) -> &dyn Any {
 		self
 	}
@@ -198,17 +195,9 @@ impl ContextInitializer for () {
 
 impl<T> ContextInitializer for Option<T>
 where
-	T: ContextInitializer,
+	T: ContextInitializer + 'static,
 {
-	fn initialize(&self, for_file: Source) -> Context {
-		if let Some(ctx) = self {
-			ctx.initialize(for_file)
-		} else {
-			().initialize(for_file)
-		}
-	}
-
-	fn populate(&self, for_file: Source, builder: &mut ContextBuilder) {
+	fn populate(&self, for_file: Source, builder: &mut InitialContextBuilder) {
 		if let Some(ctx) = self {
 			ctx.populate(for_file, builder);
 		}
@@ -223,13 +212,7 @@ macro_rules! impl_context_initializer {
 	($($gen:ident)*) => {
 		#[allow(non_snake_case)]
 		impl<$($gen: ContextInitializer + Trace,)*> ContextInitializer for ($($gen,)*) {
-			fn reserve_vars(&self) -> usize {
-				let mut out = 0;
-				let ($($gen,)*) = self;
-				$(out += $gen.reserve_vars();)*
-				out
-			}
-			fn populate(&self, for_file: Source, builder: &mut ContextBuilder) {
+			fn populate(&self, for_file: Source, builder: &mut InitialContextBuilder) {
 				let ($($gen,)*) = self;
 				$($gen.populate(for_file.clone(), builder);)*
 			}
@@ -456,7 +439,12 @@ impl State {
 		file.evaluating = true;
 		// Dropping file cache guard here, as evaluation may use this map too
 		drop(file_cache);
-		let res = evaluate(self.create_default_context(file_name), &parsed);
+		let (ctx, externals) = self.create_default_context(file_name.clone()).build();
+		let report = analyze::analyze_root(&parsed, externals);
+		if report.errored {
+			return Err(StaticAnalysisError(report.diagnostics_list).into());
+		}
+		let res = evaluate::evaluate(ctx.build(), &report.lir);
 
 		let mut file_cache = self.file_cache();
 		let mut file = file_cache.entry(path);
@@ -489,24 +477,22 @@ impl State {
 	}
 
 	/// Creates context with all passed global variables
-	pub fn create_default_context(&self, source: Source) -> Context {
-		self.context_initializer().initialize(source)
+	pub fn create_default_context(&self, source: Source) -> InitialContextBuilder {
+		self.create_default_context_with(source, &())
 	}
 
 	/// Creates context with all passed global variables, calling custom modifier
 	pub fn create_default_context_with(
 		&self,
 		source: Source,
-		context_initializer: impl ContextInitializer,
-	) -> Context {
+		context_initializer: &dyn ContextInitializer,
+	) -> InitialContextBuilder {
 		let default_initializer = self.context_initializer();
-		let mut builder = ContextBuilder::with_capacity(
-			default_initializer.reserve_vars() + context_initializer.reserve_vars(),
-		);
+		let mut builder = InitialContextBuilder::new();
 		default_initializer.populate(source.clone(), &mut builder);
 		context_initializer.populate(source, &mut builder);
 
-		builder.build()
+		builder
 	}
 }
 
@@ -549,7 +535,7 @@ pub fn in_description_frame<T>(
 #[derive(Trace)]
 pub struct InitialUnderscore(pub Thunk<Val>);
 impl ContextInitializer for InitialUnderscore {
-	fn populate(&self, _for_file: Source, builder: &mut ContextBuilder) {
+	fn populate(&self, _for_file: Source, builder: &mut InitialContextBuilder) {
 		builder.bind("_", self.0.clone());
 	}
 
@@ -562,20 +548,14 @@ impl ContextInitializer for InitialUnderscore {
 impl State {
 	/// Parses and evaluates the given snippet
 	pub fn evaluate_snippet(&self, name: impl Into<IStr>, code: impl Into<IStr>) -> Result<Val> {
-		let code = code.into();
-		let source = Source::new_virtual(name.into(), code.clone());
-		let parsed = parse_jsonnet(&code, source.clone()).map_err(|e| ImportSyntaxError {
-			path: source.clone(),
-			error: Box::new(e),
-		})?;
-		evaluate(self.create_default_context(source), &parsed)
+		self.evaluate_snippet_with(name, code, &())
 	}
 	/// Parses and evaluates the given snippet with custom context modifier
 	pub fn evaluate_snippet_with(
 		&self,
 		name: impl Into<IStr>,
 		code: impl Into<IStr>,
-		context_initializer: impl ContextInitializer,
+		context_initializer: &dyn ContextInitializer,
 	) -> Result<Val> {
 		let code = code.into();
 		let source = Source::new_virtual(name.into(), code.clone());
@@ -583,10 +563,14 @@ impl State {
 			path: source.clone(),
 			error: Box::new(e),
 		})?;
-		evaluate(
-			self.create_default_context_with(source, context_initializer),
-			&parsed,
-		)
+		let (ctx, externals) = self
+			.create_default_context_with(source.clone(), context_initializer)
+			.build();
+		let report = analyze::analyze_root(&parsed, externals);
+		if report.errored {
+			return Err(StaticAnalysisError(report.diagnostics_list).into());
+		}
+		evaluate::evaluate(ctx.build(), &report.lir)
 	}
 }
 
@@ -633,7 +617,7 @@ impl StateBuilder {
 	}
 	pub fn context_initializer(
 		&mut self,
-		context_initializer: impl ContextInitializer,
+		context_initializer: impl ContextInitializer + Trace,
 	) -> &mut Self {
 		let _ = self
 			.context_initializer

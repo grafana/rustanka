@@ -3,17 +3,16 @@
 
 use jrsonnet_evaluator::{
 	function::builtin,
-	operator::evaluate_mod_op,
 	stdlib::std_format,
 	typed::{Either, Either2},
-	val::{equals, primitive_equals, NumValue},
-	IStr, Result, Val,
+	val::{equals, primitive_equals},
+	IStr, NumValue, Result, Val,
 };
 
 #[builtin]
 pub fn builtin_mod(a: Either![NumValue, IStr], b: Val) -> Result<Val> {
 	use Either2::*;
-	evaluate_mod_op(
+	Val::try_mod(
 		&match a {
 			A(v) => Val::Num(v),
 			B(s) => Val::string(s),

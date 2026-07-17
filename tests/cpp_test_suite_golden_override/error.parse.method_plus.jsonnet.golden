@@ -1,2 +1,2 @@
-syntax error: expected COLON, got "+"
+syntax error: expected ':', got '+'
     error.parse.method_plus.jsonnet:17:18

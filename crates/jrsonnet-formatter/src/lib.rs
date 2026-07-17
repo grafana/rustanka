@@ -450,6 +450,47 @@ impl Printable for ObjBody {
 	fn print(&self, out: &mut PrintItems) {
 		match self {
 			Self::ObjBodyComp(l) => {
+				fn gen_obj_comp(
+					members: Vec<Child<Member>>,
+					member_end_comments: EndingComments,
+					compspecs: Vec<Child<CompSpec>>,
+					multi_line: ConditionResolver,
+				) -> PrintItems {
+					let mut out = PrintItems::new();
+					for mem in members {
+						if mem.should_start_with_newline {
+							p!(out, nl);
+						}
+						format_comments(&mem.before_trivia, CommentLocation::AboveItem, &mut out);
+						p!(&mut out, { mem.value });
+						p!(out, if("trailing comma", multi_line, str(",")));
+						format_comments(&mem.inline_trivia, CommentLocation::ItemInline, &mut out);
+						p!(out, if_else("member-comp sep", multi_line, nl)(sonl));
+					}
+
+					if member_end_comments.should_start_with_newline {
+						p!(out, nl);
+					}
+					format_comments(
+						&member_end_comments.trivia,
+						CommentLocation::EndOfItems,
+						&mut out,
+					);
+
+					let mut compspecs = compspecs.into_iter().peekable();
+					while let Some(mem) = compspecs.next() {
+						if mem.should_start_with_newline {
+							p!(out, nl);
+						}
+						format_comments(&mem.before_trivia, CommentLocation::AboveItem, &mut out);
+						p!(&mut out, { mem.value });
+						format_comments(&mem.inline_trivia, CommentLocation::ItemInline, &mut out);
+						p!(out, if_else("comp spec sep", multi_line, nl)(sonl));
+					}
+
+					out
+				}
+
 				let (children, mut end_comments) = children_between::<Member>(
 					l.syntax().clone(),
 					l.l_brace_token().map(Into::into).as_ref(),
@@ -464,23 +505,8 @@ impl Printable for ObjBody {
 					None,
 				);
 				let trailing_for_comp = end_comments.extract_trailing();
-				p!(out, str("{") >i nl);
-				for mem in children {
-					if mem.should_start_with_newline {
-						p!(out, nl);
-					}
-					format_comments(&mem.before_trivia, CommentLocation::AboveItem, out);
-					p!(out, {mem.value} str(","));
-					format_comments(&mem.inline_trivia, CommentLocation::ItemInline, out);
-					p!(out, nl);
-				}
 
-				if end_comments.should_start_with_newline {
-					p!(out, nl);
-				}
-				format_comments(&end_comments.trivia, CommentLocation::EndOfItems, out);
-
-				let (compspecs, end_comments) = children_between::<CompSpec>(
+				let (compspecs, comp_end_comments) = children_between::<CompSpec>(
 					l.syntax().clone(),
 					l.member_comps()
 						.last()
@@ -491,20 +517,35 @@ impl Printable for ObjBody {
 					l.r_brace_token().map(Into::into).as_ref(),
 					Some(trailing_for_comp),
 				);
-				for mem in compspecs {
-					if mem.should_start_with_newline {
-						p!(out, nl);
-					}
-					format_comments(&mem.before_trivia, CommentLocation::AboveItem, out);
-					p!(out, { mem.value });
-					format_comments(&mem.inline_trivia, CommentLocation::ItemInline, out);
-				}
-				if end_comments.should_start_with_newline {
-					p!(out, nl);
-				}
-				format_comments(&end_comments.trivia, CommentLocation::EndOfItems, out);
 
-				p!(out, nl <i str("}"));
+				let source_is_multiline = children.iter().any(|c| c.triggers_multiline)
+					|| compspecs.iter().any(|c| c.triggers_multiline)
+					|| end_comments.should_start_with_newline
+					|| comp_end_comments.should_start_with_newline;
+
+				let start = LineNumber::new("obj comp start line");
+				let end = LineNumber::new("obj comp end line");
+				let multi_line: ConditionResolver = if source_is_multiline {
+					true_resolver()
+				} else {
+					Rc::new(move |ctx: &mut ConditionResolverContext| {
+						is_multiple_lines(ctx, start, end)
+					})
+				};
+
+				let body = new_line_group(gen_obj_comp(
+					children,
+					end_comments,
+					compspecs,
+					multi_line.clone(),
+				))
+				.into_rc_path();
+
+				let body = with_indent_eoi(multi_line, body.into(), comp_end_comments);
+
+				p!(out, str("{") info(start));
+				p!(out, items(body));
+				p!(out, str("}") info(end));
 			}
 			Self::ObjBodyMemberList(l) => {
 				fn gen_members(

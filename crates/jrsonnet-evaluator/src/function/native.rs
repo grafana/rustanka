@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use jrsonnet_gcmodule::Trace;
+use jrsonnet_types::{ComplexValType, ValType};
 
 use super::PreparedFuncVal;
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
 	typed::{FromUntyped, IntoUntyped, Typed},
 	CallLocation, Result, Val,
 };
-use jrsonnet_types::{ComplexValType, ValType};
 
 #[derive(Debug, Trace, Clone)]
 pub struct NativeFn<D: 'static>(pub(crate) PreparedFuncVal, PhantomData<D>);
@@ -39,12 +39,19 @@ macro_rules! impl_native_desc {
 		impl<$($gen,)* O> FromUntyped for NativeFn<($($gen,)* O,)> {
 			fn from_untyped(untyped: Val) -> Result<Self> {
 				let func = FuncVal::from_untyped(untyped)?;
+				Self::try_from(func)
+			}
+		}
+		impl<$($gen,)* O> TryFrom<FuncVal> for NativeFn<($($gen,)* O,)> {
+			type Error = crate::Error;
+			fn try_from(v: FuncVal) -> Result<Self> {
 				Ok(Self(
-					PreparedFuncVal::new(func, $i, &[])?,
+					PreparedFuncVal::new(v, $i, &[])?,
 					PhantomData,
 				))
 			}
 		}
+
 	};
 	($i:expr; $($cur:ident)* @ $c:ident $($rest:ident)*) => {
 		impl_native_desc!($i; $($cur)*);

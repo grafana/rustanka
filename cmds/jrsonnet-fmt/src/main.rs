@@ -51,8 +51,12 @@ enum Error {
 }
 
 fn main_result() -> Result<(), Error> {
-	eprintln!("jrsonnet-fmt is a prototype of a jsonnet code formatter, do not expect it to produce meaningful results right now.");
-	eprintln!("It is not expected for its output to match other implementations, it will be completly separate implementation with maybe different name.");
+	eprintln!(
+		"jrsonnet-fmt is a prototype of a jsonnet code formatter, do not expect it to produce meaningful results right now."
+	);
+	eprintln!(
+		"It is not expected for its output to match other implementations, it will be completly separate implementation with maybe different name."
+	);
 	let mut opts = Opts::parse();
 	let input = if opts.exec {
 		if opts.in_place {

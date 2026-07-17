@@ -13,19 +13,19 @@ workspace = true
 [features]
 default = []
 experimental = [
-    "exp-preserve-order",
-    "exp-destruct",
-    "exp-null-coaelse",
-    "exp-object-iteration",
-    "exp-bigint",
-    "exp-apply",
+  "exp-preserve-order",
+  "exp-destruct",
+  "exp-null-coaelse",
+  "exp-object-iteration",
+  "exp-bigint",
+  "exp-apply",
 ]
 # Use mimalloc as allocator
 mimalloc = ["mimallocator"]
 # Experimental feature, which allows to preserve order of object fields
 exp-preserve-order = [
-    "jrsonnet-evaluator/exp-preserve-order",
-    "jrsonnet-cli/exp-preserve-order",
+  "jrsonnet-evaluator/exp-preserve-order",
+  "jrsonnet-cli/exp-preserve-order",
 ]
 # Destructuring of locals
 exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
@@ -35,9 +35,9 @@ exp-object-iteration = ["jrsonnet-evaluator/exp-object-iteration"]
 exp-bigint = ["jrsonnet-evaluator/exp-bigint", "jrsonnet-cli/exp-bigint"]
 # obj?.field, obj?.['field']
 exp-null-coaelse = [
-    "jrsonnet-evaluator/exp-null-coaelse",
-    "jrsonnet-ir/exp-null-coaelse",
-    "jrsonnet-cli/exp-null-coaelse",
+  "jrsonnet-evaluator/exp-null-coaelse",
+  "jrsonnet-ir/exp-null-coaelse",
+  "jrsonnet-cli/exp-null-coaelse",
 ]
 # --exp-apply
 exp-apply = []

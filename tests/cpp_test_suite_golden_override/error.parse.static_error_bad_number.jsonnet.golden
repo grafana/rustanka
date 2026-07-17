@@ -1,2 +1,2 @@
-syntax error: unexpected token in expression: DOT
+syntax error: unexpected '.'
     error.parse.static_error_bad_number.jsonnet:17:1

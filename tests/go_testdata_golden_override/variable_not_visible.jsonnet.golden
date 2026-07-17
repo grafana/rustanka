@@ -1,3 +1,1 @@
-local is not defined: nested
-    variable_not_visible.jsonnet:1:44-51: local <nested> access
-    variable_not_visible.jsonnet:1:52-55: local <x2> access
+static analysis errors: undefined local: nested; unused local: x1

@@ -1,2 +1,2 @@
-syntax error: expected R_BRACE, got ":"
+syntax error: expected '}', got ':'
     error.parse.object_comprehension_local_clash.jsonnet:17:29

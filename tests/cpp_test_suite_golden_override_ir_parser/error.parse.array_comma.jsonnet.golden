@@ -1,2 +1,0 @@
-syntax error: expected ']', got number "3"
-    error.parse.array_comma.jsonnet:17:7

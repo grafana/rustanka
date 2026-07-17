@@ -313,6 +313,7 @@ fn expr(p: &mut Parser) -> CompletedMarker {
 	};
 	m.complete(p, EXPR)
 }
+
 fn expr_binding_power(
 	p: &mut Parser,
 	minimum_binding_power: u8,
@@ -344,9 +345,14 @@ fn expr_binding_power(
 		}
 
 		let m = m.precede(p);
-		let parsed_rhs = expr_binding_power(p, right_binding_power)
-			.map(|v| v.precede(p).complete(p, EXPR))
-			.is_ok();
+		let parsed_rhs = if p.at(T![local]) || p.at(T![assert]) {
+			expr(p);
+			true
+		} else {
+			expr_binding_power(p, right_binding_power)
+				.map(|v| v.precede(p).complete(p, EXPR))
+				.is_ok()
+		};
 		lhs = m.complete(
 			p,
 			if op == BinaryOperatorKind::MetaObjectApply {
@@ -926,7 +932,7 @@ fn lhs_basic(p: &mut Parser) -> Result<CompletedMarker, CompletedMarker> {
 
 		let m = p.start();
 		p.bump();
-		let _ = expr_binding_power(p, right_binding_power);
+		let _ = expr_binding_power(p, right_binding_power).map(|v| v.precede(p).complete(p, EXPR));
 		m.complete(p, EXPR_UNARY)
 	} else if p.at(T!['(']) {
 		let m = p.start();

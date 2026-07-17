@@ -1,0 +1,34 @@
+---
+source: crates/jrsonnet-rowan-parser/src/tests.rs
+expression: "a + local x = 1; x\n"
+---
+SOURCE_FILE@0..19
+  EXPR@0..18
+    EXPR_BINARY@0..18
+      EXPR@0..1
+        EXPR_VAR@0..1
+          NAME@0..1
+            IDENT@0..1 "a"
+      WHITESPACE@1..2 " "
+      PLUS@2..3 "+"
+      WHITESPACE@3..4 " "
+      EXPR@4..18
+        STMT_LOCAL@4..16
+          LOCAL_KW@4..9 "local"
+          WHITESPACE@9..10 " "
+          BIND_DESTRUCT@10..15
+            DESTRUCT_FULL@10..11
+              NAME@10..11
+                IDENT@10..11 "x"
+            WHITESPACE@11..12 " "
+            ASSIGN@12..13 "="
+            WHITESPACE@13..14 " "
+            EXPR@14..15
+              EXPR_NUMBER@14..15
+                FLOAT@14..15 "1"
+          SEMI@15..16 ";"
+        WHITESPACE@16..17 " "
+        EXPR_VAR@17..18
+          NAME@17..18
+            IDENT@17..18 "x"
+  WHITESPACE@18..19 "\n"

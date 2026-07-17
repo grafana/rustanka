@@ -1,1 +1,1 @@
-attempted to index array with string foo
+array index type should be string, got string

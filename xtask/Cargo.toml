@@ -16,4 +16,4 @@ proc-macro2.workspace = true
 quote.workspace = true
 ungrammar.workspace = true
 xshell.workspace = true
-clap = {workspace = true, features = ["derive"]}
+clap = { workspace = true, features = ["derive"] }

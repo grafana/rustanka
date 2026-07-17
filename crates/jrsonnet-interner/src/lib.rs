@@ -171,14 +171,14 @@ fn maybe_unpool(inner: &Inner) {
 			let mut pool = pool.borrow_mut();
 
 			if pool.remove(inner).is_none() {
+				// DOC(string-pooling)
 				// On some platforms (i.e i686-windows), try_with will not fail after TLS
 				// destructor is called, but instead re-initialize the TLS with the empty pool.
 				// Allow non-pooled Drop in this case.
 				// https://github.com/CertainLach/jrsonnet/issues/98#issuecomment-1591624016
-				//
-				// However, if pool is not empty, most likely this is issue #113, and then I don't
-				// have any explainations for now.
-				assert!(pool.is_empty(), "received an unpooled string not during the program termination, please write any info regarding this crash to https://github.com/CertainLach/jrsonnet/issues/113, thanks!");
+				// Another cause might be that you have improperly used jrsonnet in multi-threaded environment:
+				// https://github.com/CertainLach/jrsonnet/issues/113
+				debug_assert!(pool.is_empty(), "if you have landed here - you most likely did something naughty with multi-threading. jrsonnet string pooling uses thread_local pool");
 			}
 		});
 	}

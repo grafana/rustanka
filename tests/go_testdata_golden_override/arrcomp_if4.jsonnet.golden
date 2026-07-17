@@ -1,2 +1,1 @@
-local is not defined: y
-    arrcomp_if4.jsonnet:1:33-35: local <y> access
+static analysis errors: undefined local: y; local could be hoisted to an outer scope: y

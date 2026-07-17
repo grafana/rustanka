@@ -2,15 +2,37 @@
   "nodes": {
     "crane": {
       "locked": {
-        "lastModified": 1770419512,
-        "owner": "ipetkov",
+        "lastModified": 1775245625,
+        "owner": "CertainLach",
         "repo": "crane",
-        "rev": "2510f2cbc3ccd237f700bb213756a8f35c32d8d7",
+        "rev": "9c67a3098774323d0270004eed7d7291ddcfe918",
         "type": "github"
       },
       "original": {
-        "owner": "ipetkov",
+        "owner": "CertainLach",
+        "ref": "refactor/drop-remarshal",
         "repo": "crane",
+        "type": "github"
+      }
+    },
+    "fenix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-analyzer-src": "rust-analyzer-src"
+      },
+      "locked": {
+        "lastModified": 1775272531,
+        "owner": "CertainLach",
+        "repo": "fenix",
+        "rev": "831116e5887552af53f2998dcb46e1d55dc0850e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "CertainLach",
+        "ref": "fix/libatomic",
+        "repo": "fenix",
         "type": "github"
       }
     },
@@ -21,10 +43,10 @@
         ]
       },
       "locked": {
-        "lastModified": 1769996383,
+        "lastModified": 1775087534,
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "57928607ea566b5db3ad13af0e57e921e6b12381",
+        "rev": "3107b77cd68437b9a76194f0f7f9c55f2329ca5b",
         "type": "github"
       },
       "original": {
@@ -33,12 +55,34 @@
         "type": "github"
       }
     },
+    "hercules-ci-effects": {
+      "inputs": {
+        "flake-parts": [
+          "flake-parts"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773550609,
+        "owner": "hercules-ci",
+        "repo": "hercules-ci-effects",
+        "rev": "554f6ed448ca74c00aa2371cde901ae1e73005b9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "hercules-ci-effects",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1770468184,
+        "lastModified": 1775270577,
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "a124a10ea33a73329c42d67f30efcdbfb60a4e04",
+        "rev": "9370b0614498381a0019e082c10e9cf8413e7c2c",
         "type": "github"
       },
       "original": {
@@ -51,28 +95,28 @@
     "root": {
       "inputs": {
         "crane": "crane",
+        "fenix": "fenix",
         "flake-parts": "flake-parts",
+        "hercules-ci-effects": "hercules-ci-effects",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay",
-        "shelly": "shelly"
+        "shelly": "shelly",
+        "treefmt-nix": "treefmt-nix"
       }
     },
-    "rust-overlay": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
+    "rust-analyzer-src": {
+      "flake": false,
       "locked": {
-        "lastModified": 1770433312,
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "9922ff9f99a6436756cbe6f5d11f9c3630e58cf0",
+        "lastModified": 1775174431,
+        "narHash": "sha256-jSw1C5MuyySiCpPgjdR+H0wPR3AgPRuylLunw+yd7A0=",
+        "owner": "rust-lang",
+        "repo": "rust-analyzer",
+        "rev": "9767050b2db436f5a770c5f91a548c88fd91ec71",
         "type": "github"
       },
       "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
+        "owner": "rust-lang",
+        "ref": "nightly",
+        "repo": "rust-analyzer",
         "type": "github"
       }
     },
@@ -87,6 +131,25 @@
       "original": {
         "owner": "CertainLach",
         "repo": "shelly",
+        "type": "github"
+      }
+    },
+    "treefmt-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1775125835,
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "rev": "75925962939880974e3ab417879daffcba36c4a3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "treefmt-nix",
         "type": "github"
       }
     }
