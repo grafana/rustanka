@@ -1,0 +1,11 @@
+---
+source: tests/tests/golden.rs
+expression: result
+input_file: tests/golden/issue224.jsonnet
+---
+{
+    "r": [
+        1,
+        1
+    ]
+}

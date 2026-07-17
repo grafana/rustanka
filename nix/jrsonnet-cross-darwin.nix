@@ -43,7 +43,8 @@ craneLib.buildPackage {
 
   doNotPostBuildInstallCargoBinaries = true;
   installPhaseCommand = ''
-    mkdir -p $out/bin
-    cp target/${targetTriple}/release/jrsonnet $out/bin/jrsonnet
+    mkdir -p $out/{bin,lib}
+    cp target/${targetTriple}/release/{jrsonnet,jrsonnet-fmt,jrb} $out/bin/
+    cp target/${targetTriple}/release/{libjsonnet.dylib,libjsonnet.a} $out/lib/
   '';
 }

@@ -14,31 +14,25 @@ use crate::location::{CodeLocation, location_to_offset, offset_to_location};
 
 macro_rules! any_ext_methods {
 	($T:ident) => {
-		fn as_any(&self) -> &dyn Any;
+		/// Object-safe Hash implementation, usually provided by [`any_ext_impl`] macro.
 		fn dyn_hash(&self, hasher: &mut dyn Hasher);
+		/// Object-safe PartialEq/Eq implementation, usually provided by [`any_ext_impl`] macro.
 		fn dyn_eq(&self, other: &dyn $T) -> bool;
-		fn dyn_debug(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 	};
 }
 macro_rules! any_ext_impl {
 	($T:ident) => {
-		fn as_any(&self) -> &dyn Any {
-			self
-		}
 		fn dyn_hash(&self, mut hasher: &mut dyn Hasher) {
 			self.hash(&mut hasher)
 		}
 		fn dyn_eq(&self, other: &dyn $T) -> bool {
-			let Some(other) = other.as_any().downcast_ref::<Self>() else {
+			let other: &dyn Any = &*other;
+			let Some(other) = other.downcast_ref::<Self>() else {
 				return false;
 			};
-			let this = <Self as $T>::as_any(self)
-				.downcast_ref::<Self>()
-				.expect("restricted by impl");
+			let this: &dyn Any = &*self;
+			let this = this.downcast_ref::<Self>().expect("restricted by impl");
 			this == other
-		}
-		fn dyn_debug(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-			<Self as std::fmt::Debug>::fmt(self, fmt)
 		}
 	};
 }
@@ -57,41 +51,50 @@ macro_rules! any_ext {
 		impl Eq for dyn $T {}
 	};
 }
-pub trait SourcePathT: Acyclic + Debug + Display {
+/// Represents trait methods used by [`SourcePath`] implementation.
+pub trait SourcePathT: Acyclic + Debug + Display + Any {
 	/// This method should be checked by resolver before panicking with bad SourcePath input
-	/// if `true` - then resolver may threat this path as default, and default is usally a CWD
+	/// if `true` - then resolver may threat this path as default, and default is usally a CWD.
 	fn is_default(&self) -> bool;
+	/// If this source path is backed by Os [`Path`] - it can be obtained from here.
 	fn path(&self) -> Option<&Path>;
 	any_ext_methods!(SourcePathT);
 }
 any_ext!(SourcePathT);
 
-/// Represents location of a file
+/// Represents location of a file.
 ///
 /// Standard CLI only operates using
-/// - [`SourceFile`] - for any file
-/// - [`SourceDirectory`] - for resolution from CWD
-/// - [`SourceVirtual`] - for stdlib/ext-str
-/// - [`SourceFifo`] - for /dev/fd/X (This path may appear with `jrsonnet <(command_that_produces_jsonnet)`)
+/// - [`SourceFile`] - for any file.
+/// - [`SourceDirectory`] - for resolution from CWD.
+/// - [`SourceVirtual`] - for stdlib/ext-str.
+/// - [`SourceFifo`] - for /dev/fd/X (This path may appear with `jrsonnet <(command_that_produces_jsonnet)`).
 ///
 /// From all of those, only [`SourceVirtual`] may be constructed manually, any other path kind should be only obtained
-/// from assigned `ImportResolver`
+/// from assigned `ImportResolver`.
 /// However, you should always check `is_default` method return, as it will return true for any paths, where default
-/// search location is applicable
+/// search location is applicable.
 ///
-/// Resolver may also return custom implementations of this trait, for example it may return http url in case of remotely loaded files
+/// Resolver may also return custom implementations of this trait, for example it may return http url in case of
+/// remotely loaded files.
 #[derive(Eq, Clone, Acyclic)]
 pub struct SourcePath(Rc<dyn SourcePathT>);
 impl SourcePath {
+	/// Create [`SourcePath`] structure from a unboxed [`SourcePathT`]
 	pub fn new(inner: impl SourcePathT) -> Self {
 		Self(Rc::new(inner))
 	}
+	/// Try to downcast the inner boxed [`SourcePathT`] to the specific type.
 	pub fn downcast_ref<T: SourcePathT>(&self) -> Option<&T> {
-		self.0.as_any().downcast_ref()
+		let this: &dyn Any = &*self.0;
+		this.downcast_ref()
 	}
+	/// This method should be checked by resolver before panicking with bad SourcePath input
+	/// if `true` - then resolver may threat this path as default, and default is usally a CWD.
 	pub fn is_default(&self) -> bool {
 		self.0.is_default()
 	}
+	/// If this source path is backed by Os [`Path`] - it can be obtained from here.
 	pub fn path(&self) -> Option<&Path> {
 		self.0.path()
 	}
@@ -123,8 +126,10 @@ impl Default for SourcePath {
 	}
 }
 
+/// Used as a search base, represents default search path, including JPATH.
+/// Used for import resolution for `--ext-str` and other methods without definitive import source.
 #[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
-struct SourceDefault;
+pub struct SourceDefault;
 impl Display for SourceDefault {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "<default>")
@@ -140,6 +145,8 @@ impl SourcePathT for SourceDefault {
 	any_ext_impl!(SourcePathT);
 }
 
+/// Used as a search base, represents default search path, excluding JPATH.
+/// Used by default by jrsonnet cli.
 #[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
 pub struct SourceDefaultIgnoreJpath;
 impl Display for SourceDefaultIgnoreJpath {
@@ -157,7 +164,8 @@ impl SourcePathT for SourceDefaultIgnoreJpath {
 	any_ext_impl!(SourcePathT);
 }
 
-/// Represents path to the file on the disk
+/// Represents path to the file on the disk.
+///
 /// Directories shouldn't be put here, as resolution for files differs from resolution for directories:
 ///
 /// When `file` is being resolved from `SourceFile(a/b/c)`, it should be resolved to `SourceFile(a/b/file)`,
@@ -165,9 +173,11 @@ impl SourcePathT for SourceDefaultIgnoreJpath {
 #[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
 pub struct SourceFile(PathBuf);
 impl SourceFile {
+	/// Wrap a path buf for [`SourceFile`]
 	pub fn new(path: PathBuf) -> Self {
 		Self(path)
 	}
+	/// Retrieve a wrapped [`Path`]
 	pub fn path(&self) -> &Path {
 		&self.0
 	}
@@ -187,9 +197,14 @@ impl SourcePathT for SourceFile {
 	any_ext_impl!(SourcePathT);
 }
 
+/// Represents path to the file by URL, used for WASM builds, and UNUSABLE by the default import resolvers.
+///
+/// Note that it might contain file: urls, but they are not returned in .path() getter (TODO: should it be?..),
+/// since we have no defined OsStr encoding for wasm.
 #[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
 pub struct SourceUrl(Url);
 impl SourceUrl {
+	/// Wrap a url for [`SourceUrl`]
 	pub fn new(url: Url) -> Self {
 		Self(url)
 	}
@@ -204,20 +219,23 @@ impl SourcePathT for SourceUrl {
 		false
 	}
 	fn path(&self) -> Option<&Path> {
+		// TODO: Parse file:?
 		None
 	}
 	any_ext_impl!(SourcePathT);
 }
 
-/// Represents path to the directory on the disk
+/// Represents path to the directory on the disk.
 ///
-/// See also [`SourceFile`]
+/// See also [`SourceFile`].
 #[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
 pub struct SourceDirectory(PathBuf);
 impl SourceDirectory {
+	/// Wrap a path buf pointing to directory for [`SourceDirectory`]
 	pub fn new(path: PathBuf) -> Self {
 		Self(path)
 	}
+	/// Retrieve a wrapped [`Path`]
 	pub fn path(&self) -> &Path {
 		&self.0
 	}
@@ -300,25 +318,33 @@ impl SourcePathT for SourceFifo {
 pub struct Source(pub Rc<(SourcePath, IStr)>);
 
 impl Source {
+	/// Wrap a source path and source code.
 	pub fn new(path: SourcePath, code: IStr) -> Self {
 		Self(Rc::new((path, code)))
 	}
 
+	/// Create a virtual source for the given name and source code.
 	pub fn new_virtual(name: IStr, code: IStr) -> Self {
 		Self::new(SourcePath::new(SourceVirtual(name)), code)
 	}
 
+	/// Retrieve the stored source code.
 	pub fn code(&self) -> &str {
 		&self.0.1
 	}
 
+	/// Retrieve the stored file path.
 	pub fn source_path(&self) -> &SourcePath {
 		&self.0.0
 	}
 
+	/// Convert span locations into line number+column+extra information for diagnostics/lsp.
+	///
+	/// See [`CodeLocation`].
 	pub fn map_source_locations<const S: usize>(&self, locs: &[u32; S]) -> [CodeLocation; S] {
 		offset_to_location(&self.0.1, locs)
 	}
+	/// Unconvert the line number+column from the representaion used by [`CodeLocation`] to the span offset.
 	pub fn map_from_source_location(&self, line: usize, column: usize) -> Option<usize> {
 		location_to_offset(&self.0.1, line, column)
 	}

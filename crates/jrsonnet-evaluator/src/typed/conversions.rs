@@ -3,13 +3,13 @@ use std::{any::TypeId, collections::BTreeMap, marker::PhantomData, mem::transmut
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_interner::{IBytes, IStr};
 use jrsonnet_ir::NumValue;
-pub use jrsonnet_ir::{MAX_SAFE_INTEGER, MIN_SAFE_INTEGER};
 use jrsonnet_types::{ComplexValType, ValType};
 
 use crate::{
 	ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
 	arr::ArrValue,
 	bail,
+	error::ErrorKind::*,
 	function::FuncVal,
 	typed::CheckType,
 	val::{IndexableVal, StrValue, ThunkMapper},
@@ -377,7 +377,7 @@ impl FromUntyped for PositiveF64 {
 }
 impl Typed for usize {
 	const TYPE: &'static ComplexValType =
-		&ComplexValType::BoundedNumber(Some(0.0), Some(MAX_SAFE_INTEGER));
+		&ComplexValType::BoundedNumber(Some(0.0), Some(NumValue::MAX_SAFE_INTEGER));
 }
 impl IntoUntyped for usize {
 	fn into_untyped(value: Self) -> Result<Val> {
@@ -533,11 +533,12 @@ where
 	fn into_untyped(typed: Self) -> Result<Val> {
 		let mut out = ObjValueBuilder::with_capacity(typed.len());
 		for (k, v) in typed {
-			let Some(key) = K::into_untyped(k)?.as_str() else {
+			let key = K::into_untyped(k)?;
+			let Some(key) = key.as_str() else {
 				bail!("map key should serialize to string");
 			};
 			let value = V::into_untyped(v)?;
-			out.field(key).value(value);
+			out.field(key.into_flat()).value(value);
 		}
 		Ok(Val::Obj(out.build()))
 	}
@@ -886,5 +887,27 @@ impl FromUntyped for NumValue {
 			Val::Num(v) => Ok(v),
 			_ => unreachable!(),
 		}
+	}
+}
+
+pub struct Codepoint(u32);
+impl Codepoint {
+	pub fn try_char(&self) -> Result<char> {
+		Ok(char::from_u32(self.0).ok_or_else(|| InvalidUnicodeCodepointGot(self.0))?)
+	}
+}
+impl Typed for Codepoint {
+	const TYPE: &'static ComplexValType = u32::TYPE;
+}
+impl IntoUntyped for Codepoint {
+	fn into_untyped(typed: Self) -> Result<Val> {
+		u32::into_untyped(typed.0)
+	}
+}
+impl FromUntyped for Codepoint {
+	fn from_untyped(untyped: Val) -> Result<Self> {
+		u32::from_untyped(untyped)
+			.description("invalid codepoint value")
+			.map(Self)
 	}
 }

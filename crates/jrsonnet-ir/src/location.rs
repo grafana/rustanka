@@ -1,12 +1,18 @@
+/// Parsed source code location info.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct CodeLocation {
+	/// Source code byte offset.
 	pub offset: usize,
 
+	/// 1-based line number.
 	pub line: usize,
+	/// 1-based column number.
 	pub column: usize,
 
+	/// Source code byte offset for the current line start.
 	pub line_start_offset: usize,
+	/// Source code byte offset for the current line end.
 	pub line_end_offset: usize,
 }
 

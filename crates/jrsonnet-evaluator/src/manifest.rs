@@ -68,8 +68,8 @@ pub(crate) fn format_float_go_g17(v: f64) -> String {
 }
 
 pub trait ManifestFormat {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()>;
-	fn manifest(&self, val: Val) -> Result<String> {
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()>;
+	fn manifest(&self, val: &Val) -> Result<String> {
 		let mut out = String::new();
 		self.manifest_buf(val, &mut out)?;
 		Ok(out)
@@ -79,7 +79,7 @@ impl<T> ManifestFormat for Box<T>
 where
 	T: ManifestFormat + ?Sized,
 {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
 		let inner = &**self;
 		inner.manifest_buf(val, buf)
 	}
@@ -88,7 +88,7 @@ impl<T> ManifestFormat for &'_ T
 where
 	T: ManifestFormat + ?Sized,
 {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
 		let inner = &**self;
 		inner.manifest_buf(val, buf)
 	}
@@ -97,7 +97,7 @@ where
 pub struct BlackBoxFormat;
 impl ManifestFormat for BlackBoxFormat {
 	#[allow(clippy::only_used_in_recursion)]
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
 		match val {
 			Val::Bool(v) => {
 				black_box(v);
@@ -114,7 +114,7 @@ impl ManifestFormat for BlackBoxFormat {
 			Val::Arr(arr_value) => {
 				for ele in arr_value.iter() {
 					let ele = ele?;
-					self.manifest_buf(ele, buf)?;
+					self.manifest_buf(&ele, buf)?;
 				}
 			}
 			Val::Obj(obj_value) => {
@@ -124,7 +124,7 @@ impl ManifestFormat for BlackBoxFormat {
 				) {
 					black_box(name);
 					let value = value?;
-					self.manifest_buf(value, buf)?;
+					self.manifest_buf(&value, buf)?;
 				}
 			}
 			Val::Func(func_val) => {
@@ -448,8 +448,8 @@ fn manifest_json_ex_buf(
 }
 
 impl ManifestFormat for JsonFormat<'_> {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
-		manifest_json_ex_buf(&val, buf, &mut String::new(), self)
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
+		manifest_json_ex_buf(val, buf, &mut String::new(), self)
 	}
 }
 
@@ -457,10 +457,10 @@ impl ManifestFormat for JsonFormat<'_> {
 /// without quoting.
 pub struct ToStringFormat;
 impl ManifestFormat for ToStringFormat {
-	fn manifest_buf(&self, val: Val, out: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, out: &mut String) -> Result<()> {
 		const JSON_TO_STRING: JsonFormat = JsonFormat::std_to_string_helper();
 		if let Some(str) = val.as_str() {
-			out.push_str(&str);
+			str.into_flat_in(out);
 			return Ok(());
 		}
 		#[cfg(feature = "exp-bigint")]
@@ -473,7 +473,7 @@ impl ManifestFormat for ToStringFormat {
 }
 pub struct StringFormat;
 impl ManifestFormat for StringFormat {
-	fn manifest_buf(&self, val: Val, out: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, out: &mut String) -> Result<()> {
 		let Val::Str(s) = val else {
 			bail!(
 				"output should be string for string manifest format, got {}",
@@ -513,7 +513,7 @@ impl<I> YamlStreamFormat<I> {
 	}
 }
 impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
-	fn manifest_buf(&self, val: Val, out: &mut String) -> Result<()> {
+	fn manifest_buf(&self, val: &Val, out: &mut String) -> Result<()> {
 		let Val::Arr(arr) = val else {
 			bail!(
 				"output should be array for yaml stream format, got {}",
@@ -535,7 +535,7 @@ impl<I: ManifestFormat> ManifestFormat for YamlStreamFormat<I> {
 				out.push_str("---\n");
 				in_description_frame(
 					|| format!("elem <{i}> manifestification"),
-					|| self.inner.manifest_buf(v, out),
+					|| self.inner.manifest_buf(&v, out),
 				)?;
 				out.push('\n');
 			}

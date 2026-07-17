@@ -2949,10 +2949,15 @@ dependencies = [
 
 [[package]]
 name = "jrb"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
+ "base64 0.22.1",
  "clap",
+ "jrsonnet-lexer",
+ "jrsonnet-pack",
  "jrsonnet-pkg",
+ "jrsonnet-rowan-parser",
+ "rustls",
  "serde",
  "serde_json",
  "tracing",
@@ -2961,7 +2966,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "clap",
  "clap_complete",
@@ -2977,7 +2982,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-cli"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "clap",
  "jrsonnet-evaluator",
@@ -2988,18 +2993,21 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-deps"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "jrsonnet-cli",
  "jrsonnet-evaluator",
  "jrsonnet-ir",
  "jrsonnet-ir-parser",
+ "jrsonnet-pack",
+ "serde_json",
 ]
 
 [[package]]
 name = "jrsonnet-evaluator"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
  "drop_bomb",
@@ -3024,12 +3032,11 @@ dependencies = [
  "strip-ansi-escapes",
  "strsim",
  "thiserror 2.0.18",
- "wasm-bindgen",
 ]
 
 [[package]]
 name = "jrsonnet-fmt"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "clap",
  "hi-doc",
@@ -3041,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-formatter"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "dprint-core",
  "hi-doc",
@@ -3073,7 +3080,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-interner"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "hashbrown 0.17.1",
  "jrsonnet-gcmodule",
@@ -3082,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-ir"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
@@ -3095,7 +3102,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-ir-parser"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
@@ -3105,14 +3112,14 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-lexer"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "jrsonnet-lint"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "clap",
  "jrsonnet-rowan-parser",
@@ -3122,7 +3129,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-macros"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3131,25 +3138,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "jrsonnet-pack"
+version = "0.5.0-pre99"
+dependencies = [
+ "base64 0.22.1",
+ "jrsonnet-evaluator",
+ "jrsonnet-ir",
+ "jrsonnet-ir-parser",
+ "jrsonnet-lexer",
+ "jrsonnet-rowan-parser",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "jrsonnet-peg-parser"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "insta",
  "jrsonnet-gcmodule",
  "jrsonnet-ir",
+ "jrsonnet-lexer",
  "peg",
 ]
 
 [[package]]
 name = "jrsonnet-pkg"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "camino",
  "directories",
  "gix",
  "peg",
  "reqwest 0.13.4",
- "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3160,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-rowan-parser"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
  "drop_bomb",
@@ -3175,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-stdlib"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -3198,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-types"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "jrsonnet-gcmodule",
  "peg",
@@ -3206,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "jrsonnet-web"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
@@ -3454,7 +3476,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libjsonnet"
-version = "0.5.0-pre98"
+version = "0.5.0-pre99"
 dependencies = [
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
@@ -5117,12 +5139,13 @@ dependencies = [
 
 [[package]]
 name = "sha3"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
+checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
 dependencies = [
  "digest 0.11.3",
  "keccak",
+ "sponge-cursor",
 ]
 
 [[package]]
@@ -5227,6 +5250,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "sponge-cursor"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
 name = "stable_deref_trait"

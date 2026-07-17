@@ -1,3 +1,6 @@
+//! Helper macros to support `jrsonnet-evaluator` usage.
+#![deny(missing_docs)]
+
 use std::string::String;
 
 use proc_macro2::TokenStream;
@@ -237,6 +240,23 @@ impl ArgInfo {
 	}
 }
 
+/// Create a `Builtin` implementation with the corresponding struct with the same name for the function definition.
+///
+/// Builtin functions might be used like closures by defining fields.
+///
+/// ```jsonnet
+/// #[builtin(fields(
+///   a: u32
+/// ))]
+/// fn curried_add(this: &curried_add, b: u32) -> u32 {
+///   this.a + b
+/// }
+///
+/// #[builtin]
+/// fn curry_add(a: u32) -> FuncVal {
+///   FuncVal::builtin(curried_add { a })
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn builtin(
 	attr: proc_macro::TokenStream,
@@ -431,6 +451,7 @@ fn builtin_inner(attr: BuiltinAttrs, mut fun: ItemFn) -> syn::Result<TokenStream
 	})
 }
 
+/// Derive for `Typed` macro, describes the object structure in jrsonnet type system.
 #[proc_macro_derive(Typed, attributes(typed))]
 pub fn derive_typed(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(item as DeriveInput);
@@ -440,6 +461,7 @@ pub fn derive_typed(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 		Err(e) => e.to_compile_error().into(),
 	}
 }
+/// Implement `IntoUntyped` for a struct, all the field values will be copied and converted using `IntoUntyped`.
 #[proc_macro_derive(IntoUntyped, attributes(typed))]
 pub fn derive_into_untyped(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(item as DeriveInput);
@@ -449,6 +471,7 @@ pub fn derive_into_untyped(item: proc_macro::TokenStream) -> proc_macro::TokenSt
 		Err(e) => e.to_compile_error().into(),
 	}
 }
+/// Implement `FromUntyped` for a struct, all the field values will be populated from jsonnet values using `FromUntyped`.
 #[proc_macro_derive(FromUntyped, attributes(typed))]
 pub fn derive_from_untyped(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(item as DeriveInput);
@@ -551,14 +574,18 @@ impl FormatInput {
 ///
 /// Using `format!("literal with no codes").into()` is slower than just `"literal with no codes".into()`
 /// This macro looks for formatting codes in the input string, and uses
-/// `format!()` only when necessary
+/// `format!()` only when necessary.
 #[proc_macro]
 pub fn format_istr(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 	let input = parse_macro_input!(input as FormatInput);
 	input.expand().into()
 }
 
-/// Create Thunk using closure syntax
+/// Create `Thunk` value using closure syntax.
+///
+/// ```jsonnet
+/// Thunk!(move || evaluaate(ctx, expr))
+/// ```
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn Thunk(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

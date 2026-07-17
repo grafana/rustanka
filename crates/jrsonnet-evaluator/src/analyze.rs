@@ -40,8 +40,12 @@ use crate::{
 pub struct AnalysisResult {
 	/// Highest object, on which identity the value is dependent. `u32::MAX` = not dependent at all
 	pub object_dependent_depth: u32,
-	/// Highest local frame, on which this value depends. `u32::MAX` = not dependent at all
+	/// Highest (outermost) local frame, on which this value depends.
+	/// `u32::MAX` = not dependent at all.
 	pub local_dependent_depth: u32,
+	/// Deepest (innermost) local frame, on which this value depends.
+	/// `<local_dependent_depth` = not dependent at all.
+	pub local_dependent_depth_max: u32,
 }
 
 impl Default for AnalysisResult {
@@ -49,6 +53,7 @@ impl Default for AnalysisResult {
 		Self {
 			object_dependent_depth: u32::MAX,
 			local_dependent_depth: u32::MAX,
+			local_dependent_depth_max: 0,
 		}
 	}
 }
@@ -60,13 +65,19 @@ impl AnalysisResult {
 		}
 	}
 	fn depend_on_local(&mut self, depth: u32) {
-		if depth < self.local_dependent_depth {
-			self.local_dependent_depth = depth;
-		}
+		self.local_dependent_depth = self.local_dependent_depth.min(depth);
+		self.local_dependent_depth_max = self.local_dependent_depth_max.max(depth);
 	}
 	fn taint_by(&mut self, other: AnalysisResult) {
 		self.depend_on_object(other.object_dependent_depth);
-		self.depend_on_local(other.local_dependent_depth);
+		self.local_dependent_depth = self.local_dependent_depth.min(other.local_dependent_depth);
+		self.local_dependent_depth_max = self
+			.local_dependent_depth_max
+			.max(other.local_dependent_depth_max);
+	}
+	/// True if any local was depended on. False for the default (no-deps) state.
+	fn has_local_deps(&self) -> bool {
+		self.local_dependent_depth_max >= self.local_dependent_depth
 	}
 }
 
@@ -426,6 +437,8 @@ pub enum LCompSpec {
 		destruct: LDestruct,
 		over: LExpr,
 		/// Is `over` does not depend on any variable introduced by an earlier for-spec in this comprehension chain
+		/// Note: If true, then the `over` expression should be evaluated OUTSIDE of the compspec closure, using the
+		/// outer arraycomp/objcomp context.
 		loop_invariant: bool,
 	},
 	#[cfg(feature = "exp-object-iteration")]
@@ -435,6 +448,8 @@ pub enum LCompSpec {
 		visibility: jrsonnet_ir::Visibility,
 		value: LDestruct,
 		over: LExpr,
+		/// Note: If true, then the `over` expression should be evaluated OUTSIDE of the compspec closure, using the
+		/// outer arraycomp/objcomp context.
 		loop_invariant: bool,
 	},
 }
@@ -1016,6 +1031,23 @@ impl AnalysisStack {
 		}
 	}
 
+	/// Temporarily detach closure frames above `keep_len` so an expression
+	/// can be re-analyzed as if it lived in the outer closure context.
+	fn reanalyze_in_outer_closure<T>(
+		&mut self,
+		keep_len: usize,
+		inner: impl FnOnce(&mut AnalysisStack) -> T,
+	) -> T {
+		let saved: Vec<ClosureFrame> = self.closure_stack.split_off(keep_len);
+		let diag_len = self.diagnostics.len();
+		let prev_errored = self.errored;
+		let v = inner(self);
+		self.diagnostics.truncate(diag_len);
+		self.errored = prev_errored;
+		self.closure_stack.extend(saved);
+		v
+	}
+
 	/// Resolve a `LocalId` reference to an `LSlot` against the innermost
 	/// closure frame. May insert capture entries up the closure stack as
 	/// needed.
@@ -1164,10 +1196,12 @@ impl AnalysisStack {
 		let user_def = &mut self.local_defs[user.idx()];
 		let before_obj = user_def.analysis.object_dependent_depth;
 		let before_loc = user_def.analysis.local_dependent_depth;
+		let before_loc_max = user_def.analysis.local_dependent_depth_max;
 		user_def.analysis.taint_by(used_analysis);
 		user_def.analysis.depend_on_local(used_defined_at_depth);
 		before_obj != user_def.analysis.object_dependent_depth
 			|| before_loc != user_def.analysis.local_dependent_depth
+			|| before_loc_max != user_def.analysis.local_dependent_depth_max
 	}
 }
 
@@ -1921,16 +1955,19 @@ fn analyze_arr_comp(
 	}))
 }
 
+#[allow(clippy::too_many_lines)]
 fn analyze_comp_specs<R>(
 	specs: &[CompSpec],
 	stack: &mut AnalysisStack,
 	taint: &mut AnalysisResult,
 	inside: impl FnOnce(&mut AnalysisStack, &mut AnalysisResult) -> R,
 ) -> CompSpecResult<R> {
+	#[allow(clippy::too_many_lines)]
 	fn go<R>(
 		idx: usize,
 		specs: &[CompSpec],
 		outer_depth: u32,
+		outer_closure_depth: usize,
 		stack: &mut AnalysisStack,
 		taint: &mut AnalysisResult,
 		inside: impl FnOnce(&mut AnalysisStack, &mut AnalysisResult) -> R,
@@ -1941,30 +1978,62 @@ fn analyze_comp_specs<R>(
 		match &specs[idx] {
 			CompSpec::IfSpec(IfSpecData { cond, .. }) => {
 				let cond_l = analyze(cond, stack, taint);
-				let (r, mut rest) = go(idx + 1, specs, outer_depth, stack, taint, inside);
+				let (r, mut rest) = go(
+					idx + 1,
+					specs,
+					outer_depth,
+					outer_closure_depth,
+					stack,
+					taint,
+					inside,
+				);
 				rest.insert(0, LCompSpec::If(cond_l));
 				(r, rest)
 			}
 			CompSpec::ForSpec(ForSpecData { destruct, over }) => {
 				let mut over_taint = AnalysisResult::default();
-				let over_l = analyze(over, stack, &mut over_taint);
-				let loop_invariant = over_taint.local_dependent_depth > outer_depth;
+				let mut over_l = analyze(over, stack, &mut over_taint);
+				let loop_invariant = !over_taint.has_local_deps()
+					|| over_taint.local_dependent_depth_max < outer_depth;
 				taint.taint_by(over_taint);
+
+				if loop_invariant && stack.closure_stack.len() > outer_closure_depth {
+					over_l = stack.reanalyze_in_outer_closure(outer_closure_depth, |stack| {
+						let mut t = AnalysisResult::default();
+						analyze(over, stack, &mut t)
+					});
+				}
 
 				let mut alloc = FrameAlloc::new(stack);
 				let closure = alloc.push_locals_closure();
 				let Some(l_destruct) = alloc.alloc_destruct(destruct) else {
 					stack.pop_closure(closure);
-					return go(idx + 1, specs, outer_depth, stack, taint, inside);
+					return go(
+						idx + 1,
+						specs,
+						outer_depth,
+						outer_closure_depth,
+						stack,
+						taint,
+						inside,
+					);
 				};
 				let mut pending = alloc.finish();
 
-				let var_analysis = AnalysisResult::default();
+				let mut var_analysis = over_taint;
+				var_analysis.depend_on_local(pending.stack.depth);
 				pending.record_spec_init(&l_destruct, var_analysis);
 
 				let body_frame = pending.finish();
-				let (r, mut rest) =
-					go(idx + 1, specs, outer_depth, body_frame.stack, taint, inside);
+				let (r, mut rest) = go(
+					idx + 1,
+					specs,
+					outer_depth,
+					outer_closure_depth,
+					body_frame.stack,
+					taint,
+					inside,
+				);
 				body_frame.finish();
 				let frame_shape = stack.pop_closure(closure);
 
@@ -1982,29 +2051,61 @@ fn analyze_comp_specs<R>(
 			#[cfg(feature = "exp-object-iteration")]
 			CompSpec::ForObjSpec(data) => {
 				let mut over_taint = AnalysisResult::default();
-				let over_l = analyze(&data.over, stack, &mut over_taint);
-				let loop_invariant = over_taint.local_dependent_depth > outer_depth;
+				let mut over_l = analyze(&data.over, stack, &mut over_taint);
+				let loop_invariant = !over_taint.has_local_deps()
+					|| over_taint.local_dependent_depth_max < outer_depth;
 				taint.taint_by(over_taint);
+
+				if loop_invariant && stack.closure_stack.len() > outer_closure_depth {
+					over_l = stack.reanalyze_in_outer_closure(outer_closure_depth, |stack| {
+						let mut t = AnalysisResult::default();
+						analyze(&data.over, stack, &mut t)
+					});
+				}
 
 				let mut alloc = FrameAlloc::new(stack);
 				let closure = alloc.push_locals_closure();
 				let Some((_, key_slot)) = alloc.define_local(data.key.clone(), None) else {
 					stack.pop_closure(closure);
-					return go(idx + 1, specs, outer_depth, stack, taint, inside);
+					return go(
+						idx + 1,
+						specs,
+						outer_depth,
+						outer_closure_depth,
+						stack,
+						taint,
+						inside,
+					);
 				};
 				let Some(l_value) = alloc.alloc_destruct(&data.value) else {
 					stack.pop_closure(closure);
-					return go(idx + 1, specs, outer_depth, stack, taint, inside);
+					return go(
+						idx + 1,
+						specs,
+						outer_depth,
+						outer_closure_depth,
+						stack,
+						taint,
+						inside,
+					);
 				};
 				let mut pending = alloc.finish();
 
-				let var_analysis = AnalysisResult::default();
+				let mut var_analysis = over_taint;
+				var_analysis.depend_on_local(pending.stack.depth);
 				pending.record_spec_init(&LDestruct::Full(key_slot), var_analysis);
 				pending.record_spec_init(&l_value, var_analysis);
 
 				let body_frame = pending.finish();
-				let (r, mut rest) =
-					go(idx + 1, specs, outer_depth, body_frame.stack, taint, inside);
+				let (r, mut rest) = go(
+					idx + 1,
+					specs,
+					outer_depth,
+					outer_closure_depth,
+					body_frame.stack,
+					taint,
+					inside,
+				);
 				body_frame.finish();
 				let frame_shape = stack.pop_closure(closure);
 
@@ -2024,7 +2125,16 @@ fn analyze_comp_specs<R>(
 		}
 	}
 	let outer_depth = stack.depth;
-	let (r, compspecs) = go(0, specs, outer_depth, stack, taint, inside);
+	let outer_closure_depth = stack.closure_stack.len();
+	let (r, compspecs) = go(
+		0,
+		specs,
+		outer_depth,
+		outer_closure_depth,
+		stack,
+		taint,
+		inside,
+	);
 	CompSpecResult {
 		inner: r,
 		compspecs,
@@ -2073,6 +2183,112 @@ pub struct AnalysisReport {
 	pub root_analysis: AnalysisResult,
 	pub diagnostics_list: Vec<Diagnostic>,
 	pub errored: bool,
+}
+
+/// Only useful for slot reference analysis
+pub trait LVisitor: Sized {
+	fn visit_lexpr(&mut self, e: &LExpr) {
+		visit_lexpr(self, e);
+	}
+	fn visit_lslot(&mut self, _slot: LSlot) {}
+	fn visit_closure(&mut self, shape: &ClosureShape) {
+		for &s in &*shape.captures {
+			self.visit_lslot(s);
+		}
+	}
+}
+
+pub fn visit_lexpr<V: LVisitor>(v: &mut V, e: &LExpr) {
+	match e {
+		LExpr::Slot(s) => v.visit_lslot(*s),
+		LExpr::Trivial(_)
+		| LExpr::ArrConst(_)
+		| LExpr::BadLocal(_)
+		| LExpr::Import { .. }
+		| LExpr::IdentityFunction
+		| LExpr::Super => {}
+		LExpr::Arr { shape, items: _ } => v.visit_closure(shape),
+		LExpr::ArrComp(c) => {
+			v.visit_closure(&c.value_shape);
+			for s in &c.compspecs {
+				match s {
+					// Outer-scope references reach closure over frame_shape
+					LCompSpec::If(_e) => {}
+					LCompSpec::For { frame_shape, .. } => v.visit_closure(frame_shape),
+					#[cfg(feature = "exp-object-iteration")]
+					LCompSpec::ForObj { frame_shape, .. } => v.visit_closure(frame_shape),
+				}
+			}
+		}
+		LExpr::Obj(b) => visit_l_obj_body(v, b),
+		LExpr::ObjExtend(base, b) => {
+			v.visit_lexpr(base);
+			visit_l_obj_body(v, b);
+		}
+		LExpr::UnaryOp(_op, e) => v.visit_lexpr(e),
+		LExpr::BinaryOp { lhs, rhs, .. } => {
+			v.visit_lexpr(lhs);
+			v.visit_lexpr(rhs);
+		}
+		LExpr::AssertExpr { assert, rest } => {
+			v.visit_lexpr(&assert.cond.value);
+			if let Some(m) = &assert.message {
+				v.visit_lexpr(m);
+			}
+			v.visit_lexpr(rest);
+		}
+		LExpr::Error(_, e) => v.visit_lexpr(e),
+		LExpr::LocalExpr(l) => v.visit_closure(&l.frame_shape),
+		LExpr::Apply {
+			applicable, args, ..
+		} => {
+			v.visit_lexpr(applicable);
+			for u in &args.value.unnamed {
+				v.visit_lexpr(u);
+			}
+			for n in &args.value.values {
+				v.visit_lexpr(n);
+			}
+		}
+		LExpr::Index { indexable, parts } => {
+			v.visit_lexpr(indexable);
+			for p in parts {
+				v.visit_lexpr(&p.value);
+			}
+		}
+		LExpr::Function(f) => v.visit_closure(&f.body_shape),
+		LExpr::IfElse {
+			cond,
+			cond_then,
+			cond_else,
+		} => {
+			v.visit_lexpr(cond);
+			v.visit_lexpr(cond_then);
+			if let Some(e) = cond_else {
+				v.visit_lexpr(e);
+			}
+		}
+		LExpr::Slice(s) => {
+			v.visit_lexpr(&s.value);
+			if let Some(e) = &s.start {
+				v.visit_lexpr(e);
+			}
+			if let Some(e) = &s.end {
+				v.visit_lexpr(e);
+			}
+			if let Some(e) = &s.step {
+				v.visit_lexpr(e);
+			}
+		}
+	}
+}
+
+fn visit_l_obj_body<V: LVisitor>(v: &mut V, b: &LObjBody) {
+	match b {
+		LObjBody::MemberList(m) => v.visit_closure(&m.frame_shape),
+		LObjBody::StaticMembers(m) => v.visit_closure(&m.frame_shape),
+		LObjBody::ObjComp(c) => v.visit_closure(&c.frame_shape),
+	}
 }
 
 #[cfg(test)]

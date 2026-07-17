@@ -1,7 +1,7 @@
 {
   description = "Jrsonnet";
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/master";
     fenix = {
       url = "github:CertainLach/fenix/fix/libatomic";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -240,6 +240,8 @@
                 jrsonnet-darwin = pkgs.callPackage ./nix/jrsonnet-cross-darwin.nix {
                   craneLib = craneLibCross;
                   targetTriple = "${targetArch}-apple-darwin";
+                  # https://github.com/rust-cross/cargo-zigbuild/issues/433
+                  zig = pkgs.zig_0_15;
                 };
                 jrsonnet-experimental-darwin = jrsonnet-darwin.override {
                   withExperimentalFeatures = true;
@@ -385,6 +387,7 @@
                 lld
                 hyperfine
                 graphviz
+                vega-lite
               ]
               ++ optionals (!stdenv.isDarwin) [
                 valgrind
@@ -429,7 +432,7 @@
       };
       hercules-ci.post-comment = {
         enable = true;
-        caches = [ "jrsonnet.cachix.org" ];
+        caches = [ "cache.delta.rocks/hercules" ];
         script =
           let
             benchmarks = inputs.self.legacyPackages.x86_64-linux.benchmarks.default;
