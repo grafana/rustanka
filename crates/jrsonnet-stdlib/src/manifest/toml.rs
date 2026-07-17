@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 
 use jrsonnet_evaluator::{
-	bail, in_description_frame,
-	manifest::{escape_string_json_buf, ManifestFormat},
+	Error, IStr, ObjValue, Result, ResultExt, Val, bail, ensure_sufficient_stack,
+	in_description_frame,
+	manifest::{ManifestFormat, escape_string_json_buf},
 	val::ArrValue,
-	IStr, ObjValue, Result, ResultExt, Val,
 };
 
 pub struct TomlFormat<'s> {
@@ -105,7 +105,7 @@ fn manifest_value(
 		Val::Num(n) => write!(buf, "{n}").unwrap(),
 		#[cfg(feature = "exp-bigint")]
 		Val::BigInt(n) => write!(buf, "{n}").unwrap(),
-		Val::Arr(a) => {
+		Val::Arr(a) => ensure_sufficient_stack(|| {
 			buf.push('[');
 
 			let mut had_items = false;
@@ -138,8 +138,9 @@ fn manifest_value(
 				buf.push_str(cur_padding);
 			}
 			buf.push(']');
-		}
-		Val::Obj(o) => {
+			Ok::<_, Error>(())
+		})?,
+		Val::Obj(o) => ensure_sufficient_stack(|| {
 			o.run_assertions()?;
 			buf.push('{');
 
@@ -172,7 +173,8 @@ fn manifest_value(
 			}
 
 			buf.push('}');
-		}
+			Ok::<_, Error>(())
+		})?,
 		Val::Null => {
 			bail!("tried to manifest null")
 		}
@@ -219,14 +221,16 @@ fn manifest_table_internal(
 		}
 		first = false;
 		path.push(k.clone());
-		in_description_frame(
-			|| format!("section <{k}> manifestification"),
-			|| match v {
-				Val::Obj(obj) => manifest_table(&obj, path, buf, cur_padding, options),
-				Val::Arr(arr) => manifest_table_array(&arr, path, buf, cur_padding, options),
-				_ => unreachable!("iterating over sections"),
-			},
-		)?;
+		ensure_sufficient_stack(|| {
+			in_description_frame(
+				|| format!("section <{k}> manifestification"),
+				|| match v {
+					Val::Obj(obj) => manifest_table(&obj, path, buf, cur_padding, options),
+					Val::Arr(arr) => manifest_table_array(&arr, path, buf, cur_padding, options),
+					_ => unreachable!("iterating over sections"),
+				},
+			)
+		})?;
 		path.pop();
 	}
 	Ok(())

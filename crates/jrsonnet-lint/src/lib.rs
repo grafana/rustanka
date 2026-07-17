@@ -6,7 +6,7 @@ mod config;
 mod unused_locals;
 
 pub use config::LintConfig;
-pub use unused_locals::{apply_fixes, lint_snippet, Diagnostic, Fix, ParseError};
+pub use unused_locals::{Diagnostic, Fix, ParseError, apply_fixes, lint_snippet};
 
 #[cfg(test)]
 mod tests {

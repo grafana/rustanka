@@ -15,11 +15,15 @@ BinaryOp {
     lhs: Obj(
         MemberList(
             LObjMembers {
+                frame_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 1,
+                },
                 this: None,
                 set_dollar: false,
                 uses_super: false,
                 locals: [],
-                asserts: [],
+                asserts: None,
                 fields: [
                     LFieldMember {
                         name: Fixed(
@@ -27,8 +31,14 @@ BinaryOp {
                         ),
                         plus: false,
                         visibility: Normal,
-                        value: Num(
-                            1.0,
+                        value: (
+                            ClosureShape {
+                                captures: [],
+                                n_locals: 0,
+                            },
+                            Num(
+                                1.0,
+                            ),
                         ),
                     },
                     LFieldMember {
@@ -37,8 +47,14 @@ BinaryOp {
                         ),
                         plus: false,
                         visibility: Normal,
-                        value: Num(
-                            2.0,
+                        value: (
+                            ClosureShape {
+                                captures: [],
+                                n_locals: 0,
+                            },
+                            Num(
+                                2.0,
+                            ),
                         ),
                     },
                 ],
@@ -49,15 +65,19 @@ BinaryOp {
     rhs: Obj(
         MemberList(
             LObjMembers {
+                frame_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 1,
+                },
                 this: Some(
-                    LocalId(
+                    LocalSlot(
                         0,
                     ),
                 ),
                 set_dollar: false,
                 uses_super: true,
                 locals: [],
-                asserts: [],
+                asserts: None,
                 fields: [
                     LFieldMember {
                         name: Fixed(
@@ -65,23 +85,29 @@ BinaryOp {
                         ),
                         plus: false,
                         visibility: Normal,
-                        value: BinaryOp {
-                            lhs: Index {
-                                indexable: Super,
-                                parts: [
-                                    LIndexPart {
-                                        span: virtual:<test>:28-29,
-                                        value: Str(
-                                            "a",
-                                        ),
-                                    },
-                                ],
+                        value: (
+                            ClosureShape {
+                                captures: [],
+                                n_locals: 0,
                             },
-                            op: Add,
-                            rhs: Num(
-                                10.0,
-                            ),
-                        },
+                            BinaryOp {
+                                lhs: Index {
+                                    indexable: Super,
+                                    parts: [
+                                        LIndexPart {
+                                            span: virtual:<test>:28-29,
+                                            value: Str(
+                                                "a",
+                                            ),
+                                        },
+                                    ],
+                                },
+                                op: Add,
+                                rhs: Num(
+                                    10.0,
+                                ),
+                            },
+                        ),
                     },
                     LFieldMember {
                         name: Fixed(
@@ -89,21 +115,29 @@ BinaryOp {
                         ),
                         plus: false,
                         visibility: Normal,
-                        value: Index {
-                            indexable: Local(
-                                LocalId(
-                                    0,
-                                ),
-                            ),
-                            parts: [
-                                LIndexPart {
-                                    span: virtual:<test>:44-45,
-                                    value: Str(
-                                        "b",
+                        value: (
+                            ClosureShape {
+                                captures: [],
+                                n_locals: 0,
+                            },
+                            Index {
+                                indexable: Slot(
+                                    Local(
+                                        LocalSlot(
+                                            0,
+                                        ),
                                     ),
-                                },
-                            ],
-                        },
+                                ),
+                                parts: [
+                                    LIndexPart {
+                                        span: virtual:<test>:44-45,
+                                        value: Str(
+                                            "b",
+                                        ),
+                                    },
+                                ],
+                            },
+                        ),
                     },
                 ],
             },

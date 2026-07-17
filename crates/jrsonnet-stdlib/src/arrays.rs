@@ -1,12 +1,10 @@
 #![allow(non_snake_case)]
 
 use jrsonnet_evaluator::{
-	bail, error,
-	function::{builtin, NativeFn},
-	runtime_error,
+	Either, IStr, ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val, bail, error,
+	function::{NativeFn, builtin},
 	typed::{BoundedUsize, Either2, FromUntyped},
-	val::{equals, ArrValue, IndexableVal},
-	Either, IStr, ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
+	val::{ArrValue, IndexableVal, equals},
 };
 
 pub fn eval_on_empty(on_empty: Option<Thunk<Val>>) -> Result<Val> {
@@ -41,8 +39,7 @@ pub fn builtin_repeat(what: Either![IStr, ArrValue], count: u32) -> Result<Val> 
 	Ok(match what {
 		Either2::A(s) => Val::string(s.repeat(count as usize)),
 		Either2::B(arr) => Val::Arr(
-			ArrValue::repeated(arr, count)
-				.ok_or_else(|| runtime_error!("repeated length overflow"))?,
+			ArrValue::repeated(arr, count).ok_or_else(|| error!("repeated length overflow"))?,
 		),
 	})
 }

@@ -1,11 +1,9 @@
-use std::rc::Rc;
-
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{
-	unescape, ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BindSpec, CompSpec, Destruct,
-	DestructRest, Expr, ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse,
-	IfSpecData, ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers,
-	Slice, SliceDesc, Source, Span, Spanned, Visibility,
+	ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BindSpec, CompSpec, Destruct, DestructRest, Expr,
+	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse, IfSpecData,
+	ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
+	SliceDesc, Source, Span, Spanned, Visibility, unescape,
 };
 use peg::parser;
 
@@ -110,7 +108,7 @@ parser! {
 			}
 		pub rule destruct_object(s: &ParserSettings) -> Destruct
 			= "{" _
-				fields:(name:id() into:(_ ":" _ into:destruct(s) {into})? default:(_ "=" _ v:spanned(<expr(s)>, s) {v})? {(name, into, default.map(Rc::new))})**comma()
+				fields:(name:id() into:(_ ":" _ into:destruct(s) {into})? default:(_ "=" _ v:spanned(<expr(s)>, s) {v})? {(name, into, default)})**comma()
 				rest:(
 					comma() rest:destruct_rest()? {rest}
 					/ comma()? {None}
@@ -430,7 +428,7 @@ mod tests {
 	use insta::{assert_snapshot, glob};
 	use jrsonnet_ir::{IStr, Source};
 
-	use crate::{parse, ParserSettings};
+	use crate::{ParserSettings, parse};
 
 	#[test]
 	fn snapshots() {

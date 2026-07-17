@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/array_comp.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/array_comp.jsonnet
 ---
 --- source ---
 [x * 2 for x in [1, 2, 3] if x > 1]
@@ -13,10 +13,16 @@ errored: false
 --- lir ---
 ArrComp(
     LArrComp {
+        value_shape: ClosureShape {
+            captures: [],
+            n_locals: 0,
+        },
         value: BinaryOp {
-            lhs: Local(
-                LocalId(
-                    0,
+            lhs: Slot(
+                Local(
+                    LocalSlot(
+                        0,
+                    ),
                 ),
             ),
             op: Mul,
@@ -26,13 +32,21 @@ ArrComp(
         },
         compspecs: [
             For {
+                frame_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 1,
+                },
                 destruct: Full(
-                    LocalId(
+                    LocalSlot(
                         0,
                     ),
                 ),
-                over: Arr(
-                    [
+                over: Arr {
+                    shape: ClosureShape {
+                        captures: [],
+                        n_locals: 0,
+                    },
+                    items: [
                         Num(
                             1.0,
                         ),
@@ -43,14 +57,16 @@ ArrComp(
                             3.0,
                         ),
                     ],
-                ),
+                },
                 loop_invariant: true,
             },
             If(
                 BinaryOp {
-                    lhs: Local(
-                        LocalId(
-                            0,
+                    lhs: Slot(
+                        Local(
+                            LocalSlot(
+                                0,
+                            ),
                         ),
                     ),
                     op: Gt,

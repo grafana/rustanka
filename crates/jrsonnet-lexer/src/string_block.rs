@@ -6,8 +6,8 @@ pub enum StringBlockError {
 	MissingIndent,
 }
 
-use logos::Lexer;
 use StringBlockError::*;
+use logos::Lexer;
 
 use crate::generated::syntax_kinds::SyntaxKind;
 

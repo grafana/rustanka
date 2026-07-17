@@ -60,15 +60,16 @@
           };
           targetArch = pkgs.stdenv.hostPlatform.parsed.cpu.name;
           rustfmt = (pkgs.fenix.complete or pkgs.fenix.stable).rustfmt;
+          rust-analyzer = (pkgs.fenix.complete or pkgs.fenix.stable).rust-analyzer;
           toolchain = pkgs.fenix.combine [
             (pkgs.fenix.stable.withComponents [
               "cargo"
               "clippy"
               "rustc"
               "rust-src"
-              "rust-analyzer"
             ])
             rustfmt
+            rust-analyzer
           ];
           craneLib = (inputs.crane.mkLib pkgs).overrideToolchain toolchain;
           treefmt =
@@ -349,6 +350,7 @@
       hercules-ci.cargo-publish = {
         enable = true;
         secretName = "crates-io";
+        extraPublishArgs = [ "--workspace" ];
       };
       hercules-ci.flake-update = {
         enable = true;

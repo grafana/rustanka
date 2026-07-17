@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use jrsonnet_evaluator::{tla::TlaArg, trace::PathResolver, Result};
+use jrsonnet_evaluator::{Result, tla::TlaArg, trace::PathResolver};
 use jrsonnet_stdlib::ContextInitializer;
 
 #[derive(Clone)]
@@ -23,7 +23,8 @@ pub struct ExtStr {
 /// assert_eq!(ext.name, "name");
 /// assert_eq!(ext.value, "value");
 ///
-/// std::env::set_var("name", "value");
+/// // SAFETY: single-threaded doctest
+/// unsafe { std::env::set_var("name", "value") };
 ///
 /// let ext = ExtStr::from_str("name").unwrap();
 /// assert_eq!(ext.name, "name");

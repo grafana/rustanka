@@ -85,7 +85,7 @@ pub fn offset_to_location<const S: usize>(file: &str, offsets: &[u32; S]) -> [Co
 
 #[cfg(test)]
 pub mod tests {
-	use super::{offset_to_location, CodeLocation};
+	use super::{CodeLocation, offset_to_location};
 
 	#[test]
 	fn test() {

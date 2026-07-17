@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, process::exit};
 use clap::Parser;
 use jrsonnet_cli::MiscOpts;
 use jrsonnet_evaluator::{FileImportResolver, ImportResolver};
-use jrsonnet_ir::{visit::Visitor, IStr, Source, SourcePath};
+use jrsonnet_ir::{IStr, Source, SourcePath, visit::Visitor};
 use jrsonnet_ir_parser::ParserSettings;
 
 #[derive(Parser)]

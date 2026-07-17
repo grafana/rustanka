@@ -1,11 +1,11 @@
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{
-	unescape, ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BinaryOpType, BindSpec, CompSpec,
-	Destruct, Expr, ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse,
-	IfSpecData, ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers,
-	Slice, SliceDesc, Source, Span, Spanned, UnaryOpType, Visibility,
+	ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BinaryOpType, BindSpec, CompSpec, Destruct, Expr,
+	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse, IfSpecData,
+	ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
+	SliceDesc, Source, Span, Spanned, UnaryOpType, Visibility, unescape,
 };
-use jrsonnet_lexer::{collect_lexed_str_block, Lexeme, Lexer, Span as LexSpan, SyntaxKind, T};
+use jrsonnet_lexer::{Lexeme, Lexer, Span as LexSpan, SyntaxKind, T, collect_lexed_str_block};
 
 pub struct ParserSettings {
 	pub source: Source,
@@ -381,7 +381,7 @@ fn destruct_object(p: &mut Parser<'_>) -> Result<Destruct> {
 				None
 			};
 			let default = if p.try_eat(T![=]) {
-				Some(Rc::new(spanned(p, expr)?))
+				Some(spanned(p, expr)?)
 			} else {
 				None
 			};
@@ -466,8 +466,10 @@ fn bind(p: &mut Parser<'_>) -> Result<BindSpec> {
 		if !p.at(SyntaxKind::IDENT) {
 			let d = destruct(p)?;
 			p.eat(T![=])?;
-			let value = Rc::new(expr(p)?);
-			return Ok(BindSpec::Field { into: d, value });
+			return Ok(BindSpec::Field {
+				into: d,
+				value: expr(p)?,
+			});
 		}
 	}
 	let name_spanned = spanned(p, ident)?;

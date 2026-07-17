@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 
 use jrsonnet_evaluator::{
-	bail,
+	Either, IStr, Val, bail,
 	error::{ErrorKind::*, Result},
 	function::builtin,
 	typed::{Either2, FromUntyped, M1},
 	val::{ArrValue, IndexableVal},
-	Either, IStr, Val,
 };
 
 #[builtin]
@@ -206,18 +205,16 @@ fn parse_nat<const BASE: u32>(raw: &str) -> Result<f64> {
 #[cfg(feature = "exp-bigint")]
 #[builtin]
 pub fn builtin_bigint(v: Either![f64, IStr]) -> Result<Val> {
-	use jrsonnet_evaluator::runtime_error;
 	use Either2::*;
+	use jrsonnet_evaluator::error;
 	Ok(match v {
-		A(a) => {
-			Val::BigInt(Box::new(a.to_string().parse().map_err(|e| {
-				runtime_error!("number is not convertible to bigint: {e}")
-			})?))
-		}
-		B(b) => Val::BigInt(Box::new(
-			b.as_str()
+		A(a) => Val::BigInt(Box::new(
+			a.to_string()
 				.parse()
-				.map_err(|e| runtime_error!("bad bigint: {e}"))?,
+				.map_err(|e| error!("number is not convertible to bigint: {e}"))?,
+		)),
+		B(b) => Val::BigInt(Box::new(
+			b.as_str().parse().map_err(|e| error!("bad bigint: {e}"))?,
 		)),
 	})
 }

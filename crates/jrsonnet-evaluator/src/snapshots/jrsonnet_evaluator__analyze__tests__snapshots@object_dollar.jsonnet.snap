@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/object_dollar.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/object_dollar.jsonnet
 ---
 --- source ---
 { a: 1, b: { c: $.a } }
@@ -14,15 +14,19 @@ errored: false
 Obj(
     MemberList(
         LObjMembers {
+            frame_shape: ClosureShape {
+                captures: [],
+                n_locals: 1,
+            },
             this: Some(
-                LocalId(
+                LocalSlot(
                     0,
                 ),
             ),
             set_dollar: true,
             uses_super: false,
             locals: [],
-            asserts: [],
+            asserts: None,
             fields: [
                 LFieldMember {
                     name: Fixed(
@@ -30,8 +34,14 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: Num(
-                        1.0,
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        Num(
+                            1.0,
+                        ),
                     ),
                 },
                 LFieldMember {
@@ -40,39 +50,69 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: Obj(
-                        MemberList(
-                            LObjMembers {
-                                this: None,
-                                set_dollar: false,
-                                uses_super: false,
-                                locals: [],
-                                asserts: [],
-                                fields: [
-                                    LFieldMember {
-                                        name: Fixed(
-                                            "c",
-                                        ),
-                                        plus: false,
-                                        visibility: Normal,
-                                        value: Index {
-                                            indexable: Local(
-                                                LocalId(
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        Obj(
+                            MemberList(
+                                LObjMembers {
+                                    frame_shape: ClosureShape {
+                                        captures: [
+                                            Local(
+                                                LocalSlot(
                                                     0,
                                                 ),
                                             ),
-                                            parts: [
-                                                LIndexPart {
-                                                    span: virtual:<test>:18-19,
-                                                    value: Str(
-                                                        "a",
-                                                    ),
-                                                },
-                                            ],
-                                        },
+                                        ],
+                                        n_locals: 1,
                                     },
-                                ],
-                            },
+                                    this: None,
+                                    set_dollar: false,
+                                    uses_super: false,
+                                    locals: [],
+                                    asserts: None,
+                                    fields: [
+                                        LFieldMember {
+                                            name: Fixed(
+                                                "c",
+                                            ),
+                                            plus: false,
+                                            visibility: Normal,
+                                            value: (
+                                                ClosureShape {
+                                                    captures: [
+                                                        Capture(
+                                                            CaptureSlot(
+                                                                0,
+                                                            ),
+                                                        ),
+                                                    ],
+                                                    n_locals: 0,
+                                                },
+                                                Index {
+                                                    indexable: Slot(
+                                                        Capture(
+                                                            CaptureSlot(
+                                                                0,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    parts: [
+                                                        LIndexPart {
+                                                            span: virtual:<test>:18-19,
+                                                            value: Str(
+                                                                "a",
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                },
+                            ),
                         ),
                     ),
                 },

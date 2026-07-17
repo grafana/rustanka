@@ -7,23 +7,23 @@ pub use jrsonnet_ir::{MAX_SAFE_INTEGER, MIN_SAFE_INTEGER};
 use jrsonnet_types::{ComplexValType, ValType};
 
 use crate::{
+	ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
 	arr::ArrValue,
 	bail,
 	function::FuncVal,
 	typed::CheckType,
 	val::{IndexableVal, StrValue, ThunkMapper},
-	ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
 };
 
 #[doc(hidden)]
 pub mod __typed_macro_prelude {
 	pub use ::jrsonnet_evaluator::{
+		IStr, ObjValue, ObjValueBuilder, State, Val,
 		error::{ErrorKind, Result as JrResult},
 		typed::{
 			CheckType, ComplexValType, FromUntyped, IntoUntyped, ParseTypedObj, SerializeTypedObj,
 			Typed,
 		},
-		IStr, ObjValue, ObjValueBuilder, State, Val,
 	};
 }
 pub use jrsonnet_macros::{FromUntyped, IntoUntyped, Typed};

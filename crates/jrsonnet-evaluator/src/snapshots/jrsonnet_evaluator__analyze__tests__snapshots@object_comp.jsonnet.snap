@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/object_comp.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/object_comp.jsonnet
 ---
 --- source ---
 { [k]: k for k in ['a', 'b'] }
@@ -14,35 +14,69 @@ errored: false
 Obj(
     ObjComp(
         LObjComp {
+            frame_shape: ClosureShape {
+                captures: [
+                    Local(
+                        LocalSlot(
+                            0,
+                        ),
+                    ),
+                ],
+                n_locals: 1,
+            },
             this: None,
             set_dollar: false,
             uses_super: false,
             locals: [],
             field: LFieldMember {
                 name: Dyn(
-                    Local(
-                        LocalId(
-                            0,
+                    Slot(
+                        Local(
+                            LocalSlot(
+                                0,
+                            ),
                         ),
                     ),
                 ),
                 plus: false,
                 visibility: Normal,
-                value: Local(
-                    LocalId(
-                        0,
+                value: (
+                    ClosureShape {
+                        captures: [
+                            Capture(
+                                CaptureSlot(
+                                    0,
+                                ),
+                            ),
+                        ],
+                        n_locals: 0,
+                    },
+                    Slot(
+                        Capture(
+                            CaptureSlot(
+                                0,
+                            ),
+                        ),
                     ),
                 ),
             },
             compspecs: [
                 For {
+                    frame_shape: ClosureShape {
+                        captures: [],
+                        n_locals: 1,
+                    },
                     destruct: Full(
-                        LocalId(
+                        LocalSlot(
                             0,
                         ),
                     ),
-                    over: Arr(
-                        [
+                    over: Arr {
+                        shape: ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        items: [
                             Str(
                                 "a",
                             ),
@@ -50,7 +84,7 @@ Obj(
                                 "b",
                             ),
                         ],
-                    ),
+                    },
                     loop_invariant: true,
                 },
             ],

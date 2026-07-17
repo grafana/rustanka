@@ -8,7 +8,7 @@ use std::{
 	rc::Rc,
 };
 
-use jrsonnet_gcmodule::{cc_dyn, Acyclic, Cc, Trace};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::BinaryOpType;
 pub use jrsonnet_macros::Thunk;
@@ -17,14 +17,13 @@ use rustc_hash::FxHashMap;
 
 pub use crate::arr::{ArrValue, ArrayLike};
 use crate::{
-	bail,
+	NumValue, ObjValue, Result, SupThis, Unbound, WeakSupThis, bail,
 	error::{Error, ErrorKind::*},
 	evaluate::operator::{evaluate_compare_op, evaluate_mod_op},
 	function::FuncVal,
 	gc::WithCapacityExt as _,
 	manifest::{ManifestFormat, ToStringFormat},
 	typed::BoundedUsize,
-	NumValue, ObjValue, Result, SupThis, Unbound, WeakSupThis,
 };
 
 pub trait ThunkValue: Trace {

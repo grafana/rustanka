@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/object_with_locals.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/object_with_locals.jsonnet
 ---
 --- source ---
 {
@@ -18,22 +18,30 @@ errored: false
 Obj(
     MemberList(
         LObjMembers {
+            frame_shape: ClosureShape {
+                captures: [],
+                n_locals: 2,
+            },
             this: None,
             set_dollar: false,
             uses_super: false,
             locals: [
                 LBind {
                     destruct: Full(
-                        LocalId(
+                        LocalSlot(
                             1,
                         ),
                     ),
+                    value_shape: ClosureShape {
+                        captures: [],
+                        n_locals: 0,
+                    },
                     value: Num(
                         10.0,
                     ),
                 },
             ],
-            asserts: [],
+            asserts: None,
             fields: [
                 LFieldMember {
                     name: Fixed(
@@ -41,9 +49,17 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: Local(
-                        LocalId(
-                            1,
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        Slot(
+                            Local(
+                                LocalSlot(
+                                    1,
+                                ),
+                            ),
                         ),
                     ),
                 },
@@ -53,17 +69,25 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: BinaryOp {
-                        lhs: Local(
-                            LocalId(
-                                1,
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        BinaryOp {
+                            lhs: Slot(
+                                Local(
+                                    LocalSlot(
+                                        1,
+                                    ),
+                                ),
                             ),
-                        ),
-                        op: Mul,
-                        rhs: Num(
-                            2.0,
-                        ),
-                    },
+                            op: Mul,
+                            rhs: Num(
+                                2.0,
+                            ),
+                        },
+                    ),
                 },
             ],
         },

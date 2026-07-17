@@ -1,7 +1,7 @@
 use std::string::String;
 
 use dprint_core::formatting::PrintItems;
-use jrsonnet_rowan_parser::{nodes::TriviaKind, AstToken};
+use jrsonnet_rowan_parser::{AstToken, nodes::TriviaKind};
 
 use crate::{children::ChildTrivia, p, pi};
 

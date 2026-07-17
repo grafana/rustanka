@@ -4,9 +4,9 @@ use logos::Logos;
 
 // use rowan::{TextRange, TextSize};
 use crate::{
-	generated::syntax_kinds::SyntaxKind,
-	string_block::{lex_str_block, StringBlockError},
 	Span,
+	generated::syntax_kinds::SyntaxKind,
+	string_block::{StringBlockError, lex_str_block},
 };
 
 pub struct Lexer<'a> {

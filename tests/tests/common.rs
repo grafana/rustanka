@@ -1,6 +1,6 @@
 use jrsonnet_evaluator::{
-	ContextBuilder, ContextInitializer as ContextInitializerT, InitialContextBuilder,
-	ObjValueBuilder, Result, Source, Thunk, Val, bail,
+	ContextInitializer as ContextInitializerT, InitialContextBuilder, ObjValueBuilder, Result,
+	Source, Thunk, Val, bail,
 	function::{FuncVal, builtin},
 };
 use jrsonnet_gcmodule::Trace;
@@ -29,7 +29,7 @@ macro_rules! ensure {
 macro_rules! ensure_val_eq {
 	($a:expr, $b:expr) => {{
 		if !::jrsonnet_evaluator::val::equals(&$a.clone(), &$b.clone())? {
-			use ::jrsonnet_evaluator::manifest::JsonFormat;
+			use jrsonnet_evaluator::manifest::JsonFormat;
 			::jrsonnet_evaluator::bail!(
 				"assertion failed: a != b\na={:#?}\nb={:#?}",
 				$a.manifest(JsonFormat::default())?,

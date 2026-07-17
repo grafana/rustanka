@@ -1,7 +1,7 @@
 use std::{borrow::Cow, cell::Cell, fmt::Write, hint::black_box, ptr};
 
 use crate::{
-	bail, evaluate::ensure_sufficient_stack, in_description_frame, Error, Result, ResultExt, Val,
+	Error, Result, ResultExt, Val, bail, evaluate::ensure_sufficient_stack, in_description_frame,
 };
 
 // Thread-local flag to control float formatting style in std.toString

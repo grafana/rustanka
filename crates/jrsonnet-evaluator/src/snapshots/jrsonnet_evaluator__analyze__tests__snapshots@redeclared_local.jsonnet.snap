@@ -14,22 +14,34 @@ errored: true
 1  │ local x = 1, x = 2; x 
 2  │  
 --- lir ---
-LocalExpr {
-    binds: [
-        LBind {
-            destruct: Full(
-                LocalId(
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
+        },
+        binds: [
+            LBind {
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Num(
+                    1.0,
+                ),
+            },
+        ],
+        body: Slot(
+            Local(
+                LocalSlot(
                     0,
                 ),
             ),
-            value: Num(
-                1.0,
-            ),
-        },
-    ],
-    body: Local(
-        LocalId(
-            0,
         ),
-    ),
-}
+    },
+)

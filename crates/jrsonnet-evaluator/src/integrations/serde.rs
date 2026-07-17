@@ -3,16 +3,16 @@ use std::borrow::Cow;
 use jrsonnet_interner::{IBytes, IStr};
 use jrsonnet_ir::NumValue;
 use serde::{
+	Deserialize, Serialize, Serializer,
 	de::{self, Visitor},
 	ser::{
 		Error, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
 		SerializeTupleStruct, SerializeTupleVariant,
 	},
-	Deserialize, Serialize, Serializer,
 };
 
 use crate::{
-	in_description_frame, runtime_error, Error as JrError, ObjValue, ObjValueBuilder, Result, Val,
+	Error as JrError, ObjValue, ObjValueBuilder, Result, Val, error, in_description_frame,
 };
 
 impl<'de> Deserialize<'de> for Val {
@@ -629,6 +629,6 @@ impl serde::ser::Error for JrError {
 	where
 		T: std::fmt::Display,
 	{
-		runtime_error!("serde: {msg}")
+		error!("serde: {msg}")
 	}
 }

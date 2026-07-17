@@ -9,11 +9,7 @@ pub fn builtin_abs(n: f64) -> f64 {
 
 #[builtin]
 pub fn builtin_sign(n: f64) -> f64 {
-	if n == 0. {
-		0.
-	} else {
-		n.signum()
-	}
+	if n == 0. { 0. } else { n.signum() }
 }
 
 #[builtin]

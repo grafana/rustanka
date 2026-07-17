@@ -1,0 +1,10 @@
+---
+source: tests/tests/golden.rs
+assertion_line: 45
+expression: result
+input_file: tests/golden/comp_if_with_multiple_captures.jsonnet
+---
+[
+    "serialgc",
+    "musl"
+]

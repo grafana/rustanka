@@ -7,8 +7,9 @@ pub use jrsonnet_types::{ComplexValType, ValType};
 use thiserror::Error;
 
 use crate::{
+	Val,
 	error::{Error, ErrorKind, Result},
-	in_description_frame, Val,
+	in_description_frame,
 };
 
 #[derive(Debug, Error, Clone, Acyclic)]

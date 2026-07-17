@@ -5,9 +5,9 @@ use jrsonnet_types::{ComplexValType, ValType};
 
 use super::PreparedFuncVal;
 use crate::{
+	CallLocation, Result, Val,
 	function::FuncVal,
 	typed::{FromUntyped, IntoUntyped, Typed},
-	CallLocation, Result, Val,
 };
 
 #[derive(Debug, Trace, Clone)]

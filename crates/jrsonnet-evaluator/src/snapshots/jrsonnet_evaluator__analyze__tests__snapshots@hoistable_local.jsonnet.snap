@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/hoistable_local.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/hoistable_local.jsonnet
 ---
 --- source ---
 local outer = 1; local inner = 10 + 20; outer + inner
@@ -14,50 +14,80 @@ errored: false
 1  │ local outer = 1; local inner = 10 + 20; outer + inner 
 2  │  
 --- lir ---
-LocalExpr {
-    binds: [
-        LBind {
-            destruct: Full(
-                LocalId(
-                    0,
-                ),
-            ),
-            value: Num(
-                1.0,
-            ),
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
         },
-    ],
-    body: LocalExpr {
         binds: [
             LBind {
                 destruct: Full(
-                    LocalId(
-                        1,
+                    LocalSlot(
+                        0,
                     ),
                 ),
-                value: BinaryOp {
-                    lhs: Num(
-                        10.0,
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Num(
+                    1.0,
+                ),
+            },
+        ],
+        body: LocalExpr(
+            LLocalExpr {
+                frame_shape: ClosureShape {
+                    captures: [
+                        Local(
+                            LocalSlot(
+                                0,
+                            ),
+                        ),
+                    ],
+                    n_locals: 1,
+                },
+                binds: [
+                    LBind {
+                        destruct: Full(
+                            LocalSlot(
+                                0,
+                            ),
+                        ),
+                        value_shape: ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        value: BinaryOp {
+                            lhs: Num(
+                                10.0,
+                            ),
+                            op: Add,
+                            rhs: Num(
+                                20.0,
+                            ),
+                        },
+                    },
+                ],
+                body: BinaryOp {
+                    lhs: Slot(
+                        Capture(
+                            CaptureSlot(
+                                0,
+                            ),
+                        ),
                     ),
                     op: Add,
-                    rhs: Num(
-                        20.0,
+                    rhs: Slot(
+                        Local(
+                            LocalSlot(
+                                0,
+                            ),
+                        ),
                     ),
                 },
             },
-        ],
-        body: BinaryOp {
-            lhs: Local(
-                LocalId(
-                    0,
-                ),
-            ),
-            op: Add,
-            rhs: Local(
-                LocalId(
-                    1,
-                ),
-            ),
-        },
+        ),
     },
-}
+)

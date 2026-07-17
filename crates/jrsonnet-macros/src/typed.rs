@@ -1,10 +1,10 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-	parenthesized,
+	DeriveInput, Error, Ident, LitStr, Result, Token, Type, parenthesized,
 	parse::{Parse, ParseStream},
 	spanned::Spanned as _,
-	token, DeriveInput, Error, Ident, LitStr, Result, Token, Type,
+	token,
 };
 
 use crate::{extract_type_from_option, kw, names::Names, parse_attr, type_is_path};

@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use jrsonnet_ir::{BinaryOpType, UnaryOpType};
 
 use crate::{
+	Context, Result, Val,
 	analyze::LExpr,
 	arr::ArrValue,
 	bail, error,
@@ -11,8 +12,7 @@ use crate::{
 	manifest::format_float_go_g17,
 	stdlib::std_format,
 	typed::IntoUntyped as _,
-	val::{equals, StrValue},
-	Context, Result, Val,
+	val::{StrValue, equals},
 };
 
 /// Format a number like Go's unparseNumber: %.0f for integers, %.17g for floats

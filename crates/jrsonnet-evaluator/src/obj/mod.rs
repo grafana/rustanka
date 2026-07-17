@@ -11,8 +11,7 @@ use std::{
 };
 
 use educe::Educe;
-use im_rc::{vector, Vector};
-use jrsonnet_gcmodule::{cc_dyn, Acyclic, Cc, Trace, Weak};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace, Weak, cc_dyn};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -23,13 +22,13 @@ pub use jrsonnet_ir::Visibility;
 pub use oop::ObjValueBuilder;
 
 use crate::{
+	CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
 	arr::{PickObjectKeyValues, PickObjectValues},
 	bail,
-	error::{suggest_object_fields, ErrorKind::*},
+	error::{ErrorKind::*, suggest_object_fields},
 	evaluate::operator::evaluate_add_op,
 	identity_hash,
 	val::{ArrValue, ThunkValue},
-	CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
 };
 
 #[cfg(not(feature = "exp-preserve-order"))]
@@ -97,7 +96,7 @@ impl FieldSortKey {
 
 // 0 - add
 //  12 - visibility
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Acyclic)]
 pub struct ObjFieldFlags(u8);
 impl ObjFieldFlags {
 	fn new(add: bool, visibility: Visibility) -> Self {
@@ -136,9 +135,7 @@ impl Debug for ObjFieldFlags {
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Trace)]
 pub struct ObjMember {
-	#[trace(skip)]
 	flags: ObjFieldFlags,
-	original_index: FieldIndex,
 	pub invoke: MaybeUnbound,
 	pub location: Option<Span>,
 }
@@ -251,7 +248,7 @@ cc_dyn!(
 #[derive(Trace, Educe)]
 #[educe(Debug)]
 struct ObjValueInner {
-	cores: Vector<CcObjectCore>,
+	cores: Vec<CcObjectCore>,
 	assertions_ran: Cell<bool>,
 	has_assertions: bool,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
@@ -319,7 +316,7 @@ fn finish_asserting(obj: &ObjValue) {
 
 thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
-		cores: vector![],
+		cores: vec![],
 		assertions_ran: Cell::new(true),
 		has_assertions: false,
 		value_cache: RefCell::default(),
@@ -552,7 +549,10 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		let cores = sup.0.cores.clone() + self.0.cores.clone();
+		let mut cores = Vec::with_capacity(sup.0.cores.len() + self.0.cores.len());
+		cores.extend(sup.0.cores.iter().cloned());
+		cores.extend(self.0.cores.iter().cloned());
+
 		let has_assertions = sup.0.has_assertions || self.0.has_assertions;
 		ObjValue(Cc::new(ObjValueInner {
 			cores,
@@ -1116,13 +1116,13 @@ impl<Kind> ObjMemberBuilder<Kind> {
 		self.location = Some(location);
 		self
 	}
-	fn build_member(self, binding: MaybeUnbound) -> (Kind, IStr, ObjMember) {
+	fn build_member(self, binding: MaybeUnbound) -> (Kind, IStr, FieldIndex, ObjMember) {
 		(
 			self.kind,
 			self.name,
+			self.original_index,
 			ObjMember {
 				flags: ObjFieldFlags::new(self.add, self.visibility),
-				original_index: self.original_index,
 				invoke: binding,
 				location: self.location,
 			},
@@ -1139,7 +1139,7 @@ impl ObjMemberBuilder<ExtendBuilder<'_>> {
 		self.binding(MaybeUnbound::Unbound(CcUnbound::new(bindable)));
 	}
 	pub fn binding(self, binding: MaybeUnbound) {
-		let (receiver, name, member) = self.build_member(binding);
+		let (receiver, name, _, member) = self.build_member(binding);
 		let new = receiver.0.clone();
 		*receiver.0 = new.extend_with_raw_member(name, member);
 	}

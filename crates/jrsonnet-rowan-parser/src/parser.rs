@@ -3,13 +3,13 @@ use std::{cell::Cell, fmt, rc::Rc};
 use rowan::{GreenNode, TextRange};
 
 use crate::{
+	AstToken, SyntaxKind,
+	SyntaxKind::*,
+	SyntaxNode, T, TS,
 	event::Event,
 	marker::{CompletedMarker, Marker},
 	nodes::{BinaryOperatorKind, Literal, Number, Text, UnaryOperatorKind},
 	token_set::SyntaxKindSet,
-	AstToken, SyntaxKind,
-	SyntaxKind::*,
-	SyntaxNode, T, TS,
 };
 
 pub struct Parse {

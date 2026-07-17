@@ -3,8 +3,8 @@
 use std::{fmt::Debug, mem};
 
 use jrsonnet_rowan_parser::{
-	nodes::{CustomError, Trivia, TriviaKind},
 	AstNode, AstToken, SyntaxElement, SyntaxNode, TS,
+	nodes::{CustomError, Trivia, TriviaKind},
 };
 
 pub type ChildTrivia = Vec<Result<Trivia, String>>;

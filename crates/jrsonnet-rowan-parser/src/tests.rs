@@ -3,7 +3,7 @@
 
 use hi_doc::{Formatting, SnippetBuilder, Text};
 
-use crate::{parse, AstNode};
+use crate::{AstNode, parse};
 
 fn process(text: &str) -> String {
 	use std::fmt::Write;

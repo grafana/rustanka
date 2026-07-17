@@ -48,11 +48,7 @@ pub enum ParamDefault {
 }
 impl ParamDefault {
 	pub const fn exists(is_exists: bool) -> Self {
-		if is_exists {
-			Self::Exists
-		} else {
-			Self::None
-		}
+		if is_exists { Self::Exists } else { Self::None }
 	}
 }
 impl fmt::Display for ParamDefault {

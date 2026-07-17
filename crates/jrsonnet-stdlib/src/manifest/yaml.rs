@@ -1,9 +1,8 @@
 use std::{borrow::Cow, fmt::Write};
 
 use jrsonnet_evaluator::{
-	bail, in_description_frame,
-	manifest::{escape_string_json_buf, ManifestFormat},
-	Result, ResultExt, Val,
+	Result, ResultExt, Val, bail, in_description_frame,
+	manifest::{ManifestFormat, escape_string_json_buf},
 };
 
 pub struct YamlFormat<'s> {
@@ -493,7 +492,7 @@ fn manifest_yaml_ex_buf(
 
 #[cfg(test)]
 mod tests {
-	use jrsonnet_evaluator::{val::ArrValue, NumValue, ObjValueBuilder};
+	use jrsonnet_evaluator::{NumValue, ObjValueBuilder, val::ArrValue};
 
 	use super::*;
 
@@ -623,15 +622,15 @@ mod tests {
 		assert!(yaml_needs_quotes("hello#world")); // hash anywhere requires quoting (matches jrsonnet)
 		assert!(yaml_needs_quotes("{json}")); // starts with brace
 		assert!(yaml_needs_quotes("[array]")); // starts with bracket
-										 // Braces/brackets anywhere require quoting to match go-jsonnet behavior
+		// Braces/brackets anywhere require quoting to match go-jsonnet behavior
 		assert!(yaml_needs_quotes("hello{world}"));
 		assert!(yaml_needs_quotes("hello[world]"));
 		// Quotes at start need quoting
 		assert!(yaml_needs_quotes("\"quoted\"")); // starts with double quote
 		assert!(yaml_needs_quotes("'quoted'")); // starts with single quote
-										  // Single quotes anywhere need quoting in jrsonnet
+		// Single quotes anywhere need quoting in jrsonnet
 		assert!(yaml_needs_quotes("hello'world")); // single quote in middle
-											 // Double quotes anywhere need quoting in jrsonnet
+		// Double quotes anywhere need quoting in jrsonnet
 		assert!(yaml_needs_quotes("hello\"world")); // double quote in middle
 		assert!(yaml_needs_quotes("job=\"api-server\"")); // typical promql/yaml pattern
 	}

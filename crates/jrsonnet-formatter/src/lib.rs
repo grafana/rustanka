@@ -2,26 +2,26 @@ use std::{any::type_name, rc::Rc};
 
 use children::{children_between, trivia_before};
 use dprint_core::formatting::{
+	ConditionResolver, ConditionResolverContext, LineNumber, PrintItems, PrintOptions,
 	condition_helpers::is_multiple_lines,
 	condition_resolvers::true_resolver,
 	ir_helpers::{new_line_group, with_indent},
-	ConditionResolver, ConditionResolverContext, LineNumber, PrintItems, PrintOptions,
 };
 use hi_doc::{Formatting, SnippetBuilder};
 use jrsonnet_lexer::collect_lexed_str_block;
 use jrsonnet_rowan_parser::{
+	AstNode, AstToken as _, SyntaxToken,
 	nodes::{
 		Arg, ArgsDesc, Assertion, BinaryOperator, Bind, CompSpec, Destruct, DestructArrayPart,
 		DestructRest, Expr, ExprArray, ExprBase, FieldName, ForSpec, IfSpec, ImportKind, Literal,
 		Member, Name, Number, ObjBody, ObjLocal, ParamsDesc, SliceDesc, SourceFile, Stmt, Suffix,
 		Text, TextKind, UnaryOperator, Visibility,
 	},
-	AstNode, AstToken as _, SyntaxToken,
 };
 
 use crate::{
-	children::{trivia_after, Child, EndingComments},
-	comments::{format_comments, CommentLocation},
+	children::{Child, EndingComments, trivia_after},
+	comments::{CommentLocation, format_comments},
 };
 
 mod children;

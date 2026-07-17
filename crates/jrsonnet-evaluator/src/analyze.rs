@@ -14,17 +14,16 @@
 //! }
 //! ```
 
-use std::{fmt::Write, rc::Rc};
+use std::rc::Rc;
 
 use drop_bomb::DropBomb;
-use hi_doc::{Formatting, SnippetBuilder, Text};
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::{
-	function::FunctionSignature, ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BinaryOpType,
-	BindSpec, CompSpec, Destruct, Expr, ExprParams, FieldName, ForSpecData, IfElse, IfSpecData,
-	ImportKind, LiteralType, NumValue, ObjBody, ObjComp, ObjMembers, Slice, SliceDesc, Span,
-	Spanned, UnaryOpType, Visibility,
+	ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BinaryOpType, BindSpec, CompSpec, Destruct, Expr,
+	ExprParams, FieldName, ForSpecData, IfElse, IfSpecData, ImportKind, LiteralType, NumValue,
+	ObjBody, ObjComp, ObjMembers, Slice, SliceDesc, Span, Spanned, UnaryOpType, Visibility,
+	function::FunctionSignature,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -78,6 +77,20 @@ impl LocalId {
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Acyclic)]
+pub enum LSlot {
+	/// Enclosing frame locals (sibling letrec, params, etc.).
+	Local(LocalSlot),
+	/// Enclosing closure's capture pack.
+	Capture(CaptureSlot),
+}
+
+#[derive(Debug, Acyclic)]
+pub struct ClosureShape {
+	pub captures: Box<[LSlot]>,
+	pub n_locals: u16,
+}
+
 struct LocalDefinition {
 	name: IStr,
 	span: Option<Span>,
@@ -121,12 +134,15 @@ impl LocalDefinition {
 
 #[derive(Debug, Acyclic)]
 pub enum LExpr {
-	Local(LocalId),
+	Slot(LSlot),
 	Null,
 	Bool(bool),
 	Str(IStr),
 	Num(NumValue),
-	Arr(Rc<Vec<LExpr>>),
+	Arr {
+		shape: ClosureShape,
+		items: Rc<Vec<LExpr>>,
+	},
 	ArrComp(Box<LArrComp>),
 	Obj(LObjBody),
 	ObjExtend(Box<LExpr>, LObjBody),
@@ -141,10 +157,7 @@ pub enum LExpr {
 		rest: Box<LExpr>,
 	},
 	Error(Span, Box<LExpr>),
-	LocalExpr {
-		binds: Vec<LBind>,
-		body: Box<LExpr>,
-	},
+	LocalExpr(Box<LLocalExpr>),
 	Import {
 		kind: Spanned<ImportKind>,
 		kind_span: Span,
@@ -160,6 +173,7 @@ pub enum LExpr {
 		parts: Vec<LIndexPart>,
 	},
 	Function(Rc<LFunction>),
+	IdentityFunction,
 	IfElse {
 		cond: Box<LExpr>,
 		cond_then: Box<LExpr>,
@@ -174,10 +188,19 @@ pub enum LExpr {
 }
 
 #[derive(Debug, Acyclic)]
+pub struct LLocalExpr {
+	pub frame_shape: ClosureShape,
+	pub binds: Vec<LBind>,
+	pub body: LExpr,
+}
+
+#[derive(Debug, Acyclic)]
 pub struct LFunction {
 	pub name: Option<IStr>,
 	pub params: Vec<LParam>,
 	pub signature: FunctionSignature,
+
+	pub body_shape: ClosureShape,
 	pub body: Rc<LExpr>,
 }
 
@@ -185,18 +208,25 @@ pub struct LFunction {
 pub struct LParam {
 	pub name: Option<IStr>,
 	pub destruct: LDestruct,
-	pub default: Option<Rc<LExpr>>,
+
+	pub default: Option<(ClosureShape, Rc<LExpr>)>,
 }
 
 #[derive(Debug, Acyclic)]
 pub struct LBind {
 	pub destruct: LDestruct,
+	pub value_shape: ClosureShape,
 	pub value: Rc<LExpr>,
 }
 
-#[derive(Debug, Clone, Acyclic)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic)]
+pub struct CaptureSlot(pub(crate) u16);
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic)]
+pub struct LocalSlot(pub(crate) u16);
+
+#[derive(Debug, Acyclic)]
 pub enum LDestruct {
-	Full(LocalId),
+	Full(LocalSlot),
 	#[cfg(feature = "exp-destruct")]
 	Skip,
 	#[cfg(feature = "exp-destruct")]
@@ -214,54 +244,54 @@ pub enum LDestruct {
 
 #[derive(Debug, Clone, Copy, Acyclic)]
 pub enum LDestructRest {
-	Keep(LocalId),
+	Keep(LocalSlot),
 	Drop,
 }
 
-#[derive(Debug, Clone, Acyclic)]
+#[derive(Debug, Acyclic)]
 pub struct LDestructField {
 	pub name: IStr,
 	pub into: Option<LDestruct>,
-	pub default: Option<Rc<LExpr>>,
+	pub default: Option<(ClosureShape, Rc<LExpr>)>,
 }
 
 impl LDestruct {
-	pub fn each_id<F: FnMut(LocalId)>(&self, f: &mut F) {
+	pub fn each_slot<F: FnMut(LocalSlot)>(&self, f: &mut F) {
 		match self {
-			Self::Full(id) => f(*id),
+			Self::Full(s) => f(*s),
 			#[cfg(feature = "exp-destruct")]
 			Self::Skip => {}
 			#[cfg(feature = "exp-destruct")]
 			Self::Array { start, rest, end } => {
 				for d in start {
-					d.each_id(f);
+					d.each_slot(f);
 				}
-				if let Some(LDestructRest::Keep(id)) = rest {
-					f(*id);
+				if let Some(LDestructRest::Keep(s)) = rest {
+					f(*s);
 				}
 				for d in end {
-					d.each_id(f);
+					d.each_slot(f);
 				}
 			}
 			#[cfg(feature = "exp-destruct")]
 			Self::Object { fields, rest } => {
 				for field in fields {
 					if let Some(into) = &field.into {
-						into.each_id(f);
+						into.each_slot(f);
 					} else {
 						unreachable!("shorthand object destruct must store `into`");
 					}
 				}
-				if let Some(LDestructRest::Keep(id)) = rest {
-					f(*id);
+				if let Some(LDestructRest::Keep(s)) = rest {
+					f(*s);
 				}
 			}
 		}
 	}
 
-	pub fn ids(&self) -> SmallVec<[LocalId; 1]> {
+	pub fn slots(&self) -> SmallVec<[LocalSlot; 1]> {
 		let mut out = SmallVec::new();
-		self.each_id(&mut |id| out.push(id));
+		self.each_slot(&mut |s| out.push(s));
 		out
 	}
 }
@@ -303,21 +333,24 @@ pub enum LObjBody {
 
 #[derive(Debug, Acyclic)]
 pub struct LObjMembers {
-	/// If current object identity (`super`/`this`/`$`) is used, `this` should be saved to the specified local
-	pub this: Option<LocalId>,
+	pub frame_shape: ClosureShape,
+	/// If current object identity (`super`/`this`/`$`) is used, `this` should
+	/// be saved to the specified local slot.
+	pub this: Option<LocalSlot>,
 	/// Set if dollar should also be assigned to object identity, `this` should also be set (TODO: proper type-level validation)
 	pub set_dollar: bool,
 	/// True iff `super` is referenced by this object's members.
 	pub uses_super: bool,
 
 	pub locals: Rc<Vec<LBind>>,
-	pub asserts: Rc<Vec<LAssertStmt>>,
+	pub asserts: Option<Rc<LObjAsserts>>,
 	pub fields: Vec<LFieldMember>,
 }
 
 #[derive(Debug, Acyclic)]
 pub struct LObjComp {
-	pub this: Option<LocalId>,
+	pub frame_shape: Rc<ClosureShape>,
+	pub this: Option<LocalSlot>,
 	pub set_dollar: bool,
 	pub uses_super: bool,
 
@@ -331,7 +364,19 @@ pub struct LFieldMember {
 	pub name: LFieldName,
 	pub plus: bool,
 	pub visibility: Visibility,
-	pub value: Rc<LExpr>,
+	pub value: Rc<(ClosureShape, LExpr)>,
+}
+
+#[derive(Debug, Acyclic)]
+pub struct LClosure<T: Acyclic> {
+	pub shape: ClosureShape,
+	pub value: T,
+}
+
+#[derive(Debug, Acyclic)]
+pub struct LObjAsserts {
+	pub shape: ClosureShape,
+	pub asserts: Vec<LAssertStmt>,
 }
 
 #[derive(Debug, Acyclic)]
@@ -350,6 +395,7 @@ impl LFieldName {
 
 #[derive(Debug, Acyclic)]
 pub struct LArrComp {
+	pub value_shape: ClosureShape,
 	pub value: Rc<LExpr>,
 	pub compspecs: Vec<LCompSpec>,
 }
@@ -358,6 +404,7 @@ pub struct LArrComp {
 pub enum LCompSpec {
 	If(LExpr),
 	For {
+		frame_shape: ClosureShape,
 		destruct: LDestruct,
 		over: LExpr,
 		/// Is `over` does not depend on any variable introduced by an earlier for-spec in this comprehension chain
@@ -365,22 +412,322 @@ pub enum LCompSpec {
 	},
 }
 
-// TODO: Binding frame state machine:
-// Pending => AllocIds => Initialize => Body => Exit
+struct FrameAlloc<'s> {
+	first_in_frame: LocalId,
+	stack: &'s mut AnalysisStack,
+	bomb: DropBomb,
+}
+impl<'s> FrameAlloc<'s> {
+	fn new(stack: &'s mut AnalysisStack) -> Self {
+		FrameAlloc {
+			first_in_frame: stack.next_local_id(),
+			stack,
+			bomb: DropBomb::new("binding frame state"),
+		}
+	}
+
+	fn push_locals_closure(&mut self) -> ClosureOnStack {
+		self.stack.push_closure_a(self.first_in_frame)
+	}
+
+	fn define_local(&mut self, name: IStr, span: Option<Span>) -> Option<(LocalId, LocalSlot)> {
+		let id = self.stack.next_local_id();
+		let stack = self.stack.local_by_name.entry(name.clone()).or_default();
+		if let Some(&existing) = stack.last()
+			&& !existing.defined_before(self.first_in_frame)
+		{
+			self.stack.report_error(
+				format!("local is already defined in the current frame: {name}"),
+				span,
+			);
+			return None;
+		}
+		stack.push(id);
+		self.stack.local_defs.push(LocalDefinition {
+			name,
+			span,
+			defined_at_depth: self.stack.depth,
+			used_at_depth: u32::MAX,
+			used_by_sibling: false,
+			analysis: AnalysisResult::default(),
+			analyzed: false,
+			scratch_referenced: false,
+		});
+		let def = self.stack.defining_closure_mut();
+		Some((id, def.define_local(id)))
+	}
+	fn alloc_bind(&mut self, bind: &BindSpec) -> Option<LDestruct> {
+		match bind {
+			BindSpec::Field { into, .. } => self.alloc_destruct(into),
+			BindSpec::Function { name, .. } => {
+				let (_, id) = self.define_local(name.clone(), None)?;
+				Some(LDestruct::Full(id))
+			}
+		}
+	}
+	fn alloc_destruct(&mut self, destruct: &Destruct) -> Option<LDestruct> {
+		Some(match destruct {
+			Destruct::Full(name) => {
+				let (_, id) = self.define_local(name.value.clone(), Some(name.span.clone()))?;
+				LDestruct::Full(id)
+			}
+			#[cfg(feature = "exp-destruct")]
+			Destruct::Skip => LDestruct::Skip,
+			#[cfg(feature = "exp-destruct")]
+			Destruct::Array { start, rest, end } => {
+				let start = start
+					.iter()
+					.map(|d| self.alloc_destruct(d))
+					.collect::<Option<Vec<_>>>()?;
+				let rest = match rest {
+					Some(jrsonnet_ir::DestructRest::Keep(name)) => {
+						let (_, id) = self.define_local(name.clone(), None)?;
+						Some(LDestructRest::Keep(id))
+					}
+					Some(jrsonnet_ir::DestructRest::Drop) => Some(LDestructRest::Drop),
+					None => None,
+				};
+				let end = end
+					.iter()
+					.map(|d| self.alloc_destruct(d))
+					.collect::<Option<Vec<_>>>()?;
+				LDestruct::Array { start, rest, end }
+			}
+			#[cfg(feature = "exp-destruct")]
+			Destruct::Object { fields, rest } => {
+				let mut l_fields: Vec<(IStr, LDestruct)> = Vec::with_capacity(fields.len());
+				// Allocate destruct LocalIds, then analyse defaults
+				for (name, into, _default) in fields {
+					let into = if let Some(inner) = into {
+						self.alloc_destruct(inner)?
+					} else {
+						let (_, id) = self.define_local(name.clone(), None)?;
+						LDestruct::Full(id)
+					};
+					l_fields.push((name.clone(), into));
+				}
+				// All locals exist, so defaults can reference any sibling.
+				let l_fields: Vec<LDestructField> = l_fields
+					.into_iter()
+					.zip(fields.iter())
+					.map(|((name, into), (_n, _i, default))| {
+						let default = match default {
+							Some(e) => {
+								let mut default_taint = AnalysisResult::default();
+								Some(self.stack.in_using_closure(|stack| {
+									Rc::new(analyze(&e.value, stack, &mut default_taint))
+								}))
+							}
+							None => None,
+						};
+						LDestructField {
+							name,
+							into: Some(into),
+							default,
+						}
+					})
+					.collect();
+				let rest = match rest {
+					Some(jrsonnet_ir::DestructRest::Keep(name)) => {
+						let (_, id) = self.define_local(name.clone(), None)?;
+						Some(LDestructRest::Keep(id))
+					}
+					Some(jrsonnet_ir::DestructRest::Drop) => Some(LDestructRest::Drop),
+					None => None,
+				};
+				LDestruct::Object {
+					fields: l_fields,
+					rest,
+				}
+			}
+		})
+	}
+
+	fn finish(self) -> PendingInit<'s> {
+		let Self {
+			first_in_frame,
+			stack,
+			bomb,
+		} = self;
+		let first_after_frame = stack.next_local_id();
+		PendingInit {
+			first_after_frame,
+			stack,
+			closures: Closures {
+				referenced: vec![],
+				spec_shapes: vec![],
+				first_in_frame,
+			},
+			bomb,
+		}
+	}
+}
 
 /// Frame state: `LocalIds` allocated, values not yet analysed.
-struct PendingInit {
-	first_in_frame: LocalId,
+struct PendingInit<'s> {
 	first_after_frame: LocalId,
+	stack: &'s mut AnalysisStack,
+	closures: Closures,
 	bomb: DropBomb,
 }
 
+impl<'s> PendingInit<'s> {
+	/// Record the analysis of a spec's value: stamp every id bound by the
+	/// spec with `analysis`, collect the spec's same-frame references, and
+	/// append them to `closures`.
+	fn record_spec_init(&mut self, destruct: &LDestruct, analysis: AnalysisResult) {
+		let mut refs: SmallVec<[LocalId; 4]> = SmallVec::new();
+		for i in self.closures.first_in_frame.0..self.first_after_frame.0 {
+			let def = &mut self.stack.local_defs[i as usize];
+			if def.scratch_referenced {
+				refs.push(LocalId(i));
+				def.scratch_referenced = false;
+			}
+		}
+
+		let mut ids_count = 0;
+		let first_local = self.stack.top_defining_local();
+		destruct.each_slot(&mut |slot| {
+			ids_count += 1;
+			let id = LocalId(first_local.0 + u32::from(slot.0));
+			let def = &mut self.stack.local_defs[id.idx()];
+			debug_assert!(!def.analyzed, "sanity: local {:?} analysed twice", def.name);
+			def.analysis = analysis;
+			def.analyzed = true;
+		});
+		self.closures.push_spec(ids_count, &refs);
+	}
+	/// After all specs are analysed, propagate dependency information between
+	/// siblings to a fix-point, then switch to "body" mode.
+	fn finish(self) -> PendingBody<'s> {
+		let Self {
+			first_after_frame,
+			closures,
+			stack,
+			bomb,
+		} = self;
+
+		debug_assert_eq!(
+			first_after_frame,
+			stack.next_local_id(),
+			"frame initialisation left unfinished locals"
+		);
+
+		debug_assert_eq!(
+			closures.spec_shapes.iter().map(|(_, d)| *d).sum::<usize>(),
+			(first_after_frame.0 - closures.first_in_frame.0) as usize,
+			"closures destruct-id counts must match frame local count"
+		);
+
+		let mut changed = true;
+		while changed {
+			changed = false;
+			for spec in closures.iter_specs() {
+				for id_raw in spec.ids.clone() {
+					let user = LocalId(id_raw);
+					for &used in spec.references {
+						changed |= stack.propagate_analysis(user, used);
+					}
+				}
+			}
+		}
+
+		stack.depth += 1;
+		PendingBody {
+			first_after_frame,
+			closures,
+			stack,
+			bomb,
+		}
+	}
+}
+
 /// Frame state: values analysed, body not yet walked.
-struct PendingBody {
-	first_in_frame: LocalId,
+struct PendingBody<'s> {
 	first_after_frame: LocalId,
 	closures: Closures,
+	stack: &'s mut AnalysisStack,
 	bomb: DropBomb,
+}
+impl<'s> PendingBody<'s> {
+	/// After the body is processed, drop the frame's locals and emit any
+	/// "unused local" warnings.
+	fn finish(self) {
+		let PendingBody {
+			first_after_frame,
+			closures,
+			stack,
+			mut bomb,
+		} = self;
+		bomb.defuse();
+		stack.depth -= 1;
+
+		debug_assert_eq!(
+			first_after_frame,
+			stack.next_local_id(),
+			"nested scopes must be popped before outer frames"
+		);
+
+		let mut changed = true;
+		while changed {
+			changed = false;
+			for spec in closures.iter_specs() {
+				// Effective used_at_depth for the spec = min over its ids.
+				let mut min_used_at = u32::MAX;
+				for id_raw in spec.ids.clone() {
+					min_used_at = min_used_at.min(stack.local_defs[id_raw as usize].used_at_depth);
+				}
+				if min_used_at == u32::MAX {
+					continue;
+				}
+				for &used in spec.references {
+					let used_def = &mut stack.local_defs[used.idx()];
+					if min_used_at < used_def.used_at_depth {
+						used_def.used_at_depth = min_used_at;
+						changed = true;
+					}
+				}
+			}
+		}
+
+		let drained: Vec<LocalDefinition> = stack
+			.local_defs
+			.drain(closures.first_in_frame.idx()..)
+			.collect();
+		for (i, def) in drained.iter().enumerate().rev() {
+			let id = LocalId(closures.first_in_frame.0 + i as u32);
+			let stack_locals = stack
+				.local_by_name
+				.get_mut(&def.name)
+				.expect("local must be in name map");
+			let popped = stack_locals.pop().expect("name stack should not be empty");
+			debug_assert_eq!(popped, id, "name stack integrity");
+			if stack_locals.is_empty() {
+				stack.local_by_name.remove(&def.name);
+			}
+
+			if def.used_at_depth == u32::MAX {
+				if def.used_by_sibling {
+					stack.report_warning(
+						format!("local is only referenced by unused siblings: {}", def.name),
+						def.span.clone(),
+					);
+				} else {
+					stack.report_warning(format!("unused local: {}", def.name), def.span.clone());
+				}
+			} else if def.analysis.local_dependent_depth > def.defined_at_depth
+				&& def.analysis.object_dependent_depth > def.defined_at_depth
+				&& def.defined_at_depth != 0
+			{
+				// The value doesn't depend on anything defined at or inside
+				// this local's scope - can be hoisted, unfortunately not automatically.
+				stack.report_warning(
+					format!("local could be hoisted to an outer scope: {}", def.name),
+					def.span.clone(),
+				);
+			}
+		}
+	}
 }
 
 struct Closures {
@@ -425,7 +772,7 @@ struct Closures {
 	/// h = 1 => referenced += [], closures += 0, destructs += 1
 	/// And the result is
 	///
-	/// ```text
+	/// ```rust,ignore
 	/// Closures {
 	///     referenced: vec![d, e, f, a, b, c, h]
 	///     spec_shapes: vec![(3, 3), (4, 3), (0, 1)],
@@ -451,14 +798,6 @@ struct Closure<'a> {
 }
 
 impl Closures {
-	fn new(first_in_frame: LocalId) -> Self {
-		Self {
-			referenced: Vec::new(),
-			spec_shapes: Vec::new(),
-			first_in_frame,
-		}
-	}
-
 	fn push_spec(&mut self, destruct_ids_count: usize, refs: &[LocalId]) {
 		self.referenced.extend_from_slice(refs);
 		self.spec_shapes.push((refs.len(), destruct_ids_count));
@@ -493,6 +832,41 @@ pub struct Diagnostic {
 	pub span: Option<Span>,
 }
 
+struct DefiningClosure {
+	first_local: LocalId,
+	n_locals: u16,
+}
+
+impl DefiningClosure {
+	fn resolve(&self, target: LocalId) -> Option<LocalSlot> {
+		let end = self.first_local.0 + u32::from(self.n_locals);
+		if target.0 >= self.first_local.0 && target.0 < end {
+			Some(LocalSlot(
+				u16::try_from(target.0 - self.first_local.0).expect("local slots overflow"),
+			))
+		} else {
+			None
+		}
+	}
+	fn define_local(&mut self, local: LocalId) -> LocalSlot {
+		let slot = self.n_locals;
+		let id = self.first_local.0 + u32::from(slot);
+		debug_assert_eq!(local.0, id);
+		self.n_locals = self.n_locals.checked_add(1).expect("local slots overflow");
+		LocalSlot(slot)
+	}
+}
+
+/// Per-closure capture computation state.
+struct ClosureFrame {
+	/// Closure may allocate locals
+	defining: Option<DefiningClosure>,
+	/// `LocalId` => capture index
+	captures: FxHashMap<LocalId, CaptureSlot>,
+	/// Capture sources in insertion order; consumed by `pop_closure_frame`.
+	capture_sources: Vec<LSlot>,
+}
+
 #[allow(clippy::struct_excessive_bools)]
 pub struct AnalysisStack {
 	local_defs: Vec<LocalDefinition>,
@@ -519,9 +893,17 @@ pub struct AnalysisStack {
 	/// True iff `$` has been referenced anywhere since the outermost object's scope was entered.
 	dollar_used: bool,
 
+	/// Stack of closure frames (innermost on top).
+	closure_stack: Vec<ClosureFrame>,
+
 	diagnostics: Vec<Diagnostic>,
 	/// Whenever analysis would be broken due to static analysis error.
 	errored: bool,
+}
+
+#[must_use]
+struct ClosureOnStack {
+	bomb: DropBomb,
 }
 
 impl AnalysisStack {
@@ -537,9 +919,118 @@ impl AnalysisStack {
 			cur_self_used: false,
 			cur_super_used: false,
 			dollar_used: false,
+			closure_stack: Vec::new(),
 			diagnostics: Vec::new(),
 			errored: false,
 		}
+	}
+
+	fn push_root_closure(&mut self, externals: u16) -> ClosureOnStack {
+		assert!(
+			self.closure_stack.is_empty(),
+			"root is only possible with empty stack"
+		);
+
+		self.closure_stack.push(ClosureFrame {
+			defining: Some(DefiningClosure {
+				first_local: LocalId(0),
+				n_locals: externals,
+			}),
+			captures: FxHashMap::default(),
+			capture_sources: Vec::new(),
+		});
+
+		ClosureOnStack {
+			bomb: DropBomb::new("root closure"),
+		}
+	}
+
+	fn push_closure_a(&mut self, first_local: LocalId) -> ClosureOnStack {
+		self.closure_stack.push(ClosureFrame {
+			defining: Some(DefiningClosure {
+				first_local,
+				n_locals: 0,
+			}),
+			captures: FxHashMap::default(),
+			capture_sources: Vec::new(),
+		});
+		ClosureOnStack {
+			bomb: DropBomb::new("closure with locals"),
+		}
+	}
+
+	#[inline]
+	fn in_using_closure<T>(
+		&mut self,
+		inner: impl FnOnce(&mut AnalysisStack) -> T,
+	) -> (ClosureShape, T) {
+		fn push_closure_b(stack: &mut AnalysisStack) -> ClosureOnStack {
+			stack.closure_stack.push(ClosureFrame {
+				defining: None,
+				captures: FxHashMap::default(),
+				capture_sources: Vec::new(),
+			});
+			ClosureOnStack {
+				bomb: DropBomb::new("closure with locals"),
+			}
+		}
+		let closure = push_closure_b(self);
+		let v = inner(self);
+		let shape = self.pop_closure(closure);
+		(shape, v)
+	}
+
+	fn pop_closure(&mut self, mut closure: ClosureOnStack) -> ClosureShape {
+		closure.bomb.defuse();
+		let frame = self.closure_stack.pop().expect("closure frame");
+		ClosureShape {
+			captures: frame.capture_sources.into_boxed_slice(),
+			n_locals: frame.defining.map(|d| d.n_locals).unwrap_or_default(),
+		}
+	}
+
+	/// Resolve a `LocalId` reference to an `LSlot` against the innermost
+	/// closure frame. May insert capture entries up the closure stack as
+	/// needed.
+	fn resolve_to_slot(&mut self, target: LocalId) -> LSlot {
+		let top = self.closure_stack.len();
+		debug_assert!(top > 0, "resolve_to_slot called with no closure frame");
+		Self::resolve_at(&mut self.closure_stack, top - 1, target)
+	}
+
+	fn resolve_at(stack: &mut [ClosureFrame], idx: usize, target: LocalId) -> LSlot {
+		if let Some(def) = &stack[idx].defining {
+			if let Some(resolved) = def.resolve(target) {
+				return LSlot::Local(resolved);
+			}
+		} else {
+			// A sibling letrec slot must never be packed as a capture, or
+			// it would read an empty `OnceCell`.
+			for j in (0..idx).rev() {
+				if let Some(def) = &stack[j].defining {
+					if let Some(resolved) = def.resolve(target) {
+						return LSlot::Local(resolved);
+					}
+					break;
+				}
+			}
+		}
+		if let Some(&cap_idx) = stack[idx].captures.get(&target) {
+			return LSlot::Capture(cap_idx);
+		}
+		debug_assert!(idx > 0, "no enclosing closure frame for target {target:?}");
+		let parent_slot = Self::resolve_at(stack, idx - 1, target);
+		let frame = &mut stack[idx];
+		let cap_idx = CaptureSlot(
+			frame
+				.capture_sources
+				.len()
+				.try_into()
+				.expect("frame has more than u16::MAX captures"),
+		);
+		frame.capture_sources.push(parent_slot);
+		frame.captures.insert(target, cap_idx);
+		LSlot::Capture(cap_idx)
 	}
 
 	fn next_local_id(&self) -> LocalId {
@@ -562,12 +1053,7 @@ impl AnalysisStack {
 		});
 	}
 
-	fn use_local(
-		&mut self,
-		name: &IStr,
-		span: Span,
-		taint: &mut AnalysisResult,
-	) -> Option<LocalId> {
+	fn use_local(&mut self, name: &IStr, span: Span, taint: &mut AnalysisResult) -> Option<LSlot> {
 		let Some(ids) = self.local_by_name.get(name) else {
 			let names = suggest_names(name, self.local_by_name.keys());
 			self.report_error(
@@ -586,7 +1072,7 @@ impl AnalysisStack {
 		} else {
 			def.scratch_referenced = true;
 		}
-		Some(id)
+		Some(self.resolve_to_slot(id))
 	}
 
 	/// Assign name to the value provided externally, e.g `std`.
@@ -613,36 +1099,19 @@ impl AnalysisStack {
 		self.local_by_name.entry(name).or_default().push(id);
 	}
 
-	/// Define a new local inside a frame currently being built.
-	fn define_local(
-		&mut self,
-		name: IStr,
-		span: Option<Span>,
-		frame_start: LocalId,
-	) -> Option<LocalId> {
-		let id = self.next_local_id();
-		let stack = self.local_by_name.entry(name.clone()).or_default();
-		if let Some(&existing) = stack.last() {
-			if !existing.defined_before(frame_start) {
-				self.report_error(
-					format!("local is already defined in the current frame: {name}"),
-					span,
-				);
-				return None;
-			}
-		}
-		stack.push(id);
-		self.local_defs.push(LocalDefinition {
-			name,
-			span,
-			defined_at_depth: self.depth,
-			used_at_depth: u32::MAX,
-			used_by_sibling: false,
-			analysis: AnalysisResult::default(),
-			analyzed: false,
-			scratch_referenced: false,
-		});
-		Some(id)
+	fn defining_closure_mut(&mut self) -> &mut DefiningClosure {
+		self.closure_stack
+			.iter_mut()
+			.rev()
+			.find_map(|c| c.defining.as_mut())
+			.expect("no enclosing defining closure frame")
+	}
+	fn defining_closure(&self) -> &DefiningClosure {
+		self.closure_stack
+			.iter()
+			.rev()
+			.find_map(|c| c.defining.as_ref())
+			.expect("no enclosing defining closure frame")
 	}
 }
 
@@ -653,169 +1122,8 @@ impl Default for AnalysisStack {
 }
 
 impl AnalysisStack {
-	fn alloc_destruct(&mut self, destruct: &Destruct, frame_start: LocalId) -> Option<LDestruct> {
-		match destruct {
-			Destruct::Full(name) => {
-				let id =
-					self.define_local(name.value.clone(), Some(name.span.clone()), frame_start)?;
-				Some(LDestruct::Full(id))
-			}
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Skip => Some(LDestruct::Skip),
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Array { start, rest, end } => {
-				let start = start
-					.iter()
-					.map(|d| self.alloc_destruct(d, frame_start))
-					.collect::<Option<Vec<_>>>()?;
-				let rest = match rest {
-					Some(jrsonnet_ir::DestructRest::Keep(name)) => {
-						let id = self.define_local(name.clone(), None, frame_start)?;
-						Some(LDestructRest::Keep(id))
-					}
-					Some(jrsonnet_ir::DestructRest::Drop) => Some(LDestructRest::Drop),
-					None => None,
-				};
-				let end = end
-					.iter()
-					.map(|d| self.alloc_destruct(d, frame_start))
-					.collect::<Option<Vec<_>>>()?;
-				Some(LDestruct::Array { start, rest, end })
-			}
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Object { fields, rest } => {
-				let mut l_fields: Vec<(IStr, LDestruct)> = Vec::with_capacity(fields.len());
-				// Two passes: first allocate ALL destruct LocalIds, then
-				// analyse defaults (which may reference later fields).
-				let mut l_fields: Vec<(IStr, LDestruct)> = Vec::with_capacity(fields.len());
-				for (name, into, _default) in fields {
-					let into = if let Some(inner) = into {
-						self.alloc_destruct(inner, frame_start)?
-					} else {
-						let id = self.define_local(name.clone(), None, frame_start)?;
-						LDestruct::Full(id)
-					};
-					l_fields.push((name.clone(), into));
-				}
-				// Second pass: all locals exist, so defaults can reference
-				// any sibling.
-				let l_fields: Vec<LDestructField> = l_fields
-					.into_iter()
-					.zip(fields.iter())
-					.map(|((name, into), (_n, _i, default))| {
-						let default = default.as_ref().map(|e| {
-							let mut default_taint = AnalysisResult::default();
-							Rc::new(analyze(&e.value, self, &mut default_taint))
-						});
-						LDestructField {
-							name,
-							into: Some(into),
-							default,
-						}
-					})
-					.collect();
-				let rest = match rest {
-					Some(jrsonnet_ir::DestructRest::Keep(name)) => {
-						let id = self.define_local(name.clone(), None, frame_start)?;
-						Some(LDestructRest::Keep(id))
-					}
-					Some(jrsonnet_ir::DestructRest::Drop) => Some(LDestructRest::Drop),
-					None => None,
-				};
-				Some(LDestruct::Object {
-					fields: l_fields,
-					rest,
-				})
-			}
-		}
-	}
-
-	// TODO: Proper state machine
-	fn begin_frame_alloc(&mut self) -> LocalId {
-		self.next_local_id()
-	}
-
-	fn finish_frame_alloc(&mut self, first_in_frame: LocalId) -> PendingInit {
-		let first_after_frame = self.next_local_id();
-		PendingInit {
-			first_in_frame,
-			first_after_frame,
-			bomb: DropBomb::new("PendingInit must be passed to finish_frame_init"),
-		}
-	}
-
-	/// Record the analysis of a spec's value: stamp every id bound by the
-	/// spec with `analysis`, collect the spec's same-frame references, and
-	/// append them to `closures`.
-	fn record_spec_init(
-		&mut self,
-		pending: &PendingInit,
-		destruct: &LDestruct,
-		analysis: AnalysisResult,
-		closures: &mut Closures,
-	) {
-		let mut refs: SmallVec<[LocalId; 4]> = SmallVec::new();
-		for i in pending.first_in_frame.0..pending.first_after_frame.0 {
-			let def = &mut self.local_defs[i as usize];
-			if def.scratch_referenced {
-				refs.push(LocalId(i));
-				def.scratch_referenced = false;
-			}
-		}
-
-		let mut ids_count = 0;
-		destruct.each_id(&mut |id| {
-			ids_count += 1;
-			let def = &mut self.local_defs[id.idx()];
-			debug_assert!(!def.analyzed, "sanity: local {:?} analysed twice", def.name);
-			def.analysis = analysis;
-			def.analyzed = true;
-		});
-		closures.push_spec(ids_count, &refs);
-	}
-
-	/// After all specs are analysed, propagate dependency information between
-	/// siblings to a fix-point, then switch to "body" mode.
-	fn finish_frame_init(&mut self, pending: PendingInit, closures: Closures) -> PendingBody {
-		let PendingInit {
-			first_in_frame,
-			first_after_frame,
-			mut bomb,
-		} = pending;
-		bomb.defuse();
-
-		debug_assert_eq!(
-			first_after_frame,
-			self.next_local_id(),
-			"frame initialisation left unfinished locals"
-		);
-
-		debug_assert_eq!(
-			closures.spec_shapes.iter().map(|(_, d)| *d).sum::<usize>(),
-			(first_after_frame.0 - first_in_frame.0) as usize,
-			"closures destruct-id counts must match frame local count"
-		);
-
-		let mut changed = true;
-		while changed {
-			changed = false;
-			for spec in closures.iter_specs() {
-				for id_raw in spec.ids.clone() {
-					let user = LocalId(id_raw);
-					for &used in spec.references {
-						changed |= self.propagate_analysis(user, used);
-					}
-				}
-			}
-		}
-
-		self.depth += 1;
-		PendingBody {
-			first_in_frame,
-			first_after_frame,
-			closures,
-			bomb: DropBomb::new("PendingBody must be passed to finish_frame_body"),
-		}
+	fn top_defining_local(&self) -> LocalId {
+		self.defining_closure().first_local
 	}
 
 	/// Merge `used`'s analysis into `user`'s analysis and record that `user`
@@ -834,82 +1142,6 @@ impl AnalysisStack {
 		before_obj != user_def.analysis.object_dependent_depth
 			|| before_loc != user_def.analysis.local_dependent_depth
 	}
-
-	/// After the body is processed, drop the frame's locals and emit any
-	/// "unused local" warnings.
-	fn finish_frame_body(&mut self, pending: PendingBody) {
-		let PendingBody {
-			first_in_frame,
-			first_after_frame,
-			closures,
-			mut bomb,
-		} = pending;
-		bomb.defuse();
-		self.depth -= 1;
-
-		debug_assert_eq!(
-			first_after_frame,
-			self.next_local_id(),
-			"nested scopes must be popped before outer frames"
-		);
-
-		let mut changed = true;
-		while changed {
-			changed = false;
-			for spec in closures.iter_specs() {
-				// Effective used_at_depth for the spec = min over its ids.
-				let mut min_used_at = u32::MAX;
-				for id_raw in spec.ids.clone() {
-					min_used_at = min_used_at.min(self.local_defs[id_raw as usize].used_at_depth);
-				}
-				if min_used_at == u32::MAX {
-					continue;
-				}
-				for &used in spec.references {
-					let used_def = &mut self.local_defs[used.idx()];
-					if min_used_at < used_def.used_at_depth {
-						used_def.used_at_depth = min_used_at;
-						changed = true;
-					}
-				}
-			}
-		}
-
-		let drained: Vec<LocalDefinition> = self.local_defs.drain(first_in_frame.idx()..).collect();
-		for (i, def) in drained.iter().enumerate().rev() {
-			let id = LocalId(first_in_frame.0 + i as u32);
-			let stack = self
-				.local_by_name
-				.get_mut(&def.name)
-				.expect("local must be in name map");
-			let popped = stack.pop().expect("name stack should not be empty");
-			debug_assert_eq!(popped, id, "name stack integrity");
-			if stack.is_empty() {
-				self.local_by_name.remove(&def.name);
-			}
-
-			if def.used_at_depth == u32::MAX {
-				if def.used_by_sibling {
-					self.report_warning(
-						format!("local is only referenced by unused siblings: {}", def.name),
-						def.span.clone(),
-					);
-				} else {
-					self.report_warning(format!("unused local: {}", def.name), def.span.clone());
-				}
-			} else if def.analysis.local_dependent_depth > def.defined_at_depth
-				&& def.analysis.object_dependent_depth > def.defined_at_depth
-				&& def.defined_at_depth != 0
-			{
-				// The value doesn't depend on anything defined at or inside
-				// this local's scope - can be hoisted, unfortunately not automatically.
-				self.report_warning(
-					format!("local could be hoisted to an outer scope: {}", def.name),
-					def.span.clone(),
-				);
-			}
-		}
-	}
 }
 
 mod names {
@@ -922,56 +1154,85 @@ mod names {
 
 // Object scope helpers
 impl AnalysisStack {
-	// TODO: proper state machine
-	fn enter_object_scope(&mut self) -> ObjectScope {
-		let is_outermost = self.first_object_depth == u32::MAX;
-		let scope = ObjectScope {
-			this_id: self.push_pseudo_local(names::this()),
-			is_outermost,
-			prev_this_local: self.this_local,
-			prev_dollar_alias: self.dollar_alias,
-			prev_cur_self_used: self.cur_self_used,
-			prev_cur_super_used: self.cur_super_used,
-			prev_dollar_used: is_outermost.then_some(self.dollar_used),
-			prev_last_object: self.last_object_depth,
-			prev_first_object: self.first_object_depth,
-		};
+	#[inline]
+	fn in_object_scope<T>(
+		&mut self,
+		inner: impl FnOnce(&mut AnalysisStack) -> T,
+	) -> (ObjectUsage, ClosureShape, T) {
+		fn enter_object_scope(stack: &mut AnalysisStack) -> ObjectScope {
+			let is_outermost = stack.first_object_depth == u32::MAX;
+			let this_id = stack.next_local_id();
+			let closure = stack.push_closure_a(this_id);
+			let pushed = stack.push_pseudo_local(names::this());
+			debug_assert_eq!(pushed, this_id, "this pseudo-local id");
+			let scope = ObjectScope {
+				this_id,
+				is_outermost,
+				prev_this_local: stack.this_local,
+				prev_dollar_alias: stack.dollar_alias,
+				prev_cur_self_used: stack.cur_self_used,
+				prev_cur_super_used: stack.cur_super_used,
+				prev_dollar_used: is_outermost.then_some(stack.dollar_used),
+				prev_last_object: stack.last_object_depth,
+				prev_first_object: stack.first_object_depth,
+				closure,
+			};
 
-		self.this_local = Some(scope.this_id);
-		if is_outermost {
-			self.dollar_alias = Some(scope.this_id);
-			self.first_object_depth = self.depth;
-			self.dollar_used = false;
+			stack.this_local = Some(scope.this_id);
+			if is_outermost {
+				stack.dollar_alias = Some(scope.this_id);
+				stack.first_object_depth = stack.depth;
+				stack.dollar_used = false;
+			}
+			stack.last_object_depth = stack.depth;
+			stack.cur_self_used = false;
+			stack.cur_super_used = false;
+			scope
 		}
-		self.last_object_depth = self.depth;
-		self.cur_self_used = false;
-		self.cur_super_used = false;
-		scope
-	}
 
-	fn leave_object_scope(&mut self, scope: ObjectScope) -> ObjectUsage {
-		let _ = self.local_defs.pop().expect("this pseudo-local exists");
-		debug_assert_eq!(self.local_defs.len(), scope.this_id.0 as usize);
+		fn leave_object_scope(
+			stack: &mut AnalysisStack,
+			scope: ObjectScope,
+		) -> (ObjectUsage, ClosureShape) {
+			let ObjectScope {
+				this_id,
+				is_outermost,
+				prev_this_local,
+				prev_dollar_alias,
+				prev_cur_self_used,
+				prev_cur_super_used,
+				prev_dollar_used,
+				prev_last_object,
+				prev_first_object,
+				closure,
+			} = scope;
+			let _ = stack.local_defs.pop().expect("this pseudo-local exists");
+			debug_assert_eq!(stack.local_defs.len(), this_id.0 as usize);
 
-		let set_dollar = scope.is_outermost && self.dollar_used;
-		let usage = ObjectUsage {
-			this_id: scope.this_id,
-			this_used: self.cur_self_used || self.cur_super_used || set_dollar,
-			uses_super: self.cur_super_used,
-			set_dollar,
-		};
+			let set_dollar = is_outermost && stack.dollar_used;
+			let usage = ObjectUsage {
+				this_used: stack.cur_self_used || stack.cur_super_used || set_dollar,
+				uses_super: stack.cur_super_used,
+				set_dollar,
+			};
 
-		self.this_local = scope.prev_this_local;
-		self.dollar_alias = scope.prev_dollar_alias;
-		self.cur_self_used = scope.prev_cur_self_used;
-		self.cur_super_used = scope.prev_cur_super_used;
-		if let Some(prev) = scope.prev_dollar_used {
-			self.dollar_used = prev;
+			stack.this_local = prev_this_local;
+			stack.dollar_alias = prev_dollar_alias;
+			stack.cur_self_used = prev_cur_self_used;
+			stack.cur_super_used = prev_cur_super_used;
+			if let Some(prev) = prev_dollar_used {
+				stack.dollar_used = prev;
+			}
+			stack.last_object_depth = prev_last_object;
+			stack.first_object_depth = prev_first_object;
+
+			let frame_shape = stack.pop_closure(closure);
+			(usage, frame_shape)
 		}
-		self.last_object_depth = scope.prev_last_object;
-		self.first_object_depth = scope.prev_first_object;
-
-		usage
+		let scope = enter_object_scope(self);
+		let v = inner(self);
+		let (usage, shape) = leave_object_scope(self, scope);
+		(usage, shape, v)
 	}
 
 	fn push_pseudo_local(&mut self, name: IStr) -> LocalId {
@@ -986,14 +1247,18 @@ impl AnalysisStack {
 			analyzed: true,
 			scratch_referenced: false,
 		});
+		{
+			let def = self.defining_closure_mut();
+			let _ = def.define_local(id);
+		}
 		id
 	}
 
-	fn use_this(&mut self, taint: &mut AnalysisResult) -> Option<LocalId> {
+	fn use_this(&mut self, taint: &mut AnalysisResult) -> Option<LSlot> {
 		let id = self.this_local?;
 		self.cur_self_used = true;
 		self.use_pseudo_local(id, taint);
-		Some(id)
+		Some(self.resolve_to_slot(id))
 	}
 
 	fn use_super(&mut self, taint: &mut AnalysisResult) -> Option<()> {
@@ -1003,11 +1268,11 @@ impl AnalysisStack {
 		Some(())
 	}
 
-	fn use_dollar(&mut self, taint: &mut AnalysisResult) -> Option<LocalId> {
+	fn use_dollar(&mut self, taint: &mut AnalysisResult) -> Option<LSlot> {
 		let id = self.dollar_alias?;
 		self.dollar_used = true;
 		self.use_pseudo_local(id, taint);
-		Some(id)
+		Some(self.resolve_to_slot(id))
 	}
 
 	// TODO: Dedicated type for object references instead of "pseudo local" BS, idk
@@ -1020,6 +1285,7 @@ impl AnalysisStack {
 	}
 }
 
+#[must_use]
 struct ObjectScope {
 	this_id: LocalId,
 	is_outermost: bool,
@@ -1030,10 +1296,10 @@ struct ObjectScope {
 	prev_dollar_used: Option<bool>,
 	prev_last_object: u32,
 	prev_first_object: u32,
+	closure: ClosureOnStack,
 }
 
 struct ObjectUsage {
-	this_id: LocalId,
 	this_used: bool,
 	uses_super: bool,
 	set_dollar: bool,
@@ -1073,7 +1339,7 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 					stack.report_error("`self` used outside of object", None);
 					LExpr::BadLocal("self")
 				},
-				LExpr::Local,
+				LExpr::Slot,
 			),
 			LiteralType::Super => {
 				if stack.use_super(taint).is_some() {
@@ -1088,7 +1354,7 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 					stack.report_error("`$` used outside of object", None);
 					LExpr::BadLocal("$")
 				},
-				LExpr::Local,
+				LExpr::Slot,
 			),
 			LiteralType::Null => LExpr::Null,
 			LiteralType::True => LExpr::Bool(true),
@@ -1098,10 +1364,15 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 		Expr::Num(n) => LExpr::Num(*n),
 		Expr::Var(v) => stack
 			.use_local(&v.value, v.span.clone(), taint)
-			.map_or_else(|| LExpr::BadLocal("ref"), LExpr::Local),
-		Expr::Arr(a) => LExpr::Arr(Rc::new(
-			a.iter().map(|v| analyze(v, stack, taint)).collect(),
-		)),
+			.map_or_else(|| LExpr::BadLocal("ref"), LExpr::Slot),
+		Expr::Arr(a) => {
+			let (shape, items) = stack
+				.in_using_closure(|stack| a.iter().map(|v| analyze(v, stack, taint)).collect());
+			LExpr::Arr {
+				shape,
+				items: Rc::new(items),
+			}
+		}
 		Expr::ArrComp(inner, comp) => analyze_arr_comp(inner, comp, stack, taint),
 		Expr::Obj(obj) => LExpr::Obj(analyze_obj_body(obj, stack, taint)),
 		Expr::ObjExtend(base, obj) => LExpr::ObjExtend(
@@ -1238,14 +1509,17 @@ fn analyze_local_expr(
 	if binds.is_empty() {
 		return analyze(body, stack, taint);
 	}
-	let (_frame_start, l_binds, body_expr) =
-		process_local_frame(binds, stack, taint, |stack, taint| {
-			analyze(body, stack, taint)
-		});
-	LExpr::LocalExpr {
+	let frame_start = stack.next_local_id();
+	let closure = stack.push_closure_a(frame_start);
+	let (l_binds, body_expr) = process_local_frame(binds, stack, taint, |stack, taint| {
+		analyze(body, stack, taint)
+	});
+	let frame_shape = stack.pop_closure(closure);
+	LExpr::LocalExpr(Box::new(LLocalExpr {
+		frame_shape,
 		binds: l_binds,
-		body: Box::new(body_expr),
-	}
+		body: body_expr,
+	}))
 }
 
 fn analyze_bind_value(
@@ -1267,55 +1541,44 @@ fn analyze_bind_value(
 	}
 }
 
-fn alloc_bind_destruct(
-	bind: &BindSpec,
-	stack: &mut AnalysisStack,
-	frame_start: LocalId,
-) -> Option<LDestruct> {
-	match bind {
-		BindSpec::Field { into, .. } => stack.alloc_destruct(into, frame_start),
-		BindSpec::Function { name, .. } => stack
-			.define_local(name.clone(), None, frame_start)
-			.map(LDestruct::Full),
-	}
-}
-
 fn process_local_frame<R>(
 	binds: &[BindSpec],
 	stack: &mut AnalysisStack,
 	taint: &mut AnalysisResult,
 	body_fn: impl FnOnce(&mut AnalysisStack, &mut AnalysisResult) -> R,
-) -> (LocalId, Vec<LBind>, R) {
-	let frame_start = stack.begin_frame_alloc();
+) -> (Vec<LBind>, R) {
+	let mut alloc = FrameAlloc::new(stack);
 
 	let mut destructs: Vec<Option<LDestruct>> = Vec::with_capacity(binds.len());
 	for bind in binds {
-		destructs.push(alloc_bind_destruct(bind, stack, frame_start));
+		destructs.push(alloc.alloc_bind(bind));
 	}
-	let pending = stack.finish_frame_alloc(frame_start);
+	let mut pending = alloc.finish();
 
-	let mut closures = Closures::new(frame_start);
 	let mut l_binds: Vec<LBind> = Vec::with_capacity(binds.len());
 	for (bind, destruct) in binds.iter().zip(destructs.into_iter()) {
 		let mut value_taint = AnalysisResult::default();
-		let value = analyze_bind_value(bind, stack, &mut value_taint);
+		let (value_shape, value) = pending
+			.stack
+			.in_using_closure(|stack| analyze_bind_value(bind, stack, &mut value_taint));
 		taint.taint_by(value_taint);
 		if let Some(destruct) = destruct {
-			stack.record_spec_init(&pending, &destruct, value_taint, &mut closures);
+			pending.record_spec_init(&destruct, value_taint);
 			l_binds.push(LBind {
 				destruct,
+				value_shape,
 				value: Rc::new(value),
 			});
 		} else {
-			closures.push_spec(0, &[]);
+			pending.closures.push_spec(0, &[]);
 		}
 	}
 
-	let body_frame = stack.finish_frame_init(pending, closures);
-	let result = body_fn(stack, taint);
-	stack.finish_frame_body(body_frame);
+	let body_frame = pending.finish();
+	let result = body_fn(body_frame.stack, taint);
+	body_frame.finish();
 
-	(frame_start, l_binds, result)
+	(l_binds, result)
 }
 
 fn analyze_function(
@@ -1325,23 +1588,29 @@ fn analyze_function(
 	stack: &mut AnalysisStack,
 	taint: &mut AnalysisResult,
 ) -> LExpr {
-	let frame_start = stack.begin_frame_alloc();
+	let mut alloc = FrameAlloc::new(stack);
+	let closure = alloc.push_locals_closure();
 
 	let mut param_destructs: Vec<Option<LDestruct>> = Vec::with_capacity(params.exprs.len());
 	for p in &params.exprs {
-		param_destructs.push(stack.alloc_destruct(&p.destruct, frame_start));
+		param_destructs.push(alloc.alloc_destruct(&p.destruct));
 	}
 
-	let pending = stack.finish_frame_alloc(frame_start);
+	let mut pending = alloc.finish();
 
-	let mut closures = Closures::new(frame_start);
 	let mut l_params: Vec<LParam> = Vec::with_capacity(params.exprs.len());
 	for (p, destruct) in params.exprs.iter().zip(param_destructs.into_iter()) {
 		let mut value_taint = AnalysisResult::default();
-		let default = p
-			.default
-			.as_ref()
-			.map(|d| Rc::new(analyze(d, stack, &mut value_taint)));
+		let default = p.default.as_ref().map_or_else(
+			|| None,
+			|d| {
+				Some(
+					pending
+						.stack
+						.in_using_closure(|stack| Rc::new(analyze(d, stack, &mut value_taint))),
+				)
+			},
+		);
 		taint.taint_by(value_taint);
 		if let Some(destruct) = destruct {
 			let name = match &p.destruct {
@@ -1349,25 +1618,42 @@ fn analyze_function(
 				#[cfg(feature = "exp-destruct")]
 				_ => None,
 			};
-			stack.record_spec_init(&pending, &destruct, value_taint, &mut closures);
+			pending.record_spec_init(&destruct, value_taint);
 			l_params.push(LParam {
 				name,
 				destruct,
 				default,
 			});
 		} else {
-			closures.push_spec(0, &[]);
+			pending.closures.push_spec(0, &[]);
 		}
 	}
 
-	let body_frame = stack.finish_frame_init(pending, closures);
-	let body_expr = analyze(body, stack, taint);
-	stack.finish_frame_body(body_frame);
+	let body_frame = pending.finish();
+	let body_expr = analyze(body, body_frame.stack, taint);
+	body_frame.finish();
+	let body_shape = stack.pop_closure(closure);
+
+	// function(x) x is an identity function
+	if l_params.len() == 1 && l_params[0].default.is_none() {
+		stack.report_warning(
+			"do not define identity functions manually, use std.id instead",
+			None,
+		);
+		#[allow(irrefutable_let_patterns, reason = "refutable with exp-destruct")]
+		if let LDestruct::Full(param_slot) = &l_params[0].destruct
+			&& let LExpr::Slot(LSlot::Local(s)) = &body_expr
+			&& s == param_slot
+		{
+			return LExpr::IdentityFunction {};
+		}
+	}
 
 	LExpr::Function(Rc::new(LFunction {
 		name,
 		params: l_params,
 		signature: params.signature.clone(),
+		body_shape,
 		body: Rc::new(body_expr),
 	}))
 }
@@ -1405,38 +1691,55 @@ fn analyze_obj_members(
 		})
 		.collect();
 
-	let scope = stack.enter_object_scope();
-	let (_frame_start, l_binds, (l_asserts, l_fields)) =
-		process_local_frame(locals, stack, taint, |stack, taint| {
-			let mut l_asserts = Vec::with_capacity(asserts.len());
-			for a in asserts {
-				let mut assert_taint = AnalysisResult::default();
-				l_asserts.push(analyze_assert(a, stack, &mut assert_taint));
-				taint.taint_by(assert_taint);
-			}
-			let mut l_fields = Vec::with_capacity(fields.len());
-			for (f, name) in fields.iter().zip(field_names) {
-				let value = if let Some(params) = &f.params {
-					analyze_function(name.function_name(), params, &f.value, stack, taint)
+	let (usage, frame_shape, (l_binds, (l_asserts_opt, l_fields))) =
+		stack.in_object_scope(|stack| {
+			process_local_frame(locals, stack, taint, |stack, taint| {
+				let l_asserts_opt = if asserts.is_empty() {
+					None
 				} else {
-					analyze(&f.value, stack, taint)
+					let (shape, l_asserts) = stack.in_using_closure(|stack| {
+						let mut l_asserts = Vec::with_capacity(asserts.len());
+						for a in asserts {
+							let mut assert_taint = AnalysisResult::default();
+							l_asserts.push(analyze_assert(a, stack, &mut assert_taint));
+							taint.taint_by(assert_taint);
+						}
+						l_asserts
+					});
+					Some(Rc::new(LObjAsserts {
+						shape,
+						asserts: l_asserts,
+					}))
 				};
-				l_fields.push(LFieldMember {
-					name,
-					plus: f.plus,
-					visibility: f.visibility,
-					value: Rc::new(value),
-				});
-			}
-			(l_asserts, l_fields)
+				let mut l_fields = Vec::with_capacity(fields.len());
+				for (f, name) in fields.iter().zip(field_names) {
+					let value = stack.in_using_closure(|stack| {
+						if let Some(params) = &f.params {
+							analyze_function(name.function_name(), params, &f.value, stack, taint)
+						} else {
+							analyze(&f.value, stack, taint)
+						}
+					});
+					l_fields.push(LFieldMember {
+						name,
+						plus: f.plus,
+						visibility: f.visibility,
+						value: Rc::new(value),
+					});
+				}
+				(l_asserts_opt, l_fields)
+			})
 		});
-	let usage = stack.leave_object_scope(scope);
+	// `this` was allocated as the first local of the object's frame,
+	// so its slot is 0 within that frame.
+	let this_slot = usage.this_used.then_some(LocalSlot(0));
 	LObjMembers {
-		this: usage.this_used.then_some(usage.this_id),
+		frame_shape,
+		this: this_slot,
 		set_dollar: usage.set_dollar,
 		uses_super: usage.uses_super,
 		locals: Rc::new(l_binds),
-		asserts: Rc::new(l_asserts),
+		asserts: l_asserts_opt,
 		fields: l_fields,
 	}
 }
@@ -1452,26 +1755,30 @@ fn analyze_obj_comp(
 			FieldName::Dyn(e) => LFieldName::Dyn(analyze(e, stack, taint)),
 		};
 
-		let scope = stack.enter_object_scope();
-		let body = process_local_frame(&comp.locals, stack, taint, |stack, taint| {
-			let value = if let Some(params) = &comp.field.params {
-				analyze_function(None, params, &comp.field.value, stack, taint)
-			} else {
-				analyze(&comp.field.value, stack, taint)
-			};
-			LFieldMember {
-				name: field_name,
-				plus: comp.field.plus,
-				visibility: comp.field.visibility,
-				value: Rc::new(value),
-			}
+		let (usage, frame_shape, body) = stack.in_object_scope(|stack| {
+			process_local_frame(&comp.locals, stack, taint, |stack, taint| {
+				let value = stack.in_using_closure(|stack| {
+					if let Some(params) = &comp.field.params {
+						analyze_function(None, params, &comp.field.value, stack, taint)
+					} else {
+						analyze(&comp.field.value, stack, taint)
+					}
+				});
+				LFieldMember {
+					name: field_name,
+					plus: comp.field.plus,
+					visibility: comp.field.visibility,
+					value: Rc::new(value),
+				}
+			})
 		});
-		let usage = stack.leave_object_scope(scope);
-		(usage, body)
+		(usage, frame_shape, body)
 	});
-	let (usage, (_frame_start, locals, field)) = res.inner;
+	let (usage, frame_shape, (locals, field)) = res.inner;
+	let this_slot = usage.this_used.then_some(LocalSlot(0));
 	LObjComp {
-		this: usage.this_used.then_some(usage.this_id),
+		frame_shape: Rc::new(frame_shape),
+		this: this_slot,
 		set_dollar: usage.set_dollar,
 		uses_super: usage.uses_super,
 		locals: Rc::new(locals),
@@ -1487,10 +1794,12 @@ fn analyze_arr_comp(
 	taint: &mut AnalysisResult,
 ) -> LExpr {
 	let res = analyze_comp_specs(specs, stack, taint, |stack, taint| {
-		analyze(inner, stack, taint)
+		stack.in_using_closure(|stack| analyze(inner, stack, taint))
 	});
+	let (value_shape, value) = res.inner;
 	LExpr::ArrComp(Box::new(LArrComp {
-		value: Rc::new(res.inner),
+		value_shape,
+		value: Rc::new(value),
 		compspecs: res.compspecs,
 	}))
 }
@@ -1525,23 +1834,27 @@ fn analyze_comp_specs<R>(
 				let loop_invariant = over_taint.local_dependent_depth > outer_depth;
 				taint.taint_by(over_taint);
 
-				let frame_start = stack.begin_frame_alloc();
-				let Some(l_destruct) = stack.alloc_destruct(destruct, frame_start) else {
+				let mut alloc = FrameAlloc::new(stack);
+				let closure = alloc.push_locals_closure();
+				let Some(l_destruct) = alloc.alloc_destruct(destruct) else {
+					stack.pop_closure(closure);
 					return go(idx + 1, specs, outer_depth, stack, taint, inside);
 				};
-				let pending = stack.finish_frame_alloc(frame_start);
+				let mut pending = alloc.finish();
 
 				let var_analysis = AnalysisResult::default();
-				let mut closures = Closures::new(frame_start);
-				stack.record_spec_init(&pending, &l_destruct, var_analysis, &mut closures);
+				pending.record_spec_init(&l_destruct, var_analysis);
 
-				let body_frame = stack.finish_frame_init(pending, closures);
-				let (r, mut rest) = go(idx + 1, specs, outer_depth, stack, taint, inside);
-				stack.finish_frame_body(body_frame);
+				let body_frame = pending.finish();
+				let (r, mut rest) =
+					go(idx + 1, specs, outer_depth, body_frame.stack, taint, inside);
+				body_frame.finish();
+				let frame_shape = stack.pop_closure(closure);
 
 				rest.insert(
 					0,
 					LCompSpec::For {
+						frame_shape,
 						destruct: l_destruct,
 						over: over_l,
 						loop_invariant,
@@ -1570,18 +1883,37 @@ pub fn analyze_root(expr: &Expr, ctx: Vec<(IStr, LocalId)>) -> AnalysisReport {
 		stack.define_external_local(name, id);
 	}
 
+	let externals_count: u16 = stack
+		.local_defs
+		.len()
+		.try_into()
+		.expect("more than u16::MAX externals");
+	let closure = stack.push_root_closure(externals_count);
+
 	let mut taint = AnalysisResult::default();
 	let lir = analyze(expr, &mut stack, &mut taint);
 
+	let root_shape = stack.pop_closure(closure);
+	debug_assert!(
+		stack.closure_stack.is_empty(),
+		"closure stack imbalance after analyze"
+	);
+
 	AnalysisReport {
 		lir,
+		root_shape,
 		root_analysis: taint,
 		diagnostics_list: stack.diagnostics,
 		errored: stack.errored,
 	}
 }
 
+#[cfg(test)]
 fn render_diagnostics(src: &str, diags: &[Diagnostic]) -> String {
+	use std::fmt::Write;
+
+	use hi_doc::{Formatting, SnippetBuilder, Text};
+
 	let mut out = String::new();
 	let mut unspanned = Vec::new();
 	let mut spanned: Vec<&Diagnostic> = Vec::new();
@@ -1620,6 +1952,7 @@ fn render_diagnostics(src: &str, diags: &[Diagnostic]) -> String {
 
 pub struct AnalysisReport {
 	pub lir: LExpr,
+	pub root_shape: ClosureShape,
 	pub root_analysis: AnalysisResult,
 	pub diagnostics_list: Vec<Diagnostic>,
 	pub errored: bool,

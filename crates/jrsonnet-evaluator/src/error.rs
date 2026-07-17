@@ -9,10 +9,11 @@ use jrsonnet_types::ValType;
 use thiserror::Error;
 
 use crate::{
+	ObjValue, ResolvePathOwned,
+	analyze::Diagnostic,
 	function::{CallLocation, FunctionSignature, ParamName},
 	stdlib::format::FormatError,
 	typed::TypeLocError,
-	ObjValue, ResolvePathOwned,
 };
 
 #[derive(Debug, Clone, Acyclic)]
@@ -112,12 +113,14 @@ pub enum ErrorKind {
 	CantUseSelfSupOutsideOfObject,
 
 	#[error("static analysis errors: {}", .0.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; "))]
-	StaticAnalysisError(Vec<crate::analyze::Diagnostic>),
+	StaticAnalysisError(Vec<Diagnostic>),
 	#[error("no super found")]
 	NoSuperFound,
 
 	#[error("for loop can only iterate over arrays")]
 	InComprehensionCanOnlyIterateOverArray,
+	#[error("(should not be visible) eager compspec evaluation failed due to captured context")]
+	EagerCompspecCaptured,
 
 	#[error("array out of bounds: {0} is not within [0,{1})")]
 	ArrayBoundsError(isize, u32),
@@ -286,11 +289,11 @@ impl Error {
 }
 impl fmt::Display for Error {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f, "{}", self.0 .0)?;
-		for el in &self.0 .1 .0 {
+		writeln!(f, "{}", self.0.0)?;
+		for el in &self.0.1.0 {
 			write!(f, "\t{}", el.desc)?;
 			if let Some(loc) = &el.location {
-				write!(f, "at {}", loc.0 .0 .0)?;
+				write!(f, "at {}", loc.0.0.0)?;
 				loc.0.map_source_locations(&[loc.1, loc.2]);
 			}
 			writeln!(f)?;
@@ -394,12 +397,5 @@ macro_rules! error {
 	};
 	($l:literal$(, $($tt:tt)*)?) => {
 		<$crate::error::Error as From<$crate::error::ErrorKind>>::from($crate::error::ErrorKind::RuntimeError($crate::jrsonnet_macros::format_istr!($l$(, $($tt)*)?)).into())
-	};
-}
-
-#[macro_export]
-macro_rules! runtime_error {
-	($l:literal$(, $($tt:tt)*)?) => {
-		$crate::error::Error::from($crate::error::ErrorKind::RuntimeError($crate::jrsonnet_macros::format_istr!($l$(, $($tt)*)?)))
 	};
 }

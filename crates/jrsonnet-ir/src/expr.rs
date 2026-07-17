@@ -7,9 +7,9 @@ use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
 
 use crate::{
+	NumValue,
 	function::{FunctionSignature, ParamDefault, ParamName, ParamParse},
 	source::Source,
-	NumValue,
 };
 
 #[derive(Debug, PartialEq, Acyclic)]
@@ -211,7 +211,7 @@ impl ArgsDesc {
 	}
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Acyclic)]
+#[derive(Debug, PartialEq, Eq, Acyclic)]
 pub enum DestructRest {
 	/// ...rest
 	Keep(IStr),
@@ -219,7 +219,7 @@ pub enum DestructRest {
 	Drop,
 }
 
-#[derive(Debug, Clone, PartialEq, Acyclic)]
+#[derive(Debug, PartialEq, Acyclic)]
 pub enum Destruct {
 	Full(Spanned<IStr>),
 	#[cfg(feature = "exp-destruct")]
@@ -233,7 +233,7 @@ pub enum Destruct {
 	#[cfg(feature = "exp-destruct")]
 	Object {
 		#[allow(clippy::type_complexity)]
-		fields: Vec<(IStr, Option<Destruct>, Option<Rc<Spanned<Expr>>>)>,
+		fields: Vec<(IStr, Option<Destruct>, Option<Spanned<Expr>>)>,
 		rest: Option<DestructRest>,
 	},
 }

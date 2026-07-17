@@ -70,7 +70,7 @@ local names = {
     manifestXmlJsonml: ['value'],
     base64: ['input'],
     base64DecodeBytes: ['str'],
-    base64Decode: ['str'],
+    base64Decode: ['str', 'lossy'],
     reverse: ['arr'],
     sort: ['arr', 'keyF'],
     uniq: ['arr', 'keyF'],

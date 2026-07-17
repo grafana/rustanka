@@ -3,10 +3,10 @@ use std::{mem, num::NonZeroUsize};
 use rowan::{GreenNodeBuilder, Language, TextRange, TextSize};
 
 use crate::{
+	AstToken, JsonnetLanguage, SyntaxKind,
 	lex::Lexeme,
 	nodes::Trivia,
 	parser::{LocatedSyntaxError, Parse, SyntaxError},
-	AstToken, JsonnetLanguage, SyntaxKind,
 };
 
 #[derive(Clone, Debug)]

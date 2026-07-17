@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use jrsonnet_evaluator::{
+	IStr, ObjValue, Result, ResultExt, Val,
 	manifest::{ManifestFormat, ToStringFormat},
 	typed::{FromUntyped, Typed},
-	IStr, ObjValue, Result, ResultExt, Val,
 };
 
 pub struct IniFormat {

@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analyze_tests/unused_local.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/unused_local.jsonnet
 ---
 --- source ---
 local unused = 1; 2
@@ -14,20 +14,30 @@ errored: false
 1  │ local unused = 1; 2 
 2  │  
 --- lir ---
-LocalExpr {
-    binds: [
-        LBind {
-            destruct: Full(
-                LocalId(
-                    0,
-                ),
-            ),
-            value: Num(
-                1.0,
-            ),
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
         },
-    ],
-    body: Num(
-        2.0,
-    ),
-}
+        binds: [
+            LBind {
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Num(
+                    1.0,
+                ),
+            },
+        ],
+        body: Num(
+            2.0,
+        ),
+    },
+)

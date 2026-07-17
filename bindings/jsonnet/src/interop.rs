@@ -8,8 +8,7 @@ pub mod wasm {
 
 	use crate::VM;
 
-	extern "C" {
-
+	unsafe extern "C" {
 		pub fn _jrsonnet_static_import_callback(
 			ctx: *mut c_void,
 			base: *const c_char,
@@ -27,7 +26,7 @@ pub mod wasm {
 		) -> *mut Val;
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	#[cfg(feature = "interop-wasm")]
 	// ctx arg is passed as-is to callback
 	#[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -38,7 +37,7 @@ pub mod wasm {
 	/// # Safety
 	///
 	/// `name` and `raw_params` should be correctly initialized
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	#[cfg(feature = "interop-wasm")]
 	pub unsafe extern "C" fn jrsonnet_apply_static_native_callback(
 		vm: &VM,
@@ -64,7 +63,7 @@ mod common {
 
 	use crate::VM;
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_set_trace_format(vm: &mut VM, format: u8) {
 		match format {
 			0 => {
@@ -105,7 +104,7 @@ mod threading {
 	///
 	/// Current thread GC will be broken after this call, need to call
 	/// `jrsonet_enter_thread` before doing anything.
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub unsafe extern "C" fn jrsonnet_exit_thread() -> *mut ThreadCTX {
 		Box::into_raw(Box::new(ThreadCTX {
 			interner: jrsonnet_interner::interop::exit_thread(),
@@ -113,7 +112,7 @@ mod threading {
 		}))
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_reenter_thread(mut ctx: Box<ThreadCTX>) {
 		use std::ptr::null_mut;
 		assert!(
@@ -132,12 +131,12 @@ mod threading {
 	// boxing.
 	pub enum JrThreadId {}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_thread_id() -> *mut JrThreadId {
 		Box::into_raw(Box::new(std::thread::current().id())).cast()
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_thread_id_compare(
 		a: *const JrThreadId,
 		b: *const JrThreadId,
@@ -147,7 +146,7 @@ mod threading {
 		i32::from(*a == *b)
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub unsafe extern "C" fn jrsonnet_thread_id_free(id: *mut JrThreadId) {
 		let _id: Box<ThreadId> = unsafe { Box::from_raw(id.cast()) };
 	}

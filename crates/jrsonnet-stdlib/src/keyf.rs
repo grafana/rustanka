@@ -1,7 +1,7 @@
 use jrsonnet_evaluator::{
+	Error, Result, Thunk, Val,
 	function::{FuncVal, NativeFn},
 	typed::{ComplexValType, FromUntyped, Typed, ValType},
-	Error, Result, Thunk, Val,
 };
 
 type PreparedKeyF = NativeFn!((Thunk<Val>) -> Val);

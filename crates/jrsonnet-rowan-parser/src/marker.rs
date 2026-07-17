@@ -3,9 +3,9 @@ use std::num::NonZeroUsize;
 use drop_bomb::DropBomb;
 
 use crate::{
+	SyntaxKind,
 	event::Event,
 	parser::{ExpectedSyntax, Parser, SyntaxError},
-	SyntaxKind,
 };
 
 // pub struct Ranger {

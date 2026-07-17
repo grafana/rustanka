@@ -1,7 +1,7 @@
 ---
 source: crates/jrsonnet-evaluator/src/analyze.rs
 expression: rendered
-input_file: crates/jrsonnet-evaluator/src/analysis_golden/nested_object_independent.jsonnet
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/nested_object_independent.jsonnet
 ---
 --- source ---
 {
@@ -19,11 +19,15 @@ errored: false
 Obj(
     MemberList(
         LObjMembers {
+            frame_shape: ClosureShape {
+                captures: [],
+                n_locals: 1,
+            },
             this: None,
             set_dollar: false,
             uses_super: false,
             locals: [],
-            asserts: [],
+            asserts: None,
             fields: [
                 LFieldMember {
                     name: Fixed(
@@ -31,8 +35,14 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: Num(
-                        1.0,
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        Num(
+                            1.0,
+                        ),
                     ),
                 },
                 LFieldMember {
@@ -41,53 +51,77 @@ Obj(
                     ),
                     plus: false,
                     visibility: Normal,
-                    value: Obj(
-                        MemberList(
-                            LObjMembers {
-                                this: Some(
-                                    LocalId(
-                                        1,
-                                    ),
-                                ),
-                                set_dollar: false,
-                                uses_super: false,
-                                locals: [],
-                                asserts: [],
-                                fields: [
-                                    LFieldMember {
-                                        name: Fixed(
-                                            "c",
-                                        ),
-                                        plus: false,
-                                        visibility: Normal,
-                                        value: Num(
-                                            2.0,
-                                        ),
+                    value: (
+                        ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        Obj(
+                            MemberList(
+                                LObjMembers {
+                                    frame_shape: ClosureShape {
+                                        captures: [],
+                                        n_locals: 1,
                                     },
-                                    LFieldMember {
-                                        name: Fixed(
-                                            "d",
+                                    this: Some(
+                                        LocalSlot(
+                                            0,
                                         ),
-                                        plus: false,
-                                        visibility: Normal,
-                                        value: Index {
-                                            indexable: Local(
-                                                LocalId(
-                                                    1,
+                                    ),
+                                    set_dollar: false,
+                                    uses_super: false,
+                                    locals: [],
+                                    asserts: None,
+                                    fields: [
+                                        LFieldMember {
+                                            name: Fixed(
+                                                "c",
+                                            ),
+                                            plus: false,
+                                            visibility: Normal,
+                                            value: (
+                                                ClosureShape {
+                                                    captures: [],
+                                                    n_locals: 0,
+                                                },
+                                                Num(
+                                                    2.0,
                                                 ),
                                             ),
-                                            parts: [
-                                                LIndexPart {
-                                                    span: virtual:<test>:35-36,
-                                                    value: Str(
-                                                        "c",
-                                                    ),
-                                                },
-                                            ],
                                         },
-                                    },
-                                ],
-                            },
+                                        LFieldMember {
+                                            name: Fixed(
+                                                "d",
+                                            ),
+                                            plus: false,
+                                            visibility: Normal,
+                                            value: (
+                                                ClosureShape {
+                                                    captures: [],
+                                                    n_locals: 0,
+                                                },
+                                                Index {
+                                                    indexable: Slot(
+                                                        Local(
+                                                            LocalSlot(
+                                                                0,
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    parts: [
+                                                        LIndexPart {
+                                                            span: virtual:<test>:35-36,
+                                                            value: Str(
+                                                                "c",
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                },
+                            ),
                         ),
                     ),
                 },

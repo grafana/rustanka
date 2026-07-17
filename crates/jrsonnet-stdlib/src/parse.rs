@@ -1,9 +1,8 @@
-use jrsonnet_evaluator::{function::builtin, runtime_error, IStr, Result, Val};
+use jrsonnet_evaluator::{IStr, Result, Val, error, function::builtin};
 
 #[builtin]
 pub fn builtin_parse_json(str: IStr) -> Result<Val> {
-	let value: Val =
-		serde_json::from_str(&str).map_err(|e| runtime_error!("failed to parse json: {e}"))?;
+	let value: Val = serde_json::from_str(&str).map_err(|e| error!("failed to parse json: {e}"))?;
 	Ok(value)
 }
 
@@ -21,7 +20,7 @@ pub fn builtin_parse_yaml(str: IStr) -> Result<Val> {
 			..Default::default()
 		},
 	)
-	.map_err(|e| runtime_error!("failed to parse yaml: {e}"))?;
+	.map_err(|e| error!("failed to parse yaml: {e}"))?;
 
 	// saphyr and other yaml implementations disagree on how to handle an empty document in multi-document stream.
 	// Saphyr only considers document started after anything is emitted after the document delimiter

@@ -9,7 +9,7 @@ use std::{
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::{IBytes, IStr};
 
-use crate::location::{location_to_offset, offset_to_location, CodeLocation};
+use crate::location::{CodeLocation, location_to_offset, offset_to_location};
 
 macro_rules! any_ext_methods {
 	($T:ident) => {
@@ -286,22 +286,22 @@ impl Source {
 	}
 
 	pub fn code(&self) -> &str {
-		&self.0 .1
+		&self.0.1
 	}
 
 	pub fn source_path(&self) -> &SourcePath {
-		&self.0 .0
+		&self.0.0
 	}
 
 	pub fn map_source_locations<const S: usize>(&self, locs: &[u32; S]) -> [CodeLocation; S] {
-		offset_to_location(&self.0 .1, locs)
+		offset_to_location(&self.0.1, locs)
 	}
 	pub fn map_from_source_location(&self, line: usize, column: usize) -> Option<usize> {
-		location_to_offset(&self.0 .1, line, column)
+		location_to_offset(&self.0.1, line, column)
 	}
 }
 impl fmt::Debug for Source {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:?}", self.0 .0)
+		write!(f, "{:?}", self.0.0)
 	}
 }

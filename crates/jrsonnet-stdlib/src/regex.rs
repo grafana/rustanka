@@ -2,11 +2,11 @@ use std::{cell::RefCell, num::NonZeroUsize, rc::Rc};
 
 use ::regex::Regex;
 use jrsonnet_evaluator::{
+	IStr, ObjValue, ObjValueBuilder,
 	error::{ErrorKind::*, Result},
 	rustc_hash::FxBuildHasher,
 	typed::{IntoUntyped, Typed},
 	val::StrValue,
-	IStr, ObjValue, ObjValueBuilder,
 };
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_macros::builtin;

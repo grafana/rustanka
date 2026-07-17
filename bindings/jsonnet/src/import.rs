@@ -5,16 +5,15 @@ use std::{
 	cell::RefCell,
 	collections::HashMap,
 	env::current_dir,
-	ffi::{c_void, CStr, CString},
+	ffi::{CStr, CString, c_void},
 	os::raw::{c_char, c_int},
 	path::PathBuf,
 	ptr::null_mut,
 };
 
 use jrsonnet_evaluator::{
-	bail,
+	AsPathLike, ImportResolver, ResolvePath, bail,
 	error::{ErrorKind::*, Result},
-	AsPathLike, ImportResolver, ResolvePath,
 };
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{SourceDirectory, SourceFile, SourcePath};
@@ -108,7 +107,7 @@ impl ImportResolver for CallbackImportResolver {
 /// # Safety
 ///
 /// It should be safe to call `cb` using valid values with passed `ctx`
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn jsonnet_import_callback(
 	vm: &VM,
 	cb: JsonnetImportCallback,
@@ -124,7 +123,7 @@ pub unsafe extern "C" fn jsonnet_import_callback(
 /// # Safety
 ///
 /// `path` should be a NUL-terminated string
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn jsonnet_jpath_add(vm: &VM, path: *const c_char) {
 	let cstr = unsafe { CStr::from_ptr(path) };
 	let path = PathBuf::from(cstr.to_str().unwrap());

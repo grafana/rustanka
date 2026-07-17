@@ -14,7 +14,7 @@ use std::{
 	str,
 };
 
-use hashbrown::{hash_map::RawEntryMut, HashMap};
+use hashbrown::{HashMap, hash_map::RawEntryMut};
 use jrsonnet_gcmodule::{Acyclic, Trace};
 use rustc_hash::FxBuildHasher;
 
@@ -242,7 +242,7 @@ thread_local! {
 pub mod interop {
 	use std::mem;
 
-	use crate::{PoolMap, POOL};
+	use crate::{POOL, PoolMap};
 
 	/// Type-erased interned string pool
 	pub enum PoolState {}

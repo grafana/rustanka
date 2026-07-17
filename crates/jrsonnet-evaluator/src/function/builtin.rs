@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use jrsonnet_gcmodule::{cc_dyn, Trace, TraceBox};
+use jrsonnet_gcmodule::{Trace, TraceBox, cc_dyn};
 use jrsonnet_ir::function::{FunctionSignature, ParamDefault, ParamName, ParamParse};
 
 use super::CallLocation;

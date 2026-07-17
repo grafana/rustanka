@@ -2,7 +2,7 @@
 use std::cell::RefCell;
 use std::{
 	any::Any,
-	path::{Path, PathBuf},
+	path::{Component, Path, PathBuf},
 };
 
 use jrsonnet_gcmodule::Trace;
@@ -10,7 +10,7 @@ use jrsonnet_ir::CodeLocation;
 #[cfg(feature = "explaining-traces")]
 use jrsonnet_ir::Span;
 
-use crate::{error::ErrorKind, Error};
+use crate::{Error, error::ErrorKind};
 
 /// The way paths should be displayed
 #[derive(Clone, Trace)]
@@ -40,10 +40,19 @@ impl PathResolver {
 				if from.is_relative() {
 					return from.to_string_lossy().into_owned();
 				}
-				pathdiff::diff_paths(from, base)
-					.expect("base is absolute")
-					.to_string_lossy()
-					.into_owned()
+				let diff = pathdiff::diff_paths(from, base).expect("base is absolute");
+				let parents = diff
+					.components()
+					.take_while(|c| matches!(c, Component::ParentDir))
+					.count();
+				let base_depth = base
+					.components()
+					.filter(|c| matches!(c, Component::Normal(_)))
+					.count();
+				if parents > 0 && parents >= base_depth {
+					return from.to_string_lossy().into_owned();
+				}
+				diff.to_string_lossy().into_owned()
 			}
 		}
 	}
@@ -259,7 +268,7 @@ impl TraceFormat for HiDocFormat {
 		struct ResetData {
 			loc: Span,
 		}
-		use hi_doc::{source_to_ansi, Formatting, SnippetBuilder, Text};
+		use hi_doc::{Formatting, SnippetBuilder, Text, source_to_ansi};
 
 		write!(out, "{}", error.error())?;
 		if let ErrorKind::ImportSyntaxError { path, error } = error.error() {

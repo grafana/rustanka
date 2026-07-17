@@ -11,94 +11,114 @@ local_dependent_depth: 0
 errored: false
 --- diagnostics ---
 --- lir ---
-LocalExpr {
-    binds: [
-        LBind {
-            destruct: Full(
-                LocalId(
-                    0,
-                ),
-            ),
-            value: Function(
-                LFunction {
-                    name: Some(
-                        "f",
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
+        },
+        binds: [
+            LBind {
+                destruct: Full(
+                    LocalSlot(
+                        0,
                     ),
-                    params: [
-                        LParam {
-                            name: Some(
-                                "x",
-                            ),
-                            destruct: Full(
-                                LocalId(
-                                    1,
-                                ),
-                            ),
-                            default: None,
-                        },
-                        LParam {
-                            name: Some(
-                                "y",
-                            ),
-                            destruct: Full(
-                                LocalId(
-                                    2,
-                                ),
-                            ),
-                            default: None,
-                        },
-                    ],
-                    signature: FunctionSignature(
-                        [
-                            ParamParse {
-                                name: Named(
+                ),
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Function(
+                    LFunction {
+                        name: Some(
+                            "f",
+                        ),
+                        params: [
+                            LParam {
+                                name: Some(
                                     "x",
+                                ),
+                                destruct: Full(
+                                    LocalSlot(
+                                        0,
+                                    ),
                                 ),
                                 default: None,
                             },
-                            ParamParse {
-                                name: Named(
+                            LParam {
+                                name: Some(
                                     "y",
+                                ),
+                                destruct: Full(
+                                    LocalSlot(
+                                        1,
+                                    ),
                                 ),
                                 default: None,
                             },
                         ],
-                    ),
-                    body: BinaryOp {
-                        lhs: Local(
-                            LocalId(
-                                1,
-                            ),
+                        signature: FunctionSignature(
+                            [
+                                ParamParse {
+                                    name: Named(
+                                        "x",
+                                    ),
+                                    default: None,
+                                },
+                                ParamParse {
+                                    name: Named(
+                                        "y",
+                                    ),
+                                    default: None,
+                                },
+                            ],
                         ),
-                        op: Add,
-                        rhs: Local(
-                            LocalId(
-                                2,
+                        body_shape: ClosureShape {
+                            captures: [],
+                            n_locals: 2,
+                        },
+                        body: BinaryOp {
+                            lhs: Slot(
+                                Local(
+                                    LocalSlot(
+                                        0,
+                                    ),
+                                ),
                             ),
-                        ),
+                            op: Add,
+                            rhs: Slot(
+                                Local(
+                                    LocalSlot(
+                                        1,
+                                    ),
+                                ),
+                            ),
+                        },
                     },
-                },
+                ),
+            },
+        ],
+        body: Apply {
+            applicable: Slot(
+                Local(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
             ),
+            args: LArgsDesc {
+                unnamed: [
+                    Num(
+                        1.0,
+                    ),
+                    Num(
+                        2.0,
+                    ),
+                ],
+                names: [],
+                values: [],
+            } from virtual:<test>:24-30,
+            tailstrict: false,
         },
-    ],
-    body: Apply {
-        applicable: Local(
-            LocalId(
-                0,
-            ),
-        ),
-        args: LArgsDesc {
-            unnamed: [
-                Num(
-                    1.0,
-                ),
-                Num(
-                    2.0,
-                ),
-            ],
-            names: [],
-            values: [],
-        } from virtual:<test>:24-30,
-        tailstrict: false,
     },
-}
+)

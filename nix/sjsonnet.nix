@@ -14,7 +14,7 @@
   java ? jdk25_headless,
 }:
 let
-  version = "0.6.2";
+  version = "0.6.3";
   baseUrl = "https://github.com/databricks/sjsonnet/releases/download/${version}";
 
   nativePlatform =
@@ -30,9 +30,9 @@ let
     url = "${baseUrl}/sjsonnet-${version}-${nativePlatform}";
     hash =
       {
-        x86_64-linux = "sha256-r79Q6SovcPIomDDUYTGIP35/y5t9Xo5Z3ohP7pxsF8I=";
-        aarch64-linux = "sha256-LxWR94u1Oncau57Kmtzj2UFEofWGT4+laDTbRDkwv08=";
-        aarch64-darwin = "sha256-gNZ6XekMm+ebeD7UFeRfoapXw/90gHk8MoeGD86dzKk=";
+        x86_64-linux = "sha256-QCV8OjFuhMI/RqcmPjWZHihFpQC4IWcY2WXqSWsdFNs=";
+        aarch64-linux = lib.fakeHash;
+        aarch64-darwin = lib.fakeHash;
       }
       .${stdenv.hostPlatform.system};
   };
@@ -41,9 +41,9 @@ let
     url = "${baseUrl}/sjsonnet-graalvm-${version}-${nativePlatform}";
     hash =
       {
-        x86_64-linux = "sha256-XNJCnQlwVFySrUevn1nLN/DY8UBGgvCFAitkedLB+yM=";
-        aarch64-linux = "sha256-J+C3pmiBEmo8M00IDHp9jznonibXmHVRlhsvQ4apVWw=";
-        aarch64-darwin = "sha256-TXNL52sS4NE3GjbOFtgf6aCP268qGKMFaoTwAfJfgGc=";
+        x86_64-linux = "sha256-JsMsjFAwOJIMPln8OnB1rxJnH93yDUPBVlqeUS4cfPQ=";
+        aarch64-linux = lib.fakeHash;
+        aarch64-darwin = lib.fakeHash;
       }
       .${stdenv.hostPlatform.system};
   };
@@ -54,7 +54,7 @@ stdenv.mkDerivation {
 
   src = fetchurl {
     url = "${baseUrl}/sjsonnet-${version}.jar";
-    hash = "sha256-jvkrxY48d/UdMGRoB9SxCJU2JJirfhZNyNMSkMrrQ7w=";
+    hash = "sha256-NxAVdF42JtojDlGipelDb8wIi8VSdZsuef2beIwGWnc=";
   };
 
   unpackPhase = "true";

@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use jrsonnet_gcmodule::{Acyclic, Trace};
-use jrsonnet_ir::{function::FunctionSignature, IStr};
+use jrsonnet_ir::{IStr, function::FunctionSignature};
 use rustc_hash::FxHashSet;
 
 use super::{CallLocation, FuncVal};
-use crate::{bail, error::ErrorKind::*, Result, Thunk, Val};
+use crate::{Result, Thunk, Val, bail, error::ErrorKind::*};
 
 #[derive(Debug, Trace, Clone)]
 pub struct PreparedFuncVal {
@@ -45,6 +45,12 @@ impl PreparedCall {
 	}
 	pub fn defaults(&self) -> &[usize] {
 		&self.defaults
+	}
+	pub const fn empty() -> Self {
+		Self {
+			named: Vec::new(),
+			defaults: Vec::new(),
+		}
 	}
 }
 

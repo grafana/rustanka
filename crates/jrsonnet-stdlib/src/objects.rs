@@ -1,9 +1,9 @@
 use jrsonnet_evaluator::{
+	IStr, ObjValue, ObjValueBuilder,
 	function::builtin,
 	gc::WithCapacityExt,
 	rustc_hash::FxHashSet,
 	val::{ArrValue, Val},
-	IStr, ObjValue, ObjValueBuilder,
 };
 
 #[builtin]

@@ -7,7 +7,7 @@ use jrsonnet_rowan_parser::nodes::{
 	MemberComp, Name, ObjBody, SourceFile, Stmt, Suffix,
 };
 use jrsonnet_rowan_parser::nodes::{ExprBase::*, Suffix::*};
-use jrsonnet_rowan_parser::{parse, AstNode};
+use jrsonnet_rowan_parser::{AstNode, parse};
 use rowan::TextRange;
 
 use crate::checks::UNUSED_LOCALS;
