@@ -9,7 +9,6 @@ use std::{
 
 use fs::File;
 use jrsonnet_gcmodule::Acyclic;
-use jrsonnet_interner::IBytes;
 use jrsonnet_ir::{
 	IStr, SourceDefaultIgnoreJpath, SourceDirectory, SourceFifo, SourceFile, SourcePath,
 };
@@ -160,10 +159,14 @@ fn check_path(path: &Path) -> Result<Option<SourcePath>> {
 			path.canonicalize().map_err(|e| ImportIo(e.to_string()))?,
 		))));
 	}
-	let ty = meta.file_type();
 	#[cfg(unix)]
 	{
 		use std::os::unix::fs::FileTypeExt;
+
+		use jrsonnet_interner::IBytes;
+
+		let ty = meta.file_type();
+
 		if ty.is_fifo() {
 			let file = fs::read(path).map_err(|e| ImportIo(format!("FIFO read failed: {e}")))?;
 			return Ok(Some(SourcePath::new(SourceFifo(

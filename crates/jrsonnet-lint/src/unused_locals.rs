@@ -731,6 +731,13 @@ impl UnusedLocalsVisitor {
 					self.visit_expr(&expr);
 				}
 			}
+			// Experimental object-iteration comprehension (`for [k, v] in obj`):
+			// visit the iterated expression; its loop bindings are not tracked.
+			CompSpec::ForObjSpec(f) => {
+				if let Some(expr) = f.expr() {
+					self.visit_expr(&expr);
+				}
+			}
 		}
 	}
 }

@@ -1,9 +1,9 @@
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{
 	ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BinaryOpType, BindSpec, CompSpec, Destruct, Expr,
-	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse, IfSpecData,
-	ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
-	SliceDesc, Source, Span, Spanned, UnaryOpType, Visibility, unescape,
+	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IdentityKind, IfElse,
+	IfSpecData, ImportKind, IndexPart, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
+	SliceDesc, Source, Span, Spanned, TrivialVal, UnaryOpType, Visibility, unescape,
 };
 use jrsonnet_lexer::{Lexeme, Lexer, Span as LexSpan, SyntaxKind, T, collect_lexed_str_block};
 
@@ -66,8 +66,22 @@ impl<'a> Parser<'a> {
 		!self.at_eof() && self.peek() == kind
 	}
 
+	#[allow(dead_code)]
+	fn nth(&self, n: usize) -> SyntaxKind {
+		self.lexemes
+			.get(self.offset + n)
+			.map_or(SyntaxKind::EOF, |l| l.kind)
+	}
+
 	fn eat_any(&mut self) {
 		self.offset += 1;
+	}
+
+	fn eat_any_spanned(&mut self) -> Span {
+		let start = self.span_start();
+		self.eat_any();
+		let end = self.span_end();
+		Span(self.source.clone(), start, end)
 	}
 
 	fn at_eof(&self) -> bool {
@@ -106,6 +120,12 @@ impl<'a> Parser<'a> {
 		}
 		self.eat_any();
 		Ok(())
+	}
+	fn eat_spanned(&mut self, t: SyntaxKind) -> Result<Span> {
+		let start = self.span_start();
+		self.eat(t)?;
+		let end = self.span_end();
+		Ok(Span(self.source.clone(), start, end))
 	}
 
 	fn span_start(&self) -> u32 {
@@ -219,23 +239,12 @@ fn parse_number(p: &mut Parser<'_>) -> Result<NumValue> {
 }
 
 fn ident(p: &mut Parser<'_>) -> Result<IStr> {
+	if !p.at(SyntaxKind::IDENT) {
+		return Err(p.error(format!("expected identifier, got {}", p.current_desc())));
+	}
 	let text = p.text();
-	p.eat(SyntaxKind::IDENT)?;
-	Ok(IStr::from(text))
-}
-
-fn literal(p: &mut Parser<'_>) -> Option<LiteralType> {
-	let t = match p.peek() {
-		T![self] => LiteralType::This,
-		T![super] => LiteralType::Super,
-		T!['$'] => LiteralType::Dollar,
-		T![null] => LiteralType::Null,
-		T![true] => LiteralType::True,
-		T![false] => LiteralType::False,
-		_ => return None,
-	};
 	p.eat_any();
-	Some(t)
+	Ok(IStr::from(text))
 }
 
 fn assert_stmt(p: &mut Parser<'_>) -> Result<AssertStmt> {
@@ -472,20 +481,20 @@ fn bind(p: &mut Parser<'_>) -> Result<BindSpec> {
 			});
 		}
 	}
-	let name_spanned = spanned(p, ident)?;
+	let name = spanned(p, ident)?;
 	if p.try_eat(T!['(']) {
 		let ps = params(p)?;
 		p.eat(T![')'])?;
 		p.eat(T![=])?;
 		Ok(BindSpec::Function {
-			name: name_spanned.value,
+			name,
 			params: ps,
 			value: expr(p)?,
 		})
 	} else {
 		p.eat(T![=])?;
 		Ok(BindSpec::Field {
-			into: Destruct::Full(name_spanned),
+			into: Destruct::Full(name),
 			value: expr(p)?,
 		})
 	}
@@ -558,20 +567,36 @@ fn member(p: &mut Parser<'_>) -> Result<Member> {
 	}
 }
 
-fn for_spec(p: &mut Parser<'_>) -> Result<ForSpecData> {
+fn for_spec(p: &mut Parser<'_>) -> Result<CompSpec> {
 	p.eat(T![for])?;
+	#[cfg(feature = "exp-object-iteration")]
+	if p.at(T!['[']) && p.nth(1) == SyntaxKind::IDENT && p.nth(2) == T![']'] && p.nth(3) == T![:] {
+		p.eat(T!['['])?;
+		let key = ident(p)?;
+		p.eat(T![']'])?;
+		let visibility = visibility(p)?;
+		let value = destruct(p)?;
+		p.eat(T![in])?;
+		let over = expr(p)?;
+		return Ok(CompSpec::ForObjSpec(jrsonnet_ir::ForObjSpecData {
+			key,
+			visibility,
+			value,
+			over,
+		}));
+	}
 	let d = destruct(p)?;
 	p.eat(T![in])?;
 	let over = expr(p)?;
-	Ok(ForSpecData { destruct: d, over })
+	Ok(CompSpec::ForSpec(ForSpecData { destruct: d, over }))
 }
 
 fn compspecs(p: &mut Parser<'_>) -> Result<Vec<CompSpec>> {
 	let mut specs = Vec::new();
-	specs.push(CompSpec::ForSpec(for_spec(p)?));
+	specs.push(for_spec(p)?);
 	loop {
 		if p.at(T![for]) {
-			specs.push(CompSpec::ForSpec(for_spec(p)?));
+			specs.push(for_spec(p)?);
 		} else if p.at(T![if]) {
 			let isd = if_spec_data(p)?;
 			specs.push(CompSpec::IfSpec(isd));
@@ -650,18 +675,30 @@ fn objinside(p: &mut Parser<'_>) -> Result<ObjBody> {
 
 #[allow(clippy::too_many_lines)]
 fn expr_basic(p: &mut Parser<'_>) -> Result<Expr> {
-	if let Some(lit) = literal(p) {
-		return Ok(Expr::Literal(lit));
-	}
-
 	match p.peek() {
+		T![self] => Ok(Expr::Identity(p.eat_any_spanned(), IdentityKind::This)),
+		T![super] => Ok(Expr::Identity(p.eat_any_spanned(), IdentityKind::Super)),
+		T!['$'] => Ok(Expr::Identity(p.eat_any_spanned(), IdentityKind::Dollar)),
+		T![null] => {
+			p.eat_any();
+			Ok(Expr::Trivial(TrivialVal::Null))
+		}
+		T![true] => {
+			p.eat_any();
+			Ok(Expr::Trivial(TrivialVal::Bool(true)))
+		}
+		T![false] => {
+			p.eat_any();
+			Ok(Expr::Trivial(TrivialVal::Bool(false)))
+		}
+
 		SyntaxKind::STRING_DOUBLE
 		| SyntaxKind::STRING_SINGLE
 		| SyntaxKind::STRING_DOUBLE_VERBATIM
 		| SyntaxKind::STRING_SINGLE_VERBATIM
-		| SyntaxKind::STRING_BLOCK => Ok(Expr::Str(parse_string_content(p)?)),
+		| SyntaxKind::STRING_BLOCK => Ok(Expr::Trivial(TrivialVal::Str(parse_string_content(p)?))),
 
-		SyntaxKind::FLOAT => Ok(Expr::Num(parse_number(p)?)),
+		SyntaxKind::FLOAT => Ok(Expr::Trivial(TrivialVal::Num(parse_number(p)?))),
 
 		T!['('] => {
 			p.eat(T!['('])?;
@@ -713,6 +750,9 @@ fn expr_basic(p: &mut Parser<'_>) -> Result<Expr> {
 			p.eat(T![local])?;
 			let mut binds = Vec::new();
 			loop {
+				if p.at(T![;]) {
+					break;
+				}
 				binds.push(bind(p)?);
 				if !p.try_eat(T![,]) {
 					break;
@@ -726,12 +766,12 @@ fn expr_basic(p: &mut Parser<'_>) -> Result<Expr> {
 		T![if] => Ok(Expr::IfElse(Box::new(if_else(p)?))),
 
 		T![function] => {
-			p.eat(T![function])?;
+			let span = p.eat_spanned(T![function])?;
 			p.eat(T!['('])?;
 			let ps = params(p)?;
 			p.eat(T![')'])?;
 			let body = expr(p)?;
-			Ok(Expr::Function(ps, Box::new(body)))
+			Ok(Expr::Function(span, ps, Box::new(body)))
 		}
 
 		T![assert] => {
@@ -791,7 +831,7 @@ fn flush_index_parts(e: &mut Expr, parts: &mut Vec<IndexPart>) {
 	if parts.is_empty() {
 		return;
 	}
-	let old = std::mem::replace(e, Expr::Literal(LiteralType::Null));
+	let old = std::mem::replace(e, Expr::Trivial(TrivialVal::Null));
 	*e = Expr::Index {
 		indexable: Box::new(old),
 		parts: std::mem::take(parts),
@@ -822,7 +862,7 @@ fn expr_suffix(p: &mut Parser<'_>) -> Result<Expr> {
 					});
 				} else {
 					// ?.field
-					let id_spanned = spanned(p, |p| Ok(Expr::Str(ident(p)?)))?;
+					let id_spanned = spanned(p, |p| Ok(Expr::Trivial(TrivialVal::Str(ident(p)?))))?;
 					parts.push(IndexPart {
 						span: id_spanned.span,
 						value: id_spanned.value,
@@ -837,7 +877,7 @@ fn expr_suffix(p: &mut Parser<'_>) -> Result<Expr> {
 
 		if p.at(T![.]) {
 			p.eat(T![.])?;
-			let id_spanned = spanned(p, |p| Ok(Expr::Str(ident(p)?)))?;
+			let id_spanned = spanned(p, |p| Ok(Expr::Trivial(TrivialVal::Str(ident(p)?))))?;
 			parts.push(IndexPart {
 				span: id_spanned.span,
 				value: id_spanned.value,
@@ -1009,7 +1049,7 @@ pub fn parse(str: &str, settings: &ParserSettings) -> Result<Expr> {
 	}
 	let e = expr(&mut p)?;
 	if !p.at_eof() {
-		return Err(p.error(format!("expected end of file, got {}", p.current_desc(),)));
+		return Err(p.error(format!("expected end of file, got {}", p.current_desc())));
 	}
 	Ok(e)
 }
@@ -1017,15 +1057,15 @@ pub fn parse(str: &str, settings: &ParserSettings) -> Result<Expr> {
 pub fn string_to_expr(s: IStr, settings: &ParserSettings) -> Spanned<Expr> {
 	let len = u32::try_from(s.len()).expect("code size is limited by 4gb");
 
-	Spanned::new(Expr::Str(s), Span(settings.source.clone(), 0, len))
+	Spanned::new(
+		Expr::Trivial(TrivialVal::Str(s)),
+		Span(settings.source.clone(), 0, len),
+	)
 }
 
 #[cfg(test)]
 mod tests {
-	use std::fs;
-
-	use insta::{assert_snapshot, glob};
-	use jrsonnet_ir::{IStr, Source};
+	use insta::assert_snapshot;
 
 	use super::*;
 
@@ -1130,6 +1170,11 @@ mod tests {
 	#[test]
 	#[cfg(not(feature = "exp-null-coaelse"))]
 	fn peg_snapshots() {
+		use std::fs;
+
+		use insta::glob;
+		use jrsonnet_ir::{IStr, Source};
+
 		glob!("../../jrsonnet-peg-parser/src", "tests/*.jsonnet", |path| {
 			let input = fs::read_to_string(path).expect("read test file");
 			let source = Source::new_virtual("<test>".into(), IStr::empty());

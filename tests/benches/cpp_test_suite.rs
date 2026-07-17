@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fs, fs::read_dir, hint::black_box, path::Path};
+use std::{
+	collections::HashMap,
+	fs,
+	fs::read_dir,
+	hint::black_box,
+	path::{Path, PathBuf},
+};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use jrsonnet_evaluator::{
@@ -43,23 +49,27 @@ fn bench_entry(c: &mut Criterion, path: &Path) {
 	});
 }
 fn criterion_benchmark(c: &mut Criterion) {
-	for entry in read_dir("go_builtin_benchmarks").expect("dir exists") {
-		let entry = entry.expect("entry is valid");
-		assert!(entry.metadata().expect("entry is valid").is_file());
-		bench_entry(c, &entry.path());
-	}
-	for entry in read_dir("cpp_perf_tests").expect("dir exists") {
-		let entry = entry.expect("entry is valid");
-		assert!(entry.metadata().expect("entry is valid").is_file());
-		bench_entry(c, &entry.path());
-	}
-	for entry in read_dir("cpp_benchmarks").expect("dir exists") {
-		let entry = entry.expect("entry is valid");
-		if entry.path().extension().is_none_or(|e| e != "jsonnet") {
-			continue;
+	if let Some(go_jsonnet) = std::env::var_os("GO_JSONNET_FOR_TESTS").map(PathBuf::from) {
+		for entry in read_dir(go_jsonnet.join("builtin-benchmarks")).expect("dir exists") {
+			let entry = entry.expect("entry is valid");
+			assert!(entry.metadata().expect("entry is valid").is_file());
+			bench_entry(c, &entry.path());
 		}
-		assert!(entry.metadata().expect("entry is valid").is_file());
-		bench_entry(c, &entry.path());
+	}
+	if let Some(cpp_jsonnet) = std::env::var_os("CPP_JSONNET_FOR_TESTS").map(PathBuf::from) {
+		for entry in read_dir(cpp_jsonnet.join("perf_tests")).expect("dir exists") {
+			let entry = entry.expect("entry is valid");
+			assert!(entry.metadata().expect("entry is valid").is_file());
+			bench_entry(c, &entry.path());
+		}
+		for entry in read_dir(cpp_jsonnet.join("benchmarks")).expect("dir exists") {
+			let entry = entry.expect("entry is valid");
+			if entry.path().extension().is_none_or(|e| e != "jsonnet") {
+				continue;
+			}
+			assert!(entry.metadata().expect("entry is valid").is_file());
+			bench_entry(c, &entry.path());
+		}
 	}
 }
 

@@ -31,6 +31,14 @@ pub enum Visibility {
 	Unhide,
 }
 
+#[derive(Debug, Clone, PartialEq, Acyclic)]
+pub enum TrivialVal {
+	Null,
+	Bool(bool),
+	Num(NumValue),
+	Str(IStr),
+}
+
 impl Visibility {
 	pub fn is_visible(&self) -> bool {
 		matches!(self, Self::Normal | Self::Unhide)
@@ -288,7 +296,7 @@ pub enum BindSpec {
 		value: Expr,
 	},
 	Function {
-		name: IStr,
+		name: Spanned<IStr>,
 		params: ExprParams,
 		value: Expr,
 	},
@@ -314,10 +322,21 @@ pub struct ForSpecData {
 	pub over: Expr,
 }
 
+#[cfg(feature = "exp-object-iteration")]
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct ForObjSpecData {
+	pub key: IStr,
+	pub visibility: Visibility,
+	pub value: Destruct,
+	pub over: Expr,
+}
+
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum CompSpec {
 	IfSpec(IfSpecData),
 	ForSpec(ForSpecData),
+	#[cfg(feature = "exp-object-iteration")]
+	ForObjSpec(ForObjSpecData),
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
@@ -340,14 +359,12 @@ pub enum ObjBody {
 	ObjComp(ObjComp),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Acyclic)]
-pub enum LiteralType {
+/// Object identity reference: `self`, `super`, or `$`.#[derive(Debug, PartialEq, Eq, Clone, Copy, Acyclic)]
+#[derive(Debug, PartialEq, Acyclic)]
+pub enum IdentityKind {
 	This,
 	Super,
 	Dollar,
-	Null,
-	True,
-	False,
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
@@ -393,12 +410,12 @@ pub struct Slice {
 /// Syntax base
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum Expr {
-	Literal(LiteralType),
+	/// Object-identity reference: `self`, `super`, `$`.
+	Identity(Span, IdentityKind),
 
-	/// String value: "hello"
-	Str(IStr),
-	/// Number: 1, 2.0, 2e+20
-	Num(NumValue),
+	/// Trivial value literal
+	Trivial(TrivialVal),
+
 	/// Variable name: test
 	Var(Spanned<IStr>),
 
@@ -443,7 +460,7 @@ pub enum Expr {
 		parts: Vec<IndexPart>,
 	},
 	/// function(x) x
-	Function(ExprParams, Box<Expr>),
+	Function(Span, ExprParams, Box<Expr>),
 	/// if true == false then 1 else 2
 	IfElse(Box<IfElse>),
 	Slice(Box<Slice>),

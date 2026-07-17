@@ -1,5 +1,8 @@
 [package]
 name = "jrsonnet-rowan-parser"
+description = "Rowan-based concrete syntax tree parser for jsonnet, suitable for tooling and LSP"
+keywords = ["jsonnet", "parser", "rowan", "cst"]
+categories = ["parser-implementations"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,7 +17,7 @@ anyhow.workspace = true
 drop_bomb.workspace = true
 hi-doc.workspace = true
 indoc.workspace = true
-jrsonnet-lexer = { version = "0.5.0-pre97", path = "../jrsonnet-lexer" }
+jrsonnet-lexer.workspace = true
 rowan.workspace = true
 thiserror.workspace = true
 
@@ -22,4 +25,4 @@ thiserror.workspace = true
 indoc.workspace = true
 insta.workspace = true
 anyhow.workspace = true
-strip-ansi-escapes = "0.2.1"
+strip-ansi-escapes.workspace = true

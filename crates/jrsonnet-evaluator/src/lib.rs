@@ -1,5 +1,5 @@
 //! jsonnet interpreter implementation
-#![cfg_attr(nightly, feature(thread_local, type_alias_impl_trait))]
+#![cfg_attr(nightly, feature(thread_local))]
 // Suppress warnings from jrsonnet-gcmodule's Trace derive macro on #[trace(skip)] fields
 #![allow(unused_assignments)]
 
@@ -37,14 +37,16 @@ use std::{
 
 pub use ctx::*;
 pub use dynamic::*;
-pub use error::{Error, ErrorKind::*, Result, ResultExt};
+pub use error::{Error, ErrorKind::*, Result, ResultExt, StackTraceElement};
 pub use evaluate::ensure_sufficient_stack;
 use function::CallLocation;
 pub use import::*;
 use jrsonnet_gcmodule::{Cc, Trace, cc_dyn};
 pub use jrsonnet_interner::{IBytes, IStr};
 use jrsonnet_ir::Expr;
-pub use jrsonnet_ir::{NumValue, Source, SourcePath, Span};
+pub use jrsonnet_ir::{
+	NumValue, Source, SourceDefaultIgnoreJpath, SourcePath, SourceUrl, SourceVirtual, Span,
+};
 #[doc(hidden)]
 pub use jrsonnet_macros;
 
@@ -144,6 +146,7 @@ pub enum MaybeUnbound {
 	Unbound(CcUnbound<Val>),
 	/// Value is object-independent
 	Bound(Thunk<Val>),
+	Const(Val),
 }
 
 impl Debug for MaybeUnbound {
@@ -157,6 +160,7 @@ impl MaybeUnbound {
 		match self {
 			Self::Unbound(v) => v.0.bind(sup_this),
 			Self::Bound(v) => Ok(v.evaluate()?),
+			Self::Const(v) => Ok(v.clone()),
 		}
 	}
 }
@@ -418,9 +422,17 @@ impl State {
 			file.parsed = Some(
 				parse_jsonnet(&code, file_name.clone())
 					.map(Rc::new)
-					.map_err(|e| ImportSyntaxError {
-						path: file_name.clone(),
-						error: Box::new(e),
+					.map_err(|e| {
+						let span = e.location.clone();
+						let mut err = Error::from(ImportSyntaxError {
+							path: file_name.clone(),
+							error: Box::new(e),
+						});
+						err.trace_mut().0.push(StackTraceElement {
+							location: Some(span),
+							desc: "parse imported".to_string(),
+						});
+						err
 					})?,
 			);
 		}

@@ -1,25 +1,33 @@
 ---
 source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1088
 expression: "format!(\"{v:#?}\")"
 ---
 Arr(
     [
-        Literal(
+        Trivial(
             Null,
         ),
-        Literal(
-            True,
+        Trivial(
+            Bool(
+                true,
+            ),
         ),
-        Literal(
-            False,
+        Trivial(
+            Bool(
+                false,
+            ),
         ),
-        Literal(
+        Identity(
+            virtual:<test>:20-24,
             This,
         ),
-        Literal(
+        Identity(
+            virtual:<test>:26-31,
             Super,
         ),
-        Literal(
+        Identity(
+            virtual:<test>:33-34,
             Dollar,
         ),
     ],

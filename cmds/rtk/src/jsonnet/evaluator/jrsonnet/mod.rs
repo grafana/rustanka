@@ -72,7 +72,7 @@ impl Evaluator for JrsonnetEvaluator {
 	}
 
 	fn collect_cycles(&self) {
-		jrsonnet_gcmodule::collect_thread_cycles();
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
 	}
 
 	fn clear_thread_local_state(&self) {
@@ -109,7 +109,7 @@ impl Evaluator for JrsonnetEvaluator {
 				global,
 			)?;
 
-			jrsonnet_gcmodule::collect_thread_cycles();
+			let _ = jrsonnet_gcmodule::collect_thread_cycles();
 
 			let value = serde_json::from_str::<serde_json::Value>(&value)
 				.context("failed to parse snippet result as JSON")?;
@@ -398,7 +398,7 @@ impl JrsonnetEvaluator {
 			.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
 
 		drop(result);
-		jrsonnet_gcmodule::collect_thread_cycles();
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
 
 		Ok(manifest)
 	}
@@ -423,7 +423,7 @@ impl JrsonnetEvaluator {
 			.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
 
 		drop(result);
-		jrsonnet_gcmodule::collect_thread_cycles();
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
 
 		Ok(manifest.to_string())
 	}

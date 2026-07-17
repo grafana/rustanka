@@ -1,9 +1,9 @@
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{
 	ArgsDesc, AssertExpr, AssertStmt, BinaryOp, BindSpec, CompSpec, Destruct, DestructRest, Expr,
-	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IfElse, IfSpecData,
-	ImportKind, IndexPart, LiteralType, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
-	SliceDesc, Source, Span, Spanned, Visibility, unescape,
+	ExprParam, ExprParams, FieldMember, FieldName, ForSpecData, IStr, IdentityKind, IfElse,
+	IfSpecData, ImportKind, IndexPart, Member, NumValue, ObjBody, ObjComp, ObjMembers, Slice,
+	SliceDesc, Source, Span, Spanned, TrivialVal, Visibility, unescape,
 };
 use peg::parser;
 
@@ -131,7 +131,7 @@ parser! {
 
 		pub rule bind(s: &ParserSettings) -> BindSpec
 			= into:destruct(s) _ "=" _ value:expr(s) {BindSpec::Field{into, value}}
-			/ name:id() _ "(" _ params:params(s) _ ")" _ "=" _ value:expr(s) {BindSpec::Function{name, params, value}}
+			/ name:spanned(<id()>, s) _ "(" _ params:params(s) _ ")" _ "=" _ value:expr(s) {BindSpec::Function{name, params, value}}
 
 		pub rule assertion(s: &ParserSettings) -> AssertStmt
 			= keyword("assert") _ assertion:spanned(<expr(s)>, s) message:(_ ":" _ e:expr(s) {e})? { AssertStmt{assertion, message} }
@@ -241,11 +241,21 @@ parser! {
 			= i:spanned(<keyword("if")>, s) _ cond:expr(s) {IfSpecData { span: i.span, cond }}
 		pub rule forspec(s: &ParserSettings) -> ForSpecData
 			= keyword("for") _ destruct:destruct(s) _ keyword("in") _ over:expr(s) { ForSpecData { destruct, over } }
+		rule ensure_object_iteration()
+			= "" {?
+				#[cfg(not(feature = "exp-object-iteration"))] return Err("!!!experimental object iteration was not enabled");
+				#[cfg(feature = "exp-object-iteration")] Ok(())
+			}
+		pub rule forobjspec(s: &ParserSettings) -> CompSpec
+			= ensure_object_iteration() keyword("for") _ "[" _ key:id() _ "]" _ vis:visibility() _ value:destruct(s) _ keyword("in") _ over:expr(s) {
+				#[cfg(feature = "exp-object-iteration")] return CompSpec::ForObjSpec(jrsonnet_ir::ForObjSpecData { key, visibility: vis, value, over });
+				#[cfg(not(feature = "exp-object-iteration"))] unreachable!("ensure_object_iteration will fail if feature is not enabled")
+			}
 		rule compspec(s: &ParserSettings) -> CompSpec
-			= i:ifspec(s) { CompSpec::IfSpec(i) } / f:forspec(s) {CompSpec::ForSpec(f)}
+			= i:ifspec(s) { CompSpec::IfSpec(i) } / f:forobjspec(s) { f } / f:forspec(s) {CompSpec::ForSpec(f)}
 		pub rule compspecs(s: &ParserSettings) -> Vec<CompSpec>
 			= specs:compspec(s) ++ _ {?
-				if !matches!(specs[0], CompSpec::ForSpec(_)) {
+				if matches!(specs[0], CompSpec::IfSpec(_)) {
 					return Err("<first compspec should be for>")
 				}
 				Ok(specs)
@@ -253,7 +263,7 @@ parser! {
 		pub rule local_expr(s: &ParserSettings) -> Expr
 			= keyword("local") _ binds:bind(s) ** comma() (_ ",")? _ ";" _ expr:expr(s) { Expr::LocalExpr(binds, Box::new(expr)) }
 		pub rule string_expr(s: &ParserSettings) -> Expr
-			= s:string() {Expr::Str(s.into())}
+			= s:string() {Expr::Trivial(TrivialVal::Str(s.into()))}
 		pub rule obj_expr(s: &ParserSettings) -> Expr
 			= "{" _ body:objinside(s) _ "}" {Expr::Obj(body)}
 		pub rule array_expr(s: &ParserSettings) -> Expr
@@ -263,19 +273,15 @@ parser! {
 				Expr::ArrComp(Box::new(expr), specs)
 			}
 		pub rule number_expr(s: &ParserSettings) -> Expr
-			= n:number() {? if let Some(n) = NumValue::new(n) {
-				Ok(Expr::Num(n))
-			} else {
-				Err("!!!numbers are finite")
-			}}
+			= n:number() {? NumValue::new(n).map_or_else(|| Err("!!!numbers are finite"), |n| Ok(Expr::Trivial(TrivialVal::Num(n))))}
 
 		rule spanned<T: Acyclic>(x: rule<T>, s: &ParserSettings) -> Spanned<T>
-			= a:position!() n:x() b:position!() { Spanned::new(n, Span(s.source.clone(), a as u32, b as u32)) }
+			= a:position!() n:x() b:position!() { Spanned::new(n, Span(s.source.clone(), codeidx(a), codeidx(b))) }
 
 		pub rule var_expr(s: &ParserSettings) -> Expr
 			= n:spanned(<id()>, s) { Expr::Var(n) }
 		pub rule id_loc(s: &ParserSettings) -> Spanned<Expr>
-			= a:position!() n:id() b:position!() { Spanned::new(Expr::Str(n), Span(s.source.clone(), a as u32,b as u32)) }
+			= a:position!() n:id() b:position!() { Spanned::new(Expr::Trivial(TrivialVal::Str(n)), Span(s.source.clone(), codeidx(a), codeidx(b))) }
 		pub rule if_then_else_expr(s: &ParserSettings) -> Expr
 			= cond:ifspec(s) _ keyword("then") _ cond_then:expr(s) cond_else:(_ keyword("else") _ e:expr(s) {e})? {Expr::IfElse(Box::new(IfElse{
 				cond,
@@ -284,14 +290,14 @@ parser! {
 			}))}
 
 		pub rule literal(s: &ParserSettings) -> Expr
-			= v:(
-				keyword("null") {LiteralType::Null}
-				/ keyword("true") {LiteralType::True}
-				/ keyword("false") {LiteralType::False}
-				/ keyword("self") {LiteralType::This}
-				/ keyword("$") {LiteralType::Dollar}
-				/ keyword("super") {LiteralType::Super}
-			) {Expr::Literal(v)}
+			= keyword("null") { Expr::Trivial(TrivialVal::Null) }
+			/ keyword("true") { Expr::Trivial(TrivialVal::Bool(true)) }
+			/ keyword("false") { Expr::Trivial(TrivialVal::Bool(false)) }
+			/ a:position!() v:(
+				keyword("self") {IdentityKind::This}
+				/ keyword("$") {IdentityKind::Dollar}
+				/ keyword("super") {IdentityKind::Super}
+			) b:position!() { Expr::Identity(Span(s.source.clone(), codeidx(a), codeidx(b)), v) }
 
 		rule import_kind() -> ImportKind
 			= keyword("importstr") { ImportKind::Str }
@@ -313,7 +319,7 @@ parser! {
 			/ local_expr(s)
 			/ if_then_else_expr(s)
 
-			/ keyword("function") _ "(" _ params:params(s) _ ")" _ expr:expr(s) {Expr::Function(params, Box::new(expr))}
+			/ kw:spanned(<keyword("function")>, s) _ "(" _ params:params(s) _ ")" _ expr:expr(s) {Expr::Function(kw.span, params, Box::new(expr))}
 			/ assert:assertion(s) _ ";" _ rest:expr(s) { Expr::AssertExpr(Box::new(AssertExpr{
 				assert, rest
 			})) }
@@ -411,6 +417,10 @@ parser! {
 	}
 }
 
+fn codeidx(i: usize) -> u32 {
+	u32::try_from(i).expect("code has 4g hard limit")
+}
+
 pub type ParseError = peg::error::ParseError<peg::str::LineCol>;
 pub fn parse(str: &str, settings: &ParserSettings) -> Result<Expr, ParseError> {
 	jsonnet_parser::jsonnet(str, settings)
@@ -418,20 +428,24 @@ pub fn parse(str: &str, settings: &ParserSettings) -> Result<Expr, ParseError> {
 /// Used for importstr values
 pub fn string_to_expr(str: IStr, settings: &ParserSettings) -> Spanned<Expr> {
 	let len = str.len();
-	Spanned::new(Expr::Str(str), Span(settings.source.clone(), 0, len as u32))
+	Spanned::new(
+		Expr::Trivial(TrivialVal::Str(str)),
+		Span(settings.source.clone(), 0, codeidx(len)),
+	)
 }
 
 #[cfg(test)]
 mod tests {
-	use std::fs;
-
-	use insta::{assert_snapshot, glob};
-	use jrsonnet_ir::{IStr, Source};
-
-	use crate::{ParserSettings, parse};
-
 	#[test]
+	#[cfg(not(feature = "exp-null-coaelse"))]
 	fn snapshots() {
+		use std::fs;
+
+		use insta::{assert_snapshot, glob};
+		use jrsonnet_ir::{IStr, Source};
+
+		use crate::{ParserSettings, parse};
+
 		glob!("tests/*.jsonnet", |path| {
 			let input = fs::read_to_string(path).expect("read test file");
 			let v = parse(

@@ -407,6 +407,7 @@ pub fn derive_from_untyped_inner(input: DeriveInput) -> Result<TokenStream> {
 
 			impl #impl_generics FromUntyped for #ident #ty_generics #where_clause {
 				fn from_untyped(value: Val) -> JrResult<Self> {
+					<Self as Typed>::TYPE.check(&value)?;
 					let obj = value.as_obj().expect("shape is correct");
 					Self::parse(&obj)
 				}

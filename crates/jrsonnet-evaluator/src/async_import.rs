@@ -52,9 +52,14 @@ pub trait AsyncImportResolver {
 	) -> impl Future<Output = Result<Vec<u8>, Self::Error>>;
 }
 
-#[derive(Acyclic)]
-struct ResolvedImportResolver {
+#[derive(Acyclic, Default)]
+pub struct ResolvedImportResolver {
 	resolved: RefCell<FxHashMap<(SourcePath, ResolvePathOwned), (SourcePath, bool)>>,
+}
+impl ResolvedImportResolver {
+	pub fn new() -> Self {
+		Self::default()
+	}
 }
 impl ImportResolver for ResolvedImportResolver {
 	fn load_file_contents(&self, _resolved: &SourcePath) -> crate::Result<Vec<u8>> {
@@ -83,7 +88,12 @@ enum Job {
 }
 
 #[allow(clippy::future_not_send)]
-pub async fn async_import<H>(s: State, handler: H, path: &dyn AsPathLike) -> Result<(), H::Error>
+pub async fn async_import<H>(
+	s: State,
+	handler: H,
+	from: &SourcePath,
+	path: &dyn AsPathLike,
+) -> Result<SourcePath, H::Error>
 where
 	H: AsyncImportResolver,
 {
@@ -91,8 +101,9 @@ where
 		.downcast_ref::<ResolvedImportResolver>()
 		.expect("for async imports, import_resolver should be set to ResolvedImportResolver");
 
+	let entry = handler.resolve_from(from, path).await?;
 	let mut queue = vec![Job::LoadFile {
-		path: handler.resolve_from_default(path).await?,
+		path: entry.clone(),
 		parse: true,
 	}];
 	while let Some(job) = queue.pop() {
@@ -143,13 +154,17 @@ where
 						continue;
 					}
 				}
-				let resolved = handler.resolve_from(&from, &import.path).await?;
+				let resolved_path = handler.resolve_from(&from, &import.path).await?;
+				resolved.resolved.borrow_mut().insert(
+					(from.clone(), import.path.clone()),
+					(resolved_path.clone(), import.expression),
+				);
 				queue.push(Job::LoadFile {
-					path: resolved,
+					path: resolved_path,
 					parse: import.expression,
 				});
 			}
 		}
 	}
-	Ok(())
+	Ok(entry)
 }

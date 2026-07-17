@@ -7,23 +7,23 @@ use jrsonnet_types::ValType;
 
 use self::{
 	compspec::{evaluate_arr_comp, evaluate_obj_comp},
-	destructure::{build_b_thunk_uno, evaluate_local_expr, evaluate_locals_unbound},
+	destructure::evaluate_locals_unbound,
 	operator::evaluate_binary_op_special,
 };
 use crate::{
-	Context, Error, ObjValue, ObjValueBuilder, ObjectAssertion, Result, ResultExt as _, SupThis,
-	Unbound, Val,
+	CcObjectAssertion, CcUnbound, Context, Error, MaybeUnbound, ObjValue, ObjValueBuilder,
+	ObjectAssertion, Result, ResultExt as _, StaticShapeOopObject, SupThis, Unbound, Val,
 	analyze::{
 		ClosureShape, LArgsDesc, LAssertStmt, LExpr, LFieldMember, LFieldName, LFunction,
-		LIndexPart, LObjAsserts, LObjBody, LObjMembers, LSlot,
+		LIndexPart, LObjAsserts, LObjBody, LObjMembers, LObjStaticMembers, LSlot,
 	},
 	arr::ArrValue,
-	bail, error,
+	bail,
 	error::{ErrorKind::*, suggest_object_fields},
 	evaluate::{destructure::fill_letrec_binds, operator::evaluate_unary_op},
 	function::{CallLocation, FuncDesc, FuncVal, prepared::PreparedFuncVal},
 	in_frame,
-	typed::FromUntyped as _,
+	typed::{BoundedUsize, FromUntyped as _},
 	val::{CachedUnbound, Thunk},
 	with_state,
 };
@@ -52,15 +52,11 @@ pub fn ensure_sufficient_stack<R>(f: impl FnOnce() -> R) -> R {
 }
 
 pub fn evaluate_trivial(expr: &LExpr) -> Option<Val> {
-	// TODO: Eager trivial array
-	Some(match expr {
-		LExpr::Str(s) => Val::string(s.clone()),
-		LExpr::Num(n) => Val::Num(*n),
-		LExpr::Bool(false) => Val::Bool(false),
-		LExpr::Bool(true) => Val::Bool(true),
-		LExpr::Null => Val::Null,
-		_ => return None,
-	})
+	if let LExpr::Trivial(tv) = expr {
+		Some(tv.clone().into())
+	} else {
+		None
+	}
 }
 
 pub fn evaluate_method(ctx: Context, name: IStr, func: &Rc<LFunction>) -> Val {
@@ -115,145 +111,155 @@ mod names {
 	}
 }
 
-pub fn evaluate(ctx: Context, expr: &LExpr) -> Result<Val> {
-	Ok(match expr {
-		LExpr::Null => Val::Null,
-		LExpr::Bool(b) => Val::Bool(*b),
-		LExpr::Str(s) => Val::string(s.clone()),
-		LExpr::Num(n) => Val::Num(*n),
-		LExpr::Slot(slot) => ctx.slot(*slot).evaluate()?,
-		LExpr::BadLocal(name) => panic!("unresolvable reference: {name}"),
-		LExpr::Arr { shape, items } => Val::Arr(ArrValue::expr(ctx, shape, items.clone())),
-		LExpr::UnaryOp(op, value) => {
-			let value = evaluate(ctx, value)?;
-			evaluate_unary_op(*op, &value)?
-		}
-		LExpr::BinaryOp { lhs, op, rhs } => evaluate_binary_op_special(ctx, lhs, *op, rhs)?,
-		LExpr::LocalExpr(local_expr) => evaluate_local_expr(ctx, local_expr)?,
-		LExpr::IfElse {
-			cond,
-			cond_then,
-			cond_else,
-		} => {
-			let cond_val = evaluate(ctx.clone(), cond)?;
-			let Val::Bool(b) = cond_val else {
-				bail!(TypeMismatch(
-					"if condition",
-					vec![ValType::Bool],
-					cond_val.value_type()
-				))
-			};
-			if b {
-				evaluate(ctx, cond_then)?
-			} else if let Some(e) = cond_else {
-				evaluate(ctx, e)?
-			} else {
+#[allow(clippy::too_many_lines)]
+pub fn evaluate(mut ctx: Context, mut expr: &LExpr) -> Result<Val> {
+	loop {
+		return Ok(match expr {
+			LExpr::Trivial(tv) => tv.clone().into(),
+			LExpr::Slot(slot) => ctx.slot(*slot).evaluate()?,
+			LExpr::BadLocal(name) => panic!("unresolvable reference: {name}"),
+			LExpr::ArrConst(rc) => Val::Arr(ArrValue::new(rc.clone())),
+			LExpr::Arr { shape, items } => {
+				let inner = Context::enter_using(&ctx, shape);
+				'eager: {
+					let mut out: Vec<Val> = Vec::with_capacity(items.len());
+					for item in items.iter() {
+						let Ok(r) = evaluate(inner.clone(), item) else {
+							break 'eager;
+						};
+						out.push(r);
+					}
+					return Ok(Val::Arr(ArrValue::new(out)));
+				}
+				Val::Arr(ArrValue::expr(inner, items.clone()))
+			}
+			LExpr::UnaryOp(op, value) => {
+				let value = evaluate(ctx, value)?;
+				evaluate_unary_op(*op, &value)?
+			}
+			LExpr::BinaryOp { lhs, op, rhs } => evaluate_binary_op_special(ctx, lhs, *op, rhs)?,
+			LExpr::LocalExpr(l) => {
+				ctx = ctx
+					.pack_captures_sup_this(&l.frame_shape)
+					.enter(|fill, ctx| {
+						fill_letrec_binds(fill, ctx, &l.binds);
+					});
+				expr = &l.body;
+				continue;
+			}
+			LExpr::IfElse {
+				cond,
+				cond_then,
+				cond_else,
+			} => {
+				let cond_val = evaluate(ctx.clone(), cond)?;
+				let Val::Bool(b) = cond_val else {
+					bail!(TypeMismatch(
+						"if condition",
+						vec![ValType::Bool],
+						cond_val.value_type()
+					))
+				};
+				if b {
+					expr = cond_then;
+					continue;
+				} else if let Some(e) = cond_else {
+					expr = e;
+					continue;
+				}
 				Val::Null
 			}
-		}
-		LExpr::Error(s, e) => in_frame(
-			CallLocation::new(s),
-			|| "error statement".to_owned(),
-			|| bail!(RuntimeError(evaluate(ctx, e)?.to_string()?,)),
-		)?,
-		LExpr::AssertExpr { assert, rest } => {
-			evaluate_assert(ctx.clone(), assert)?;
-			evaluate(ctx, rest)?
-		}
+			LExpr::Error(s, e) => in_frame(
+				CallLocation::new(s),
+				|| "error statement".to_owned(),
+				|| bail!(RuntimeError(evaluate(ctx, e)?.to_string()?,)),
+			)?,
+			LExpr::AssertExpr { assert, rest } => {
+				evaluate_assert(ctx.clone(), assert)?;
+				expr = rest;
+				continue;
+			}
 
-		LExpr::Function(func) => evaluate_method(
-			ctx,
-			func.name.clone().unwrap_or_else(names::anonymous),
-			func,
-		),
-		LExpr::IdentityFunction => Val::Func(FuncVal::identity()),
-		LExpr::Apply {
-			applicable,
-			args,
-			tailstrict,
-		} => evaluate_apply(
-			ctx,
-			applicable,
-			args,
-			CallLocation::new(&args.span),
-			*tailstrict,
-		)?,
-		LExpr::Index { indexable, parts } => evaluate_index(ctx, indexable, parts)?,
-		LExpr::Obj(body) => evaluate_obj_body(None, ctx, body)?,
-		LExpr::ObjExtend(lhs, body) => {
-			let lhs_val = evaluate(ctx.clone(), lhs)?;
-			let Val::Obj(lhs_obj) = lhs_val else {
-				bail!(TypeMismatch(
-					"object extend lhs",
-					vec![ValType::Obj],
-					lhs_val.value_type(),
-				))
-			};
-			evaluate_obj_body(Some(lhs_obj), ctx, body)?
-		}
-		LExpr::ArrComp(comp) => evaluate_arr_comp(ctx, comp)?,
-		LExpr::Slice(slice) => {
-			use crate::typed::BoundedUsize;
-			let val = evaluate(ctx.clone(), &slice.value)?;
-			let indexable = val.into_indexable()?;
-			let start = slice
-				.start
-				.as_ref()
-				.map(|e| evaluate(ctx.clone(), e))
-				.transpose()?
-				.map(|v| -> Result<i32> {
-					v.as_num()
-						.ok_or_else(|| {
-							TypeMismatch("slice start", vec![ValType::Num], v.value_type()).into()
-						})
-						.map(|n| n as i32)
+			LExpr::Function(func) => evaluate_method(
+				ctx,
+				func.name.clone().unwrap_or_else(names::anonymous),
+				func,
+			),
+			LExpr::IdentityFunction => Val::Func(FuncVal::identity()),
+			LExpr::Apply {
+				applicable,
+				args,
+				tailstrict,
+			} => evaluate_apply(
+				ctx,
+				applicable,
+				args,
+				CallLocation::new(&args.span),
+				*tailstrict,
+			)?,
+			LExpr::Index { indexable, parts } => evaluate_index(ctx, indexable, parts)?,
+			LExpr::Obj(body) => evaluate_obj_body(None, ctx, body)?,
+			LExpr::ObjExtend(lhs, body) => {
+				let lhs_val = evaluate(ctx.clone(), lhs)?;
+				let Val::Obj(lhs_obj) = lhs_val else {
+					bail!(TypeMismatch(
+						"object extend lhs",
+						vec![ValType::Obj],
+						lhs_val.value_type(),
+					))
+				};
+				evaluate_obj_body(Some(lhs_obj), ctx, body)?
+			}
+			LExpr::ArrComp(comp) => evaluate_arr_comp(ctx, comp)?,
+			LExpr::Slice(slice) => {
+				let val = evaluate(ctx.clone(), &slice.value)?;
+				let indexable = val.into_indexable()?;
+				let start = slice
+					.start
+					.as_ref()
+					.map(|e| evaluate(ctx.clone(), e))
+					.transpose()?
+					.map(|v| -> Result<i32> {
+						i32::from_untyped(v).description("slice start value")
+					})
+					.transpose()?;
+				let end = slice
+					.end
+					.as_ref()
+					.map(|e| evaluate(ctx.clone(), e))
+					.transpose()?
+					.map(|v| -> Result<i32> { i32::from_untyped(v).description("slice end value") })
+					.transpose()?;
+				let step = slice
+					.step
+					.as_ref()
+					.map(|e| evaluate(ctx, e))
+					.transpose()?
+					.map(|v| -> Result<BoundedUsize<1, { i32::MAX as usize }>> {
+						BoundedUsize::from_untyped(v).description("slice step value")
+					})
+					.transpose()?;
+				Val::from(indexable.slice32(start, end, step)?)
+			}
+			LExpr::Super => Val::Obj(ctx.try_sup_this()?.standalone_super().ok_or(NoSuperFound)?),
+			LExpr::Import {
+				kind,
+				kind_span,
+				path,
+			} => with_state(|state| {
+				let resolved = state.resolve_from(kind_span.0.source_path(), &path.clone())?;
+				Ok::<_, Error>(match kind.value {
+					ImportKind::Normal => in_frame(
+						CallLocation::new(&kind.span),
+						|| "import".to_string(),
+						|| state.import_resolved(resolved),
+					)?,
+					ImportKind::Str => Val::string(state.import_resolved_str(resolved)?),
+					ImportKind::Bin => Val::arr(state.import_resolved_bin(resolved)?),
 				})
-				.transpose()?;
-			let end = slice
-				.end
-				.as_ref()
-				.map(|e| evaluate(ctx.clone(), e))
-				.transpose()?
-				.map(|v| -> Result<i32> {
-					v.as_num()
-						.ok_or_else(|| {
-							TypeMismatch("slice end", vec![ValType::Num], v.value_type()).into()
-						})
-						.map(|n| n as i32)
-				})
-				.transpose()?;
-			let step = slice
-				.step
-				.as_ref()
-				.map(|e| evaluate(ctx, e))
-				.transpose()?
-				.map(|v| -> Result<BoundedUsize<1, { i32::MAX as usize }>> {
-					let n = v.as_num().ok_or_else(|| -> crate::Error {
-						TypeMismatch("slice step", vec![ValType::Num], v.value_type()).into()
-					})?;
-					BoundedUsize::new(n as usize).ok_or_else(|| error!("slice step must be >= 1"))
-				})
-				.transpose()?;
-			Val::from(indexable.slice(start, end, step)?)
-		}
-		LExpr::Super => Val::Obj(ctx.try_sup_this()?.standalone_super()?),
-		LExpr::Import {
-			kind,
-			kind_span,
-			path,
-		} => with_state(|state| {
-			let resolved = state.resolve_from(kind_span.0.source_path(), &path.clone())?;
-			Ok::<_, Error>(match kind.value {
-				ImportKind::Normal => in_frame(
-					CallLocation::new(&kind.span),
-					|| "import".to_string(),
-					|| state.import_resolved(resolved),
-				)?,
-				ImportKind::Str => Val::string(state.import_resolved_str(resolved)?),
-				ImportKind::Bin => Val::arr(state.import_resolved_bin(resolved)?),
-			})
-		})?,
-	})
+			})?,
+		});
+	}
 }
 
 fn evaluate_apply(
@@ -336,114 +342,136 @@ fn evaluate_apply(
 	)
 }
 
+#[allow(clippy::too_many_lines)]
 fn evaluate_index(ctx: Context, indexable: &LExpr, parts: &[LIndexPart]) -> Result<Val> {
-	let mut value = if matches!(indexable, LExpr::Super) {
+	let mut parts = parts.iter();
+	let mut indexable = if matches!(indexable, LExpr::Super) {
+		let part = parts.next().expect("at least part should exist");
+		// sup_this existence check might also be skipped here for null-coalesce...
+		// But I believe this might cause errors.
 		let sup_this = ctx.try_sup_this()?;
-		// First part must be evaluated to get the super field name
-		if parts.is_empty() {
-			bail!(RuntimeError("super requires an index".into()))
+
+		if !sup_this.has_super() {
+			#[cfg(feature = "exp-null-coaelse")]
+			if part.null_coaelse {
+				return Ok(Val::Null);
+			}
+			bail!(NoSuperFound);
 		}
-		let key_val = evaluate(ctx.clone(), &parts[0].value)?;
-		let Val::Str(key) = &key_val else {
+		let name = evaluate(ctx.clone(), &part.value)?;
+
+		let Val::Str(name) = name else {
 			bail!(ValueIndexMustBeTypeGot(
 				ValType::Obj,
 				ValType::Str,
-				key_val.value_type(),
+				name.value_type(),
 			))
 		};
-		let field = key.clone().into_flat();
-		if let Some(v) = sup_this.get_super(field.clone())? {
-			// Continue with remaining parts
-			let mut value = v;
-			for part in &parts[1..] {
-				value = index_val(ctx.clone(), CallLocation::new(&part.span), value, part)?;
+
+		let name = name.into_flat();
+		match sup_this
+			.get_super(name.clone())
+			.with_description_src(&part.span, || format!("super field <{name}> access"))?
+		{
+			Some(v) => v,
+			#[cfg(feature = "exp-null-coaelse")]
+			None if part.null_coaelse => return Ok(Val::Null),
+			None => {
+				let suggestions = suggest_object_fields(
+					&sup_this.standalone_super().expect("super exists"),
+					name.clone(),
+				);
+				bail!(NoSuchField(name, suggestions))
 			}
-			return Ok(value);
 		}
-		let suggestions = suggest_object_fields(sup_this.this(), field.clone());
-		bail!(NoSuchField(field, suggestions))
 	} else {
 		evaluate(ctx.clone(), indexable)?
 	};
 
 	for part in parts {
-		value = index_val(ctx.clone(), CallLocation::new(&part.span), value, part)?;
+		let ctx = ctx.clone();
+		let loc = CallLocation::new(&part.span);
+		let value = indexable;
+		let key_val = evaluate(ctx, &part.value)?;
+		indexable = match (&value, &key_val) {
+			(Val::Obj(obj), Val::Str(key)) => {
+				let key = key.clone().into_flat();
+				match obj
+					.get(key.clone())
+					.with_description_src(loc, || format!("field <{key}> access"))?
+				{
+					Some(v) => v,
+					#[cfg(feature = "exp-null-coaelse")]
+					None if part.null_coaelse => return Ok(Val::Null),
+					None => {
+						return Err(Error::from(NoSuchField(
+							key.clone(),
+							suggest_object_fields(obj, key.clone()),
+						)))
+						.with_description_src(loc, || format!("field <{key}> access"));
+					}
+				}
+			}
+			(Val::Arr(arr), Val::Num(idx)) => {
+				let n = idx.get();
+				if n.fract() > f64::EPSILON {
+					bail!(FractionalIndex)
+				}
+				let len = arr.len32();
+				if n < 0.0 || n > f64::from(len) {
+					bail!(ArrayBoundsError(n, len));
+				}
+				#[expect(
+					clippy::cast_possible_truncation,
+					clippy::cast_sign_loss,
+					reason = "n is checked range"
+				)]
+				let i = n as u32;
+				arr.get32(i)
+					.with_description_src(loc, || format!("element <{i}> access"))?
+					.ok_or_else(|| ArrayBoundsError(n, len))?
+			}
+			(Val::Str(s), Val::Num(idx)) => {
+				let n = idx.get();
+				if n.fract() > f64::EPSILON {
+					bail!(FractionalIndex)
+				}
+				#[expect(
+					clippy::cast_possible_truncation,
+					clippy::cast_sign_loss,
+					reason = "n is checked positive, overflow will truncate as expected"
+				)]
+				let i = n as usize;
+				let flat = s.clone().into_flat();
+				#[allow(clippy::cast_possible_truncation, reason = "string is max 4g")]
+				if n >= 0.0
+					&& n <= f64::from(u32::MAX)
+					&& let Some(char) = flat.chars().nth(i)
+				{
+					Val::string(char)
+				} else {
+					let len = flat.chars().count();
+					bail!(StringBoundsError(n, len as u32))
+				}
+			}
+			#[cfg(feature = "exp-null-coaelse")]
+			(Val::Null, _) if part.null_coaelse => return Ok(Val::Null),
+			_ => bail!(ValueIndexMustBeTypeGot(
+				value.value_type(),
+				ValType::Str,
+				key_val.value_type()
+			)),
+		};
 	}
-	Ok(value)
-}
-
-fn index_val(ctx: Context, loc: CallLocation<'_>, value: Val, part: &LIndexPart) -> Result<Val> {
-	let key_val = evaluate(ctx, &part.value)?;
-	Ok(match (&value, &key_val) {
-		(Val::Obj(obj), Val::Str(key)) => {
-			let field = key.clone().into_flat();
-			if let Some(v) = obj
-				.get(field.clone())
-				.with_description_src(loc, || format!("field <{field}> access"))?
-			{
-				v
-			} else {
-				bail!(NoSuchField(
-					field.clone(),
-					suggest_object_fields(obj, field)
-				))
-			}
-		}
-		(Val::Arr(arr), Val::Num(idx)) => {
-			let n = idx.get();
-			if n.fract() > f64::EPSILON {
-				bail!(FractionalIndex)
-			}
-			if n < 0.0 {
-				bail!(ArrayBoundsError(
-					n as isize, // truncation is fine for error display
-					arr.len()
-				));
-			}
-			#[expect(
-				clippy::cast_possible_truncation,
-				clippy::cast_sign_loss,
-				reason = "n is checked positive"
-			)]
-			let i = n as u32;
-			arr.get(i)
-				.with_description_src(loc, || format!("element <{i}> access"))?
-				.ok_or_else(|| ArrayBoundsError(i as isize, arr.len()))?
-		}
-		(Val::Str(s), Val::Num(idx)) => {
-			let n = idx.get();
-			if n.fract() > f64::EPSILON {
-				bail!(FractionalIndex)
-			}
-			let flat = s.clone().into_flat();
-			if n < 0.0 {
-				bail!(ArrayBoundsError(
-					n as isize, // truncation is fine for error display
-					flat.chars().count() as u32
-				));
-			}
-			#[expect(
-				clippy::cast_possible_truncation,
-				clippy::cast_sign_loss,
-				reason = "n is checked positive, overflow will truncate as expected"
-			)]
-			let i = n as usize;
-			let Some(char) = flat.chars().nth(i) else {
-				bail!(StringBoundsError(i, flat.chars().count()))
-			};
-			Val::string(char)
-		}
-		_ => bail!(ValueIndexMustBeTypeGot(
-			value.value_type(),
-			ValType::Str,
-			key_val.value_type()
-		)),
-	})
+	Ok(indexable)
 }
 
 fn evaluate_obj_body(super_obj: Option<ObjValue>, ctx: Context, body: &LObjBody) -> Result<Val> {
 	match body {
 		LObjBody::MemberList(members) => evaluate_obj_members(super_obj, ctx, members),
+		LObjBody::StaticMembers(members) => {
+			Ok(evaluate_static_obj_members(super_obj, ctx, members))
+		}
 		LObjBody::ObjComp(comp) => evaluate_obj_comp(super_obj, ctx, comp),
 	}
 }
@@ -505,13 +533,92 @@ pub fn evaluate_field_member_static(
 		return Ok(());
 	};
 
-	let thunk = build_b_thunk_uno(&value_ctx, value.clone());
+	let env = Context::enter_using(&value_ctx, &value.0);
+	let value = value.clone();
 	builder
 		.field(name)
 		.with_add(*plus)
 		.with_visibility(*visibility)
-		.try_thunk(thunk)?;
+		.try_thunk(Thunk!(move || evaluate(env, &value.1)))?;
 	Ok(())
+}
+
+fn evaluate_static_obj_members(
+	super_obj: Option<ObjValue>,
+	ctx: Context,
+	members: &LObjStaticMembers,
+) -> Val {
+	#[derive(Trace)]
+	struct UnboundField<B: Trace> {
+		uctx: B,
+		value: Rc<(ClosureShape, LExpr)>,
+		name: IStr,
+	}
+	impl<B: Unbound<Bound = Context>> Unbound for UnboundField<B> {
+		type Bound = Val;
+		fn bind(&self, sup_this: SupThis) -> Result<Val> {
+			let a_ctx = self.uctx.bind(sup_this)?;
+			let b_ctx = Context::enter_using(&a_ctx, &self.value.0);
+			evaluate(b_ctx, &self.value.1)
+		}
+	}
+
+	let needs_unbound = members.this.is_some() || members.uses_super;
+
+	let mut bindings: Vec<MaybeUnbound> = Vec::with_capacity(members.bindings.len());
+
+	let assertion = if needs_unbound {
+		let uctx = CachedUnbound::new(evaluate_locals_unbound(
+			&ctx,
+			&members.frame_shape,
+			members.this,
+			members.locals.clone(),
+		));
+		for (binding, field) in members.bindings.iter().zip(members.shape.fields()) {
+			if let Some(v) = evaluate_trivial(&binding.1) {
+				bindings.push(MaybeUnbound::Const(v));
+				continue;
+			}
+			bindings.push(MaybeUnbound::Unbound(CcUnbound::new(UnboundField {
+				uctx: uctx.clone(),
+				value: binding.clone(),
+				name: field.name.clone(),
+			})));
+		}
+		members
+			.asserts
+			.as_ref()
+			.map(|a| CcObjectAssertion::new(evaluate_object_assertions_unbound(uctx, a.clone())))
+	} else {
+		let a_ctx = ctx
+			.pack_captures_sup_this(&members.frame_shape)
+			.enter(|fill, ctx| {
+				fill_letrec_binds(fill, ctx, &members.locals);
+			});
+		for binding in &members.bindings {
+			if let Some(v) = evaluate_trivial(&binding.1) {
+				bindings.push(MaybeUnbound::Const(v));
+				continue;
+			}
+			let env = Context::enter_using(&a_ctx, &binding.0);
+			let value = binding.clone();
+			bindings.push(MaybeUnbound::Bound(Thunk!(move || evaluate(env, &value.1))));
+		}
+		members.asserts.as_ref().map(|a| {
+			CcObjectAssertion::new(evaluate_object_assertions_static(a_ctx.clone(), a.clone()))
+		})
+	};
+
+	let mut builder = ObjValueBuilder::with_capacity(0);
+	if let Some(sup) = super_obj {
+		builder.with_super(sup);
+	}
+	builder.extend_with_core(StaticShapeOopObject::new(
+		members.shape.clone(),
+		bindings,
+		assertion,
+	));
+	Val::Obj(builder.build())
 }
 
 fn evaluate_obj_members(
@@ -546,7 +653,7 @@ fn evaluate_obj_members(
 		let a_ctx = ctx
 			.pack_captures_sup_this(&members.frame_shape)
 			.enter(|fill, ctx| {
-				fill_letrec_binds(fill, &ctx, &members.locals);
+				fill_letrec_binds(fill, ctx, &members.locals);
 			});
 		for field in &members.fields {
 			evaluate_field_member_static(&mut builder, ctx.clone(), a_ctx.clone(), field)?;

@@ -6,10 +6,18 @@ publish = false
 
 [features]
 default = ["ir-parser"]
+experimental = [
+  "exp-destruct",
+  "exp-null-coaelse",
+  "exp-preserve-order",
+  "exp-bigint",
+]
 ir-parser = ["jrsonnet-evaluator/ir-parser"]
 peg-parser = ["jrsonnet-evaluator/peg-parser"]
 exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
 exp-null-coaelse = ["jrsonnet-evaluator/exp-null-coaelse"]
+exp-preserve-order = ["jrsonnet-stdlib/exp-preserve-order"]
+exp-bigint = ["jrsonnet-stdlib/exp-bigint"]
 
 [lints]
 workspace = true

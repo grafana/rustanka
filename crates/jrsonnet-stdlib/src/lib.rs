@@ -525,7 +525,7 @@ pub struct Settings {
 	/// Used for `std.extVar`
 	pub ext_vars: HashMap<IStr, TlaArg>,
 	/// Used for `std.native`
-	pub ext_natives: HashMap<IStr, FuncVal>,
+	pub ext_natives: HashMap<IStr, Val>,
 	/// Used for `std.trace`
 	pub trace_printer: Rc<dyn TracePrinter>,
 	/// Used for `std.thisFile`
@@ -585,7 +585,7 @@ impl ContextInitializer {
 	pub fn add_native(&self, name: impl Into<IStr>, cb: impl Into<FuncVal>) {
 		self.settings_mut()
 			.ext_natives
-			.insert(name.into(), cb.into());
+			.insert(name.into(), Val::Func(cb.into()));
 	}
 	/// Set the manifest YAML doc formatting options
 	pub fn set_manifest_yaml_doc_formatting(&self, formatting: ManifestYamlDocFormatting) {

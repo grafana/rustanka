@@ -33,8 +33,6 @@ crate-type = ["cdylib", "staticlib"]
 default = ["interop-common", "interop-threading"]
 # Export additional functions for native integration, i.e ability to set custom trace format
 interop-common = []
-# Provide ability to statically override callbacks from WASM (by using imports)
-interop-wasm = []
 # Provide ability to move jsonnet vm state between threads
 interop-threading = []
 

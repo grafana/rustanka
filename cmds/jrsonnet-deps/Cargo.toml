@@ -1,6 +1,8 @@
 [package]
 name = "jrsonnet-deps"
-description = "List dependencies of a jsonnet file"
+description = "Command-line tool that lists imports of a jsonnet file"
+keywords = ["jsonnet", "dependencies", "cli"]
+categories = ["command-line-utilities"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

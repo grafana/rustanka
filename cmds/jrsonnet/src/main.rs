@@ -7,10 +7,9 @@ use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 use jrsonnet_cli::{GcOpts, ManifestOpts, MiscOpts, OutputOpts, StdOpts, TlaOpts, TraceOpts};
 use jrsonnet_evaluator::{
-	ResultExt, State, Val, apply_tla, bail,
+	ResultExt, SourceDefaultIgnoreJpath, SourcePath, State, Val, apply_tla, bail,
 	error::{Error as JrError, ErrorKind},
 };
-use jrsonnet_ir::{SourceDefaultIgnoreJpath, SourcePath};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -238,7 +237,7 @@ fn main_real(opts: Opts) -> Result<(), Error> {
 				data.manifest(&manifest_format)
 					.with_description(|| format!("manifesting {field}"))?,
 			)?;
-			if manifest_format.file_trailing_newline() {
+			if !opts.manifest.no_trailing_newline {
 				writeln!(file)?;
 			}
 			file.flush()?;

@@ -1,5 +1,8 @@
 [package]
 name = "jrsonnet-peg-parser"
+description = "Legacy PEG-based parser producing jrsonnet IR"
+keywords = ["jsonnet", "parser", "peg"]
+categories = ["parser-implementations"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,5 +22,7 @@ insta.workspace = true
 
 [features]
 default = []
+experimental = ["exp-destruct", "exp-null-coaelse", "exp-object-iteration"]
 exp-destruct = ["jrsonnet-ir/exp-destruct"]
 exp-null-coaelse = ["jrsonnet-ir/exp-null-coaelse"]
+exp-object-iteration = ["jrsonnet-ir/exp-object-iteration"]

@@ -13,9 +13,9 @@ use jrsonnet_rowan_parser::{
 	AstNode, AstToken as _, SyntaxToken,
 	nodes::{
 		Arg, ArgsDesc, Assertion, BinaryOperator, Bind, CompSpec, Destruct, DestructArrayPart,
-		DestructRest, Expr, ExprArray, ExprBase, FieldName, ForSpec, IfSpec, ImportKind, Literal,
-		Member, Name, Number, ObjBody, ObjLocal, ParamsDesc, SliceDesc, SourceFile, Stmt, Suffix,
-		Text, TextKind, UnaryOperator, Visibility,
+		DestructRest, Expr, ExprArray, ExprBase, FieldName, ForObjSpec, ForSpec, IfSpec,
+		ImportKind, Literal, Member, Name, Number, ObjBody, ObjLocal, ParamsDesc, SliceDesc,
+		SourceFile, Stmt, Suffix, Text, TextKind, UnaryOperator, Visibility,
 	},
 };
 
@@ -477,8 +477,7 @@ impl Printable for ObjBody {
 						&mut out,
 					);
 
-					let mut compspecs = compspecs.into_iter().peekable();
-					while let Some(mem) = compspecs.next() {
+					for mem in compspecs {
 						if mem.should_start_with_newline {
 							p!(out, nl);
 						}
@@ -645,6 +644,11 @@ impl Printable for ForSpec {
 		p!(out, str("for ") {self.bind()} str(" in ") {self.expr()});
 	}
 }
+impl Printable for ForObjSpec {
+	fn print(&self, out: &mut PrintItems) {
+		p!(out, str("for [") {self.key()} str("]") {self.visibility()} str(" ") {self.value()} str(" in ") {self.expr()});
+	}
+}
 impl Printable for IfSpec {
 	fn print(&self, out: &mut PrintItems) {
 		p!(out, str("if ") {self.expr()});
@@ -654,6 +658,7 @@ impl Printable for CompSpec {
 	fn print(&self, out: &mut PrintItems) {
 		match self {
 			Self::ForSpec(f) => f.print(out),
+			Self::ForObjSpec(f) => f.print(out),
 			Self::IfSpec(i) => i.print(out),
 		}
 	}
@@ -896,8 +901,25 @@ impl Printable for SourceFile {
 }
 
 pub struct FormatOptions {
-	// 0 for hard tabs, otherwise number of spaces
 	pub indent: u8,
+	pub use_tabs: bool,
+	pub max_width: u32,
+}
+
+impl FormatOptions {
+	pub fn new() -> Self {
+		Self {
+			indent: 4,
+			use_tabs: true,
+			max_width: 100,
+		}
+	}
+}
+
+impl Default for FormatOptions {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 #[allow(
@@ -907,6 +929,8 @@ pub struct FormatOptions {
 pub fn format(input: &str, opts: &FormatOptions) -> Result<String, SnippetBuilder> {
 	let (parsed, errors) = jrsonnet_rowan_parser::parse(input);
 	if !errors.is_empty() {
+		// Reserve one char for EOF display
+		let input = format!("{input} ");
 		let mut builder = hi_doc::SnippetBuilder::new(input);
 		for error in errors {
 			builder
@@ -916,7 +940,8 @@ pub fn format(input: &str, opts: &FormatOptions) -> Result<String, SnippetBuilde
 				))
 				.range(
 					error.range.start().into()
-						..=(usize::from(error.range.end()) - 1).max(error.range.start().into()),
+						..=(usize::from(error.range.end()).saturating_sub(1))
+							.max(error.range.start().into()),
 				)
 				.build();
 		}
@@ -933,14 +958,9 @@ pub fn format(input: &str, opts: &FormatOptions) -> Result<String, SnippetBuilde
 			out
 		},
 		PrintOptions {
-			indent_width: if opts.indent == 0 {
-				// Reasonable max length for both 2 and 4 space sized tabs.
-				3
-			} else {
-				opts.indent
-			},
-			max_width: 100,
-			use_tabs: opts.indent == 0,
+			indent_width: opts.indent,
+			max_width: opts.max_width,
+			use_tabs: opts.use_tabs,
 			new_line_text: "\n",
 		},
 	))

@@ -1,6 +1,8 @@
 [package]
 name = "jrsonnet-stdlib"
-description = "jsonnet standard library packaged as crate"
+description = "Jsonnet standard library implementation for jrsonnet"
+keywords = ["jsonnet", "stdlib"]
+categories = ["template-engine"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +13,11 @@ version.workspace = true
 workspace = true
 
 [features]
+experimental = [
+  "exp-preserve-order",
+  "exp-bigint",
+  "exp-null-coaelse",
+]
 # Add order preservation flag to some functions
 exp-preserve-order = ["jrsonnet-evaluator/exp-preserve-order"]
 # Bigint type

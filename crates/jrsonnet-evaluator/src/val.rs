@@ -10,7 +10,7 @@ use std::{
 
 use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
 use jrsonnet_interner::IStr;
-use jrsonnet_ir::BinaryOpType;
+use jrsonnet_ir::{BinaryOpType, TrivialVal};
 pub use jrsonnet_macros::Thunk;
 use jrsonnet_types::ValType;
 use rustc_hash::FxHashMap;
@@ -280,7 +280,7 @@ impl IndexableVal {
 	/// For strings, will create a copy of specified interval.
 	///
 	/// For arrays, nothing will be copied on this call, instead [`ArrValue::Slice`] view will be returned.
-	pub fn slice(
+	pub fn slice32(
 		self,
 		index: Option<i32>,
 		end: Option<i32>,
@@ -324,7 +324,7 @@ impl IndexableVal {
 					.into(),
 				))
 			}
-			Self::Arr(arr) => Ok(Self::Arr(arr.clone().slice(
+			Self::Arr(arr) => Ok(Self::Arr(arr.clone().slice32(
 				index,
 				end,
 				#[expect(
@@ -619,6 +619,21 @@ impl From<ObjValue> for Val {
 		Self::Obj(value)
 	}
 }
+impl From<bool> for Val {
+	fn from(value: bool) -> Self {
+		Self::Bool(value)
+	}
+}
+impl From<TrivialVal> for Val {
+	fn from(tv: TrivialVal) -> Self {
+		match tv {
+			TrivialVal::Null => Self::Null,
+			TrivialVal::Bool(b) => Self::Bool(b),
+			TrivialVal::Num(n) => Self::Num(n),
+			TrivialVal::Str(s) => Self::string(s),
+		}
+	}
+}
 
 const fn is_function_like(val: &Val) -> bool {
 	matches!(val, Val::Func(_))
@@ -656,7 +671,7 @@ pub fn equals(val_a: &Val, val_b: &Val) -> Result<bool> {
 			if ArrValue::ptr_eq(a, b) {
 				return Ok(true);
 			}
-			if a.len() != b.len() {
+			if a.len32() != b.len32() {
 				return Ok(false);
 			}
 			for (a, b) in a.iter().zip(b.iter()) {

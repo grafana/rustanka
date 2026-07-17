@@ -21,33 +21,34 @@ use common::ContextInitializer as TestContextInitializer;
 fn run(file: &Path, root: &Path) -> String {
 	let mut s = State::builder();
 
-	let std_context = ContextInitializer::new(PathResolver::Relative(root.to_owned()));
+	let resolver = PathResolver::Relative(root.to_owned());
+	let std_context = ContextInitializer::new(resolver.clone());
 	// C++ test suite
 	std_context.add_ext_str("var1".into(), "test".into());
 	std_context
-		.add_ext_code("var2".into(), "{x:1,y:2}")
+		.add_ext_code("var2", "{x:1,y:2}")
 		.expect("code is valid");
 
 	// Golang test suite
 	std_context
-		.add_ext_code("codeVar".into(), "3+3")
+		.add_ext_code("codeVar", "3+3")
 		.expect("code is valid");
 	std_context.add_ext_str("stringVar".into(), "2 + 2".into());
 	std_context
 		.add_ext_code(
-			"selfRecursiveVar".into(),
+			"selfRecursiveVar",
 			r#"[42, std.extVar("selfRecursiveVar")[0] + 1]"#,
 		)
 		.expect("code is valid");
 	std_context
 		.add_ext_code(
-			"mutuallyRecursiveVar1".into(),
+			"mutuallyRecursiveVar1",
 			r#"[42, std.extVar("mutuallyRecursiveVar2")[0] + 1]"#,
 		)
 		.expect("code is valid");
 	std_context
 		.add_ext_code(
-			"mutuallyRecursiveVar2".into(),
+			"mutuallyRecursiveVar2",
 			r#"[42, std.extVar("mutuallyRecursiveVar1")[0] + 1]"#,
 		)
 		.expect("code is valid");
@@ -59,7 +60,7 @@ fn run(file: &Path, root: &Path) -> String {
 	let _entered = s.enter();
 
 	let trace_format = CompactFormat {
-		resolver: PathResolver::FileName,
+		resolver,
 		max_trace: 20,
 		padding: 4,
 	};
@@ -117,9 +118,6 @@ const SKIPPED: &[&str] = &[
 	// Parser fails with stack overflow. While is a bug, this is a too unusual
 	// thing to run untrusted jsonnet code? Will be fixed with nom/rowan.
 	"error.parse.deep_array_nesting.jsonnet",
-	// Runtime, not static error in jrsonnet
-	"error.parse.object_local_clash.jsonnet",
-	"error.function_duplicate_param.jsonnet",
 	// Too slow to throw due to how lazyness is implemented in jrsonnet
 	"error.recursive_object_non_term.jsonnet",
 	// In jrsonnet returns the one passed argument, works as Rust's dbg!()
@@ -134,7 +132,7 @@ const SKIPPED: &[&str] = &[
 
 	// Something is wrong, go-jsonnet skips safe integer range check here
 	"bitwise_or9.jsonnet",
-	// Jrsonnet does not use byte strings, all utf8 is converted to bytes first
+	// Bad check: https://github.com/databricks/sjsonnet/issues/793#issuecomment-4323153709
 	"builtinBase64_string_high_codepoint.jsonnet",
 	// Split by empty string is string characters, same as everywhere else
 	"builtinSplitLimitR6.jsonnet",
@@ -142,8 +140,6 @@ const SKIPPED: &[&str] = &[
 	"builtin_escapeStringJson.jsonnet",
 	// golang float formatting is inefficient and not portable
 	"builtin_manifestTomlEx.jsonnet",
-	"div3.jsonnet",
-	"pow6.jsonnet",
 	// golang escapes "e" yaml key, does it think it is float?
 	"builtin_manifestYamlDoc.jsonnet",
 	// multi output is a CLI part, not an interpreter.
@@ -156,8 +152,6 @@ const SKIPPED: &[&str] = &[
 	"native2.jsonnet",
 	"native3.jsonnet",
 	"native6.jsonnet",
-	// Since when parser should throw an error for that?..
-	"number_leading_zero.jsonnet",
 	// Golang fails with max stack frames exceeded error
 	"std.makeArray_recursive_evalutation_order_matters.jsonnet",
 	// Tailstrict semantics is partially unspecified
@@ -168,113 +162,117 @@ const SKIPPED: &[&str] = &[
 	"string_times_number.jsonnet",
 ];
 
-#[test]
-fn cpp_test_suite() -> io::Result<()> {
-	for root_dir in ["cpp_test_suite", "go_testdata"] {
-		let root_tests = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-		let root = root_tests.join(root_dir);
-		let root_override = root_tests.join(format!("{root_dir}_golden_override"));
+fn run_test_suite(root: PathBuf, root_override: PathBuf) -> io::Result<()> {
+	dbg!(&root);
+	for entry in fs::read_dir(&root).map_err(|e| io::Error::other(format!("failed to enumerate test suite dir (Note: it needs to be cloned from upstream jsonnet repo for this test): {e}")))? {
+		let entry = entry?;
+		if entry.path().extension().is_none_or(|e| e != "jsonnet") {
+			continue;
+		}
 
-		let entries = match fs::read_dir(&root) {
-			Ok(entries) => entries,
-			Err(e) if e.kind() == ErrorKind::NotFound => {
-				eprintln!(
-					"Skipping {root_dir}: directory not found (run `cargo xtask update-testsuites` to fetch)"
-				);
-				continue;
-			}
-			Err(e) => {
-				return Err(io::Error::new(
-					ErrorKind::Other,
-					format!("failed to enumerate {root_dir} dir: {e}"),
-				));
-			}
+		let _stack = if entry.path().file_stem().is_some_and(|e| e == "recursive_function" || e == "tailstrict"|| e == "tailstrict5") {
+			Some(limit_stack_depth(100_000))
+		} else {
+			None
 		};
-		for entry in entries {
-			let entry = entry?;
-			if !entry.path().extension().map_or(false, |e| e == "jsonnet") {
-				continue;
-			}
 
-			if entry
-				.path()
-				.file_name()
-				.and_then(|v| v.to_str())
-				.map_or(false, |v| SKIPPED.contains(&v))
-			{
-				continue;
-			}
+		if entry
+			.path()
+			.file_name()
+			.and_then(|v| v.to_str())
+			.is_some_and(|v| SKIPPED.contains(&v))
+		{
+			continue;
+		}
 
-			let result = run(&entry.path(), &root);
+		eprintln!("test: {}", entry.path().display());
 
-			let mut golden_path = entry.path();
-			golden_path.set_extension("jsonnet.golden");
+		let result = run(&entry.path(), &root);
 
-			let mut golden_path2 = entry.path();
-			golden_path2.set_extension("golden");
+		let mut golden_path = entry.path();
+		golden_path.set_extension("jsonnet.golden");
 
-			let golden_override =
-				root_override.join(&golden_path.file_name().expect("file has basename"));
+		let mut golden_path2 = entry.path();
+		golden_path2.set_extension("golden");
 
-			// .jsonnet.golden for C++ tests
-			let mut golden = read_file(&golden_path)?;
-			// .golden for Go tests
-			if golden.is_none()
-				&& let Some(golden_path) = read_file(&dbg!(golden_path2))?
-			{
-				golden = Some(golden_path);
-			}
+		let golden_override =
+			root_override.join(golden_path.file_name().expect("file has basename"));
 
-			// Any of them can be overriden by overrides
-			if let Some(golden_path) = read_file(&golden_override)? {
-				golden = Some(golden_path);
-			}
+		// .jsonnet.golden for C++ tests
+		let mut golden = read_file(&golden_path)?;
+		// .golden for Go tests
+		if golden.is_none() && let Some(golden_path) = read_file(&golden_path2)? {
+			golden = Some(golden_path);
+		}
 
-			// Otherwise assume test should just not fail and return true.
-			let golden = golden.unwrap_or_else(|| "true".to_owned());
+		// Any of them can be overriden by overrides
+		if let Some(golden_path) = read_file(&golden_override)? {
+			golden = Some(golden_path);
+		}
 
-			match (
-				serde_json::from_str::<serde_json::Value>(&result),
-				serde_json::from_str::<serde_json::Value>(&golden),
-			) {
-				(Err(_), Ok(_)) => panic!(
-					"unexpected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
-					entry.path().display()
-				),
-				(Ok(_), Err(_)) => panic!(
-					"expected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
-					entry.path().display()
-				),
-				(Ok(result_v), Ok(golden_v)) => {
-					if result_v != golden_v {
-						if env::var_os("UPDATE_GOLDEN").is_some() {
-							fs::write(golden_override, result)?;
-						} else {
-							panic!(
-								"Result \n{result_v:#}\n\
+		// Otherwise assume test should just not fail and return true.
+		let golden = golden.unwrap_or_else(|| "true".to_owned());
+
+		let update_golden_path = &golden_override;
+
+		match (serde_json::from_str::<serde_json::Value>(&result), serde_json::from_str::<serde_json::Value>(&golden)) {
+			(Err(_), Ok(_)) => panic!(
+				"unexpected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
+				entry.path().display()
+			),
+			(Ok(_), Err(_)) => panic!(
+				"expected error for golden {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
+				entry.path().display()
+			),
+			(Ok(result_v), Ok(golden_v)) => {
+				if result_v != golden_v {
+					if env::var_os("UPDATE_GOLDEN").is_some() {
+						fs::write(update_golden_path, result)?;
+					} else {
+						panic!(
+							"Result \n{result_v:#}\n\
 								and golden \n{golden_v:#}\n\
 								did not match structurally\n\
 								for golden {}",
-								entry.path().display()
-							);
-						}
+							entry.path().display()
+						);
 					}
 				}
-				(Err(_), Err(_)) => {
-					if result != golden.trim_end() {
-						if env::var_os("UPDATE_GOLDEN").is_some() {
-							fs::write(golden_override, result)?;
-						} else {
-							panic!(
-								"golden didn't match for {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
-								entry.path().display()
-							)
-						}
+			}
+			(Err(_), Err(_)) => {
+				if result != golden.trim_end() {
+					if env::var_os("UPDATE_GOLDEN").is_some() {
+						fs::write(update_golden_path, result)?;
+					} else {
+						panic!(
+						"golden didn't match for {}:\n<got>\n{result}\n</got>\n<golden>\n{golden}\n</golden>",
+						entry.path().display()
+					)
 					}
 				}
-			};
+			}
 		}
 		println!("done!");
+	}
+	Ok(())
+}
+
+#[test]
+fn upstream_test_suite() -> io::Result<()> {
+	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+	if let Some(cpp_jsonnet) = std::env::var_os("CPP_JSONNET_FOR_TESTS") {
+		let path = PathBuf::from(cpp_jsonnet).join("test_suite");
+		let path_override = manifest.join("cpp_test_suite_golden_override");
+		run_test_suite(path, path_override)?;
+	} else {
+		eprintln!("no cpp jsonnet available for tests");
+	}
+	if let Some(go_jsonnet) = std::env::var_os("GO_JSONNET_FOR_TESTS") {
+		let path = PathBuf::from(go_jsonnet).join("testdata");
+		let path_override = manifest.join("go_testdata_golden_override");
+		run_test_suite(path, path_override)?;
+	} else {
+		eprintln!("no go jsonnet available for tests");
 	}
 
 	jrsonnet_gcmodule::with_thread_object_space(ObjectSpace::leak);

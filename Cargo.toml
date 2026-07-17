@@ -1,6 +1,18 @@
 [workspace]
-members = ["crates/*", "bindings/jsonnet", "cmds/*", "tests", "xtask"]
-default-members = ["cmds/jrsonnet"]
+members = [
+  "crates/*",
+  "bindings/jrsonnet-web",
+  "bindings/jsonnet",
+  "cmds/*",
+  "tests",
+  "xtask",
+]
+default-members = [
+  "cmds/jrsonnet",
+  "cmds/jrsonnet-fmt",
+  "cmds/jrb",
+  "bindings/jsonnet",
+]
 resolver = "2"
 
 [workspace.package]
@@ -23,7 +35,9 @@ jrsonnet-cli = { path = "./crates/jrsonnet-cli", version = "0.5.0-pre98" }
 jrsonnet-lint = { path = "./crates/jrsonnet-lint" }
 jrsonnet-types = { path = "./crates/jrsonnet-types", version = "0.5.0-pre98" }
 jrsonnet-formatter = { path = "./crates/jrsonnet-formatter", version = "0.5.0-pre98" }
-jrsonnet-gcmodule = { version = "0.4.5" }
+jrsonnet-lexer = { path = "./crates/jrsonnet-lexer", version = "0.5.0-pre98" }
+jrsonnet-pkg = { path = "./crates/jrsonnet-pkg", version = "0.5.0-pre98" }
+jrsonnet-gcmodule = { version = "0.5.0" }
 # Diagnostics.
 # hi-doc is my library, which handles text formatting very well, but isn't polished enough yet
 # Previous implementation was based on annotate-snippets, which I don't like for many reasons.
@@ -31,8 +45,7 @@ jrsonnet-gcmodule = { version = "0.4.5" }
 # I'm against using miette, because I want to reuse data between interpreter and annotations, yet miette
 #   and other libraries want to handle spans etc by itself, which is okay for compiler diagnostics, but is
 #   bad for interpreter, where interpreter and parser are paired much closer.
-hi-doc = "0.3.0"
-annotate-snippets = "0.12.11"
+hi-doc = { version = "0.3.0", default-features = false }
 
 # CLI
 clap = "4.5"
@@ -52,6 +65,13 @@ thiserror = "2.0.18"
 
 # Code formatting
 dprint-core = "0.67.4"
+
+# Evaluator
+stacker = "0.1.23"
+smallvec = "1.15.1"
+educe = { version = "0.6.0", default-features = false }
+url = "2.5.8"
+rustversion = "1.0.22"
 
 # Stdlib hashing functions
 md5 = "0.8.0"
@@ -87,7 +107,7 @@ itertools = "0.14.0"
 xshell = "0.2.7"
 
 regex = "1.12"
-lru = "0.17.0"
+lru = "0.18.0"
 
 syn-dissect-closure = "0.1.0"
 phf = { version = "0.13", features = ["macros"] }
@@ -95,6 +115,27 @@ phf = { version = "0.13", features = ["macros"] }
 # Tests/benchmarks
 insta = { version = "1.46", features = ["glob"] }
 criterion = { version = "0.8" }
+strip-ansi-escapes = "0.2.1"
+nix = { version = "0.31", features = ["process"] }
+
+# Web
+wasm-bindgen = "=0.2.106"
+wasm-bindgen-futures = "0.4.56"
+js-sys = "0.3.83"
+console_error_panic_hook = "0.1"
+getrandom = "0.3.4"
+
+# Bundler
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+reqwest = { version = "0.13", default-features = false, features = [
+  "blocking",
+] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+directories = "6.0.0"
+gix = { version = "0.83.0", features = ["blocking-network-client"] }
+camino = { version = "1.2.2", features = ["serde1"] }
+rustls = { version = "0.23", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

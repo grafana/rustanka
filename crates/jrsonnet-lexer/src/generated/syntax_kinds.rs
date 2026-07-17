@@ -128,7 +128,7 @@ pub enum SyntaxKind {
 	SINGLE_LINE_SLASH_COMMENT,
 	#[regex("#[^\\r\\n]*?(\\r\\n|\\n)?")]
 	SINGLE_LINE_HASH_COMMENT,
-	#[regex("/\\*([^*]|\\*[^/])*\\*/")]
+	#[regex("/\\*([^*]|\\*+[^*/])*\\*+/")]
 	MULTI_LINE_COMMENT,
 	#[regex("/\\*/")]
 	ERROR_COMMENT_TOO_SHORT,

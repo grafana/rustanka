@@ -1,0 +1,13 @@
+---
+source: crates/jrsonnet-rowan-parser/src/tests.rs
+expression: "/** unterminated\n"
+---
+SOURCE_FILE@0..17
+  ERROR_COMMENT_UNTERMINATED@0..17 "/** unterminated\n"
+  EXPR@17..17
+    ERROR_MISSING_TOKEN@17..17
+===
+LocatedSyntaxError { error: Missing { expected: Named("expression") }, range: 17..17 }
+===
+   ·                  ╭── missing expression
+1  │ /** unterminated

@@ -29,7 +29,7 @@ pub fn offset_to_location<const S: usize>(file: &str, offsets: &[u32; S]) -> [Co
 		return [CodeLocation::default(); S];
 	}
 	let mut line = 1;
-	let mut column = 1;
+	let mut column = 0;
 	let max_offset = *offsets.iter().max().expect("offsets is not empty");
 
 	let mut offset_map = offsets
@@ -63,7 +63,7 @@ pub fn offset_to_location<const S: usize>(file: &str, offsets: &[u32; S]) -> [Co
 		}
 		if ch == '\n' {
 			line += 1;
-			column = 1;
+			column = 0;
 
 			for idx in with_no_known_line_ending.drain(..) {
 				out[idx].line_end_offset = pos;
@@ -98,14 +98,14 @@ pub mod tests {
 				CodeLocation {
 					offset: 0,
 					line: 1,
-					column: 2,
+					column: 1,
 					line_start_offset: 0,
 					line_end_offset: 11,
 				},
 				CodeLocation {
 					offset: 14,
 					line: 2,
-					column: 4,
+					column: 3,
 					line_start_offset: 12,
 					line_end_offset: 67
 				}

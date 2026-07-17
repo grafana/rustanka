@@ -8,6 +8,7 @@ use std::{
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::{IBytes, IStr};
+use url::Url;
 
 use crate::location::{CodeLocation, location_to_offset, offset_to_location};
 
@@ -182,6 +183,28 @@ impl SourcePathT for SourceFile {
 	}
 	fn path(&self) -> Option<&Path> {
 		Some(&self.0)
+	}
+	any_ext_impl!(SourcePathT);
+}
+
+#[derive(Acyclic, Hash, PartialEq, Eq, Debug)]
+pub struct SourceUrl(Url);
+impl SourceUrl {
+	pub fn new(url: Url) -> Self {
+		Self(url)
+	}
+}
+impl Display for SourceUrl {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+impl SourcePathT for SourceUrl {
+	fn is_default(&self) -> bool {
+		false
+	}
+	fn path(&self) -> Option<&Path> {
+		None
 	}
 	any_ext_impl!(SourcePathT);
 }

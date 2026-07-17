@@ -1,5 +1,8 @@
 [package]
 name = "jrsonnet-formatter"
+description = "Jsonnet source code formatter library"
+keywords = ["jsonnet", "formatter"]
+categories = ["development-tools"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +14,7 @@ dprint-core.workspace = true
 hi-doc.workspace = true
 indoc.workspace = true
 insta.workspace = true
-jrsonnet-lexer = { version = "0.5.0-pre97", path = "../jrsonnet-lexer" }
+jrsonnet-lexer.workspace = true
 jrsonnet-rowan-parser.workspace = true
 
 [lints]

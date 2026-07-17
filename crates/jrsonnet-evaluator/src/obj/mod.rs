@@ -17,13 +17,15 @@ use jrsonnet_ir::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 mod oop;
+mod static_shape;
 
 pub use jrsonnet_ir::Visibility;
 pub use oop::ObjValueBuilder;
+pub use static_shape::{ObjShape, ObjShapeBuilder, ShapeField, StaticShapeOopObject};
 
 use crate::{
 	CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
-	arr::{PickObjectKeyValues, PickObjectValues},
+	arr::{PickObjectKeyValues, PickObjectValues, arridx},
 	bail,
 	error::{ErrorKind::*, suggest_object_fields},
 	evaluate::operator::evaluate_add_op,
@@ -99,7 +101,7 @@ impl FieldSortKey {
 #[derive(Clone, Copy, Acyclic)]
 pub struct ObjFieldFlags(u8);
 impl ObjFieldFlags {
-	fn new(add: bool, visibility: Visibility) -> Self {
+	pub fn new(add: bool, visibility: Visibility) -> Self {
 		let mut v = 0;
 		if add {
 			v |= 1;
@@ -140,7 +142,7 @@ pub struct ObjMember {
 	pub location: Option<Span>,
 }
 
-cc_dyn!(CcObjectAssertion, ObjectAssertion);
+cc_dyn!(CcObjectAssertion, ObjectAssertion, pub fn new() {...});
 pub trait ObjectAssertion: Trace {
 	fn run(&self, sup_this: SupThis) -> Result<()>;
 }
@@ -203,6 +205,10 @@ pub trait ObjectCore: Trace + Any + Debug {
 	fn field_visibility_core(&self, field: IStr) -> FieldVisibility;
 
 	fn run_assertions_core(&self, sup_this: SupThis) -> Result<()>;
+
+	fn has_assertion(&self) -> bool {
+		false
+	}
 }
 
 #[derive(Clone, Trace)]
@@ -481,17 +487,17 @@ impl SupThis {
 	/// Exists when super appears outside of `super.field`/`"field" in super` expressions
 	/// Exclusive to jrsonnet.
 	///
-	/// Might return `NoSuperFound` error.
-	pub fn standalone_super(&self) -> Result<ObjValue> {
+	/// Returns None if no `super` found
+	pub fn standalone_super(&self) -> Option<ObjValue> {
 		if !self.sup.super_exists() {
-			bail!(NoSuperFound)
+			return None;
 		}
 		let mut out = ObjValue::builder();
 		out.extend_with_core(StandaloneSuperCore {
 			sup: self.sup,
 			this: self.this.clone(),
 		});
-		Ok(out.build())
+		Some(out.build())
 	}
 	pub fn this(&self) -> &ObjValue {
 		&self.this
@@ -567,11 +573,14 @@ impl ObjValue {
 	// }
 	/// Returns amount of visible object fields
 	/// If object only contains hidden fields - may return zero.
-	pub fn len(&self) -> u32 {
+	pub fn len(&self) -> usize {
 		self.fields_visibility()
 			.values()
 			.filter(|d| d.visible())
-			.count() as u32
+			.count()
+	}
+	pub fn len32(&self) -> u32 {
+		arridx(self.len())
 	}
 	/// For each field, calls callback.
 	/// If callback returns false - ends iteration prematurely.
@@ -682,7 +691,7 @@ impl ObjValue {
 				Entry::Vacant(v) => {
 					v.insert(CacheValue::Pending);
 				}
-			};
+			}
 		}
 		let result = self.get_idx_uncached(key, core);
 		{
@@ -978,6 +987,56 @@ impl ObjValue {
 
 		out
 	}
+	pub fn fields_with_visibility(
+		&self,
+		#[cfg(feature = "exp-preserve-order")] preserve_order: bool,
+	) -> Vec<(IStr, Visibility)> {
+		#[cfg(feature = "exp-preserve-order")]
+		if preserve_order {
+			let (mut fields, mut keys): (Vec<_>, Vec<_>) = self
+				.fields_visibility()
+				.into_iter()
+				.enumerate()
+				.map(|(idx, (k, d))| {
+					(
+						(
+							k,
+							d.exists_visible.expect("non-existing fields filtered out"),
+						),
+						(d.sort_key(), idx),
+					)
+				})
+				.unzip();
+			keys.sort_unstable_by_key(|v| v.0);
+			for i in 0..fields.len() {
+				let x = fields[i].clone();
+				let mut j = i;
+				loop {
+					let k = keys[j].1;
+					keys[j].1 = j;
+					if k == i {
+						break;
+					}
+					fields[j] = fields[k].clone();
+					j = k;
+				}
+				fields[j] = x;
+			}
+			return fields;
+		}
+		let mut fields: Vec<_> = self
+			.fields_visibility()
+			.into_iter()
+			.map(|(k, d)| {
+				(
+					k,
+					d.exists_visible.expect("non-existing fields filtered out"),
+				)
+			})
+			.collect();
+		fields.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+		fields
+	}
 	pub fn fields_ex(
 		&self,
 		include_hidden: bool,
@@ -1133,7 +1192,7 @@ impl<Kind> ObjMemberBuilder<Kind> {
 pub struct ExtendBuilder<'v>(&'v mut ObjValue);
 impl ObjMemberBuilder<ExtendBuilder<'_>> {
 	pub fn value(self, value: impl Into<Val>) {
-		self.binding(MaybeUnbound::Bound(Thunk::evaluated(value.into())));
+		self.binding(MaybeUnbound::Const(value.into()));
 	}
 	pub fn bindable(self, bindable: impl Unbound<Bound = Val>) {
 		self.binding(MaybeUnbound::Unbound(CcUnbound::new(bindable)));

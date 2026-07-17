@@ -15,7 +15,7 @@ pub mod visit;
 pub use location::CodeLocation;
 pub use source::{
 	Source, SourceDefaultIgnoreJpath, SourceDirectory, SourceFifo, SourceFile, SourcePath,
-	SourcePathT, SourceVirtual,
+	SourcePathT, SourceUrl, SourceVirtual,
 };
 
 // It seels to be a wrong place for this kind of stuff, but as it would also be used for static analysis and

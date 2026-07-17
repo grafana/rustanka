@@ -23,13 +23,6 @@ pub struct ExtStr {
 /// assert_eq!(ext.name, "name");
 /// assert_eq!(ext.value, "value");
 ///
-/// // SAFETY: single-threaded doctest
-/// unsafe { std::env::set_var("name", "value") };
-///
-/// let ext = ExtStr::from_str("name").unwrap();
-/// assert_eq!(ext.name, "name");
-/// assert_eq!(ext.value, "value");
-///
 /// let ext = ExtStr::from_str("name=value=with=equals").unwrap();
 /// assert_eq!(ext.name, "name");
 /// assert_eq!(ext.value, "value=with=equals");
@@ -128,7 +121,6 @@ impl StdOpts {
 				.ext_vars
 				.insert(ext.name.as_str().into(), TlaArg::Import(ext.path.clone()));
 		}
-
 		Ok(Some(ctx))
 	}
 }

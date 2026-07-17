@@ -1,10 +1,8 @@
 {
   lib,
   runCommand,
-  jsonnet-bundler,
-  cacert,
   stdenv,
-  fetchFromGitHub,
+  fetchJrq,
   go-jsonnet,
   sjsonnet,
   cpp-jsonnet,
@@ -17,35 +15,16 @@ with lib;
 let
   inherit (cpp-jsonnet) jsonnetBench;
   inherit (go-jsonnet) goJsonnetBench;
-  graalvmBench = fetchFromGitHub {
-    owner = "oracle";
-    repo = "graal";
-    rev = "bc305df3fe587960f7635f0185571500e5988475";
-    hash = "sha256-4EKB1b2o4/qtYQ+nqbbs621OJrtjApsAWEBcw5EjrYc=";
+  realworldVendor = fetchJrq {
+    name = "realworld-vendor";
+    lockfile = ../tests/realworld/jsonnetfile.lock.json;
+    vendorHash = "sha256-oEUzM6Bhu8ZT8vCtYDbBEjG5BFHYpID+1/2pgXvIAgo=";
   };
-  kubePrometheusBench =
-    let
-      src = fetchFromGitHub {
-        owner = "prometheus-operator";
-        repo = "kube-prometheus";
-        rev = "d3889807798d1697ea0691f10caf1b6a1997a8bd";
-        hash = "sha256-TeYWHzoZAmDp2PzT7EH8XRUcvb3tR8Qfxel7o2QBvIM=";
-      };
-    in
-    runCommand "kube-prometheus-vendor"
-      {
-        outputHash = "sha256-AGc0dHlD/Ld7I5b1+gOotzJkYrn+bB1VjISdD5NITtw=";
-        outputHashMode = "recursive";
-        buildInputs = [ cacert ];
-      }
-      ''
-        mkdir -p $out
-        cp -r ${src}/* $out/
-        cd $out
-        chmod u+w jsonnetfile.lock.json
-        mkdir vendor
-        ${jsonnet-bundler}/bin/jb install
-      '';
+  realworldBench = runCommand "realworld-bench" { } ''
+    mkdir -p $out
+    cp ${../tests/realworld}/*.jsonnet ${../tests/realworld}/*.libsonnet $out/
+    cp -r ${realworldVendor} $out/vendor
+  '';
 
   # Removes outsiders from the output
   # Useful when comparing performance of different jrsonnet releases
@@ -77,8 +56,11 @@ stdenv.mkDerivation {
           skipScala ? "",
           skipCpp ? "",
           skipGo ? "",
-          vendor ? "",
+          jpaths ? [ ],
         }:
+        let
+          jpathArgs = concatMapStrings (p: " -J ${p}") jpaths;
+        in
         ''
           echo >> $out
           echo "=== ${name}" >> $out
@@ -122,35 +104,29 @@ stdenv.mkDerivation {
               concatStringsSep " " (
                 forEach jrsonnetVariants (
                   variant:
-                  "\"${variant.drv}/bin/jrsonnet $path${optionalString (vendor != "") " -J${vendor}"}\" -n \"Rust${
+                  "\"${variant.drv}/bin/jrsonnet $path${jpathArgs}\" -n \"Rust${
                     if variant.name != "" then " (${variant.name})" else ""
                   }\""
                 )
               )
             } \
             ${
-              optionalString (skipRustAlternative == "")
-                "\"rsjsonnet $path${
-                  optionalString (vendor != "") " -J ${vendor}"
-                }\" -n \"Rust (alternative, rsjsonnet)\""
+              optionalString (
+                skipRustAlternative == ""
+              ) "\"rsjsonnet $path${jpathArgs}\" -n \"Rust (alternative, rsjsonnet)\""
             } \
+            ${optionalString (skipGo == "") "\"go-jsonnet $path${jpathArgs}\" -n \"Go\""} \
             ${
-              optionalString (skipGo == "")
-                "\"go-jsonnet $path${optionalString (vendor != "") " -J ${vendor}"}\" -n \"Go\""
-            } \
-            ${
-              optionalString (skipScala == "")
-                "\"sjsonnet-native $path${optionalString (vendor != "") " -J ${vendor}"}\" -n \"Scala (native)\""
+              optionalString (skipScala == "") "\"sjsonnet-native $path${jpathArgs}\" -n \"Scala (native)\""
             } \
             ${
               # My aarch64-linux machine can't run graalvm image:
               # The current machine does not support all of the following CPU features that are required by the image: [FP, ASIMD, CRC32, LSE].
-              optionalString (skipScala == "" && stdenv.hostPlatform.system != "aarch64-linux")
-                "\"sjsonnet-graalvm $path${optionalString (vendor != "") " -J ${vendor}"}\" -n \"Scala (GraalVM)\""
+              optionalString (
+                skipScala == "" && stdenv.hostPlatform.system != "aarch64-linux"
+              ) "\"sjsonnet-graalvm $path${jpathArgs}\" -n \"Scala (GraalVM)\""
             } \
-            ${optionalString (skipCpp == "")
-              "\"jsonnet $path${optionalString (vendor != "") " -J ${vendor}"}\" -n \"C++\""
-            }
+            ${optionalString (skipCpp == "") "\"jsonnet $path${jpathArgs}\" -n \"C++\""}
           cat result.adoc >> $out
         '';
     in
@@ -189,17 +165,64 @@ stdenv.mkDerivation {
       ''}
       echo "== Real world" >> $out
       ${mkBench {
-        name = "Graalvm CI";
-        path = "${graalvmBench}/ci.jsonnet";
-        omitSource = true;
-        skipCpp = "takes longer than a hour";
+        name = "GitLab runbooks dashboards";
+        path = "${realworldBench}/entry-gitlab-runbooks.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor"
+          "${realworldBench}/vendor/runbooks/libsonnet"
+          "${realworldBench}/vendor/runbooks/dashboards"
+          "${realworldBench}/vendor/runbooks/services"
+          "${realworldBench}/vendor/runbooks/metrics-catalog"
+        ];
+        skipCpp = "too slow, takes hours, skews results";
         skipGo = skipSlow;
       }}
       ${mkBench {
-        name = "Kube-prometheus manifests";
-        vendor = "${kubePrometheusBench}/vendor";
-        path = "${kubePrometheusBench}/example.jsonnet";
-        omitSource = true;
+        name = "GraalVM CI";
+        path = "${realworldBench}/entry-graalvm.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor/graal"
+        ];
+        skipCpp = "too slow, takes hours, skews results";
+        skipGo = skipSlow;
+      }}
+      ${mkBench {
+        name = "Kube-prometheus";
+        path = "${realworldBench}/entry-kube-prometheus.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor"
+        ];
+        skipCpp = "too slow, takes hours, skews results";
+        skipGo = skipSlow;
+      }}
+      ${mkBench {
+        name = "Loki manifests";
+        path = "${realworldBench}/entry-loki.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor"
+          "${realworldBench}"
+        ];
+        skipCpp = "too slow, takes hours, skews results";
+        skipGo = skipSlow;
+      }}
+      ${mkBench {
+        name = "Mimir manifests";
+        path = "${realworldBench}/entry-mimir.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor"
+          "${realworldBench}"
+        ];
+        skipCpp = "too slow, takes hours, skews results";
+        skipGo = skipSlow;
+        skipScala = "https://github.com/databricks/sjsonnet/issues/829";
+      }}
+      ${mkBench {
+        name = "Tempo manifests";
+        path = "${realworldBench}/entry-tempo.jsonnet";
+        jpaths = [
+          "${realworldBench}/vendor"
+          "${realworldBench}"
+        ];
         skipCpp = "too slow, takes hours, skews results";
         skipGo = skipSlow;
       }}

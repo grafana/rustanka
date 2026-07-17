@@ -1,31 +1,40 @@
 ---
 source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1082
 expression: "format!(\"{v:#?}\")"
 ---
 AssertExpr(
     AssertExpr {
         assert: AssertStmt {
             assertion: Index {
-                indexable: Literal(
-                    True,
+                indexable: Trivial(
+                    Bool(
+                        true,
+                    ),
                 ),
                 parts: [
                     IndexPart {
                         span: virtual:<test>:12-17,
-                        value: Literal(
-                            False,
+                        value: Trivial(
+                            Bool(
+                                false,
+                            ),
                         ),
                     },
                 ],
             } from virtual:<test>:7-18,
             message: Some(
-                Literal(
-                    False,
+                Trivial(
+                    Bool(
+                        false,
+                    ),
                 ),
             ),
         },
-        rest: Literal(
-            True,
+        rest: Trivial(
+            Bool(
+                true,
+            ),
         ),
     },
 )

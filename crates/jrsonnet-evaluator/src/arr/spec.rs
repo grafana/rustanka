@@ -8,11 +8,12 @@ use std::{
 
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::{IBytes, IStr};
+use jrsonnet_ir::TrivialVal;
 
-use super::ArrValue;
+use super::{ArrValue, arridx};
 use crate::{
 	Context, Error, ObjValue, Result, Thunk, Val,
-	analyze::{ClosureShape, LExpr},
+	analyze::LExpr,
 	error::ErrorKind::InfiniteRecursionDetected,
 	evaluate::evaluate,
 	function::NativeFn,
@@ -21,12 +22,12 @@ use crate::{
 };
 
 pub trait ArrayLike: Any + Trace + Debug {
-	fn len(&self) -> u32;
+	fn len32(&self) -> u32;
 	fn is_empty(&self) -> bool {
-		self.len() == 0
+		self.len32() == 0
 	}
-	fn get(&self, index: u32) -> Result<Option<Val>>;
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>>;
+	fn get32(&self, index: u32) -> Result<Option<Val>>;
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>>;
 
 	fn is_cheap(&self) -> bool {
 		false
@@ -40,15 +41,15 @@ impl<T> ArrayLike for T
 where
 	T: Any + Trace + Debug + ArrayCheap,
 {
-	fn len(&self) -> u32 {
+	fn len32(&self) -> u32 {
 		<T as ArrayCheap>::len(self)
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		Ok(<T as ArrayCheap>::get(self, index))
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		<T as ArrayCheap>::get(self, index).map(Thunk::evaluated)
 	}
 
@@ -80,16 +81,16 @@ impl SliceArray {
 	}
 }
 impl ArrayLike for SliceArray {
-	fn len(&self) -> u32 {
+	fn len32(&self) -> u32 {
 		(self.to - self.from).div_ceil(self.step)
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
-		self.inner.get(self.map_idx(index))
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
+		self.inner.get32(self.map_idx(index))
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
-		self.inner.get_lazy(self.map_idx(index))
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
+		self.inner.get_lazy32(self.map_idx(index))
 	}
 
 	fn is_cheap(&self) -> bool {
@@ -99,12 +100,24 @@ impl ArrayLike for SliceArray {
 
 impl ArrayCheap for IBytes {
 	fn len(&self) -> u32 {
-		self.as_slice().len() as u32
+		arridx(self.as_slice().len())
 	}
 	fn get(&self, index: u32) -> Option<Val> {
 		self.as_slice()
 			.get(index as usize)
 			.map(|v| Val::Num((*v).into()))
+	}
+}
+
+impl ArrayCheap for Rc<Vec<TrivialVal>> {
+	fn get(&self, index: u32) -> Option<Val> {
+		self.as_slice()
+			.get(index as usize)
+			.map(|tv| tv.clone().into())
+	}
+
+	fn len(&self) -> u32 {
+		arridx(self.as_slice().len())
 	}
 }
 
@@ -123,20 +136,20 @@ pub struct ExprArray {
 	cached: Cc<RefCell<Vec<ArrayThunk>>>,
 }
 impl ExprArray {
-	pub fn new(outer: Context, shape: &ClosureShape, src: Rc<Vec<LExpr>>) -> Self {
+	pub fn new(ctx: Context, src: Rc<Vec<LExpr>>) -> Self {
 		Self {
-			ctx: Context::enter_using(&outer, shape),
+			ctx,
 			cached: Cc::new(RefCell::new(vec![ArrayThunk::Waiting; src.len()])),
 			src,
 		}
 	}
 }
 impl ArrayLike for ExprArray {
-	fn len(&self) -> u32 {
-		self.cached.borrow().len() as u32
+	fn len32(&self) -> u32 {
+		arridx(self.cached.borrow().len())
 	}
-	fn get(&self, index: u32) -> Result<Option<Val>> {
-		if index >= self.len() {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
+		if index >= self.len32() {
 			return Ok(None);
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -153,11 +166,19 @@ impl ArrayLike for ExprArray {
 			unreachable!()
 		};
 
-		let new_value: Val = evaluate(self.ctx.clone(), &self.src[index as usize])?;
-		self.cached.borrow_mut()[index as usize] = ArrayThunk::Computed(new_value.clone());
-		Ok(Some(new_value))
+		let result = evaluate(self.ctx.clone(), &self.src[index as usize]);
+		match result {
+			Ok(new_value) => {
+				self.cached.borrow_mut()[index as usize] = ArrayThunk::Computed(new_value.clone());
+				Ok(Some(new_value))
+			}
+			Err(e) => {
+				self.cached.borrow_mut()[index as usize] = ArrayThunk::Waiting;
+				Err(e)
+			}
+		}
 	}
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		#[derive(Trace)]
 		struct ExprArrThunk {
 			expr: ExprArray,
@@ -168,13 +189,13 @@ impl ArrayLike for ExprArray {
 
 			fn get(&self) -> Result<Self::Output> {
 				self.expr
-					.get(self.index)
+					.get32(self.index)
 					.transpose()
 					.expect("index checked")
 			}
 		}
 
-		if index >= self.len() {
+		if index >= self.len32() {
 			return None;
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -204,8 +225,8 @@ pub struct ExtendedArray {
 #[allow(dead_code)]
 impl ExtendedArray {
 	pub fn new(a: ArrValue, b: ArrValue) -> Option<Self> {
-		let a_len = a.len();
-		let b_len = b.len();
+		let a_len = a.len32();
+		let b_len = b.len32();
 		let len = a_len.checked_add(b_len)?;
 		Some(Self {
 			a,
@@ -253,22 +274,22 @@ where
 	}
 }
 impl ArrayLike for ExtendedArray {
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		if self.split > index {
-			self.a.get(index)
+			self.a.get32(index)
 		} else {
-			self.b.get(index - self.split)
+			self.b.get32(index - self.split)
 		}
 	}
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		if self.split > index {
-			self.a.get_lazy(index)
+			self.a.get_lazy32(index)
 		} else {
-			self.b.get_lazy(index - self.split)
+			self.b.get_lazy32(index - self.split)
 		}
 	}
 
-	fn len(&self) -> u32 {
+	fn len32(&self) -> u32 {
 		self.len
 	}
 
@@ -282,18 +303,18 @@ where
 	T: IntoUntyped + Trace + fmt::Debug,
 	for<'a> &'a T: IntoUntyped,
 {
-	fn len(&self) -> u32 {
+	fn len32(&self) -> u32 {
 		self.as_slice().len().try_into().unwrap_or(u32::MAX)
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		let Some(elem) = self.as_slice().get(index as usize) else {
 			return Ok(None);
 		};
 		IntoUntyped::into_untyped(elem).map(Some)
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		let elem = self.as_slice().get(index as usize)?;
 		Some(IntoUntyped::into_lazy_untyped(elem))
 	}
@@ -345,16 +366,16 @@ impl ArrayCheap for RangeArray {
 #[derive(Debug, Trace)]
 pub struct ReverseArray(pub ArrValue);
 impl ArrayLike for ReverseArray {
-	fn len(&self) -> u32 {
-		self.0.len()
+	fn len32(&self) -> u32 {
+		self.0.len32()
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
-		self.0.get(self.0.len() - index - 1)
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
+		self.0.get32(self.0.len32() - index - 1)
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
-		self.0.get_lazy(self.0.len() - index - 1)
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
+		self.0.get_lazy32(self.0.len32() - index - 1)
 	}
 
 	fn is_cheap(&self) -> bool {
@@ -376,7 +397,7 @@ pub struct MappedArray {
 }
 impl MappedArray {
 	pub fn new(inner: ArrValue, mapper: ArrayMapper) -> Self {
-		let len = inner.len();
+		let len = inner.len32();
 		Self {
 			inner,
 			cached: Cc::new(RefCell::new(vec![ArrayThunk::Waiting; len as usize])),
@@ -391,12 +412,12 @@ impl MappedArray {
 	}
 }
 impl ArrayLike for MappedArray {
-	fn len(&self) -> u32 {
-		self.cached.borrow().len() as u32
+	fn len32(&self) -> u32 {
+		arridx(self.cached.borrow().len())
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
-		if index >= self.len() {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
+		if index >= self.len32() {
 			return Ok(None);
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -415,7 +436,7 @@ impl ArrayLike for MappedArray {
 
 		let val = self
 			.inner
-			.get(index)
+			.get32(index)
 			.transpose()
 			.expect("index checked")
 			.and_then(|r| self.evaluate(index, r));
@@ -430,7 +451,7 @@ impl ArrayLike for MappedArray {
 		self.cached.borrow_mut()[index as usize] = ArrayThunk::Computed(new_value.clone());
 		Ok(Some(new_value))
 	}
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		#[derive(Trace)]
 		struct MappedArrayThunk {
 			arr: MappedArray,
@@ -440,11 +461,14 @@ impl ArrayLike for MappedArray {
 			type Output = Val;
 
 			fn get(&self) -> Result<Self::Output> {
-				self.arr.get(self.index).transpose().expect("index checked")
+				self.arr
+					.get32(self.index)
+					.transpose()
+					.expect("index checked")
 			}
 		}
 
-		if index >= self.len() {
+		if index >= self.len32() {
 			return None;
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -473,12 +497,12 @@ impl MakeArray {
 	}
 }
 impl ArrayLike for MakeArray {
-	fn len(&self) -> u32 {
-		self.cached.borrow().len() as u32
+	fn len32(&self) -> u32 {
+		arridx(self.cached.borrow().len())
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
-		if index >= self.len() {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
+		if index >= self.len32() {
 			return Ok(None);
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -495,7 +519,7 @@ impl ArrayLike for MakeArray {
 			unreachable!()
 		};
 
-		let val = self.mapper.call(index as u32);
+		let val = self.mapper.call(index);
 
 		let new_value = match val {
 			Ok(v) => v,
@@ -507,7 +531,7 @@ impl ArrayLike for MakeArray {
 		self.cached.borrow_mut()[index as usize] = ArrayThunk::Computed(new_value.clone());
 		Ok(Some(new_value))
 	}
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		#[derive(Trace)]
 		struct MakeArrayThunk {
 			arr: MakeArray,
@@ -517,11 +541,14 @@ impl ArrayLike for MakeArray {
 			type Output = Val;
 
 			fn get(&self) -> Result<Self::Output> {
-				self.arr.get(self.index).transpose().expect("index checked")
+				self.arr
+					.get32(self.index)
+					.transpose()
+					.expect("index checked")
 			}
 		}
 
-		if index >= self.len() {
+		if index >= self.len32() {
 			return None;
 		}
 		match &self.cached.borrow()[index as usize] {
@@ -545,7 +572,7 @@ pub struct RepeatedArray {
 }
 impl RepeatedArray {
 	pub fn new(data: ArrValue, repeats: u32) -> Option<Self> {
-		let total_len = data.len().checked_mul(repeats)?;
+		let total_len = data.len32().checked_mul(repeats)?;
 		Some(Self {
 			data,
 			repeats,
@@ -556,25 +583,25 @@ impl RepeatedArray {
 		if index > self.total_len {
 			return None;
 		}
-		Some(index % self.data.len())
+		Some(index % self.data.len32())
 	}
 }
 
 impl ArrayLike for RepeatedArray {
-	fn len(&self) -> u32 {
+	fn len32(&self) -> u32 {
 		self.total_len
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		let Some(idx) = self.map_idx(index) else {
 			return Ok(None);
 		};
-		self.data.get(idx)
+		self.data.get32(idx)
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		let idx = self.map_idx(index)?;
-		self.data.get_lazy(idx)
+		self.data.get_lazy32(idx)
 	}
 
 	fn is_cheap(&self) -> bool {
@@ -595,18 +622,18 @@ impl PickObjectValues {
 }
 
 impl ArrayLike for PickObjectValues {
-	fn len(&self) -> u32 {
-		self.keys.len() as u32
+	fn len32(&self) -> u32 {
+		arridx(self.keys.len())
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		let Some(key) = self.keys.as_slice().get(index as usize) else {
 			return Ok(None);
 		};
 		Ok(Some(self.obj.get_or_bail(key.clone())?))
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		let key = self.keys.as_slice().get(index as usize)?;
 		Some(self.obj.get_lazy_or_bail(key.clone()))
 	}
@@ -635,11 +662,11 @@ pub struct KeyValue {
 }
 
 impl ArrayLike for PickObjectKeyValues {
-	fn len(&self) -> u32 {
-		self.keys.len() as u32
+	fn len32(&self) -> u32 {
+		arridx(self.keys.len())
 	}
 
-	fn get(&self, index: u32) -> Result<Option<Val>> {
+	fn get32(&self, index: u32) -> Result<Option<Val>> {
 		let Some(key) = self.keys.as_slice().get(index as usize) else {
 			return Ok(None);
 		};
@@ -652,7 +679,7 @@ impl ArrayLike for PickObjectKeyValues {
 		))
 	}
 
-	fn get_lazy(&self, index: u32) -> Option<Thunk<Val>> {
+	fn get_lazy32(&self, index: u32) -> Option<Thunk<Val>> {
 		let key = self.keys.as_slice().get(index as usize)?;
 		// Nothing can fail in the key part, yet value is still
 		// lazy-evaluated
