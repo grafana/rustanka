@@ -2,10 +2,10 @@ use std::rc::Rc;
 use std::{any::Any, cell::RefCell, future::Future};
 
 use jrsonnet_gcmodule::Acyclic;
-use jrsonnet_parser::{
+use jrsonnet_ir::{
 	ArgsDesc, AssertExpr, AssertStmt, BindSpec, CompSpec, Destruct, Expr, ExprParam, ExprParams,
-	FieldMember, FieldName, ForSpecData, IfElse, IfSpecData, ImportKind, ObjBody, ParserSettings,
-	Slice, SliceDesc, Source, SourcePath, Spanned,
+	FieldMember, FieldName, ForSpecData, IfElse, IfSpecData, ImportKind, ObjBody, Slice, SliceDesc,
+	Source, SourcePath, Spanned,
 };
 use rustc_hash::FxHashMap;
 
@@ -138,7 +138,7 @@ pub fn find_imports(expr: &Spanned<Expr>, out: &mut FoundImports) {
 			if let Expr::Str(s) = &***v {
 				out.0.push(Import {
 					path: ResolvePathOwned::Str(s.to_string()),
-					expression: matches!(&**expr, Expr::Import(ImportKind::Normal, _)),
+					expression: todo!(),
 				});
 			}
 			// Non-string import will fail in runtime
@@ -322,7 +322,7 @@ where
 						};
 						let source = Source::new(path.clone(), code.clone());
 						// If failed - then skip import
-						file.parsed = jrsonnet_parser::parse(&code, &ParserSettings { source })
+						file.parsed = crate::parse_jsonnet(&code, source)
 							.map(Rc::new)
 							.ok();
 						if let Some(parsed) = &file.parsed {

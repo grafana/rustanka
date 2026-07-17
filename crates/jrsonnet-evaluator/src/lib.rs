@@ -7,7 +7,7 @@
 extern crate self as jrsonnet_evaluator;
 
 mod arr;
-pub mod async_import;
+// pub mod async_import;
 mod ctx;
 mod dynamic;
 pub mod error;
@@ -44,10 +44,15 @@ use function::CallLocation;
 pub use import::*;
 use jrsonnet_gcmodule::{cc_dyn, Cc, Trace};
 pub use jrsonnet_interner::{IBytes, IStr};
+pub use jrsonnet_ir as parser;
+use jrsonnet_ir::{Expr, Source, SourcePath};
 #[doc(hidden)]
 pub use jrsonnet_macros;
-pub use jrsonnet_parser as parser;
-use jrsonnet_parser::{Expr, ParserSettings, Source, SourcePath, Spanned};
+
+#[cfg(not(any(feature = "ir-parser", feature = "peg-parser")))]
+compile_error!("at least one of `ir-parser` or `peg-parser` features must be enabled");
+
+pub use error::{SyntaxError, SyntaxErrorLocation};
 pub use obj::*;
 pub use rustc_hash;
 use rustc_hash::FxHashMap;
@@ -56,6 +61,67 @@ pub use tla::apply_tla;
 pub use val::{Thunk, Val};
 
 use crate::gc::WithCapacityExt as _;
+
+#[allow(clippy::needless_return)]
+pub(crate) fn parse_jsonnet(code: &str, source: Source) -> Result<Expr, SyntaxError> {
+	#[cfg(feature = "peg-parser")]
+	{
+		static USE_LEGACY_PARSER: LazyLock<bool> =
+			LazyLock::new(|| std::env::var_os("JRSONNET_LEGACY_PARSER").is_some());
+
+		if USE_LEGACY_PARSER {
+			return parse_peg(code, source);
+		}
+	}
+	#[cfg(feature = "ir-parser")]
+	{
+		return parse_ir(code, source);
+	}
+	#[cfg(feature = "peg-parser")]
+	{
+		return parse_peg(code, source);
+	}
+}
+
+#[cfg(feature = "ir-parser")]
+fn parse_ir(code: &str, source: Source) -> Result<Expr, SyntaxError> {
+	jrsonnet_ir_parser::parse(code, &jrsonnet_ir_parser::ParserSettings { source }).map_err(|e| {
+		SyntaxError {
+			message: e.message,
+			location: SyntaxErrorLocation {
+				offset: e.location.offset,
+			},
+		}
+	})
+}
+
+#[cfg(feature = "peg-parser")]
+fn parse_peg(code: &str, source: Source) -> Result<Expr, SyntaxError> {
+	jrsonnet_peg_parser::parse(code, &jrsonnet_peg_parser::ParserSettings { source }).map_err(|e| {
+		let message = e
+			.expected
+			.tokens()
+			.find(|t| t.starts_with("!!!"))
+			.map_or_else(
+				|| {
+					format!(
+						"expected {}, got {:?}",
+						e.expected,
+						code.chars()
+							.nth(e.location.offset)
+							.map_or_else(|| "EOF".into(), |c: char| c.to_string())
+					)
+				},
+				|v| v[3..].into(),
+			);
+		SyntaxError {
+			message,
+			location: SyntaxErrorLocation {
+				offset: e.location.offset,
+			},
+		}
+	})
+}
 
 cc_dyn!(
 	#[derive(Clone)]
@@ -200,7 +266,7 @@ enum CachedEvaluation {
 struct FileData {
 	string: Option<IStr>,
 	bytes: Option<IBytes>,
-	parsed: Option<Rc<Spanned<Expr>>>,
+	parsed: Option<Rc<Expr>>,
 	evaluated: Option<CachedEvaluation>,
 
 	evaluating: bool,
@@ -366,17 +432,12 @@ impl State {
 		let file_name = Source::new(path.clone(), code.clone());
 		if file.parsed.is_none() {
 			file.parsed = Some(
-				jrsonnet_parser::parse(
-					&code,
-					&ParserSettings {
-						source: file_name.clone(),
-					},
-				)
-				.map(Rc::new)
-				.map_err(|e| ImportSyntaxError {
-					path: file_name.clone(),
-					error: Box::new(e),
-				})?,
+				parse_jsonnet(&code, file_name.clone())
+					.map(Rc::new)
+					.map_err(|e| ImportSyntaxError {
+						path: file_name.clone(),
+						error: Box::new(e),
+					})?,
 			);
 		}
 		let parsed = file.parsed.as_ref().expect("just set").clone();
@@ -503,13 +564,7 @@ impl State {
 	pub fn evaluate_snippet(&self, name: impl Into<IStr>, code: impl Into<IStr>) -> Result<Val> {
 		let code = code.into();
 		let source = Source::new_virtual(name.into(), code.clone());
-		let parsed = jrsonnet_parser::parse(
-			&code,
-			&ParserSettings {
-				source: source.clone(),
-			},
-		)
-		.map_err(|e| ImportSyntaxError {
+		let parsed = parse_jsonnet(&code, source.clone()).map_err(|e| ImportSyntaxError {
 			path: source.clone(),
 			error: Box::new(e),
 		})?;
@@ -524,13 +579,7 @@ impl State {
 	) -> Result<Val> {
 		let code = code.into();
 		let source = Source::new_virtual(name.into(), code.clone());
-		let parsed = jrsonnet_parser::parse(
-			&code,
-			&ParserSettings {
-				source: source.clone(),
-			},
-		)
-		.map_err(|e| ImportSyntaxError {
+		let parsed = parse_jsonnet(&code, source.clone()).map_err(|e| ImportSyntaxError {
 			path: source.clone(),
 			error: Box::new(e),
 		})?;

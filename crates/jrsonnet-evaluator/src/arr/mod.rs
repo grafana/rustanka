@@ -7,7 +7,7 @@ use std::{
 
 use jrsonnet_gcmodule::{cc_dyn, Cc};
 use jrsonnet_interner::IBytes;
-use jrsonnet_parser::{Expr, Spanned};
+use jrsonnet_ir::Expr;
 
 use crate::{function::NativeFn, Context, Result, Thunk, Val};
 
@@ -38,7 +38,7 @@ impl ArrValue {
 		Self::new(RangeArray::empty())
 	}
 
-	pub fn expr(ctx: Context, exprs: Rc<Vec<Spanned<Expr>>>) -> Self {
+	pub fn expr(ctx: Context, exprs: Rc<Vec<Expr>>) -> Self {
 		Self::new(ExprArray::new(ctx, exprs))
 	}
 

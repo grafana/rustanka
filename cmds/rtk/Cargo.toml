@@ -30,7 +30,7 @@ sha2 = "0.10"
 jrsonnet-evaluator.workspace = true
 jrsonnet-lint.workspace = true
 jrsonnet-stdlib.workspace = true
-jrsonnet-parser.workspace = true
+jrsonnet-ir.workspace = true
 jrsonnet-macros.workspace = true
 jrsonnet-gcmodule.workspace = true
 

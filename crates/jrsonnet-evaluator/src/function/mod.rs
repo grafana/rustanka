@@ -3,8 +3,8 @@ use std::{fmt::Debug, rc::Rc};
 use educe::Educe;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
+use jrsonnet_ir::{ArgsDesc, Destruct, Expr, ExprParams, Span};
 pub use jrsonnet_macros::builtin;
-use jrsonnet_parser::{ArgsDesc, Destruct, Expr, ExprParams, Span, Spanned};
 
 use self::{
 	builtin::{Builtin, StaticBuiltin},
@@ -24,7 +24,7 @@ mod prepared;
 pub use native::NativeFn;
 pub use prepared::PreparedFuncVal;
 
-pub use jrsonnet_parser::function::*;
+pub use jrsonnet_ir::function::*;
 
 /// Function callsite location.
 /// Either from other jsonnet code, specified by expression location, or from native (without location).
@@ -71,7 +71,7 @@ pub struct FuncDesc {
 	/// Function parameter definition
 	pub params: ExprParams,
 	/// Function body
-	pub body: Rc<Spanned<Expr>>,
+	pub body: Rc<Expr>,
 }
 impl FuncDesc {
 	/// Create body context, but fill arguments without defaults with lazy error
@@ -256,7 +256,7 @@ impl FuncVal {
 					#[cfg(feature = "exp-destruct")]
 					_ => return false,
 				};
-				**desc.body == Expr::Var(id.clone())
+				matches!(&*desc.body, Expr::Var(v) if &**v == id)
 			}
 			_ => false,
 		}

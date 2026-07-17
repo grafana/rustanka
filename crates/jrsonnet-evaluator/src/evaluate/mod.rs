@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{
+use jrsonnet_ir::{
 	function::ParamName, ArgsDesc, AssertStmt, BinaryOpType, BindSpec, CompSpec, Expr, ExprParams,
 	FieldMember, FieldName, ForSpecData, IfSpecData, ImportKind, LiteralType, ObjBody, ObjMembers,
 	Spanned,
@@ -16,7 +16,7 @@ use crate::{
 	bail,
 	destructure::evaluate_dest,
 	error::{suggest_object_fields, ErrorKind::*},
-	evaluate::operator::{evaluate_add_op, evaluate_binary_op_special, evaluate_unary_op},
+	evaluate::operator::{evaluate_binary_op_special, evaluate_unary_op},
 	function::{CallLocation, FuncDesc, FuncVal},
 	gc::WithCapacityExt as _,
 	in_frame,
@@ -47,9 +47,9 @@ pub fn ensure_sufficient_stack<R>(f: impl FnOnce() -> R) -> R {
 	stacker::maybe_grow(RED_ZONE, STACK_PER_RECURSION, f)
 }
 
-pub fn evaluate_trivial(expr: &Spanned<Expr>) -> Option<Val> {
-	fn is_trivial(expr: &Spanned<Expr>) -> bool {
-		match &**expr {
+pub fn evaluate_trivial(expr: &Expr) -> Option<Val> {
+	fn is_trivial(expr: &Expr) -> bool {
+		match expr {
 			Expr::Str(_)
 			| Expr::Num(_)
 			| Expr::Literal(LiteralType::False | LiteralType::True | LiteralType::Null) => true,
@@ -57,7 +57,7 @@ pub fn evaluate_trivial(expr: &Spanned<Expr>) -> Option<Val> {
 			_ => false,
 		}
 	}
-	Some(match &**expr {
+	Some(match expr {
 		Expr::Str(s) => Val::string(s.clone()),
 		Expr::Num(n) => {
 			Val::Num(NumValue::new(*n).expect("parser will not allow non-finite values"))
@@ -80,12 +80,7 @@ pub fn evaluate_trivial(expr: &Spanned<Expr>) -> Option<Val> {
 	})
 }
 
-pub fn evaluate_method(
-	ctx: Context,
-	name: IStr,
-	params: ExprParams,
-	body: Rc<Spanned<Expr>>,
-) -> Val {
+pub fn evaluate_method(ctx: Context, name: IStr, params: ExprParams, body: Rc<Expr>) -> Val {
 	Val::Func(FuncVal::Normal(Cc::new(FuncDesc {
 		name,
 		ctx,
@@ -94,19 +89,19 @@ pub fn evaluate_method(
 	})))
 }
 
-pub fn evaluate_field_name(ctx: Context, field_name: &FieldName) -> Result<Option<IStr>> {
-	Ok(match field_name {
+pub fn evaluate_field_name(ctx: Context, field_name: &Spanned<FieldName>) -> Result<Option<IStr>> {
+	Ok(match &field_name.value {
 		FieldName::Fixed(n) => Some(n.clone()),
 		FieldName::Dyn(expr) => in_frame(
-			CallLocation::new(&expr.span()),
+			CallLocation::new(&field_name.span),
 			|| "evaluating field name".to_string(),
 			|| {
-				let value = evaluate(ctx, expr)?;
-				if matches!(value, Val::Null) {
-					Ok(None)
+				let v = evaluate(ctx, expr)?;
+				Ok(if matches!(v, Val::Null) {
+					None
 				} else {
-					Ok(Some(IStr::from_untyped(value)?))
-				}
+					Some(IStr::from_untyped(v)?)
+				})
 			},
 		)?,
 	})
@@ -119,46 +114,51 @@ pub fn evaluate_comp(
 ) -> Result<()> {
 	match specs.first() {
 		None => callback(ctx)?,
-		Some(CompSpec::IfSpec(IfSpecData(cond))) => {
+		Some(CompSpec::IfSpec(IfSpecData { cond, span: _ })) => {
 			if bool::from_untyped(evaluate(ctx.clone(), cond)?)? {
 				evaluate_comp(ctx, &specs[1..], callback)?;
 			}
 		}
-		Some(CompSpec::ForSpec(ForSpecData(var, expr))) => match evaluate(ctx.clone(), expr)? {
-			Val::Arr(list) => {
-				for item in list.iter_lazy() {
-					let fctx = Pending::new();
-					let mut new_bindings = FxHashMap::with_capacity(var.binds_len());
-					destruct(var, item, fctx.clone(), &mut new_bindings)?;
-					let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
+		Some(CompSpec::ForSpec(ForSpecData {
+			destruct: into,
+			over,
+		})) => {
+			match evaluate(ctx.clone(), over)? {
+				Val::Arr(list) => {
+					for item in list.iter_lazy() {
+						let fctx = Pending::new();
+						let mut new_bindings = FxHashMap::with_capacity(into.binds_len());
+						destruct(into, item, fctx.clone(), &mut new_bindings)?;
+						let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
 
-					evaluate_comp(ctx, &specs[1..], callback)?;
+						evaluate_comp(ctx, &specs[1..], callback)?;
+					}
 				}
-			}
-			#[cfg(feature = "exp-object-iteration")]
-			Val::Obj(obj) => {
-				for field in obj.fields(
-					// TODO: Should there be ability to preserve iteration order?
-					#[cfg(feature = "exp-preserve-order")]
-					false,
-				) {
-					let fctx = Pending::new();
-					let mut new_bindings = FxHashMap::with_capacity(var.binds_len());
-					let obj = obj.clone();
-					let value = Thunk::evaluated(Val::Arr(ArrValue::lazy(vec![
-						Thunk::evaluated(Val::string(field.clone())),
-						Thunk!(move || obj.get(field).transpose().expect(
-							"field exists, as field name was obtained from object.fields()",
-						)),
-					])));
-					destruct(var, value, fctx.clone(), &mut new_bindings)?;
-					let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
+				#[cfg(feature = "exp-object-iteration")]
+				Val::Obj(obj) => {
+					for field in obj.fields(
+						// TODO: Should there be ability to preserve iteration order?
+						#[cfg(feature = "exp-preserve-order")]
+						false,
+					) {
+						let fctx = Pending::new();
+						let mut new_bindings = FxHashMap::with_capacity(into.binds_len());
+						let obj = obj.clone();
+						let value = Thunk::evaluated(Val::Arr(ArrValue::lazy(vec![
+							Thunk::evaluated(Val::string(field.clone())),
+							Thunk!(move || obj.get(field).transpose().expect(
+								"field exists, as field name was obtained from object.fields()",
+							)),
+						])));
+						destruct(into, value, fctx.clone(), &mut new_bindings)?;
+						let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
 
-					evaluate_comp(ctx, &specs[1..], callback)?;
+						evaluate_comp(ctx, &specs[1..], callback)?;
+					}
 				}
+				_ => bail!(InComprehensionCanOnlyIterateOverArray),
 			}
-			_ => bail!(InComprehensionCanOnlyIterateOverArray),
-		},
+		}
 	}
 	Ok(())
 }
@@ -221,7 +221,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 			#[derive(Trace)]
 			struct UnboundValue<B: Trace> {
 				uctx: B,
-				value: Rc<Spanned<Expr>>,
+				value: Rc<Expr>,
 				name: IStr,
 			}
 			impl<B: Unbound<Bound = Context>> Unbound for UnboundValue<B> {
@@ -235,7 +235,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 				.field(name.clone())
 				.with_add(*plus)
 				.with_visibility(*visibility)
-				.with_location(value.span())
+				.with_location(field.name.span.clone())
 				.bindable(UnboundValue {
 					uctx,
 					value: value.clone(),
@@ -251,7 +251,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 			#[derive(Trace)]
 			struct UnboundMethod<B: Trace> {
 				uctx: B,
-				value: Rc<Spanned<Expr>>,
+				value: Rc<Expr>,
 				params: ExprParams,
 				name: IStr,
 			}
@@ -270,7 +270,7 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 			builder
 				.field(name.clone())
 				.with_visibility(*visibility)
-				.with_location(value.span())
+				// .with_location(value.span())
 				.bindable(UnboundMethod {
 					uctx,
 					value: value.clone(),
@@ -282,47 +282,86 @@ pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
 	Ok(())
 }
 
+#[derive(Trace, Clone)]
+struct DirectUnbound(Context);
+impl Unbound for DirectUnbound {
+	type Bound = Context;
+	fn bind(&self, sup_this: SupThis) -> Result<Context> {
+		Ok(self
+			.0
+			.clone()
+			.extend_bindings_sup_this(FxHashMap::new(), sup_this))
+	}
+}
+
 #[allow(clippy::too_many_lines)]
-pub fn evaluate_member_list_object(ctx: Context, members: &ObjMembers) -> Result<ObjValue> {
-	let mut builder = ObjValueBuilder::new();
-	let locals = members.locals.clone();
-
-	// We have single context for all fields, so we can cache binds
-	let uctx = CachedUnbound::new(evaluate_object_locals(ctx.clone(), locals));
-
-	for field in &members.fields {
-		evaluate_field_member(&mut builder, ctx.clone(), uctx.clone(), field)?;
+pub fn evaluate_member_list_object(
+	super_obj: Option<ObjValue>,
+	ctx: Context,
+	members: &ObjMembers,
+) -> Result<ObjValue> {
+	#[derive(Trace)]
+	struct ObjectAssert<B: Trace> {
+		uctx: B,
+		asserts: Rc<Vec<AssertStmt>>,
+	}
+	impl<B: Unbound<Bound = Context>> ObjectAssertion for ObjectAssert<B> {
+		fn run(&self, sup_this: SupThis) -> Result<()> {
+			let ctx = self.uctx.bind(sup_this)?;
+			for assert in &*self.asserts {
+				evaluate_assert(ctx.clone(), assert)?;
+			}
+			Ok(())
+		}
 	}
 
-	if !members.asserts.is_empty() {
-		#[derive(Trace)]
-		struct ObjectAssert<B: Trace> {
-			uctx: B,
-			asserts: Rc<Vec<AssertStmt>>,
+	let mut builder = ObjValueBuilder::new();
+	if let Some(super_obj) = super_obj {
+		builder.with_super(super_obj);
+	}
+
+	if members.locals.is_empty() {
+		// We can use the same context for all field evaluation, it doesn't depends on locals, only on this/super
+		let uctx = DirectUnbound(ctx.clone());
+		for field in &members.fields {
+			evaluate_field_member(&mut builder, ctx.clone(), uctx.clone(), field)?;
 		}
-		impl<B: Unbound<Bound = Context>> ObjectAssertion for ObjectAssert<B> {
-			fn run(&self, sup_this: SupThis) -> Result<()> {
-				let ctx = self.uctx.bind(sup_this)?;
-				for assert in &*self.asserts {
-					evaluate_assert(ctx.clone(), assert)?;
-				}
-				Ok(())
-			}
+		if !members.asserts.is_empty() {
+			builder.assert(ObjectAssert {
+				uctx,
+				asserts: members.asserts.clone(),
+			});
 		}
-		builder.assert(ObjectAssert {
-			uctx,
-			asserts: members.asserts.clone(),
-		});
+	} else {
+		let locals = members.locals.clone();
+		// We have single context for all fields, so we can cache them together
+		let uctx = CachedUnbound::new(evaluate_object_locals(ctx.clone(), locals));
+		for field in &members.fields {
+			evaluate_field_member(&mut builder, ctx.clone(), uctx.clone(), field)?;
+		}
+		if !members.asserts.is_empty() {
+			builder.assert(ObjectAssert {
+				uctx,
+				asserts: members.asserts.clone(),
+			});
+		}
 	}
 
 	Ok(builder.build())
 }
 
-pub fn evaluate_object(ctx: Context, object: &ObjBody) -> Result<ObjValue> {
+pub fn evaluate_object(
+	super_obj: Option<ObjValue>,
+	ctx: Context,
+	object: &ObjBody,
+) -> Result<ObjValue> {
 	Ok(match object {
-		ObjBody::MemberList(members) => evaluate_member_list_object(ctx, members)?,
+		ObjBody::MemberList(members) => evaluate_member_list_object(super_obj, ctx, members)?,
 		ObjBody::ObjComp(obj) => {
 			let mut builder = ObjValueBuilder::new();
+			if let Some(super_obj) = super_obj {
+				builder.with_super(super_obj);
+			}
 			let locals = obj.locals.clone();
 			evaluate_comp(ctx, &obj.compspecs, &mut |ctx| {
 				let uctx = evaluate_object_locals(ctx.clone(), locals.clone());
@@ -337,7 +376,7 @@ pub fn evaluate_object(ctx: Context, object: &ObjBody) -> Result<ObjValue> {
 
 pub fn evaluate_apply(
 	ctx: Context,
-	value: &Spanned<Expr>,
+	value: &Expr,
 	args: &ArgsDesc,
 	loc: CallLocation<'_>,
 	tailstrict: bool,
@@ -360,13 +399,13 @@ pub fn evaluate_assert(ctx: Context, assertion: &AssertStmt) -> Result<()> {
 	let value = &assertion.0;
 	let msg = &assertion.1;
 	let assertion_result = in_frame(
-		CallLocation::new(&value.span()),
+		CallLocation::new(&value.span),
 		|| "assertion condition".to_owned(),
 		|| bool::from_untyped(evaluate(ctx.clone(), value)?),
 	)?;
 	if !assertion_result {
 		in_frame(
-			CallLocation::new(&value.span()),
+			CallLocation::new(&value.span),
 			|| "assertion failure".to_owned(),
 			|| {
 				if let Some(msg) = msg {
@@ -379,30 +418,29 @@ pub fn evaluate_assert(ctx: Context, assertion: &AssertStmt) -> Result<()> {
 	Ok(())
 }
 
-pub fn evaluate_named_param(ctx: Context, expr: &Spanned<Expr>, name: ParamName) -> Result<Val> {
+pub fn evaluate_named_param(ctx: Context, expr: &Expr, name: ParamName) -> Result<Val> {
 	match name {
 		ParamName::Named(name) => evaluate_named(ctx, expr, name),
 		ParamName::Unnamed => evaluate(ctx, expr),
 	}
 }
 
-pub fn evaluate_named(ctx: Context, expr: &Spanned<Expr>, name: IStr) -> Result<Val> {
+pub fn evaluate_named(ctx: Context, expr: &Expr, name: IStr) -> Result<Val> {
 	use Expr::*;
-	Ok(match &**expr {
+	Ok(match expr {
 		Function(params, body) => evaluate_method(ctx, name, params.clone(), body.clone()),
 		_ => evaluate(ctx, expr)?,
 	})
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
+pub fn evaluate(ctx: Context, expr: &Expr) -> Result<Val> {
 	use Expr::*;
 
 	if let Some(trivial) = evaluate_trivial(expr) {
 		return Ok(trivial);
 	}
-	let loc = expr.span();
-	Ok(match &**expr {
+	Ok(match expr {
 		Literal(LiteralType::This) => Val::Obj(ctx.try_this()?),
 		Literal(LiteralType::Super) => Val::Obj(ctx.try_sup_this()?.standalone_super()?),
 		Literal(LiteralType::Dollar) => Val::Obj(ctx.try_dollar()?),
@@ -418,7 +456,7 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 		// because the standalone super literal is not supported, that is because in other
 		// implementations `in super` treated differently from `in smth_else`.
 		BinaryOp(bin)
-			if matches!(&*bin.rhs, Expr::Literal(LiteralType::Super))
+			if matches!(&bin.rhs, Expr::Literal(LiteralType::Super))
 				&& bin.op == BinaryOpType::In =>
 		{
 			let sup_this = ctx.try_sup_this()?;
@@ -433,13 +471,13 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 		BinaryOp(bin) => evaluate_binary_op_special(ctx, &bin.lhs, bin.op, &bin.rhs)?,
 		UnaryOp(o, v) => evaluate_unary_op(*o, &evaluate(ctx, v)?)?,
 		Var(name) => in_frame(
-			CallLocation::new(&loc),
-			|| format!("local <{name}> access"),
-			|| ctx.binding(name.clone())?.evaluate(),
+			CallLocation::new(&name.span),
+			|| format!("local <{}> access", &**name),
+			|| ctx.binding((**name).clone())?.evaluate(),
 		)?,
 		Index { indexable, parts } => ensure_sufficient_stack(|| {
 			let mut parts = parts.iter();
-			let mut indexable = if matches!(&***indexable, Expr::Literal(LiteralType::Super)) {
+			let mut indexable = if matches!(&**indexable, Expr::Literal(LiteralType::Super)) {
 				let part = parts.next().expect("at least part should exist");
 				// sup_this existence check might also be skipped here for null-coalesce...
 				// But I believe this might cause errors.
@@ -464,7 +502,7 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 				let name = name.into_flat();
 				match sup_this
 					.get_super(name.clone())
-					.with_description_src(&part.value, || format!("field <{name}> access"))?
+					.with_description_src(&part.span, || format!("field <{name}> access"))?
 				{
 					Some(v) => v,
 					#[cfg(feature = "exp-null-coaelse")]
@@ -486,7 +524,7 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 				indexable = match (indexable, evaluate(ctx.clone(), &part.value)?) {
 					(Val::Obj(v), Val::Str(key)) => match v
 						.get(key.clone().into_flat())
-						.with_description_src(&part.value, || format!("field <{key}> access"))?
+						.with_description_src(&part.span, || format!("field <{key}> access"))?
 					{
 						Some(v) => v,
 						#[cfg(feature = "exp-null-coaelse")]
@@ -498,7 +536,7 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 								key.clone().into_flat(),
 								suggestions,
 							)))
-							.with_description_src(&part.value, || format!("field <{key}> access"));
+							.with_description_src(&part.span, || format!("field <{key}> access"));
 						}
 					},
 					(Val::Obj(_), n) => bail!(ValueIndexMustBeTypeGot(
@@ -585,13 +623,16 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 			})?;
 			Val::Arr(ArrValue::lazy(out))
 		}
-		Obj(body) => Val::Obj(evaluate_object(ctx, body)?),
-		ObjExtend(a, b) => evaluate_add_op(
-			&evaluate(ctx.clone(), a)?,
-			&Val::Obj(evaluate_object(ctx, b)?),
-		)?,
+		Obj(body) => Val::Obj(evaluate_object(None, ctx, body)?),
+		ObjExtend(a, b) => {
+			let base = evaluate(ctx.clone(), a)?;
+			match base {
+				Val::Obj(base_obj) => Val::Obj(evaluate_object(Some(base_obj), ctx, b)?),
+				_ => bail!("ObjExtend lhs should be an object value"),
+			}
+		}
 		Apply(value, args, tailstrict) => ensure_sufficient_stack(|| {
-			evaluate_apply(ctx, value, args, CallLocation::new(&loc), *tailstrict)
+			evaluate_apply(ctx, value, args, CallLocation::new(&args.span), *tailstrict)
 		})?,
 		Function(params, body) => {
 			evaluate_method(ctx, "anonymous".into(), params.clone(), body.clone())
@@ -600,16 +641,16 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 			evaluate_assert(ctx.clone(), &assert.assert)?;
 			evaluate(ctx, &assert.rest)?
 		}
-		ErrorStmt(e) => in_frame(
-			CallLocation::new(&loc),
+		ErrorStmt(s, e) => in_frame(
+			CallLocation::new(s),
 			|| "error statement".to_owned(),
 			|| bail!(RuntimeError(evaluate(ctx, e)?.to_string()?,)),
 		)?,
 		IfElse(if_else) => {
 			if in_frame(
-				CallLocation::new(&loc),
+				CallLocation::new(&if_else.cond.span),
 				|| "if condition".to_owned(),
-				|| bool::from_untyped(evaluate(ctx.clone(), &if_else.cond.0)?),
+				|| bool::from_untyped(evaluate(ctx.clone(), &if_else.cond.cond)?),
 			)? {
 				evaluate(ctx, &if_else.cond_then)?
 			} else {
@@ -621,14 +662,13 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 		}
 		Slice(slice) => {
 			fn parse_idx<T: Typed + FromUntyped>(
-				loc: CallLocation<'_>,
 				ctx: Context,
 				expr: Option<&Spanned<Expr>>,
 				desc: &'static str,
 			) -> Result<Option<T>> {
 				if let Some(value) = expr {
 					Ok(in_frame(
-						loc,
+						CallLocation::new(&value.span),
 						|| format!("slice {desc}"),
 						|| <Option<T>>::from_untyped(evaluate(ctx, value)?),
 					)?)
@@ -638,24 +678,23 @@ pub fn evaluate(ctx: Context, expr: &Spanned<Expr>) -> Result<Val> {
 			}
 
 			let indexable = evaluate(ctx.clone(), &slice.value)?;
-			let loc = CallLocation::new(&loc);
 
-			let start = parse_idx(loc, ctx.clone(), slice.slice.start.as_ref(), "start")?;
-			let end = parse_idx(loc, ctx.clone(), slice.slice.end.as_ref(), "end")?;
-			let step = parse_idx(loc, ctx, slice.slice.step.as_ref(), "step")?;
+			let start = parse_idx(ctx.clone(), slice.slice.start.as_ref(), "start")?;
+			let end = parse_idx(ctx.clone(), slice.slice.end.as_ref(), "end")?;
+			let step = parse_idx(ctx, slice.slice.step.as_ref(), "step")?;
 
 			IndexableVal::into_untyped(indexable.into_indexable()?.slice(start, end, step)?)?
 		}
 		Import(kind, path) => {
-			let Expr::Str(path) = &***path else {
+			let Expr::Str(path) = &**path else {
 				bail!("computed imports are not supported")
 			};
-			let tmp = loc.clone().0;
 			with_state(|s| {
-				let resolved_path = s.resolve_from(tmp.source_path(), path)?;
-				Ok(match kind {
+				let span = &kind.span;
+				let resolved_path = s.resolve_from(span.0.source_path(), path)?;
+				Ok(match &**kind {
 					ImportKind::Normal => in_frame(
-						CallLocation::new(&loc),
+						CallLocation::new(span),
 						|| format!("import {:?}", path.clone()),
 						|| s.import_resolved(resolved_path),
 					)?,

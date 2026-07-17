@@ -13,12 +13,12 @@ use std::{
 use educe::Educe;
 use jrsonnet_gcmodule::{cc_dyn, Acyclic, Cc, Trace, Weak};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::Span;
+use jrsonnet_ir::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 mod oop;
 
-pub use jrsonnet_parser::Visibility;
+pub use jrsonnet_ir::Visibility;
 pub use oop::ObjValueBuilder;
 
 use crate::{
@@ -250,6 +250,8 @@ cc_dyn!(
 struct ObjValueInner {
 	cores: Vec<CcObjectCore>,
 	assertions_ran: Cell<bool>,
+	#[trace(skip)]
+	has_assertions: bool,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
 }
 
@@ -317,6 +319,7 @@ thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
 		cores: vec![],
 		assertions_ran: Cell::new(true),
+		has_assertions: false,
 		value_cache: RefCell::default(),
 	}))
 }
@@ -538,12 +541,15 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		let mut cores = sup.0.cores.clone();
+		let mut cores = Vec::with_capacity(sup.0.cores.len() + self.0.cores.len());
+		cores.extend(sup.0.cores.iter().cloned());
 		cores.extend(self.0.cores.iter().cloned());
+		let has_assertions = sup.0.has_assertions || self.0.has_assertions;
 		ObjValue(Cc::new(ObjValueInner {
 			cores,
 			value_cache: RefCell::default(),
-			assertions_ran: Cell::new(false),
+			assertions_ran: Cell::new(!has_assertions),
+			has_assertions,
 		}))
 	}
 	// #[must_use]
@@ -669,7 +675,8 @@ impl ObjValue {
 		if !is_in_assertion() {
 			self.run_assertions()?;
 		}
-		let mut add_stack = Vec::with_capacity(2);
+		let mut first_add = None;
+		let mut add_stack: Vec<Val> = Vec::new();
 		let mut skip = Saturating(0);
 		for (sup, core) in self.0.cores[..core.idx].iter().enumerate().rev() {
 			let sup_this = SupThis {
@@ -677,7 +684,7 @@ impl ObjValue {
 				this: self.clone(),
 			};
 			match core.0.get_for_core(key.clone(), sup_this, skip.0 != 0)? {
-				GetFor::Final(val) if add_stack.is_empty() => {
+				GetFor::Final(val) if first_add.is_none() => {
 					if skip.0 == 0 {
 						return Ok(Some(val));
 					}
@@ -690,33 +697,36 @@ impl ObjValue {
 				}
 				GetFor::SuperPlus(val) => {
 					if skip.0 == 0 {
-						add_stack.push(val);
+						if first_add.is_none() {
+							first_add = Some(val);
+						} else {
+							add_stack.push(val);
+						}
 					}
 				}
 				GetFor::Omit(new_skip) => {
-					// +1 including this core
 					skip = skip.max(new_skip + Saturating(1));
 				}
 				GetFor::NotFound => {}
 			}
 			skip -= 1;
 		}
-		if add_stack.is_empty() {
-			// None of layers had this field
-			return Ok(None);
-		} else if add_stack.len() == 1 {
-			// A layer had this field, but it wanted this field to be added with super.
-			// However, no super had this field, fail-safe
+		let Some(first) = first_add else {
+			if add_stack.is_empty() {
+				return Ok(None);
+			}
 			return Ok(Some(add_stack.pop().expect("single element on stack")));
+		};
+		if add_stack.is_empty() {
+			return Ok(Some(first));
 		}
+		add_stack.insert(0, first);
 		let mut values = add_stack.into_iter().rev();
 		let init = values.next().expect("at least 2 elements");
 
 		values
 			.try_fold(init, |a, b| evaluate_add_op(&a, &b))
 			.map(Some)
-
-		// self.0.get_raw(key, this)
 	}
 
 	pub fn get_or_bail(&self, key: IStr) -> Result<Val> {

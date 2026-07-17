@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+default = ["ir-parser"]
+ir-parser = ["jrsonnet-evaluator/ir-parser"]
+peg-parser = ["jrsonnet-evaluator/peg-parser"]
+exp-destruct = ["jrsonnet-evaluator/exp-destruct"]
+exp-null-coaelse = ["jrsonnet-evaluator/exp-null-coaelse"]
+
 [lints]
 workspace = true
 

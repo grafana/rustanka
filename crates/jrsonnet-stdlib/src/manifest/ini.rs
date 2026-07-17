@@ -3,9 +3,8 @@ use std::collections::BTreeMap;
 use jrsonnet_evaluator::{
 	manifest::{ManifestFormat, ToStringFormat},
 	typed::{FromUntyped, Typed},
-	ObjValue, Result, ResultExt, Val,
+	IStr, ObjValue, Result, ResultExt, Val,
 };
-use jrsonnet_parser::IStr;
 
 pub struct IniFormat {
 	#[cfg(feature = "exp-preserve-order")]

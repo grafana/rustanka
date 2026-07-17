@@ -3,7 +3,7 @@ use std::{any::Any, cell::RefCell, fmt::Debug, mem::replace};
 
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::{IBytes, IStr};
-use jrsonnet_parser::{Expr, Spanned};
+use jrsonnet_ir::Expr;
 
 use super::ArrValue;
 use crate::function::NativeFn;
@@ -118,11 +118,11 @@ enum ArrayThunk {
 #[derive(Debug, Trace, Clone)]
 pub struct ExprArray {
 	ctx: Context,
-	src: Rc<Vec<Spanned<Expr>>>,
+	src: Rc<Vec<Expr>>,
 	cached: Cc<RefCell<Vec<ArrayThunk>>>,
 }
 impl ExprArray {
-	pub fn new(ctx: Context, src: Rc<Vec<Spanned<Expr>>>) -> Self {
+	pub fn new(ctx: Context, src: Rc<Vec<Expr>>) -> Self {
 		Self {
 			ctx,
 			cached: Cc::new(RefCell::new(vec![ArrayThunk::Waiting; src.len()])),
