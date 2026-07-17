@@ -2,13 +2,14 @@ use std::{
 	any::Any,
 	fmt::{self},
 	num::NonZeroU32,
+	rc::Rc,
 };
 
 use jrsonnet_gcmodule::{cc_dyn, Cc};
 use jrsonnet_interner::IBytes;
-use jrsonnet_parser::AnalyzedExpr;
+use jrsonnet_parser::{Expr, Spanned};
 
-use crate::{function::FuncVal, Context, Result, Thunk, Val};
+use crate::{function::NativeFn, Context, Result, Thunk, Val};
 
 mod spec;
 pub use spec::{ArrayLike, *};
@@ -37,7 +38,7 @@ impl ArrValue {
 		Self::new(RangeArray::empty())
 	}
 
-	pub fn expr(ctx: Context, exprs: impl IntoIterator<Item = AnalyzedExpr>) -> Self {
+	pub fn expr(ctx: Context, exprs: Rc<Vec<Spanned<Expr>>>) -> Self {
 		Self::new(ExprArray::new(ctx, exprs))
 	}
 
@@ -61,13 +62,13 @@ impl ArrValue {
 	}
 
 	#[must_use]
-	pub fn map(self, mapper: FuncVal) -> Self {
-		Self::new(<MappedArray<false>>::new(self, mapper))
+	pub fn map(self, mapper: NativeFn!((Val) -> Val)) -> Self {
+		Self::new(<MappedArray>::new(self, ArrayMapper::Plain(mapper)))
 	}
 
 	#[must_use]
-	pub fn map_with_index(self, mapper: FuncVal) -> Self {
-		Self::new(<MappedArray<true>>::new(self, mapper))
+	pub fn map_with_index(self, mapper: NativeFn!((u32, Val) -> Val)) -> Self {
+		Self::new(<MappedArray>::new(self, ArrayMapper::WithIndex(mapper)))
 	}
 
 	pub fn filter(self, filter: impl Fn(&Val) -> Result<bool>) -> Result<Self> {
@@ -77,7 +78,7 @@ impl ArrValue {
 			let i = i?;
 			if filter(&i)? {
 				out.push(i);
-			};
+			}
 		}
 		Ok(Self::eager(out))
 	}
@@ -92,14 +93,11 @@ impl ArrValue {
 		} else if b.is_empty() {
 			a
 		} else if let (Some(a), Some(b)) = (a.iter_cheap(), b.iter_cheap()) {
-			// Both arrays are cheap to iterate - create eager array
 			let mut out = Vec::with_capacity(a.len() + b.len());
 			out.extend(a);
 			out.extend(b);
 			Self::eager(out)
 		} else {
-			// At least one array requires evaluation - create lazy array
-			// Still flatten, but with lazy thunks
 			let mut out = Vec::with_capacity(a.len() + b.len());
 			out.extend(a.iter_lazy());
 			out.extend(b.iter_lazy());

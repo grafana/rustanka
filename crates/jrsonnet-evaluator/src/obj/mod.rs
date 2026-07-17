@@ -1,10 +1,11 @@
 use std::{
 	any::Any,
 	cell::{Cell, RefCell},
+	clone::Clone,
+	cmp::Reverse,
 	collections::hash_map::Entry,
 	fmt::{self, Debug},
 	hash::{Hash, Hasher},
-	mem,
 	num::Saturating,
 	ops::ControlFlow,
 };
@@ -12,23 +13,26 @@ use std::{
 use educe::Educe;
 use jrsonnet_gcmodule::{cc_dyn, Acyclic, Cc, Trace, Weak};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{Span, Visibility};
+use jrsonnet_parser::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+mod oop;
+
+pub use jrsonnet_parser::Visibility;
+pub use oop::ObjValueBuilder;
 
 use crate::{
 	arr::{PickObjectKeyValues, PickObjectValues},
 	bail,
 	error::{suggest_object_fields, ErrorKind::*},
-	function::{CallLocation, FuncVal},
-	gc::WithCapacityExt as _,
-	identity_hash, in_frame,
+	identity_hash,
 	operator::evaluate_add_op,
 	val::{ArrValue, ThunkValue},
 	CcUnbound, MaybeUnbound, Result, Thunk, Unbound, Val,
 };
 
 #[cfg(not(feature = "exp-preserve-order"))]
-mod ordering {
+pub mod ordering {
 	#![allow(
 		// This module works as stub for preserve-order feature
 		clippy::unused_self,
@@ -36,15 +40,19 @@ mod ordering {
 
 	use jrsonnet_gcmodule::Trace;
 
-	#[derive(Clone, Copy, Default, Debug, Trace)]
+	#[derive(Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord)]
 	pub struct FieldIndex(());
 	impl FieldIndex {
+		pub fn absolute(_v: u32) -> Self {
+			Self(())
+		}
+		#[must_use]
 		pub const fn next(self) -> Self {
 			Self(())
 		}
 	}
 
-	#[derive(Clone, Copy, Default, Debug, Trace)]
+	#[derive(Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord)]
 	pub struct SuperDepth(());
 	impl SuperDepth {
 		pub(super) fn deepen(self) {}
@@ -52,14 +60,16 @@ mod ordering {
 }
 
 #[cfg(feature = "exp-preserve-order")]
-mod ordering {
-	use std::cmp::Reverse;
-
+pub mod ordering {
 	use jrsonnet_gcmodule::Trace;
 
 	#[derive(Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord)]
 	pub struct FieldIndex(u32);
 	impl FieldIndex {
+		pub fn absolute(v: u32) -> Self {
+			Self(v)
+		}
+		#[must_use]
 		pub fn next(self) -> Self {
 			Self(self.0 + 1)
 		}
@@ -69,22 +79,20 @@ mod ordering {
 	pub struct SuperDepth(u32);
 	impl SuperDepth {
 		pub(super) fn deepen(&mut self) {
-			self.0 += 1
-		}
-	}
-
-	#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-	pub struct FieldSortKey(Reverse<SuperDepth>, FieldIndex);
-	impl FieldSortKey {
-		pub fn new(depth: SuperDepth, index: FieldIndex) -> Self {
-			Self(Reverse(depth), index)
+			self.0 += 1;
 		}
 	}
 }
 
-#[cfg(feature = "exp-preserve-order")]
-use ordering::FieldSortKey;
 use ordering::{FieldIndex, SuperDepth};
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct FieldSortKey(Reverse<SuperDepth>, FieldIndex);
+impl FieldSortKey {
+	pub fn new(depth: SuperDepth, index: FieldIndex) -> Self {
+		Self(Reverse(depth), index)
+	}
+}
 
 // 0 - add
 //  12 - visibility
@@ -147,27 +155,7 @@ enum CacheValue {
 	Pending,
 }
 
-#[allow(clippy::module_name_repetitions)]
-#[derive(Trace, Default)]
-#[trace(tracking(force))]
-pub struct OopObject {
-	assertions: Vec<CcObjectAssertion>,
-	this_entries: FxHashMap<IStr, ObjMember>,
-}
-impl Debug for OopObject {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("OopObject")
-			.field("this_entries", &self.this_entries)
-			.finish_non_exhaustive()
-	}
-}
-impl OopObject {
-	fn is_empty(&self) -> bool {
-		self.assertions.is_empty() && self.this_entries.is_empty()
-	}
-}
-
-type EnumFieldsHandler<'a> =
+pub type EnumFieldsHandler<'a> =
 	dyn FnMut(SuperDepth, FieldIndex, IStr, EnumFields) -> ControlFlow<()> + 'a;
 
 pub enum EnumFields {
@@ -257,177 +245,10 @@ cc_dyn!(
 	CcObjectCore, ObjectCore,
 	pub fn new() {...}
 );
-
-/// Either a flat Vec of cores or a nested LayeredCores reference.
-#[derive(Trace, Debug)]
-enum CoreSegment {
-	Flat(Vec<CcObjectCore>),
-	Nested(LayeredCores),
-}
-impl CoreSegment {
-	fn len(&self) -> usize {
-		match self {
-			CoreSegment::Flat(v) => v.len(),
-			CoreSegment::Nested(lc) => lc.len(),
-		}
-	}
-}
-
-/// A layered linked list of `CcObjectCore`s. Clone is O(1) via Cc.
-/// `extend` creates a new node with `self` as parent — O(new_cores.len()).
-/// `extend_layered` creates a new node with a nested LayeredCores — O(1).
-/// Iteration walks the chain (parent first, then current).
-#[derive(Trace, Debug)]
-#[trace(tracking(force))]
-struct LayeredCoresInner {
-	parent: Option<LayeredCores>,
-	parent_len: usize,
-	current: CoreSegment,
-}
-
-#[derive(Trace, Debug)]
-struct LayeredCores(Cc<LayeredCoresInner>);
-impl Clone for LayeredCores {
-	fn clone(&self) -> Self {
-		Self(self.0.clone())
-	}
-}
-impl LayeredCores {
-	fn new(cores: Vec<CcObjectCore>) -> Self {
-		Self(Cc::new(LayeredCoresInner {
-			parent: None,
-			parent_len: 0,
-			current: CoreSegment::Flat(cores),
-		}))
-	}
-	fn empty() -> Self {
-		Self::new(vec![])
-	}
-	fn extend(self, mut more: Vec<CcObjectCore>) -> Self {
-		more.shrink_to_fit();
-		let parent_len = self.len();
-		Self(Cc::new(LayeredCoresInner {
-			parent: Some(self),
-			parent_len,
-			current: CoreSegment::Flat(more),
-		}))
-	}
-	/// Create a new layer with a nested LayeredCores as the current segment — O(1).
-	fn extend_layered(self, more: LayeredCores) -> Self {
-		if more.is_empty() {
-			return self;
-		}
-		let parent_len = self.len();
-		Self(Cc::new(LayeredCoresInner {
-			parent: Some(self),
-			parent_len,
-			current: CoreSegment::Nested(more),
-		}))
-	}
-	fn len(&self) -> usize {
-		self.0.parent_len + self.0.current.len()
-	}
-	fn is_empty(&self) -> bool {
-		self.len() == 0
-	}
-	/// Iterate all cores in forward order with absolute index, calling f for each.
-	fn for_each_enumerated(&self, f: &mut dyn FnMut(usize, &CcObjectCore)) {
-		if let Some(parent) = &self.0.parent {
-			parent.for_each_enumerated(f);
-		}
-		let offset = self.0.parent_len;
-		match &self.0.current {
-			CoreSegment::Flat(v) => {
-				for (i, core) in v.iter().enumerate() {
-					f(offset + i, core);
-				}
-			}
-			CoreSegment::Nested(lc) => {
-				lc.for_each_enumerated(&mut |idx, core| f(offset + idx, core));
-			}
-		}
-	}
-	/// Iterate cores in reverse order, calling f for each.
-	fn for_each_rev(&self, f: &mut dyn FnMut(&CcObjectCore)) {
-		match &self.0.current {
-			CoreSegment::Flat(v) => {
-				for core in v.iter().rev() {
-					f(core);
-				}
-			}
-			CoreSegment::Nested(lc) => lc.for_each_rev(f),
-		}
-		if let Some(parent) = &self.0.parent {
-			parent.for_each_rev(f);
-		}
-	}
-	/// Iterate cores [0..limit) in reverse order with absolute index.
-	/// Returns `Break` if the callback broke early, `Continue` otherwise.
-	fn for_each_rev_up_to(
-		&self,
-		limit: usize,
-		f: &mut dyn FnMut(usize, &CcObjectCore) -> ControlFlow<()>,
-	) -> ControlFlow<()> {
-		let offset = self.0.parent_len;
-		match &self.0.current {
-			CoreSegment::Flat(v) => {
-				let end = limit.saturating_sub(offset).min(v.len());
-				for i in (0..end).rev() {
-					f(offset + i, &v[i])?;
-				}
-			}
-			CoreSegment::Nested(lc) => {
-				let nested_limit = limit.saturating_sub(offset).min(lc.len());
-				if nested_limit > 0 {
-					lc.for_each_rev_up_to(nested_limit, &mut |idx, core| f(offset + idx, core))?;
-				}
-			}
-		}
-		if let Some(parent) = &self.0.parent {
-			parent.for_each_rev_up_to(limit.min(offset), f)?;
-		}
-		ControlFlow::Continue(())
-	}
-	/// Like for_each_rev_up_to but the callback can return Result.
-	fn try_for_each_rev_up_to(
-		&self,
-		limit: usize,
-		f: &mut dyn FnMut(usize, &CcObjectCore) -> Result<ControlFlow<()>, crate::error::Error>,
-	) -> Result<ControlFlow<()>, crate::error::Error> {
-		let offset = self.0.parent_len;
-		match &self.0.current {
-			CoreSegment::Flat(v) => {
-				let end = limit.saturating_sub(offset).min(v.len());
-				for i in (0..end).rev() {
-					match f(offset + i, &v[i])? {
-						ControlFlow::Continue(()) => {}
-						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
-					}
-				}
-			}
-			CoreSegment::Nested(lc) => {
-				let nested_limit = limit.saturating_sub(offset).min(lc.len());
-				if nested_limit > 0 {
-					match lc.try_for_each_rev_up_to(nested_limit, &mut |idx, core| {
-						f(offset + idx, core)
-					})? {
-						ControlFlow::Continue(()) => {}
-						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
-					}
-				}
-			}
-		}
-		if let Some(parent) = &self.0.parent {
-			return parent.try_for_each_rev_up_to(limit.min(offset), f);
-		}
-		Ok(ControlFlow::Continue(()))
-	}
-}
-
 #[derive(Trace, Educe)]
 #[educe(Debug)]
 struct ObjValueInner {
-	cores: LayeredCores,
+	cores: Vec<CcObjectCore>,
 	assertions_ran: Cell<bool>,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
 }
@@ -435,7 +256,13 @@ struct ObjValueInner {
 thread_local! {
 	static RUNNING_ASSERTIONS: RefCell<FxHashSet<ObjValue>> = RefCell::default();
 }
-
+fn is_asserting(obj: &ObjValue) -> bool {
+	RUNNING_ASSERTIONS.with_borrow(|v| v.contains(obj))
+}
+/// Returns false if already asserting
+fn start_asserting(obj: &ObjValue) -> bool {
+	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()))
+}
 // == Rustanka custom features ==
 
 // Feature 1: SKIP_ASSERTIONS - skip all assertions during manifest generation (Go-Tanka compat)
@@ -469,13 +296,13 @@ impl Drop for AssertionGuard {
 	}
 }
 
-fn is_asserting(obj: &ObjValue) -> bool {
-	RUNNING_ASSERTIONS.with_borrow(|v| v.contains(obj))
+/// Resets all thread-local state in obj to defaults.
+pub fn reset_obj_thread_locals() {
+	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
+	SKIP_ASSERTIONS.with(|v| v.set(false));
+	ASSERTION_DEPTH.with(|v| v.set(0));
 }
-/// Returns false if already asserting
-fn start_asserting(obj: &ObjValue) -> bool {
-	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()))
-}
+
 fn finish_asserting(obj: &ObjValue) {
 	RUNNING_ASSERTIONS.with_borrow_mut(|v| {
 		let r = v.remove(obj);
@@ -486,18 +313,11 @@ fn finish_asserting(obj: &ObjValue) {
 	});
 }
 
-/// Resets all thread-local state in obj.rs to defaults.
-pub fn reset_obj_thread_locals() {
-	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
-	SKIP_ASSERTIONS.with(|v| v.set(false));
-	ASSERTION_DEPTH.with(|v| v.set(0));
-}
-
 thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
-		cores: LayeredCores::empty(),
+		cores: vec![],
 		assertions_ran: Cell::new(true),
-		value_cache: Default::default(),
+		value_cache: RefCell::default(),
 	}))
 }
 
@@ -510,7 +330,7 @@ pub struct ObjValue(
 
 impl ObjValue {
 	pub fn empty() -> Self {
-		EMPTY_OBJ.with(|v| v.clone())
+		EMPTY_OBJ.with(Clone::clone)
 	}
 	pub fn is_empty(&self) -> bool {
 		self.0.cores.is_empty() || self.len() == 0
@@ -544,14 +364,13 @@ impl ObjectCore for StandaloneSuperCore {
 			return Ok(GetFor::NotFound);
 		}
 		let v = self.this.get_idx(key, self.sup)?;
-		Ok(v.map_or(GetFor::NotFound, |v| GetFor::Final(v)))
+		Ok(v.map_or(GetFor::NotFound, GetFor::Final))
 	}
 
 	fn field_visibility_core(&self, field: IStr) -> FieldVisibility {
-		match self.this.field_visibility_idx(field, self.sup) {
-			Some(c) => FieldVisibility::Found(c),
-			None => FieldVisibility::NotFound,
-		}
+		self.this
+			.field_visibility_idx(field, self.sup)
+			.map_or(FieldVisibility::NotFound, FieldVisibility::Found)
 	}
 
 	fn run_assertions_core(&self, _sup_this: SupThis) -> Result<()> {
@@ -572,12 +391,13 @@ impl ObjectCore for OmitFieldsCore {
 	) -> bool {
 		let mut fi = FieldIndex::default();
 		for f in &self.omit {
-			if let ControlFlow::Break(()) = handler(
+			if handler(
 				*super_depth,
 				fi,
 				f.clone(),
 				EnumFields::Omit(Saturating(self.prev_layers)),
-			) {
+			) == ControlFlow::Break(())
+			{
 				return false;
 			}
 			fi = fi.next();
@@ -672,7 +492,7 @@ impl SupThis {
 		}
 	}
 }
-#[derive(Trace, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Trace, PartialEq, Eq, Hash, Debug)]
 pub struct WeakSupThis {
 	sup: CoreIdx,
 	this: WeakObjValue,
@@ -718,9 +538,10 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		// Chain sup's cores with self's cores — O(1) via nested LayeredCores.
+		let mut cores = sup.0.cores.clone();
+		cores.extend(self.0.cores.iter().cloned());
 		ObjValue(Cc::new(ObjValueInner {
-			cores: sup.0.cores.clone().extend_layered(self.0.cores.clone()),
+			cores,
 			value_cache: RefCell::default(),
 			assertions_ran: Cell::new(false),
 		}))
@@ -757,16 +578,13 @@ impl ObjValue {
 		handler: &mut EnumFieldsHandler<'_>,
 		idx: CoreIdx,
 	) -> bool {
-		let mut result = true;
-		let _ = self.0.cores.for_each_rev_up_to(idx.idx, &mut |_, core| {
+		for core in self.0.cores[..idx.idx].iter().rev() {
 			if !core.0.enum_fields_core(super_depth, handler) {
-				result = false;
-				return ControlFlow::Break(());
+				return false;
 			}
 			super_depth.deepen();
-			ControlFlow::Continue(())
-		});
-		result
+		}
+		true
 	}
 
 	pub fn has_field_include_hidden(&self, name: IStr) -> bool {
@@ -779,24 +597,22 @@ impl ObjValue {
 	}
 	fn has_field_include_hidden_idx(&self, name: IStr, core: CoreIdx) -> bool {
 		let mut skip = Saturating(0usize);
-		let mut found = false;
-		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
+		for ele in self.0.cores[..core.idx].iter().rev() {
 			match ele.0.has_field_include_hidden_core(name.clone()) {
 				HasFieldIncludeHidden::Exists => {
 					if skip.0 == 0 {
-						found = true;
-						return ControlFlow::Break(());
+						return true;
 					}
 				}
 				HasFieldIncludeHidden::Omit(new_skip) => {
+					// +1 including this core
 					skip = skip.max(new_skip + Saturating(1));
 				}
 				HasFieldIncludeHidden::NotFound => {}
 			}
 			skip -= 1;
-			ControlFlow::Continue(())
-		});
-		found
+		}
+		false
 	}
 	pub fn has_field(&self, name: IStr) -> bool {
 		match self.field_visibility(name) {
@@ -824,6 +640,7 @@ impl ObjValue {
 		let cache_key = (key.clone(), core);
 		{
 			let mut cache = self.0.value_cache.borrow_mut();
+			// entry_ref candidate?
 			match cache.entry(cache_key.clone()) {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
@@ -854,13 +671,7 @@ impl ObjValue {
 		}
 		let mut add_stack = Vec::with_capacity(2);
 		let mut skip = Saturating(0);
-		let mut early_return: Option<Result<Option<Val>>> = None;
-		let _ = self.0.cores.try_for_each_rev_up_to(core.idx, &mut |sup,
-		                                                             core|
-		 -> Result<
-			ControlFlow<()>,
-			crate::error::Error,
-		> {
+		for (sup, core) in self.0.cores[..core.idx].iter().enumerate().rev() {
 			let sup_this = SupThis {
 				sup: CoreIdx { idx: sup },
 				this: self.clone(),
@@ -868,14 +679,13 @@ impl ObjValue {
 			match core.0.get_for_core(key.clone(), sup_this, skip.0 != 0)? {
 				GetFor::Final(val) if add_stack.is_empty() => {
 					if skip.0 == 0 {
-						early_return = Some(Ok(Some(val)));
-						return Ok(ControlFlow::Break(()));
+						return Ok(Some(val));
 					}
 				}
 				GetFor::Final(val) => {
 					if skip.0 == 0 {
 						add_stack.push(val);
-						return Ok(ControlFlow::Break(()));
+						break;
 					}
 				}
 				GetFor::SuperPlus(val) => {
@@ -890,10 +700,6 @@ impl ObjValue {
 				GetFor::NotFound => {}
 			}
 			skip -= 1;
-			Ok(ControlFlow::Continue(()))
-		})?;
-		if let Some(result) = early_return {
-			return result;
 		}
 		if add_stack.is_empty() {
 			// None of layers had this field
@@ -932,30 +738,28 @@ impl ObjValue {
 	fn field_visibility_idx(&self, field: IStr, core: CoreIdx) -> Option<Visibility> {
 		let mut exists = false;
 		let mut skip = Saturating(0usize);
-		let mut early = None;
-		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_, ele| {
+		for ele in self.0.cores[..core.idx].iter().rev() {
 			let vis = ele.0.field_visibility_core(field.clone());
 			match vis {
 				FieldVisibility::Found(vis @ (Visibility::Unhide | Visibility::Hidden)) => {
 					if skip.0 == 0 {
-						early = Some(vis);
-						return ControlFlow::Break(());
+						return Some(vis);
 					}
 				}
 				FieldVisibility::Found(Visibility::Normal) => {
 					if skip.0 == 0 {
-						exists = true
+						exists = true;
 					}
 				}
 				FieldVisibility::NotFound => {}
 				FieldVisibility::Omit(new_skip) => {
+					// +1 including this core
 					skip = skip.max(new_skip + Saturating(1));
 				}
 			}
 			skip -= 1;
-			ControlFlow::Continue(())
-		});
-		early.or_else(|| exists.then_some(Visibility::Normal))
+		}
+		exists.then_some(Visibility::Normal)
 	}
 
 	pub fn run_assertions(&self) -> Result<()> {
@@ -972,19 +776,14 @@ impl ObjValue {
 			return Ok(());
 		}
 		let _guard = AssertionGuard::new();
-		let mut assertion_err: Option<crate::error::Error> = None;
-		self.0.cores.for_each_enumerated(&mut |idx, ele| {
+		for (idx, ele) in self.0.cores.iter().enumerate() {
 			let sup_this = SupThis {
 				sup: CoreIdx { idx },
 				this: self.clone(),
 			};
-			if let Err(e) = ele.0.run_assertions_core(sup_this) {
+			ele.0.run_assertions_core(sup_this).inspect_err(|_e| {
 				finish_asserting(self);
-				assertion_err = Some(e);
-			}
-		});
-		if let Some(e) = assertion_err {
-			return Err(e);
+			})?;
 		}
 		finish_asserting(self);
 		self.0.assertions_ran.set(true);
@@ -1008,9 +807,6 @@ impl ObjValue {
 		})
 	}
 	pub fn get_lazy(&self, key: IStr) -> Option<Thunk<Val>> {
-		if !self.has_field_ex(key.clone(), true) {
-			return None;
-		}
 		#[derive(Trace)]
 		struct ObjFieldThunk {
 			obj: ObjValue,
@@ -1025,6 +821,10 @@ impl ObjValue {
 					.transpose()
 					.expect("field existence checked")
 			}
+		}
+
+		if !self.has_field_ex(key.clone(), true) {
+			return None;
 		}
 
 		Some(Thunk::new(ObjFieldThunk {
@@ -1063,7 +863,7 @@ impl ObjValue {
 struct FieldVisibilityData {
 	omitted_until: Saturating<usize>,
 	exists_visible: Option<Visibility>,
-	#[cfg(feature = "exp-preserve-order")]
+	#[allow(dead_code, reason = "used for exp-object-ordering, ZST otherwise")]
 	key: FieldSortKey,
 }
 impl FieldVisibilityData {
@@ -1072,7 +872,7 @@ impl FieldVisibilityData {
 			.expect("non-existing fields shall be dropped at the end of fn fields_visibility()")
 			.is_visible()
 	}
-	#[cfg(feature = "exp-preserve-order")]
+	#[allow(dead_code, reason = "used for exp-object-ordering, ZST otherwise")]
 	fn sort_key(&self) -> FieldSortKey {
 		self.key
 	}
@@ -1084,14 +884,13 @@ impl ObjValue {
 
 		let mut super_depth = SuperDepth::default();
 		let mut omit_index = Saturating(0);
-		self.0.cores.for_each_rev(&mut |core| {
+		for core in self.0.cores.iter().rev() {
 			core.0
-				.enum_fields_core(&mut super_depth, &mut |_depth, _index, name, visibility| {
+				.enum_fields_core(&mut super_depth, &mut |depth, index, name, visibility| {
 					let entry = out.entry(name);
-					let data = entry.or_insert(FieldVisibilityData {
+					let data = entry.or_insert_with(|| FieldVisibilityData {
 						exists_visible: None,
-						#[cfg(feature = "exp-preserve-order")]
-						key: FieldSortKey::new(_depth, _index),
+						key: FieldSortKey::new(depth, index),
 						omitted_until: omit_index,
 					});
 					match visibility {
@@ -1102,10 +901,8 @@ impl ObjValue {
 								.max(omit_index + new_skip + Saturating(1));
 						}
 						EnumFields::Normal(Visibility::Normal) => {
-							if data.omitted_until <= omit_index {
-								if data.exists_visible.is_none() {
-									data.exists_visible = Some(Visibility::Normal);
-								}
+							if data.omitted_until <= omit_index && data.exists_visible.is_none() {
+								data.exists_visible = Some(Visibility::Normal);
 							}
 						}
 						EnumFields::Normal(Visibility::Hidden) => {
@@ -1126,13 +923,13 @@ impl ObjValue {
 								});
 							}
 						}
-					};
-					return ControlFlow::Continue(());
+					}
+					ControlFlow::Continue(())
 				});
 
 			super_depth.deepen();
 			omit_index += 1;
-		});
+		}
 
 		out.retain(|_, v| v.exists_visible.is_some());
 
@@ -1234,186 +1031,6 @@ impl ObjValue {
 	}
 }
 
-impl OopObject {
-	pub fn new(
-		this_entries: FxHashMap<IStr, ObjMember>,
-		assertions: Vec<CcObjectAssertion>,
-	) -> Self {
-		Self {
-			this_entries,
-			assertions,
-		}
-	}
-}
-
-impl ObjectCore for OopObject {
-	fn enum_fields_core(
-		&self,
-		super_depth: &mut SuperDepth,
-		handler: &mut EnumFieldsHandler<'_>,
-	) -> bool {
-		for (name, member) in self.this_entries.iter() {
-			if matches!(
-				handler(
-					*super_depth,
-					member.original_index,
-					name.clone(),
-					EnumFields::Normal(member.flags.visibility()),
-				),
-				ControlFlow::Break(())
-			) {
-				return false;
-			}
-		}
-		true
-	}
-
-	fn has_field_include_hidden_core(&self, name: IStr) -> HasFieldIncludeHidden {
-		if self.this_entries.contains_key(&name) {
-			HasFieldIncludeHidden::Exists
-		} else {
-			HasFieldIncludeHidden::NotFound
-		}
-	}
-
-	fn get_for_core(&self, key: IStr, sup_this: SupThis, omit_only: bool) -> Result<GetFor> {
-		if omit_only {
-			return Ok(GetFor::NotFound);
-		}
-		match self.this_entries.get(&key) {
-			Some(k) => {
-				let v = k.invoke.evaluate(sup_this)?;
-				Ok(if k.flags.add() {
-					GetFor::SuperPlus(v)
-				} else {
-					GetFor::Final(v)
-				})
-			}
-			None => Ok(GetFor::NotFound),
-		}
-	}
-	fn field_visibility_core(&self, name: IStr) -> FieldVisibility {
-		match self.this_entries.get(&name) {
-			Some(f) => FieldVisibility::Found(f.flags.visibility()),
-			None => FieldVisibility::NotFound,
-		}
-	}
-
-	fn run_assertions_core(&self, sup_this: SupThis) -> Result<()> {
-		if self.assertions.is_empty() {
-			return Ok(());
-		}
-		for assertion in self.assertions.iter() {
-			assertion.0.run(sup_this.clone())?;
-		}
-		Ok(())
-	}
-}
-
-#[allow(clippy::module_name_repetitions)]
-pub struct ObjValueBuilder {
-	base: Option<LayeredCores>,
-	sup: Vec<CcObjectCore>,
-
-	new: OopObject,
-	next_field_index: FieldIndex,
-}
-impl ObjValueBuilder {
-	pub fn new() -> Self {
-		Self::with_capacity(0)
-	}
-	pub fn with_capacity(capacity: usize) -> Self {
-		Self {
-			base: None,
-			sup: vec![],
-			new: OopObject {
-				assertions: vec![],
-				this_entries: FxHashMap::with_capacity(capacity),
-			},
-			next_field_index: FieldIndex::default(),
-		}
-	}
-	pub fn reserve_cores(&mut self, capacity: usize) -> &mut Self {
-		self.sup.reserve_exact(capacity);
-		self
-	}
-	pub fn reserve_asserts(&mut self, capacity: usize) -> &mut Self {
-		self.new.assertions.reserve_exact(capacity);
-		self
-	}
-	pub fn with_super(&mut self, super_obj: ObjValue) -> &mut Self {
-		self.base = Some(super_obj.0.cores.clone());
-		self
-	}
-
-	pub fn assert(&mut self, assertion: impl ObjectAssertion + 'static) -> &mut Self {
-		self.new.assertions.push(CcObjectAssertion::new(assertion));
-		self
-	}
-	pub fn field(&mut self, name: impl Into<IStr>) -> ObjMemberBuilder<ValueBuilder<'_>> {
-		let field_index = self.next_field_index;
-		self.next_field_index = self.next_field_index.next();
-		ObjMemberBuilder::new(ValueBuilder(self), name.into(), field_index)
-	}
-	/// Preset for common method definiton pattern:
-	/// Create a hidden field with the function value.
-	///
-	/// `.field(name).hide().value(Val::function(value))`
-	pub fn method(&mut self, name: impl Into<IStr>, value: impl Into<FuncVal>) -> &mut Self {
-		self.field(name).hide().value(Val::Func(value.into()));
-		self
-	}
-	pub fn try_method(
-		&mut self,
-		name: impl Into<IStr>,
-		value: impl Into<FuncVal>,
-	) -> Result<&mut Self> {
-		self.field(name).hide().try_value(Val::Func(value.into()))?;
-		Ok(self)
-	}
-
-	pub fn extend_with_core(&mut self, core: impl ObjectCore) {
-		self.commit();
-		self.sup.push(CcObjectCore::new(core));
-	}
-
-	fn commit(&mut self) {
-		if !self.new.is_empty() {
-			self.new.this_entries.shrink_to_fit();
-			self.new.assertions.shrink_to_fit();
-			self.sup.push(CcObjectCore::new(mem::take(&mut self.new)));
-		}
-		self.next_field_index = FieldIndex::default();
-	}
-
-	pub fn with_fields_omitted(&mut self, omit: FxHashSet<IStr>) {
-		self.commit();
-		let prev_layers = self.base.as_ref().map_or(0, |b| b.len()) + self.sup.len();
-		self.sup
-			.push(CcObjectCore::new(OmitFieldsCore { omit, prev_layers }));
-	}
-
-	pub fn build(mut self) -> ObjValue {
-		self.commit();
-		let cores = match self.base {
-			Some(base) if self.sup.is_empty() => base,
-			Some(base) => base.extend(self.sup),
-			None if self.sup.is_empty() => return ObjValue::empty(),
-			None => LayeredCores::new(self.sup),
-		};
-		ObjValue(Cc::new(ObjValueInner {
-			cores,
-			assertions_ran: Cell::new(false),
-			value_cache: Default::default(),
-		}))
-	}
-}
-impl Default for ObjValueBuilder {
-	fn default() -> Self {
-		Self::with_capacity(0)
-	}
-}
-
 #[allow(clippy::module_name_repetitions)]
 #[must_use = "value not added unless binding() was called"]
 pub struct ObjMemberBuilder<Kind> {
@@ -1467,47 +1084,6 @@ impl<Kind> ObjMemberBuilder<Kind> {
 				location: self.location,
 			},
 		)
-	}
-}
-
-pub struct ValueBuilder<'v>(&'v mut ObjValueBuilder);
-impl ObjMemberBuilder<ValueBuilder<'_>> {
-	/// Inserts value, replacing if it is already defined
-	pub fn value(self, value: impl Into<Val>) {
-		let (receiver, name, member) =
-			self.build_member(MaybeUnbound::Bound(Thunk::evaluated(value.into())));
-		let entry = receiver.0.new.this_entries.entry(name);
-		entry.insert_entry(member);
-	}
-	/// Inserts thunk, replacing if it is already defined
-	pub fn thunk(self, value: impl Into<Thunk<Val>>) {
-		let (receiver, name, member) = self.build_member(MaybeUnbound::Bound(value.into()));
-		let entry = receiver.0.new.this_entries.entry(name);
-		entry.insert_entry(member);
-	}
-
-	/// Tries to insert value, returns an error if it was already defined
-	pub fn try_value(self, value: impl Into<Val>) -> Result<()> {
-		self.try_thunk(Thunk::evaluated(value.into()))
-	}
-	pub fn try_thunk(self, value: impl Into<Thunk<Val>>) -> Result<()> {
-		self.binding(MaybeUnbound::Bound(value.into()))
-	}
-	pub fn bindable(self, bindable: impl Unbound<Bound = Val>) -> Result<()> {
-		self.binding(MaybeUnbound::Unbound(CcUnbound::new(bindable)))
-	}
-	pub fn binding(self, binding: MaybeUnbound) -> Result<()> {
-		let (receiver, name, member) = self.build_member(binding);
-		let location = member.location.clone();
-		let old = receiver.0.new.this_entries.insert(name.clone(), member);
-		if old.is_some() {
-			in_frame(
-				CallLocation(location.as_ref()),
-				|| format!("field <{}> initializtion", name.clone()),
-				|| bail!(DuplicateFieldName(name.clone())),
-			)?;
-		}
-		Ok(())
 	}
 }
 

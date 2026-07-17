@@ -21,7 +21,7 @@ mod map;
 mod obj;
 pub mod stack;
 pub mod stdlib;
-mod tla;
+pub mod tla;
 pub mod trace;
 pub mod typed;
 pub mod val;
@@ -47,7 +47,7 @@ pub use jrsonnet_interner::{IBytes, IStr};
 #[doc(hidden)]
 pub use jrsonnet_macros;
 pub use jrsonnet_parser as parser;
-use jrsonnet_parser::{AnalyzedExpr, ParserSettings, Source, SourcePath};
+use jrsonnet_parser::{Expr, ParserSettings, Source, SourcePath, Spanned};
 pub use obj::*;
 pub use rustc_hash;
 use rustc_hash::FxHashMap;
@@ -200,7 +200,7 @@ enum CachedEvaluation {
 struct FileData {
 	string: Option<IStr>,
 	bytes: Option<IBytes>,
-	parsed: Option<AnalyzedExpr>,
+	parsed: Option<Rc<Spanned<Expr>>>,
 	evaluated: Option<CachedEvaluation>,
 
 	evaluating: bool,
@@ -372,6 +372,7 @@ impl State {
 						source: file_name.clone(),
 					},
 				)
+				.map(Rc::new)
 				.map_err(|e| ImportSyntaxError {
 					path: file_name.clone(),
 					error: Box::new(e),
@@ -385,9 +386,9 @@ impl State {
 		//   { value: if cond then (import 'self.libsonnet').other else 42 }
 		// The original check was too strict and prevented legitimate patterns that Go Tanka handles.
 		// Real infinite recursion is still caught by:
-		// 1. Thunk Pending state (val.rs:105)
+		// 1. Thunk Pending state (val.rs)
 		// 2. Stack depth limits (stack.rs)
-		// 3. Pending value access (dynamic.rs:44)
+		// 3. Pending value access (dynamic.rs)
 		// if file.evaluating {
 		// 	bail!(InfiniteRecursionDetected)
 		// }
@@ -397,7 +398,7 @@ impl State {
 		let res = evaluate(self.create_default_context(file_name), &parsed);
 
 		let mut file_cache = self.file_cache();
-		let mut file = file_cache.entry(path.clone());
+		let mut file = file_cache.entry(path);
 
 		let Entry::Occupied(file) = &mut file else {
 			unreachable!("this file was just here")

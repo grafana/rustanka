@@ -1779,10 +1779,10 @@ dependencies = [
 name = "jrsonnet-parser"
 version = "0.5.0-pre97"
 dependencies = [
+ "insta",
  "jrsonnet-gcmodule",
  "jrsonnet-interner",
  "peg",
- "rustc-hash 2.1.1",
  "static_assertions",
 ]
 

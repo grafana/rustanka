@@ -59,7 +59,7 @@ fn assert_throw(lazy: Thunk<Val>, message: String) -> Result<bool> {
 #[allow(dead_code)]
 fn param_names(fun: FuncVal) -> Vec<String> {
 	fun.params()
-		.into_iter()
+		.iter()
 		.map(|v| v.name().as_str().unwrap_or("<unnamed>").to_owned())
 		.collect()
 }

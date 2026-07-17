@@ -1,43 +1,70 @@
-use super::{
-	arglike::{ArgLike, OptionalContext},
-	FuncVal,
+use std::marker::PhantomData;
+
+use jrsonnet_gcmodule::Trace;
+
+use super::PreparedFuncVal;
+use crate::{
+	function::FuncVal,
+	typed::{FromUntyped, IntoUntyped, Typed},
+	CallLocation, Result, Val,
 };
-use crate::{typed::Typed, Result};
+use jrsonnet_types::{ComplexValType, ValType};
 
-pub trait NativeDesc {
-	type Value;
-	fn into_native(val: FuncVal) -> Self::Value;
-}
+#[derive(Debug, Trace, Clone)]
+pub struct NativeFn<D: 'static>(pub(crate) PreparedFuncVal, PhantomData<D>);
 macro_rules! impl_native_desc {
-	($($gen:ident)*) => {
-		impl<$($gen,)* O> NativeDesc for (($($gen,)*), O)
+	($i:expr; $($gen:ident)*) => {
+		impl<$($gen,)* O> NativeFn<($($gen,)* O,)>
 		where
-			$($gen: ArgLike + OptionalContext,)*
-			O: Typed,
+			$($gen: Typed + IntoUntyped,)*
+			O: Typed + FromUntyped,
 		{
-			type Value = Box<dyn Fn($($gen,)*) -> Result<O>>;
+			#[allow(non_snake_case, clippy::too_many_arguments)]
+			pub fn call(
+				&self,
+				$($gen: $gen,)*
+			) -> Result<O> {
+				let val = self.0.call(
+					CallLocation::native(),
+					&[$(IntoUntyped::into_lazy_untyped($gen),)*],
+					&[],
+				)?;
+				O::from_untyped(val)
+			}
+		}
+		impl<$($gen,)* O> Typed for NativeFn<($($gen,)* O,)> {
+			const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Func);
+		}
 
-			#[allow(non_snake_case)]
-			fn into_native(val: FuncVal) -> Self::Value {
-				Box::new(move |$($gen),*| {
-					let val = val.evaluate_simple(
-						&($($gen,)*),
-						false,
-					)?;
-					O::from_untyped(val)
-				})
+		impl<$($gen,)* O> FromUntyped for NativeFn<($($gen,)* O,)> {
+			fn from_untyped(untyped: Val) -> Result<Self> {
+				let func = FuncVal::from_untyped(untyped)?;
+				Ok(Self(
+					PreparedFuncVal::new(func, $i, &[])?,
+					PhantomData,
+				))
 			}
 		}
 	};
-	($($cur:ident)* @ $c:ident $($rest:ident)*) => {
-		impl_native_desc!($($cur)*);
-		impl_native_desc!($($cur)* $c @ $($rest)*);
+	($i:expr; $($cur:ident)* @ $c:ident $($rest:ident)*) => {
+		impl_native_desc!($i; $($cur)*);
+		impl_native_desc!($i + 1; $($cur)* $c @ $($rest)*);
 	};
-	($($cur:ident)* @) => {
-		impl_native_desc!($($cur)*);
+	($i:expr; $($cur:ident)* @) => {
+		impl_native_desc!($i; $($cur)*);
 	}
 }
 
 impl_native_desc! {
-	@ A B C D E F G H I J K L
+	0; @ A B C D E F G H I J K L
 }
+
+mod native_macro {
+	#[macro_export]
+	macro_rules! NativeFn {
+		(($($t:ty),* $(,)?) -> $res:ty) => {
+			NativeFn<($($t,)* $res)>
+		}
+	}
+}
+pub use crate::NativeFn;

@@ -5,8 +5,6 @@ use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
 use rustc_hash::FxHashMap;
 
-use jrsonnet_parser::Analysis;
-
 use crate::{
 	error::ErrorKind::*, gc::WithCapacityExt as _, map::LayeredHashMap, ObjValue, Pending, Result,
 	SupThis, Thunk, Val,
@@ -130,42 +128,6 @@ impl Context {
 		}))
 	}
 
-	/// Create a trimmed context that only retains bindings for variables
-	/// the given expression actually uses. This flattens the LayeredHashMap
-	/// chain into a single flat map, breaking reference chains and allowing
-	/// unreferenced thunks (and everything they hold) to be freed.
-	#[must_use]
-	pub fn trimmed(&self, analysis: &Analysis) -> Self {
-		let used_vars = &analysis.used_vars;
-		let has_var = analysis.var.is_some();
-
-		if used_vars.is_empty() && !has_var {
-			return Self(Cc::new(ContextInternal {
-				dollar: self.0.dollar.clone(),
-				sup_this: self.0.sup_this.clone(),
-				bindings: LayeredHashMap::default(),
-			}));
-		}
-
-		let extra = if has_var { 1 } else { 0 };
-		let mut trimmed = FxHashMap::with_capacity(used_vars.len() + extra);
-		if let Some(var) = &analysis.var {
-			if let Some(thunk) = self.0.bindings.get(var) {
-				trimmed.insert(var.clone(), thunk.clone());
-			}
-		}
-		for name in used_vars.set() {
-			if let Some(thunk) = self.0.bindings.get(name) {
-				trimmed.insert(name.clone(), thunk.clone());
-			}
-		}
-		Self(Cc::new(ContextInternal {
-			dollar: self.0.dollar.clone(),
-			sup_this: self.0.sup_this.clone(),
-			bindings: LayeredHashMap::new(trimmed),
-		}))
-	}
-
 	#[must_use]
 	pub fn extend_bindings(self, new_bindings: FxHashMap<IStr, Thunk<Val>>) -> Self {
 		if new_bindings.is_empty() {
@@ -217,6 +179,12 @@ impl ContextBuilder {
 	pub fn bind(&mut self, name: impl Into<IStr>, value: Thunk<Val>) -> &mut Self {
 		let old = self.bindings.insert(name.into(), value);
 		assert!(old.is_none(), "variable bound twice in single context call");
+		self
+	}
+	pub fn binds(&mut self, bindings: FxHashMap<IStr, Thunk<Val>>) -> &mut Self {
+		for (k, v) in bindings {
+			self.bind(k, v);
+		}
 		self
 	}
 	pub fn build(self) -> Context {

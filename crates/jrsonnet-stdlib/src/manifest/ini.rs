@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use jrsonnet_evaluator::{
 	manifest::{ManifestFormat, ToStringFormat},
-	typed::Typed,
+	typed::{FromUntyped, Typed},
 	ObjValue, Result, ResultExt, Val,
 };
 use jrsonnet_parser::IStr;
@@ -82,7 +82,7 @@ fn manifest_ini_body(
 	Ok(())
 }
 
-#[derive(Typed)]
+#[derive(Typed, FromUntyped)]
 struct IniObj {
 	main: Option<ObjValue>,
 	// TODO: Preserve section order?

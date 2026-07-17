@@ -1,20 +1,24 @@
+use std::{collections::HashMap, hash::BuildHasher};
+
 use jrsonnet_interner::IStr;
 use jrsonnet_parser::{BindSpec, Destruct};
-use rustc_hash::FxHashMap;
 
 use crate::{
 	bail,
 	error::{ErrorKind::*, Result},
-	evaluate, evaluate_method, evaluate_named, Context, Pending, Thunk, Val,
+	evaluate_method, evaluate_named_param, Context, Pending, Thunk, Val,
 };
+
+#[cfg(feature = "exp-preserve-order")]
+use crate::evaluate;
 
 #[allow(clippy::too_many_lines)]
 #[allow(unused_variables)]
-pub fn destruct(
+pub fn destruct<H: BuildHasher>(
 	d: &Destruct,
 	parent: Thunk<Val>,
 	fctx: Pending<Context>,
-	new_bindings: &mut FxHashMap<IStr, Thunk<Val>>,
+	new_bindings: &mut HashMap<IStr, Thunk<Val>, H>,
 ) -> Result<()> {
 	match d {
 		Destruct::Full(v) => {
@@ -159,10 +163,10 @@ pub fn destruct(
 	Ok(())
 }
 
-pub fn evaluate_dest(
+pub fn evaluate_dest<H: BuildHasher>(
 	d: &BindSpec,
 	fctx: Pending<Context>,
-	new_bindings: &mut FxHashMap<IStr, Thunk<Val>>,
+	new_bindings: &mut HashMap<IStr, Thunk<Val>, H>,
 ) -> Result<()> {
 	match d {
 		BindSpec::Field { into, value } => {
@@ -170,10 +174,7 @@ pub fn evaluate_dest(
 			let value = value.clone();
 			let data = {
 				let fctx = fctx.clone();
-				Thunk!(move || name.map_or_else(
-					|| evaluate(fctx.unwrap(), &value),
-					|name| evaluate_named(fctx.unwrap(), &value, name),
-				))
+				Thunk!(move || evaluate_named_param(fctx.unwrap(), &value, name))
 			};
 			destruct(into, data, fctx, new_bindings)?;
 		}

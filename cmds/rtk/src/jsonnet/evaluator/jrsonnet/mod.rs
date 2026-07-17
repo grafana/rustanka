@@ -12,7 +12,7 @@ use jrsonnet_evaluator::rustc_hash::{FxBuildHasher, FxHashMap};
 use jrsonnet_evaluator::stack::set_stack_depth_limit;
 use jrsonnet_evaluator::trace::PathResolver;
 use jrsonnet_evaluator::{
-	function::TlaArg, set_skip_assertions, FileImportResolver, IStr, ImportResolver, State,
+	set_skip_assertions, tla::TlaArg, FileImportResolver, IStr, ImportResolver, State,
 };
 use jrsonnet_stdlib::ContextInitializer;
 

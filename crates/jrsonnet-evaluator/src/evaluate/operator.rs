@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use jrsonnet_parser::{AnalyzedExpr, BinaryOpType, UnaryOpType};
+use jrsonnet_parser::{BinaryOpType, Expr, Spanned, UnaryOpType};
 
 use crate::{
 	arr::ArrValue,
@@ -9,7 +9,7 @@ use crate::{
 	evaluate,
 	manifest::format_float_go_g17,
 	stdlib::std_format,
-	typed::Typed,
+	typed::IntoUntyped as _,
 	val::{equals, StrValue},
 	Context, Result, Val,
 };
@@ -106,9 +106,9 @@ fn is_attempt_to_divide_by_zero(a: &Val, b: &Val) -> bool {
 		// string format
 		(Str(_), _) => false,
 
-		(_, Num(b)) => return **b == 0.,
+		(_, Num(b)) => **b == 0.,
 		#[cfg(feature = "exp-bigint")]
-		(_, BigInt(b)) => return **b == num_bigint::BigInt::ZERO,
+		(_, BigInt(b)) => **b == num_bigint::BigInt::ZERO,
 
 		// something else
 		_ => false,
@@ -158,9 +158,9 @@ pub fn evaluate_mod_op(a: &Val, b: &Val) -> Result<Val> {
 
 pub fn evaluate_binary_op_special(
 	ctx: Context,
-	a: &AnalyzedExpr,
+	a: &Spanned<Expr>,
 	op: BinaryOpType,
-	b: &AnalyzedExpr,
+	b: &Spanned<Expr>,
 ) -> Result<Val> {
 	use BinaryOpType::*;
 	use Val::*;

@@ -6,17 +6,18 @@ use std::{
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
-use rustc_hash::FxHashSet;
 
-use crate::source::Source;
-use crate::used_vars::{compute_used_vars, UsedVars};
+use crate::{
+	function::{FunctionSignature, ParamDefault, ParamName, ParamParse},
+	source::Source,
+};
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum FieldName {
 	/// {fixed: 2}
 	Fixed(IStr),
 	/// {["dyn"+"amic"]: 3}
-	Dyn(AnalyzedExpr),
+	Dyn(Spanned<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
@@ -36,20 +37,20 @@ impl Visibility {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Acyclic)]
-pub struct AssertStmt(pub AnalyzedExpr, pub Option<AnalyzedExpr>);
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct AssertStmt(pub Spanned<Expr>, pub Option<Spanned<Expr>>);
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct FieldMember {
 	pub name: FieldName,
 	pub plus: bool,
-	pub params: Option<ParamsDesc>,
+	pub params: Option<ExprParams>,
 	pub visibility: Visibility,
-	pub value: AnalyzedExpr,
+	pub value: Rc<Spanned<Expr>>,
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
-pub enum Member {
+pub(crate) enum Member {
 	Field(FieldMember),
 	BindStmt(BindSpec),
 	AssertStmt(AssertStmt),
@@ -149,26 +150,55 @@ impl Display for BinaryOpType {
 
 /// name, default value
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct Param(pub Destruct, pub Option<AnalyzedExpr>);
+pub struct ExprParam {
+	pub destruct: Destruct,
+	pub default: Option<Rc<Spanned<Expr>>>,
+}
 
 /// Defined function parameters
 #[derive(Debug, Clone, PartialEq, Acyclic)]
-pub struct ParamsDesc(pub Rc<Vec<Param>>);
+pub struct ExprParams {
+	pub exprs: Rc<Vec<ExprParam>>,
+	pub signature: FunctionSignature,
+	binds_len: usize,
+}
+impl ExprParams {
+	pub fn len(&self) -> usize {
+		self.exprs.len()
+	}
+	pub fn is_empty(&self) -> bool {
+		self.exprs.is_empty()
+	}
 
-impl Deref for ParamsDesc {
-	type Target = Vec<Param>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
+	pub fn binds_len(&self) -> usize {
+		self.binds_len
+	}
+	pub fn new(exprs: Vec<ExprParam>) -> Self {
+		Self {
+			signature: FunctionSignature::new(
+				exprs
+					.iter()
+					.map(|p| {
+						ParamParse::new(
+							p.destruct.name(),
+							ParamDefault::exists(p.default.is_some()),
+						)
+					})
+					.collect(),
+			),
+			binds_len: exprs.iter().map(|v| v.destruct.binds_len()).sum(),
+			exprs: Rc::new(exprs),
+		}
 	}
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct ArgsDesc {
-	pub unnamed: Vec<AnalyzedExpr>,
-	pub named: Vec<(IStr, AnalyzedExpr)>,
+	pub unnamed: Vec<Rc<Spanned<Expr>>>,
+	pub named: Vec<(IStr, Rc<Spanned<Expr>>)>,
 }
 impl ArgsDesc {
-	pub fn new(unnamed: Vec<AnalyzedExpr>, named: Vec<(IStr, AnalyzedExpr)>) -> Self {
+	pub fn new(unnamed: Vec<Rc<Spanned<Expr>>>, named: Vec<(IStr, Rc<Spanned<Expr>>)>) -> Self {
 		Self { unnamed, named }
 	}
 }
@@ -194,20 +224,21 @@ pub enum Destruct {
 	},
 	#[cfg(feature = "exp-destruct")]
 	Object {
-		fields: Vec<(IStr, Option<Destruct>, Option<AnalyzedExpr>)>,
+		#[allow(clippy::type_complexity)]
+		fields: Vec<(IStr, Option<Destruct>, Option<Rc<Spanned<Expr>>>)>,
 		rest: Option<DestructRest>,
 	},
 }
 impl Destruct {
 	/// Name of destructure, used for function parameter names
-	pub fn name(&self) -> Option<IStr> {
+	pub fn name(&self) -> ParamName {
 		match self {
-			Self::Full(name) => Some(name.clone()),
+			Self::Full(name) => ParamName::Named(name.clone()),
 			#[cfg(feature = "exp-destruct")]
-			_ => None,
+			_ => ParamName::Unnamed,
 		}
 	}
-	pub fn capacity_hint(&self) -> usize {
+	pub fn binds_len(&self) -> usize {
 		#[cfg(feature = "exp-destruct")]
 		fn cap_rest(rest: &Option<DestructRest>) -> usize {
 			match rest {
@@ -222,8 +253,8 @@ impl Destruct {
 			Self::Skip => 0,
 			#[cfg(feature = "exp-destruct")]
 			Self::Array { start, rest, end } => {
-				start.iter().map(Destruct::capacity_hint).sum::<usize>()
-					+ end.iter().map(Destruct::capacity_hint).sum::<usize>()
+				start.iter().map(Destruct::binds_len).sum::<usize>()
+					+ end.iter().map(Destruct::binds_len).sum::<usize>()
 					+ cap_rest(rest)
 			}
 			#[cfg(feature = "exp-destruct")]
@@ -231,7 +262,7 @@ impl Destruct {
 				let mut out = 0;
 				for (_, into, _) in fields {
 					match into {
-						Some(v) => out += v.capacity_hint(),
+						Some(v) => out += v.binds_len(),
 						// Field is destructured to default name
 						None => out += 1,
 					}
@@ -242,32 +273,32 @@ impl Destruct {
 	}
 }
 
-#[derive(Debug, Clone, PartialEq, Acyclic)]
+#[derive(Debug, PartialEq, Acyclic)]
 pub enum BindSpec {
 	Field {
 		into: Destruct,
-		value: AnalyzedExpr,
+		value: Rc<Spanned<Expr>>,
 	},
 	Function {
 		name: IStr,
-		params: ParamsDesc,
-		value: AnalyzedExpr,
+		params: ExprParams,
+		value: Rc<Spanned<Expr>>,
 	},
 }
 impl BindSpec {
-	pub fn capacity_hint(&self) -> usize {
+	pub fn binds_len(&self) -> usize {
 		match self {
-			BindSpec::Field { into, .. } => into.capacity_hint(),
+			BindSpec::Field { into, .. } => into.binds_len(),
 			BindSpec::Function { .. } => 1,
 		}
 	}
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct IfSpecData(pub AnalyzedExpr);
+pub struct IfSpecData(pub Spanned<Expr>);
 
 #[derive(Debug, PartialEq, Acyclic)]
-pub struct ForSpecData(pub Destruct, pub AnalyzedExpr);
+pub struct ForSpecData(pub Destruct, pub Spanned<Expr>);
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub enum CompSpec {
@@ -277,15 +308,21 @@ pub enum CompSpec {
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct ObjComp {
-	pub pre_locals: Vec<BindSpec>,
-	pub field: FieldMember,
-	pub post_locals: Vec<BindSpec>,
+	pub locals: Rc<Vec<BindSpec>>,
+	pub field: Rc<FieldMember>,
 	pub compspecs: Vec<CompSpec>,
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
+pub struct ObjMembers {
+	pub locals: Rc<Vec<BindSpec>>,
+	pub asserts: Rc<Vec<AssertStmt>>,
+	pub fields: Vec<FieldMember>,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
 pub enum ObjBody {
-	MemberList(Vec<Member>),
+	MemberList(ObjMembers),
 	ObjComp(ObjComp),
 }
 
@@ -301,9 +338,42 @@ pub enum LiteralType {
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct SliceDesc {
-	pub start: Option<AnalyzedExpr>,
-	pub end: Option<AnalyzedExpr>,
-	pub step: Option<AnalyzedExpr>,
+	pub start: Option<Spanned<Expr>>,
+	pub end: Option<Spanned<Expr>>,
+	pub step: Option<Spanned<Expr>>,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct AssertExpr {
+	pub assert: AssertStmt,
+	pub rest: Spanned<Expr>,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct BinaryOp {
+	pub lhs: Spanned<Expr>,
+	pub op: BinaryOpType,
+	pub rhs: Spanned<Expr>,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
+pub enum ImportKind {
+	Normal,
+	Str,
+	Bin,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct IfElse {
+	pub cond: IfSpecData,
+	pub cond_then: Spanned<Expr>,
+	pub cond_else: Option<Spanned<Expr>>,
+}
+
+#[derive(Debug, PartialEq, Acyclic)]
+pub struct Slice {
+	pub value: Spanned<Expr>,
+	pub slice: SliceDesc,
 }
 
 /// Syntax base
@@ -319,7 +389,7 @@ pub enum Expr {
 	Var(IStr),
 
 	/// Array of expressions: [1, 2, "Hello"]
-	Arr(Vec<AnalyzedExpr>),
+	Arr(Rc<Vec<Spanned<Expr>>>),
 	/// Array comprehension:
 	/// ```jsonnet
 	///  ingredients: [
@@ -331,54 +401,43 @@ pub enum Expr {
 	///    ]
 	///  ],
 	/// ```
-	ArrComp(AnalyzedExpr, Vec<CompSpec>),
+	ArrComp(Rc<Spanned<Expr>>, Vec<CompSpec>),
 
 	/// Object: {a: 2}
 	Obj(ObjBody),
 	/// Object extension: var1 {b: 2}
-	ObjExtend(AnalyzedExpr, ObjBody),
-
-	/// (obj)
-	Parened(AnalyzedExpr),
+	ObjExtend(Rc<Spanned<Expr>>, ObjBody),
 
 	/// -2
-	UnaryOp(UnaryOpType, AnalyzedExpr),
+	UnaryOp(UnaryOpType, Box<Spanned<Expr>>),
 	/// 2 - 2
-	BinaryOp(AnalyzedExpr, BinaryOpType, AnalyzedExpr),
+	BinaryOp(Box<BinaryOp>),
 	/// assert 2 == 2 : "Math is broken"
-	AssertExpr(AssertStmt, AnalyzedExpr),
+	AssertExpr(Rc<AssertExpr>),
 	/// local a = 2; { b: a }
-	LocalExpr(Vec<BindSpec>, AnalyzedExpr),
+	LocalExpr(Vec<BindSpec>, Box<Spanned<Expr>>),
 
-	/// import "hello"
-	Import(AnalyzedExpr),
-	/// importStr "file.txt"
-	ImportStr(AnalyzedExpr),
-	/// importBin "file.txt"
-	ImportBin(AnalyzedExpr),
+	/// import* "hello"
+	Import(ImportKind, Box<Spanned<Expr>>),
 	/// error "I'm broken"
-	ErrorStmt(AnalyzedExpr),
+	ErrorStmt(Box<Spanned<Expr>>),
 	/// a(b, c)
-	Apply(AnalyzedExpr, ArgsDesc, bool),
+	Apply(Box<Spanned<Expr>>, ArgsDesc, bool),
 	/// a[b], a.b, a?.b
 	Index {
-		indexable: AnalyzedExpr,
+		indexable: Box<Spanned<Expr>>,
 		parts: Vec<IndexPart>,
 	},
 	/// function(x) x
-	Function(ParamsDesc, AnalyzedExpr),
+	Function(ExprParams, Rc<Spanned<Expr>>),
 	/// if true == false then 1 else 2
-	IfElse {
-		cond: IfSpecData,
-		cond_then: AnalyzedExpr,
-		cond_else: Option<AnalyzedExpr>,
-	},
-	Slice(AnalyzedExpr, SliceDesc),
+	IfElse(Box<IfElse>),
+	Slice(Box<Slice>),
 }
 
 #[derive(Debug, PartialEq, Acyclic)]
 pub struct IndexPart {
-	pub value: AnalyzedExpr,
+	pub value: Spanned<Expr>,
 	#[cfg(feature = "exp-null-coaelse")]
 	pub null_coaelse: bool,
 }
@@ -401,82 +460,28 @@ impl Debug for Span {
 	}
 }
 
-/// Information about an expression that can be used for optimization.
-#[derive(Debug, Clone, Acyclic)]
-pub struct Analysis {
-	/// Single variable referenced by this expression (for `Var` nodes).
-	/// Avoids allocating a hashset for the common single-variable case.
-	pub var: Option<IStr>,
-	/// Set of variable names referenced (used) by this expression and its sub-expressions.
-	pub used_vars: UsedVars,
+#[derive(Clone, PartialEq, Acyclic)]
+pub struct Spanned<T: Acyclic>(T, Span);
+impl<T: Acyclic> Deref for Spanned<T> {
+	type Target = T;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
 }
-
-/// Internal representation of an analyzed expression node.
-#[derive(Debug, Acyclic)]
-struct AnalyzedExprInternals {
-	expr: Expr,
-	span: Span,
-	analysis: Analysis,
-}
-
-/// Holds AST expression, its location in source file, and used-variable analysis.
-#[derive(Clone, Acyclic)]
-pub struct AnalyzedExpr(Rc<AnalyzedExprInternals>);
-
-/// Backward-compatible alias.
-pub type LocExpr = AnalyzedExpr;
-
-impl AnalyzedExpr {
-	pub fn new(expr: Expr, span: Span) -> Self {
-		let var = match &expr {
-			Expr::Var(name) => Some(name.clone()),
-			_ => None,
-		};
-		let used_vars = compute_used_vars(&expr);
-		Self(Rc::new(AnalyzedExprInternals {
-			expr,
-			span,
-			analysis: Analysis { var, used_vars },
-		}))
+impl<T: Acyclic> Spanned<T> {
+	#[inline]
+	pub fn new(v: T, s: Span) -> Self {
+		Self(v, s)
 	}
 	#[inline]
 	pub fn span(&self) -> Span {
-		self.0.span.clone()
-	}
-	#[inline]
-	pub fn expr(&self) -> &Expr {
-		&self.0.expr
-	}
-	#[inline]
-	pub fn analysis(&self) -> &Analysis {
-		&self.0.analysis
-	}
-	#[inline]
-	pub fn used_vars(&self) -> &UsedVars {
-		&self.0.analysis.used_vars
-	}
-	/// Insert all variable names used by this expression into `target`.
-	/// Handles both the singleton `var` field and the `used_vars` set.
-	#[inline]
-	pub fn extend_used_into(&self, target: &mut FxHashSet<IStr>) {
-		if let Some(var) = &self.0.analysis.var {
-			target.insert(var.clone());
-		}
-		self.0.analysis.used_vars.extend_into(target);
+		self.1.clone()
 	}
 }
 
-impl PartialEq for AnalyzedExpr {
-	fn eq(&self, other: &Self) -> bool {
-		self.0.expr == other.0.expr && self.0.span == other.0.span
-	}
-}
-
-static_assertions::assert_eq_size!(AnalyzedExpr, usize);
-
-impl Debug for AnalyzedExpr {
+impl<T: Debug + Acyclic> Debug for Spanned<T> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let expr = self.expr();
+		let expr = &**self;
 		if f.alternate() {
 			write!(f, "{:#?}", expr)?;
 		} else {

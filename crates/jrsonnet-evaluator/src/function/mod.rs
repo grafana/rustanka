@@ -1,26 +1,30 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
-pub use arglike::{ArgLike, ArgsLike, TlaArg};
+use educe::Educe;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
 pub use jrsonnet_macros::builtin;
-use jrsonnet_parser::{AnalyzedExpr, Destruct, Expr, ParamsDesc, Span};
+use jrsonnet_parser::{ArgsDesc, Destruct, Expr, ExprParams, Span, Spanned};
 
 use self::{
-	arglike::OptionalContext,
-	builtin::{Builtin, BuiltinParam, ParamDefault, ParamName, StaticBuiltin},
-	native::NativeDesc,
-	parse::{parse_default_function_call, parse_function_call},
+	builtin::{Builtin, StaticBuiltin},
+	parse::{parse_builtin_call, parse_default_function_call, parse_function_call},
+	prepared::{parse_prepared_builtin_call, parse_prepared_function_call, PreparedCall},
 };
 use crate::{
 	bail, error::ErrorKind::*, evaluate, evaluate_trivial, function::builtin::BuiltinFunc, Context,
-	ContextBuilder, Result, Thunk, Val,
+	Result, Thunk, Val,
 };
 
-pub mod arglike;
 pub mod builtin;
-pub mod native;
-pub mod parse;
+mod native;
+mod parse;
+mod prepared;
+
+pub use native::NativeFn;
+pub use prepared::PreparedFuncVal;
+
+pub use jrsonnet_parser::function::*;
 
 /// Function callsite location.
 /// Either from other jsonnet code, specified by expression location, or from native (without location).
@@ -40,7 +44,8 @@ impl CallLocation<'static> {
 }
 
 /// Represents Jsonnet function defined in code.
-#[derive(Debug, Trace, PartialEq)]
+#[derive(Trace, Educe)]
+#[educe(Debug, PartialEq)]
 pub struct FuncDesc {
 	/// # Example
 	///
@@ -64,9 +69,9 @@ pub struct FuncDesc {
 	pub ctx: Context,
 
 	/// Function parameter definition
-	pub params: ParamsDesc,
+	pub params: ExprParams,
 	/// Function body
-	pub body: AnalyzedExpr,
+	pub body: Rc<Spanned<Expr>>,
 }
 impl FuncDesc {
 	/// Create body context, but fill arguments without defaults with lazy error
@@ -75,10 +80,10 @@ impl FuncDesc {
 	}
 
 	/// Create context, with which body code will run
-	pub fn call_body_context(
+	pub(crate) fn call_body_context(
 		&self,
 		call_ctx: Context,
-		args: &dyn ArgsLike,
+		args: &ArgsDesc,
 		tailstrict: bool,
 	) -> Result<Context> {
 		parse_function_call(call_ctx, self.ctx.clone(), &self.params, args, tailstrict)
@@ -134,36 +139,18 @@ impl FuncVal {
 		Self::StaticBuiltin(static_builtin)
 	}
 
-	pub fn params(&self) -> Vec<BuiltinParam> {
+	pub fn params(&self) -> FunctionSignature {
 		match self {
-			Self::Id => ID.params().to_vec(),
-			Self::StaticBuiltin(i) => i.params().to_vec(),
-			Self::Builtin(i) => i.params().to_vec(),
-			Self::Normal(p) => p
-				.params
-				.iter()
-				.map(|p| {
-					BuiltinParam::new(
-						p.0.name()
-							.as_ref()
-							.map(IStr::to_string)
-							.map_or(ParamName::ANONYMOUS, ParamName::new_dynamic),
-						ParamDefault::exists(p.1.is_some()),
-					)
-				})
-				.collect(),
-			Self::Thunk(_) => vec![],
+			Self::Id => ID.params(),
+			Self::StaticBuiltin(i) => i.params(),
+			Self::Builtin(i) => i.params(),
+			Self::Normal(p) => p.params.signature.clone(),
+			Self::Thunk(_) => FunctionSignature::empty(),
 		}
 	}
 	/// Amount of non-default required arguments
 	pub fn params_len(&self) -> usize {
-		match self {
-			Self::Id => 1,
-			Self::Normal(n) => n.params.iter().filter(|p| p.1.is_none()).count(),
-			Self::StaticBuiltin(i) => i.params().iter().filter(|p| !p.has_default()).count(),
-			Self::Builtin(i) => i.params().iter().filter(|p| !p.has_default()).count(),
-			Self::Thunk(_) => 0,
-		}
+		self.params().iter().filter(|p| !p.has_default()).count()
 	}
 	/// Function name, as defined in code.
 	pub fn name(&self) -> IStr {
@@ -182,40 +169,68 @@ impl FuncVal {
 		&self,
 		call_ctx: Context,
 		loc: CallLocation<'_>,
-		args: &dyn ArgsLike,
+		args: &ArgsDesc,
 		tailstrict: bool,
 	) -> Result<Val> {
 		match self {
-			Self::Id => ID.call(call_ctx, loc, args),
 			Self::Normal(func) => {
 				let body_ctx = func.call_body_context(call_ctx, args, tailstrict)?;
 				evaluate(body_ctx, &func.body)
 			}
 			Self::Thunk(thunk) => {
-				if args.is_empty() {
-					bail!(TooManyArgsFunctionHas(0, vec![],))
+				if !args.named.is_empty() || !args.unnamed.is_empty() {
+					bail!(TooManyArgsFunctionHas(0, FunctionSignature::empty()))
 				}
 				thunk.evaluate()
 			}
-			Self::StaticBuiltin(b) => b.call(call_ctx, loc, args),
-			Self::Builtin(b) => b.call(call_ctx, loc, args),
+			Self::Id => {
+				let args = parse_builtin_call(call_ctx, ID.params(), args, tailstrict)?;
+				ID.call(loc, &args)
+			}
+			Self::StaticBuiltin(b) => {
+				let args = parse_builtin_call(call_ctx, b.params(), args, tailstrict)?;
+				b.call(loc, &args)
+			}
+			Self::Builtin(b) => {
+				let args = parse_builtin_call(call_ctx, b.params(), args, tailstrict)?;
+				b.call(loc, &args)
+			}
 		}
 	}
-	pub fn evaluate_simple<A: ArgsLike + OptionalContext>(
+
+	pub(crate) fn evaluate_prepared(
 		&self,
-		args: &A,
-		tailstrict: bool,
+		prepared: &PreparedCall,
+		loc: CallLocation<'_>,
+		unnamed: &[Thunk<Val>],
+		named: &[Thunk<Val>],
+		_tailstrict: bool,
 	) -> Result<Val> {
-		self.evaluate(
-			ContextBuilder::new().build(),
-			CallLocation::native(),
-			args,
-			tailstrict,
-		)
-	}
-	/// Convert jsonnet function to plain `Fn` value.
-	pub fn into_native<D: NativeDesc>(self) -> D::Value {
-		D::into_native(self)
+		match self {
+			FuncVal::Normal(func) => {
+				let body_ctx = parse_prepared_function_call(
+					func.ctx.clone(),
+					prepared,
+					&func.params,
+					unnamed,
+					named,
+				)?;
+				evaluate(body_ctx, &func.body)
+			}
+			FuncVal::Thunk(t) => t.evaluate(),
+			FuncVal::Id => {
+				let args = parse_prepared_builtin_call(prepared, ID.params(), unnamed, named);
+				ID.call(loc, &args)
+			}
+			FuncVal::StaticBuiltin(b) => {
+				let args = parse_prepared_builtin_call(prepared, b.params(), unnamed, named);
+				b.call(loc, &args)
+			}
+			FuncVal::Builtin(b) => {
+				let args = parse_prepared_builtin_call(prepared, b.params(), unnamed, named);
+				b.call(loc, &args)
+			}
+		}
 	}
 
 	/// Is this function an indentity function.
@@ -230,17 +245,18 @@ impl FuncVal {
 				if desc.params.len() != 1 {
 					return false;
 				}
-				let param = &desc.params[0];
-				if param.1.is_some() {
+				let param = &desc.params.exprs[0];
+				if param.default.is_some() {
 					return false;
 				}
+
 				#[allow(clippy::infallible_destructuring_match)]
-				let id = match &param.0 {
+				let id = match &param.destruct {
 					Destruct::Full(id) => id,
 					#[cfg(feature = "exp-destruct")]
 					_ => return false,
 				};
-				desc.body.expr() == &Expr::Var(id.clone())
+				**desc.body == Expr::Var(id.clone())
 			}
 			_ => false,
 		}

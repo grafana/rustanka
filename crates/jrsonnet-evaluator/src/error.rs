@@ -1,17 +1,13 @@
-use std::{
-	cmp::Ordering,
-	convert::Infallible,
-	fmt::{Debug, Display},
-};
+use std::{cmp::Ordering, convert::Infallible, fmt};
 
-use jrsonnet_gcmodule::Trace;
+use jrsonnet_gcmodule::{Acyclic, Trace};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{AnalyzedExpr, BinaryOpType, Source, SourcePath, Span, UnaryOpType};
+use jrsonnet_parser::{BinaryOpType, Source, SourcePath, Span, Spanned, UnaryOpType};
 use jrsonnet_types::ValType;
 use thiserror::Error;
 
 use crate::{
-	function::{builtin::ParamDefault, CallLocation},
+	function::{CallLocation, FunctionSignature, ParamName},
 	stdlib::format::FormatError,
 	typed::TypeLocError,
 	val::ConvertNumValueError,
@@ -47,36 +43,6 @@ pub(crate) fn format_found(list: &[IStr], what: &str) -> String {
 	out
 }
 
-fn format_signature(sig: &FunctionSignature) -> String {
-	let mut out = String::new();
-	out.push_str("\nFunction has the following signature: ");
-	out.push('(');
-	if sig.is_empty() {
-		out.push_str("/*no arguments*/");
-	} else {
-		for (i, (name, default)) in sig.iter().enumerate() {
-			if i != 0 {
-				out.push_str(", ");
-			}
-			if let Some(name) = name {
-				out.push_str(name);
-			} else {
-				out.push_str("<unnamed>");
-			}
-			match default {
-				ParamDefault::None => {}
-				ParamDefault::Exists => out.push_str(" = <default>"),
-				ParamDefault::Literal(lit) => {
-					out.push_str(" = ");
-					out.push_str(lit);
-				}
-			}
-		}
-	}
-	out.push(')');
-	out
-}
-
 const fn format_empty_str(str: &str) -> &str {
 	if str.is_empty() {
 		"\"\" (empty string)"
@@ -96,19 +62,13 @@ pub(crate) fn suggest_object_fields(v: &ObjValue, key: IStr) -> Vec<IStr> {
 		if conf < 0.8 {
 			continue;
 		}
-		// Skip exact match: don't suggest the key itself. Compare by string content so we
-		// don't panic when string pooling fails (e.g. under heavy load with many envs).
-		if field.as_str() == key.as_str() {
-			continue;
-		}
+		assert!(field.as_str() != key.as_str(), "looks like string pooling failure, please write any info regarding this crash to https://github.com/CertainLach/jrsonnet/issues/113, thanks!");
 
 		heap.push((conf, field));
 	}
 	heap.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
 	heap.into_iter().map(|v| v.1).collect()
 }
-
-type FunctionSignature = Vec<(Option<IStr>, ParamDefault)>;
 
 /// Possible errors
 #[allow(missing_docs)]
@@ -152,13 +112,13 @@ pub enum ErrorKind {
 	#[error("only functions can be called, got {0}")]
 	OnlyFunctionsCanBeCalledGot(ValType),
 	#[error("parameter {0} is not defined")]
-	UnknownFunctionParameter(String),
+	UnknownFunctionParameter(IStr),
 	#[error("argument {0} is already bound")]
 	BindingParameterASecondTime(IStr),
-	#[error("too many args, function has {0}{sig}", sig = format_signature(.1))]
+	#[error("too many args, function has {0}\nFunction has the following signature: {1}")]
 	TooManyArgsFunctionHas(usize, FunctionSignature),
-	#[error("function argument is not passed: {}{}", .0.as_ref().map_or("<unnamed>", IStr::as_str), format_signature(.1))]
-	FunctionParameterNotBoundInCall(Option<IStr>, FunctionSignature),
+	#[error("function argument is not passed: {0}\nFunction has the following signature: {1}")]
+	FunctionParameterNotBoundInCall(ParamName, FunctionSignature),
 
 	#[error("external variable is not defined: {0}")]
 	UndefinedExternalVariable(IStr),
@@ -218,10 +178,6 @@ pub enum ErrorKind {
 	StackOverflow,
 	#[error("infinite recursion detected")]
 	InfiniteRecursionDetected,
-	/// Internal error: assertion tried to access a field that is currently being evaluated.
-	/// This is not shown to users; it's caught and handled by the assertion mechanism.
-	#[error("assertion accessed pending field")]
-	AssertionAccessedPendingField,
 	#[error("tried to index by fractional value")]
 	FractionalIndex,
 	#[error("attempted to divide by zero")]
@@ -308,27 +264,22 @@ impl Error {
 		&mut (self.0).1
 	}
 }
-impl Display for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		writeln!(f, "{}", self.0 .0)?;
 		for el in &self.0 .1 .0 {
+			write!(f, "\t{}", el.desc)?;
 			if let Some(loc) = &el.location {
-				let [start, _end] = loc.0.map_source_locations(&[loc.1, loc.2]);
-				write!(
-					f,
-					"\t{}:{}:{}",
-					loc.0.source_path(),
-					start.line,
-					start.column
-				)?;
+				write!(f, "at {}", loc.0 .0 .0)?;
+				loc.0.map_source_locations(&[loc.1, loc.2]);
 			}
-			writeln!(f, "\t{}", el.desc)?;
+			writeln!(f)?;
 		}
 		Ok(())
 	}
 }
-impl Debug for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_tuple("LocError").field(&self.0).finish()
 	}
 }
@@ -337,7 +288,7 @@ impl std::error::Error for Error {}
 pub trait ErrorSource {
 	fn to_location(self) -> Option<Span>;
 }
-impl ErrorSource for &AnalyzedExpr {
+impl<T: Acyclic> ErrorSource for &Spanned<T> {
 	fn to_location(self) -> Option<Span> {
 		Some(self.span())
 	}
