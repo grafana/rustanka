@@ -129,6 +129,7 @@ impl Context {
 			bindings,
 		}))
 	}
+
 	/// Create a trimmed context that only retains bindings for variables
 	/// the given expression actually uses. This flattens the LayeredHashMap
 	/// chain into a single flat map, breaking reference chains and allowing

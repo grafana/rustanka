@@ -83,7 +83,7 @@ pub unsafe extern "C" fn jsonnet_tla_code(vm: &mut VM, name: *const c_char, code
 	let code = unsafe { CStr::from_ptr(code) };
 
 	let name: IStr = name.to_str().expect("name is not utf-8").into();
-	let code: IStr = code.to_str().expect("code is not utf-8").into();
+	let code: String = code.to_str().expect("code is not utf-8").to_owned();
 
 	vm.tla_args.insert(name, TlaArg::InlineCode(code));
 }

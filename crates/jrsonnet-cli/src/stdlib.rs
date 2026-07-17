@@ -119,7 +119,7 @@ impl StdOpts {
 		for ext in &self.ext_code {
 			ctx.settings_mut().ext_vars.insert(
 				ext.name.as_str().into(),
-				TlaArg::InlineCode(ext.value.as_str().into()),
+				TlaArg::InlineCode(ext.value.clone()),
 			);
 		}
 		for ext in &self.ext_code_file {

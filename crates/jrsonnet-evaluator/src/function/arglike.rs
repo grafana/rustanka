@@ -46,7 +46,7 @@ pub enum TlaArg {
 	Lazy(Thunk<Val>),
 	Import(String),
 	ImportStr(String),
-	InlineCode(IStr),
+	InlineCode(String),
 }
 impl TlaArg {
 	pub fn evaluate_tailstrict(&self) -> Result<Val> {

@@ -21,6 +21,7 @@ use crate::{
 	bail,
 	error::{Error, ErrorKind::*},
 	function::FuncVal,
+	gc::WithCapacityExt as _,
 	manifest::{ManifestFormat, ToStringFormat},
 	typed::{BoundedUsize, MAX_SAFE_INTEGER, MIN_SAFE_INTEGER},
 	ObjValue, Result, SupThis, Unbound, WeakSupThis,
@@ -212,7 +213,7 @@ where
 impl<I: Unbound<Bound = T>, T: Trace> CachedUnbound<I, T> {
 	pub fn new(value: I) -> Self {
 		Self {
-			cache: Cc::new(RefCell::new(FxHashMap::default())),
+			cache: Cc::new(RefCell::new(FxHashMap::new())),
 			value,
 		}
 	}
