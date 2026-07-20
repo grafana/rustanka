@@ -201,14 +201,17 @@ pub fn evaluate(mut ctx: Context, mut expr: &LExpr) -> Result<Val> {
 			LExpr::Obj(body) => evaluate_obj_body(None, ctx, body)?,
 			LExpr::ObjExtend(lhs, body) => {
 				let lhs_val = evaluate(ctx.clone(), lhs)?;
-				let Val::Obj(lhs_obj) = lhs_val else {
-					bail!(TypeMismatch(
-						"object extend lhs",
-						vec![ValType::Obj],
-						lhs_val.value_type(),
-					))
-				};
-				evaluate_obj_body(Some(lhs_obj), ctx, body)?
+				match lhs_val {
+					Val::Obj(lhs_obj) => evaluate_obj_body(Some(lhs_obj), ctx, body)?,
+					// Jsonnet spec: `e { body }` desugars to `e + { body }`, so a
+					// non-object lhs takes `+` operator semantics (e.g. a string
+					// lhs concatenates with the manifested object — go-jsonnet
+					// parity, hit by dashboards defined via importstr).
+					lhs_val => {
+						let rhs = evaluate_obj_body(None, ctx, body)?;
+						crate::evaluate::operator::evaluate_add_op(&lhs_val, &rhs)?
+					}
+				}
 			}
 			LExpr::ArrComp(comp) => evaluate_arr_comp(ctx, comp)?,
 			LExpr::Slice(slice) => {
