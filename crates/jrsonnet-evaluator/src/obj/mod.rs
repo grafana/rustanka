@@ -251,10 +251,164 @@ cc_dyn!(
 	pub fn new() {...}
 );
 
+/// Either a flat Vec of cores or a nested LayeredCores reference.
+#[derive(Trace, Debug)]
+enum CoreSegment {
+	Flat(Vec<CcObjectCore>),
+	Nested(LayeredCores),
+}
+impl CoreSegment {
+	fn len(&self) -> usize {
+		match self {
+			CoreSegment::Flat(v) => v.len(),
+			CoreSegment::Nested(lc) => lc.len(),
+		}
+	}
+}
+
+/// A layered linked list of `CcObjectCore`s. Clone is O(1) via Cc.
+/// `extend` creates a new node with `self` as parent — O(new_cores.len()).
+/// `extend_layered` creates a new node with a nested LayeredCores — O(1).
+/// Iteration walks the chain (parent first, then current).
+/// This avoids the quadratic core-list copying that plain `Vec` extension
+/// causes on deep mixin chains (rustanka coredump/OOM fix).
+#[derive(Trace, Debug)]
+#[trace(tracking(force))]
+pub(super) struct LayeredCoresInner {
+	parent: Option<LayeredCores>,
+	parent_len: usize,
+	current: CoreSegment,
+}
+
+#[derive(Trace, Debug)]
+pub(super) struct LayeredCores(Cc<LayeredCoresInner>);
+impl Clone for LayeredCores {
+	fn clone(&self) -> Self {
+		Self(self.0.clone())
+	}
+}
+impl LayeredCores {
+	fn new(cores: Vec<CcObjectCore>) -> Self {
+		Self(Cc::new(LayeredCoresInner {
+			parent: None,
+			parent_len: 0,
+			current: CoreSegment::Flat(cores),
+		}))
+	}
+	fn empty() -> Self {
+		Self::new(vec![])
+	}
+	fn extend(self, mut more: Vec<CcObjectCore>) -> Self {
+		more.shrink_to_fit();
+		let parent_len = self.len();
+		Self(Cc::new(LayeredCoresInner {
+			parent: Some(self),
+			parent_len,
+			current: CoreSegment::Flat(more),
+		}))
+	}
+	/// Create a new layer with a nested LayeredCores as the current segment — O(1).
+	fn extend_layered(self, more: LayeredCores) -> Self {
+		if more.is_empty() {
+			return self;
+		}
+		let parent_len = self.len();
+		Self(Cc::new(LayeredCoresInner {
+			parent: Some(self),
+			parent_len,
+			current: CoreSegment::Nested(more),
+		}))
+	}
+	fn len(&self) -> usize {
+		self.0.parent_len + self.0.current.len()
+	}
+	fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
+	/// Iterate all cores in forward order with absolute index, calling f for each.
+	fn for_each_enumerated(&self, f: &mut dyn FnMut(usize, &CcObjectCore)) {
+		if let Some(parent) = &self.0.parent {
+			parent.for_each_enumerated(f);
+		}
+		let offset = self.0.parent_len;
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				for (i, core) in v.iter().enumerate() {
+					f(offset + i, core);
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				lc.for_each_enumerated(&mut |idx, core| f(offset + idx, core));
+			}
+		}
+	}
+	/// Iterate cores [0..limit) in reverse order with absolute index.
+	/// Returns `Break` if the callback broke early, `Continue` otherwise.
+	fn for_each_rev_up_to(
+		&self,
+		limit: usize,
+		f: &mut dyn FnMut(usize, &CcObjectCore) -> ControlFlow<()>,
+	) -> ControlFlow<()> {
+		let offset = self.0.parent_len;
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				let end = limit.saturating_sub(offset).min(v.len());
+				for i in (0..end).rev() {
+					f(offset + i, &v[i])?;
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				let nested_limit = limit.saturating_sub(offset).min(lc.len());
+				if nested_limit > 0 {
+					lc.for_each_rev_up_to(nested_limit, &mut |idx, core| f(offset + idx, core))?;
+				}
+			}
+		}
+		if let Some(parent) = &self.0.parent {
+			parent.for_each_rev_up_to(limit.min(offset), f)?;
+		}
+		ControlFlow::Continue(())
+	}
+	/// Like for_each_rev_up_to but the callback can return Result.
+	fn try_for_each_rev_up_to(
+		&self,
+		limit: usize,
+		f: &mut dyn FnMut(usize, &CcObjectCore) -> Result<ControlFlow<()>, crate::error::Error>,
+	) -> Result<ControlFlow<()>, crate::error::Error> {
+		let offset = self.0.parent_len;
+		match &self.0.current {
+			CoreSegment::Flat(v) => {
+				let end = limit.saturating_sub(offset).min(v.len());
+				for i in (0..end).rev() {
+					match f(offset + i, &v[i])? {
+						ControlFlow::Continue(()) => {}
+						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+					}
+				}
+			}
+			CoreSegment::Nested(lc) => {
+				let nested_limit = limit.saturating_sub(offset).min(lc.len());
+				if nested_limit > 0 {
+					match lc.try_for_each_rev_up_to(nested_limit, &mut |idx, core| {
+						f(offset + idx, core)
+					})? {
+						ControlFlow::Continue(()) => {}
+						ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+					}
+				}
+			}
+		}
+		if let Some(parent) = &self.0.parent {
+			return parent.try_for_each_rev_up_to(limit.min(offset), f);
+		}
+		Ok(ControlFlow::Continue(()))
+	}
+}
+
 #[derive(Trace, Educe)]
 #[educe(Debug)]
 struct ObjValueInner {
-	cores: Vec<CcObjectCore>,
+	cores: LayeredCores,
 	assertions_ran: Cell<bool>,
 	has_assertions: bool,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
@@ -322,7 +476,7 @@ fn finish_asserting(obj: &ObjValue) {
 
 thread_local! {
 	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
-		cores: vec![],
+		cores: LayeredCores::empty(),
 		assertions_ran: Cell::new(true),
 		has_assertions: false,
 		value_cache: RefCell::default(),
@@ -555,9 +709,8 @@ impl ObjValue {
 
 	#[must_use]
 	pub fn extend_from(&self, sup: Self) -> Self {
-		let mut cores = Vec::with_capacity(sup.0.cores.len() + self.0.cores.len());
-		cores.extend(sup.0.cores.iter().cloned());
-		cores.extend(self.0.cores.iter().cloned());
+		// Chain sup's cores with self's cores — O(1) via nested LayeredCores.
+		let cores = sup.0.cores.clone().extend_layered(self.0.cores.clone());
 
 		let has_assertions = sup.0.has_assertions || self.0.has_assertions;
 		ObjValue(Cc::new(ObjValueInner {
@@ -597,32 +750,22 @@ impl ObjValue {
 		)
 	}
 
-	fn iter_cores(&self, idx: CoreIdx) -> impl Iterator<Item = &CcObjectCore> {
-		self.0.cores.iter().take(idx.idx).rev()
-	}
-	fn iter_cores_enumerate(&self, idx: CoreIdx) -> impl Iterator<Item = (CoreIdx, &CcObjectCore)> {
-		self.0
-			.cores
-			.iter()
-			.take(idx.idx)
-			.enumerate()
-			.rev()
-			.map(|(idx, o)| (CoreIdx { idx }, o))
-	}
-
 	fn enum_fields_idx(
 		&self,
 		super_depth: &mut SuperDepth,
 		handler: &mut EnumFieldsHandler<'_>,
 		idx: CoreIdx,
 	) -> bool {
-		for core in self.iter_cores(idx) {
+		let mut completed = true;
+		let _ = self.0.cores.for_each_rev_up_to(idx.idx, &mut |_i, core| {
 			if !core.0.enum_fields_core(super_depth, handler) {
-				return false;
+				completed = false;
+				return ControlFlow::Break(());
 			}
 			super_depth.deepen();
-		}
-		true
+			ControlFlow::Continue(())
+		});
+		completed
 	}
 
 	pub fn has_field_include_hidden(&self, name: IStr) -> bool {
@@ -635,11 +778,13 @@ impl ObjValue {
 	}
 	fn has_field_include_hidden_idx(&self, name: IStr, core: CoreIdx) -> bool {
 		let mut skip = Saturating(0usize);
-		for ele in self.iter_cores(core) {
+		let mut found = false;
+		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_i, ele| {
 			match ele.0.has_field_include_hidden_core(name.clone()) {
 				HasFieldIncludeHidden::Exists => {
 					if skip.0 == 0 {
-						return true;
+						found = true;
+						return ControlFlow::Break(());
 					}
 				}
 				HasFieldIncludeHidden::Omit(new_skip) => {
@@ -649,8 +794,9 @@ impl ObjValue {
 				HasFieldIncludeHidden::NotFound => {}
 			}
 			skip -= 1;
-		}
-		false
+			ControlFlow::Continue(())
+		});
+		found
 	}
 	pub fn has_field(&self, name: IStr) -> bool {
 		match self.field_visibility(name) {
@@ -710,38 +856,47 @@ impl ObjValue {
 		let mut first_add = None;
 		let mut add_stack: Vec<Val> = Vec::new();
 		let mut skip = Saturating(0);
-		for (sup, core) in self.iter_cores_enumerate(core) {
-			let sup_this = SupThis {
-				sup,
-				this: self.clone(),
-			};
-			match core.0.get_for_core(key.clone(), sup_this, skip.0 != 0)? {
-				GetFor::Final(val) if first_add.is_none() => {
-					if skip.0 == 0 {
-						return Ok(Some(val));
-					}
-				}
-				GetFor::Final(val) => {
-					if skip.0 == 0 {
-						add_stack.push(val);
-						break;
-					}
-				}
-				GetFor::SuperPlus(val) => {
-					if skip.0 == 0 {
-						if first_add.is_none() {
-							first_add = Some(val);
-						} else {
-							add_stack.push(val);
+		let mut early_return: Option<Val> = None;
+		let _ = self
+			.0
+			.cores
+			.try_for_each_rev_up_to(core.idx, &mut |sup, core| {
+				let sup_this = SupThis {
+					sup: CoreIdx { idx: sup },
+					this: self.clone(),
+				};
+				match core.0.get_for_core(key.clone(), sup_this, skip.0 != 0)? {
+					GetFor::Final(val) if first_add.is_none() => {
+						if skip.0 == 0 {
+							early_return = Some(val);
+							return Ok(ControlFlow::Break(()));
 						}
 					}
+					GetFor::Final(val) => {
+						if skip.0 == 0 {
+							add_stack.push(val);
+							return Ok(ControlFlow::Break(()));
+						}
+					}
+					GetFor::SuperPlus(val) => {
+						if skip.0 == 0 {
+							if first_add.is_none() {
+								first_add = Some(val);
+							} else {
+								add_stack.push(val);
+							}
+						}
+					}
+					GetFor::Omit(new_skip) => {
+						skip = skip.max(new_skip + Saturating(1));
+					}
+					GetFor::NotFound => {}
 				}
-				GetFor::Omit(new_skip) => {
-					skip = skip.max(new_skip + Saturating(1));
-				}
-				GetFor::NotFound => {}
-			}
-			skip -= 1;
+				skip -= 1;
+				Ok(ControlFlow::Continue(()))
+			})?;
+		if let Some(val) = early_return {
+			return Ok(Some(val));
 		}
 		let Some(first) = first_add else {
 			if add_stack.is_empty() {
@@ -780,12 +935,14 @@ impl ObjValue {
 	fn field_visibility_idx(&self, field: IStr, core: CoreIdx) -> Option<Visibility> {
 		let mut exists = false;
 		let mut skip = Saturating(0usize);
-		for ele in self.iter_cores(core) {
+		let mut early_vis: Option<Visibility> = None;
+		let _ = self.0.cores.for_each_rev_up_to(core.idx, &mut |_i, ele| {
 			let vis = ele.0.field_visibility_core(field.clone());
 			match vis {
 				FieldVisibility::Found(vis @ (Visibility::Unhide | Visibility::Hidden)) => {
 					if skip.0 == 0 {
-						return Some(vis);
+						early_vis = Some(vis);
+						return ControlFlow::Break(());
 					}
 				}
 				FieldVisibility::Found(Visibility::Normal) => {
@@ -800,6 +957,10 @@ impl ObjValue {
 				}
 			}
 			skip -= 1;
+			ControlFlow::Continue(())
+		});
+		if early_vis.is_some() {
+			return early_vis;
 		}
 		exists.then_some(Visibility::Normal)
 	}
@@ -818,14 +979,22 @@ impl ObjValue {
 			return Ok(());
 		}
 		let _guard = AssertionGuard::new();
-		for (idx, ele) in self.0.cores.iter().enumerate() {
+		let mut assertion_err: Option<crate::error::Error> = None;
+		self.0.cores.for_each_enumerated(&mut |idx, ele| {
+			if assertion_err.is_some() {
+				return;
+			}
 			let sup_this = SupThis {
 				sup: CoreIdx { idx },
 				this: self.clone(),
 			};
-			ele.0.run_assertions_core(sup_this).inspect_err(|_e| {
-				finish_asserting(self);
-			})?;
+			if let Err(e) = ele.0.run_assertions_core(sup_this) {
+				assertion_err = Some(e);
+			}
+		});
+		if let Some(e) = assertion_err {
+			finish_asserting(self);
+			return Err(e);
 		}
 		finish_asserting(self);
 		self.0.assertions_ran.set(true);
@@ -936,52 +1105,57 @@ impl ObjValue {
 
 		let mut super_depth = SuperDepth::default();
 		let mut omit_index = Saturating(0);
-		for core in self.0.cores.iter().rev() {
-			core.0
-				.enum_fields_core(&mut super_depth, &mut |depth, index, name, visibility| {
-					let entry = out.entry(name);
-					let data = entry.or_insert_with(|| FieldVisibilityData {
-						exists_visible: None,
-						key: FieldSortKey::new(depth, index),
-						omitted_until: omit_index,
+		let _ = self
+			.0
+			.cores
+			.for_each_rev_up_to(self.0.cores.len(), &mut |_i, core| {
+				core.0
+					.enum_fields_core(&mut super_depth, &mut |depth, index, name, visibility| {
+						let entry = out.entry(name);
+						let data = entry.or_insert_with(|| FieldVisibilityData {
+							exists_visible: None,
+							key: FieldSortKey::new(depth, index),
+							omitted_until: omit_index,
+						});
+						match visibility {
+							EnumFields::Omit(new_skip) => {
+								// +1 including this core
+								data.omitted_until = data
+									.omitted_until
+									.max(omit_index + new_skip + Saturating(1));
+							}
+							EnumFields::Normal(Visibility::Normal) => {
+								if data.omitted_until <= omit_index && data.exists_visible.is_none()
+								{
+									data.exists_visible = Some(Visibility::Normal);
+								}
+							}
+							EnumFields::Normal(Visibility::Hidden) => {
+								if data.omitted_until <= omit_index {
+									data.exists_visible = Some(match data.exists_visible {
+										// We're iterating in reverse, later unhide is preserved
+										Some(Visibility::Unhide) => Visibility::Unhide,
+										_ => Visibility::Hidden,
+									});
+								}
+							}
+							EnumFields::Normal(Visibility::Unhide) => {
+								if data.omitted_until <= omit_index {
+									data.exists_visible = Some(match data.exists_visible {
+										// We're iterating in reverse, later hide is preserved
+										Some(Visibility::Hidden) => Visibility::Hidden,
+										_ => Visibility::Unhide,
+									});
+								}
+							}
+						}
+						ControlFlow::Continue(())
 					});
-					match visibility {
-						EnumFields::Omit(new_skip) => {
-							// +1 including this core
-							data.omitted_until = data
-								.omitted_until
-								.max(omit_index + new_skip + Saturating(1));
-						}
-						EnumFields::Normal(Visibility::Normal) => {
-							if data.omitted_until <= omit_index && data.exists_visible.is_none() {
-								data.exists_visible = Some(Visibility::Normal);
-							}
-						}
-						EnumFields::Normal(Visibility::Hidden) => {
-							if data.omitted_until <= omit_index {
-								data.exists_visible = Some(match data.exists_visible {
-									// We're iterating in reverse, later unhide is preserved
-									Some(Visibility::Unhide) => Visibility::Unhide,
-									_ => Visibility::Hidden,
-								});
-							}
-						}
-						EnumFields::Normal(Visibility::Unhide) => {
-							if data.omitted_until <= omit_index {
-								data.exists_visible = Some(match data.exists_visible {
-									// We're iterating in reverse, later hide is preserved
-									Some(Visibility::Hidden) => Visibility::Hidden,
-									_ => Visibility::Unhide,
-								});
-							}
-						}
-					}
-					ControlFlow::Continue(())
-				});
 
-			super_depth.deepen();
-			omit_index += 1;
-		}
+				super_depth.deepen();
+				omit_index += 1;
+				ControlFlow::Continue(())
+			});
 
 		out.retain(|_, v| v.exists_visible.is_some());
 

@@ -10,8 +10,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
 	CcObjectAssertion, CcObjectCore, EnumFields, EnumFieldsHandler, FieldVisibility, GetFor,
-	HasFieldIncludeHidden, ObjMember, ObjMemberBuilder, ObjValue, ObjValueInner, ObjectAssertion,
-	ObjectCore, OmitFieldsCore, SupThis,
+	HasFieldIncludeHidden, LayeredCores, ObjMember, ObjMemberBuilder, ObjValue, ObjValueInner,
+	ObjectAssertion, ObjectCore, OmitFieldsCore, SupThis,
 	ordering::{FieldIndex, SuperDepth},
 };
 use crate::{
@@ -121,6 +121,7 @@ impl ObjectCore for OopObject {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct ObjValueBuilder {
+	base: Option<LayeredCores>,
 	sup: Vec<CcObjectCore>,
 	has_assertions: bool,
 
@@ -133,6 +134,7 @@ impl ObjValueBuilder {
 	}
 	pub fn with_capacity(capacity: usize) -> Self {
 		Self {
+			base: None,
 			sup: Vec::new(),
 			has_assertions: false,
 			new: OopObject::new(FxHashMap::with_capacity(capacity), None),
@@ -144,7 +146,8 @@ impl ObjValueBuilder {
 	}
 	pub fn with_super(&mut self, super_obj: ObjValue) -> &mut Self {
 		self.has_assertions |= super_obj.0.has_assertions;
-		self.sup.clone_from(&super_obj.0.cores);
+		// O(1): reference the super's core list instead of copying it.
+		self.base = Some(super_obj.0.cores.clone());
 		self
 	}
 
@@ -194,20 +197,22 @@ impl ObjValueBuilder {
 
 	pub fn with_fields_omitted(&mut self, omit: FxHashSet<IStr>) {
 		self.commit();
-		self.sup.push(CcObjectCore::new(OmitFieldsCore {
-			omit,
-			prev_layers: self.sup.len(),
-		}));
+		let prev_layers = self.base.as_ref().map_or(0, LayeredCores::len) + self.sup.len();
+		self.sup
+			.push(CcObjectCore::new(OmitFieldsCore { omit, prev_layers }));
 	}
 
 	pub fn build(mut self) -> ObjValue {
 		self.commit();
-		if self.sup.is_empty() {
-			return ObjValue::empty();
-		}
+		let cores = match self.base {
+			Some(base) if self.sup.is_empty() => base,
+			Some(base) => base.extend(self.sup),
+			None if self.sup.is_empty() => return ObjValue::empty(),
+			None => LayeredCores::new(self.sup),
+		};
 		let has_assertions = self.has_assertions;
 		ObjValue(Cc::new(ObjValueInner {
-			cores: self.sup,
+			cores,
 			assertions_ran: Cell::new(!has_assertions),
 			has_assertions,
 			value_cache: RefCell::default(),
