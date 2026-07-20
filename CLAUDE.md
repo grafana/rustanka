@@ -11,6 +11,13 @@ Project-specific context for AI agents working on rustanka (rtk).
 
 rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Tanka](https://github.com/grafana/tanka) (tk). The primary goal is **exact output compatibility with Tanka**.
 
+## Upstream jrsonnet Syncs
+
+Use the `merge-upstream-jrsonnet` skill (`.claude/skills/merge-upstream-jrsonnet/`)
+for merging in upstream jrsonnet. The last merged upstream commit is recorded in
+`.jrsonnet-upstream-base`; the skill covers staged merging, the rustanka features
+that must survive, and the signed-commit linearization the org requires.
+
 ## Key Dependencies
 
 ### serde-saphyr (YAML Serialization)
