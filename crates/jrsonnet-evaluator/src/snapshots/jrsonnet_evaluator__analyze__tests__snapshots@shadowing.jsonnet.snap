@@ -1,0 +1,77 @@
+---
+source: crates/jrsonnet-evaluator/src/analyze.rs
+assertion_line: 2175
+expression: rendered
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/shadowing.jsonnet
+---
+--- source ---
+local x = 1; local x = 2; x
+--- root analysis ---
+object_dependent_depth: none
+local_dependent_depth: 1
+errored: false
+--- diagnostics ---
+   ·                    ╭── local could be hoisted to an outer scope: x
+1  │ local x = 1; local x = 2; x 
+   ·       ╰── unused local: x
+2  │  
+--- lir ---
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
+        },
+        binds: [
+            LBind {
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Trivial(
+                    Num(
+                        1.0,
+                    ),
+                ),
+            },
+        ],
+        body: LocalExpr(
+            LLocalExpr {
+                frame_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 1,
+                },
+                binds: [
+                    LBind {
+                        destruct: Full(
+                            LocalSlot(
+                                0,
+                            ),
+                        ),
+                        value_shape: ClosureShape {
+                            captures: [],
+                            n_locals: 0,
+                        },
+                        value: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                    },
+                ],
+                body: Slot(
+                    Local(
+                        LocalSlot(
+                            0,
+                        ),
+                    ),
+                ),
+            },
+        ),
+    },
+)

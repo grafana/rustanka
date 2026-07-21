@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use jrsonnet_evaluator::{function::TlaArg, trace::PathResolver, Result};
+use jrsonnet_evaluator::{Result, tla::TlaArg, trace::PathResolver};
 use jrsonnet_stdlib::ContextInitializer;
 
 #[derive(Clone)]
@@ -20,12 +20,6 @@ pub struct ExtStr {
 /// use jrsonnet_cli::ExtStr;
 ///
 /// let ext = ExtStr::from_str("name=value").unwrap();
-/// assert_eq!(ext.name, "name");
-/// assert_eq!(ext.value, "value");
-///
-/// std::env::set_var("name", "value");
-///
-/// let ext = ExtStr::from_str("name").unwrap();
 /// assert_eq!(ext.name, "name");
 /// assert_eq!(ext.value, "value");
 ///
@@ -119,7 +113,7 @@ impl StdOpts {
 		for ext in &self.ext_code {
 			ctx.settings_mut().ext_vars.insert(
 				ext.name.as_str().into(),
-				TlaArg::InlineCode(ext.value.as_str().into()),
+				TlaArg::InlineCode(ext.value.clone()),
 			);
 		}
 		for ext in &self.ext_code_file {
@@ -127,7 +121,6 @@ impl StdOpts {
 				.ext_vars
 				.insert(ext.name.as_str().into(), TlaArg::Import(ext.path.clone()));
 		}
-
 		Ok(Some(ctx))
 	}
 }

@@ -3,13 +3,13 @@ use std::{cell::Cell, fmt, rc::Rc};
 use rowan::{GreenNode, TextRange};
 
 use crate::{
+	AstToken, SyntaxKind,
+	SyntaxKind::*,
+	SyntaxNode, T, TS,
 	event::Event,
 	marker::{CompletedMarker, Marker},
 	nodes::{BinaryOperatorKind, Literal, Number, Text, UnaryOperatorKind},
 	token_set::SyntaxKindSet,
-	AstToken, SyntaxKind,
-	SyntaxKind::*,
-	SyntaxNode, T, TS,
 };
 
 pub struct Parse {
@@ -52,8 +52,7 @@ impl fmt::Display for SyntaxError {
 				write!(f, "unexpected {found:?}, expecting {expected}")
 			}
 			SyntaxError::Missing { expected } => write!(f, "missing {expected}"),
-			SyntaxError::Custom { error } => write!(f, "{error}"),
-			SyntaxError::Hint { error } => write!(f, "{error}"),
+			SyntaxError::Custom { error } | SyntaxError::Hint { error } => write!(f, "{error}"),
 		}
 	}
 }
@@ -227,12 +226,12 @@ impl Parser {
 		self.nth_at(0, kind)
 	}
 	pub fn nth_at(&self, n: usize, kind: SyntaxKind) -> bool {
-		if n == 0 {
-			if let ExpectedSyntax::Unnamed(kinds) = self.expected_syntax_tracking_state.get() {
-				let kinds = kinds.with(kind);
-				self.expected_syntax_tracking_state
-					.set(ExpectedSyntax::Unnamed(kinds));
-			}
+		if n == 0
+			&& let ExpectedSyntax::Unnamed(kinds) = self.expected_syntax_tracking_state.get()
+		{
+			let kinds = kinds.with(kind);
+			self.expected_syntax_tracking_state
+				.set(ExpectedSyntax::Unnamed(kinds));
 		}
 		self.nth(n) == kind
 	}
@@ -314,6 +313,7 @@ fn expr(p: &mut Parser) -> CompletedMarker {
 	};
 	m.complete(p, EXPR)
 }
+
 fn expr_binding_power(
 	p: &mut Parser,
 	minimum_binding_power: u8,
@@ -345,9 +345,14 @@ fn expr_binding_power(
 		}
 
 		let m = m.precede(p);
-		let parsed_rhs = expr_binding_power(p, right_binding_power)
-			.map(|v| v.precede(p).complete(p, EXPR))
-			.is_ok();
+		let parsed_rhs = if p.at(T![local]) || p.at(T![assert]) {
+			expr(p);
+			true
+		} else {
+			expr_binding_power(p, right_binding_power)
+				.map(|v| v.precede(p).complete(p, EXPR))
+				.is_ok()
+		};
 		lhs = m.complete(
 			p,
 			if op == BinaryOperatorKind::MetaObjectApply {
@@ -368,6 +373,19 @@ const COMPSPEC: SyntaxKindSet = TS![for if];
 fn compspec(p: &mut Parser) -> CompletedMarker {
 	assert!(p.at_ts(COMPSPEC));
 	if p.at(T![for]) {
+		if p.nth_at(1, T!['[']) && p.nth_at(2, IDENT) && p.nth_at(3, T![']']) && p.nth_at(4, T![:])
+		{
+			let m = p.start();
+			p.bump_assert(T![for]);
+			p.bump_assert(T!['[']);
+			name(p);
+			p.expect(T![']']);
+			visibility(p);
+			destruct(p);
+			p.expect(T![in]);
+			expr(p);
+			return m.complete(p, FOR_OBJ_SPEC);
+		}
 		let m = p.start();
 		p.bump();
 		destruct(p);
@@ -416,17 +434,27 @@ fn field_name(p: &mut Parser) {
 		m.complete(p, FIELD_NAME_FIXED);
 	} else {
 		m.forget(p);
-		// ::: it split because in TS it is being handled as : ::
-		p.error_with_recovery_set(TS![; : :: '('].with(T![:::]));
+		// Recover with ::, :::
+		p.error_with_recovery_set(TS![; : '(']);
 	}
 }
 fn visibility(p: &mut Parser) {
-	// ::: it split because in TS it is being handled as : ::
-	if p.at_ts(TS![: ::].with(T![:::])) {
-		p.bump();
-	} else {
+	let m = p.start();
+	if !p.at_ts(TS![:]) {
 		p.error_with_recovery_set(TS![=]);
 	}
+	p.bump();
+	'colons: {
+		if !p.at_ts(TS![:]) {
+			break 'colons;
+		}
+		p.bump();
+		if !p.at_ts(TS![:]) {
+			break 'colons;
+		}
+		p.bump();
+	}
+	m.complete(p, VISIBILITY);
 }
 fn assertion(p: &mut Parser) {
 	let m = p.start();
@@ -482,17 +510,17 @@ fn object(p: &mut Parser) -> CompletedMarker {
 				visibility(p);
 				expr(p);
 				true
-			// ::: it split because in TS it is being handled as : ::
-			} else if p.at_ts(TS![: ::].with(T![:::])) && p.nth_at(1, T![function]) {
-				visibility(p);
-				p.bump_assert(T![function]);
-				params_desc(p);
-				expr(p);
-				true
 			} else {
 				visibility(p);
-				expr(p);
-				false
+				if p.at(T![function]) {
+					p.bump_assert(T![function]);
+					params_desc(p);
+					expr(p);
+					true
+				} else {
+					expr(p);
+					false
+				}
 			};
 			elems += 1;
 
@@ -501,7 +529,7 @@ fn object(p: &mut Parser) -> CompletedMarker {
 			} else {
 				m.complete(p, MEMBER_FIELD_NORMAL)
 			};
-		};
+		}
 		while p.at_ts(COMPSPEC) {
 			compspecs.push(compspec(p));
 		}
@@ -658,15 +686,14 @@ fn array(p: &mut Parser) -> CompletedMarker {
 fn slice_desc_or_index(p: &mut Parser) -> bool {
 	let m = p.start();
 	p.bump();
-	// TODO: do not treat :, ::, ::: as full tokens?
 	// Start
-	if !p.at(T![:]) && !p.at(T![::]) {
+	if !p.at(T![:]) {
 		expr(p);
 	}
 	if p.at(T![:]) {
 		p.bump();
 		// End
-		if !p.at(T![']']) {
+		if !p.at_ts(TS![']' :]) {
 			expr(p).wrap(p, SLICE_DESC_END, true);
 		}
 		if p.at(T![:]) {
@@ -675,12 +702,6 @@ fn slice_desc_or_index(p: &mut Parser) -> bool {
 			if !p.at(T![']']) {
 				expr(p).wrap(p, SLICE_DESC_STEP, true);
 			}
-		}
-	} else if p.at(T![::]) {
-		p.bump();
-		// End
-		if !p.at(T![']']) {
-			expr(p).wrap(p, SLICE_DESC_END, true);
 		}
 	} else {
 		// It was not a slice
@@ -756,7 +777,7 @@ fn destruct_object_field(p: &mut Parser) {
 	if p.at(T![:]) {
 		p.bump();
 		destruct(p);
-	};
+	}
 	if p.at(T![=]) {
 		p.bump();
 		expr(p);
@@ -924,7 +945,7 @@ fn lhs_basic(p: &mut Parser) -> Result<CompletedMarker, CompletedMarker> {
 
 		let m = p.start();
 		p.bump();
-		let _ = expr_binding_power(p, right_binding_power);
+		let _ = expr_binding_power(p, right_binding_power).map(|v| v.precede(p).complete(p, EXPR));
 		m.complete(p, EXPR_UNARY)
 	} else if p.at(T!['(']) {
 		let m = p.start();

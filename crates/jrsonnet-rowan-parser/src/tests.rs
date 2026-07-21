@@ -3,7 +3,7 @@
 
 use hi_doc::{Formatting, SnippetBuilder, Text};
 
-use crate::{parse, AstNode};
+use crate::{AstNode, parse};
 
 fn process(text: &str) -> String {
 	use std::fmt::Write;
@@ -13,7 +13,7 @@ fn process(text: &str) -> String {
 	if !errors.is_empty() && !text.is_empty() {
 		writeln!(out, "===").unwrap();
 		for err in &errors {
-			writeln!(out, "{:?}", err).unwrap();
+			writeln!(out, "{err:?}").unwrap();
 		}
 		let mut code = text.to_string();
 
@@ -207,6 +207,58 @@ mk_test!(
 		|||-
 			Trimmed text block
 		|||
+	"#
+
+	visibilities => r#"
+		{
+			normal: 1,
+			hide:: 2,
+			unhide::: 3,
+		}
+	"#
+
+	unary_not => r#"
+		!false
+	"#
+
+	unary_not_in_call => r#"
+		std.assertEqual(!false, true)
+	"#
+
+	local_in_binop_rhs => r#"
+		a + local x = 1; x
+	"#
+
+	for_obj_spec_visible => r#"
+		{ [k]: v for [k]: v in obj }
+	"#
+	for_obj_spec_hidden => r#"
+		{ [k]: v for [k]:: v in obj }
+	"#
+	for_obj_spec_force_visible => r#"
+		{ [k]: v for [k]::: v in obj }
+	"#
+	for_obj_spec_value_destruct => r#"
+		{ [k]: a + b for [k]: [a, b] in obj }
+	"#
+
+	multi_line_comment_doc => r#"
+		{ a:: 1, /** doc **/ b:: 2 }
+	"#
+	multi_line_comment_empty => r#"
+		/**/ 1
+	"#
+	multi_line_comment_triple_star => r#"
+		/***/ 2
+	"#
+	multi_line_comment_inner_star => r#"
+		/* * */ 3
+	"#
+	multi_line_comment_too_short => r#"
+		/*/
+	"#
+	multi_line_comment_unterminated => r#"
+		/** unterminated
 	"#
 );
 

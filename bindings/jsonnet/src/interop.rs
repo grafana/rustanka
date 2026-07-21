@@ -1,70 +1,12 @@
 //! Jrsonnet specific additional binding helpers
 
-#[cfg(feature = "interop-wasm")]
-pub mod wasm {
-	use std::ffi::{c_char, c_int, c_void};
-
-	use jrsonnet_evaluator::Val;
-
-	use crate::VM;
-
-	extern "C" {
-
-		pub fn _jrsonnet_static_import_callback(
-			ctx: *mut c_void,
-			base: *const c_char,
-			rel: *const c_char,
-			found_here: *mut *const c_char,
-			buf: *mut *mut c_char,
-			buflen: *mut usize,
-		) -> c_int;
-
-		#[allow(improper_ctypes)]
-		pub fn _jrsonnet_static_native_callback(
-			ctx: *const c_void,
-			argv: *const *const Val,
-			success: *mut c_int,
-		) -> *mut Val;
-	}
-
-	#[no_mangle]
-	#[cfg(feature = "interop-wasm")]
-	// ctx arg is passed as-is to callback
-	#[allow(clippy::not_unsafe_ptr_arg_deref)]
-	pub extern "C" fn jrsonnet_apply_static_import_callback(vm: &VM, ctx: *mut c_void) {
-		unsafe { crate::import::jsonnet_import_callback(vm, _jrsonnet_static_import_callback, ctx) }
-	}
-
-	/// # Safety
-	///
-	/// `name` and `raw_params` should be correctly initialized
-	#[no_mangle]
-	#[cfg(feature = "interop-wasm")]
-	pub unsafe extern "C" fn jrsonnet_apply_static_native_callback(
-		vm: &VM,
-		name: *const c_char,
-		ctx: *mut c_void,
-		raw_params: *const *const c_char,
-	) {
-		unsafe {
-			crate::native::jsonnet_native_callback(
-				vm,
-				name,
-				_jrsonnet_static_native_callback,
-				ctx,
-				raw_params,
-			);
-		}
-	}
-}
-
 #[cfg(feature = "interop-common")]
 mod common {
 	use jrsonnet_evaluator::trace::{CompactFormat, HiDocFormat, JsFormat, PathResolver};
 
 	use crate::VM;
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_set_trace_format(vm: &mut VM, format: u8) {
 		match format {
 			0 => {
@@ -105,7 +47,7 @@ mod threading {
 	///
 	/// Current thread GC will be broken after this call, need to call
 	/// `jrsonet_enter_thread` before doing anything.
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub unsafe extern "C" fn jrsonnet_exit_thread() -> *mut ThreadCTX {
 		Box::into_raw(Box::new(ThreadCTX {
 			interner: jrsonnet_interner::interop::exit_thread(),
@@ -113,7 +55,7 @@ mod threading {
 		}))
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_reenter_thread(mut ctx: Box<ThreadCTX>) {
 		use std::ptr::null_mut;
 		assert!(
@@ -132,12 +74,12 @@ mod threading {
 	// boxing.
 	pub enum JrThreadId {}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_thread_id() -> *mut JrThreadId {
 		Box::into_raw(Box::new(std::thread::current().id())).cast()
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub extern "C" fn jrsonnet_thread_id_compare(
 		a: *const JrThreadId,
 		b: *const JrThreadId,
@@ -147,7 +89,7 @@ mod threading {
 		i32::from(*a == *b)
 	}
 
-	#[no_mangle]
+	#[unsafe(no_mangle)]
 	pub unsafe extern "C" fn jrsonnet_thread_id_free(id: *mut JrThreadId) {
 		let _id: Box<ThreadId> = unsafe { Box::from_raw(id.cast()) };
 	}

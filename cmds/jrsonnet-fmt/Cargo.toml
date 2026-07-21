@@ -1,5 +1,8 @@
 [package]
 name = "jrsonnet-fmt"
+description = "Command-line jsonnet code formatter"
+keywords = ["jsonnet", "formatter", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

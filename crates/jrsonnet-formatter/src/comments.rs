@@ -1,7 +1,7 @@
 use std::string::String;
 
 use dprint_core::formatting::PrintItems;
-use jrsonnet_rowan_parser::{nodes::TriviaKind, AstToken};
+use jrsonnet_rowan_parser::{AstToken, nodes::TriviaKind};
 
 use crate::{children::ChildTrivia, p, pi};
 
@@ -136,7 +136,7 @@ pub fn format_comments(comments: &ChildTrivia, loc: CommentLocation, out: &mut P
 								}
 								line = new_line.to_string();
 							}
-							p!(out, string(line.to_string()) nl);
+							p!(out, string(line.clone()) nl);
 						}
 					}
 					if doc {

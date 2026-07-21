@@ -1,0 +1,129 @@
+---
+source: crates/jrsonnet-evaluator/src/analyze.rs
+assertion_line: 2175
+expression: rendered
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/function_def.jsonnet
+---
+--- source ---
+local f(x, y) = x + y; f(1, 2)
+--- root analysis ---
+object_dependent_depth: none
+local_dependent_depth: 0
+errored: false
+--- diagnostics ---
+--- lir ---
+LocalExpr(
+    LLocalExpr {
+        frame_shape: ClosureShape {
+            captures: [],
+            n_locals: 1,
+        },
+        binds: [
+            LBind {
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                value_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 0,
+                },
+                value: Function(
+                    LFunction {
+                        name: Some(
+                            "f",
+                        ),
+                        params: [
+                            LParam {
+                                name: Some(
+                                    "x",
+                                ),
+                                destruct: Full(
+                                    LocalSlot(
+                                        0,
+                                    ),
+                                ),
+                                default: None,
+                            },
+                            LParam {
+                                name: Some(
+                                    "y",
+                                ),
+                                destruct: Full(
+                                    LocalSlot(
+                                        1,
+                                    ),
+                                ),
+                                default: None,
+                            },
+                        ],
+                        signature: FunctionSignature(
+                            [
+                                ParamParse {
+                                    name: Named(
+                                        "x",
+                                    ),
+                                    default: None,
+                                },
+                                ParamParse {
+                                    name: Named(
+                                        "y",
+                                    ),
+                                    default: None,
+                                },
+                            ],
+                        ),
+                        body_shape: ClosureShape {
+                            captures: [],
+                            n_locals: 2,
+                        },
+                        body: BinaryOp {
+                            lhs: Slot(
+                                Local(
+                                    LocalSlot(
+                                        0,
+                                    ),
+                                ),
+                            ),
+                            op: Add,
+                            rhs: Slot(
+                                Local(
+                                    LocalSlot(
+                                        1,
+                                    ),
+                                ),
+                            ),
+                        },
+                    },
+                ),
+            },
+        ],
+        body: Apply {
+            applicable: Slot(
+                Local(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+            ),
+            args: LArgsDesc {
+                unnamed: [
+                    Trivial(
+                        Num(
+                            1.0,
+                        ),
+                    ),
+                    Trivial(
+                        Num(
+                            2.0,
+                        ),
+                    ),
+                ],
+                names: [],
+                values: [],
+            } from virtual:<test>:24-30,
+            tailstrict: false,
+        },
+    },
+)

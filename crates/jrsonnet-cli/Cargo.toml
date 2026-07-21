@@ -1,6 +1,8 @@
 [package]
 name = "jrsonnet-cli"
-description = "Utilities for building jrsonnet CLIs"
+description = "Reusable clap-based building blocks for jrsonnet command-line tools"
+keywords = ["jsonnet", "cli", "clap"]
+categories = ["command-line-interface"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,22 +13,24 @@ version.workspace = true
 workspace = true
 
 [features]
+experimental = [
+  "exp-preserve-order",
+  "exp-bigint",
+  "exp-null-coaelse",
+]
 exp-preserve-order = [
-    "jrsonnet-evaluator/exp-preserve-order",
-    "jrsonnet-stdlib/exp-preserve-order",
+  "jrsonnet-evaluator/exp-preserve-order",
+  "jrsonnet-stdlib/exp-preserve-order",
 ]
-exp-bigint = [
-    "jrsonnet-evaluator/exp-bigint",
-    "jrsonnet-stdlib/exp-bigint",
-]
+exp-bigint = ["jrsonnet-evaluator/exp-bigint", "jrsonnet-stdlib/exp-bigint"]
 exp-null-coaelse = [
-    "jrsonnet-evaluator/exp-null-coaelse",
-    "jrsonnet-stdlib/exp-null-coaelse",
+  "jrsonnet-evaluator/exp-null-coaelse",
+  "jrsonnet-stdlib/exp-null-coaelse",
 ]
 
 [dependencies]
 jrsonnet-evaluator = { workspace = true, features = ["explaining-traces"] }
-jrsonnet-parser.workspace = true
+jrsonnet-ir.workspace = true
 jrsonnet-stdlib.workspace = true
 jrsonnet-gcmodule.workspace = true
 

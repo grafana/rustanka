@@ -11,7 +11,7 @@ struct StackLimit {
 struct NightlyLocalKey<T>(pub T);
 #[cfg(nightly)]
 impl<T> NightlyLocalKey<T> {
-	#[inline(always)]
+	#[inline]
 	fn with<U>(&self, v: impl FnOnce(&T) -> U) -> U {
 		v(&self.0)
 	}
@@ -21,6 +21,7 @@ impl<T> NightlyLocalKey<T> {
 type NightlyLocalKey<T> = std::thread::LocalKey<T>;
 
 #[cfg(nightly)]
+#[macro_export]
 macro_rules! const_tls {
 	(const $name:ident: $t:ty = $expr:expr;) => {
 		#[thread_local]
@@ -28,6 +29,7 @@ macro_rules! const_tls {
 	};
 }
 #[cfg(not(nightly))]
+#[macro_export]
 macro_rules! const_tls {
 	(const $name:ident: $t:ty = $expr:expr;) => {
 		thread_local! {
@@ -59,7 +61,7 @@ impl From<StackOverflowError> for Error {
 pub struct StackDepthGuard(PhantomData<()>);
 impl Drop for StackDepthGuard {
 	fn drop(&mut self) {
-		STACK_LIMIT.with(|limit| limit.current_depth.set(limit.current_depth.get() - 1))
+		STACK_LIMIT.with(|limit| limit.current_depth.set(limit.current_depth.get() - 1));
 	}
 }
 

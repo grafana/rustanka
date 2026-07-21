@@ -1,5 +1,6 @@
 ---
 source: crates/jrsonnet-rowan-parser/src/tests.rs
+assertion_line: 60
 expression: "* 2\n"
 ---
 SOURCE_FILE@0..4

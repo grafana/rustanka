@@ -2,8 +2,7 @@
 
 use event::Sink;
 use generated::nodes::{SourceFile, Trivia};
-use lex::lex;
-use parser::{LocatedSyntaxError, Parser};
+use parser::Parser;
 pub use rowan;
 
 mod ast;
@@ -14,23 +13,17 @@ mod lex;
 mod marker;
 mod parser;
 mod precedence;
-mod string_block;
 mod tests;
 mod token_set;
 
 pub use ast::{AstChildren, AstNode, AstToken};
 pub use generated::{nodes, syntax_kinds::SyntaxKind};
 pub use language::*;
-pub use string_block::{collect_lexed_str_block, CollectStrBlock};
+pub use parser::LocatedSyntaxError;
 pub use token_set::SyntaxKindSet;
 
-use self::{
-	ast::support,
-	generated::nodes::{Expr, ExprObjExtend},
-};
-
 pub fn parse(input: &str) -> (SourceFile, Vec<LocatedSyntaxError>) {
-	let lexemes = lex(input);
+	let lexemes = lex::lex(input);
 	let kinds = lexemes
 		.iter()
 		.map(|l| l.kind)
@@ -47,15 +40,4 @@ pub fn parse(input: &str) -> (SourceFile, Vec<LocatedSyntaxError>) {
 		},
 		parse.errors,
 	)
-}
-impl ExprObjExtend {
-	pub fn lhs_work(&self) -> Option<Expr> {
-		support::child(self.syntax())
-	}
-	pub fn rhs_work(&self) -> Option<Expr> {
-		let mut children = support::children(self.syntax());
-		// skip lhs
-		children.next()?;
-		children.next()
-	}
 }

@@ -1,0 +1,14 @@
+---
+source: crates/jrsonnet-rowan-parser/src/tests.rs
+expression: "/*/\n"
+---
+SOURCE_FILE@0..4
+  ERROR_COMMENT_TOO_SHORT@0..3 "/*/"
+  WHITESPACE@3..4 "\n"
+  EXPR@4..4
+    ERROR_MISSING_TOKEN@4..4
+===
+LocatedSyntaxError { error: Missing { expected: Named("expression") }, range: 4..4 }
+===
+   ·     ╭── missing expression
+1  │ /*/

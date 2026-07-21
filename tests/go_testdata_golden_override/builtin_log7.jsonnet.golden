@@ -1,2 +1,2 @@
-convert num value: non-finite
-    builtin_log7.jsonnet:1:1-13: function <builtin_log> call
+failed to convert num value: numeric value is not finite (got NaN)
+    builtin_log7.jsonnet:1:8-11: function <builtin_log> call

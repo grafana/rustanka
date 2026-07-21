@@ -1,0 +1,54 @@
+---
+source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1143
+expression: "format!(\"{v:#?}\")"
+---
+Index {
+    indexable: Apply(
+        Index {
+            indexable: Var(
+                "std" from virtual:<test>:0-3,
+            ),
+            parts: [
+                IndexPart {
+                    span: virtual:<test>:4-8,
+                    value: Trivial(
+                        Str(
+                            "test",
+                        ),
+                    ),
+                },
+            ],
+        },
+        ArgsDesc {
+            unnamed: [
+                Trivial(
+                    Num(
+                        2.0,
+                    ),
+                ),
+            ],
+            names: [],
+            values: [],
+        } from virtual:<test>:8-11,
+        false,
+    ),
+    parts: [
+        IndexPart {
+            span: virtual:<test>:12-17,
+            value: Trivial(
+                Str(
+                    "field",
+                ),
+            ),
+        },
+        IndexPart {
+            span: virtual:<test>:18-19,
+            value: Trivial(
+                Num(
+                    0.0,
+                ),
+            ),
+        },
+    ],
+}

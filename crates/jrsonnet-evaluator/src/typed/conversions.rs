@@ -1,24 +1,38 @@
-use std::{collections::BTreeMap, marker::PhantomData, ops::Deref};
+use std::{any::TypeId, collections::BTreeMap, marker::PhantomData, mem::transmute, ops::Deref};
 
-use jrsonnet_gcmodule::{Cc, Trace};
+use jrsonnet_gcmodule::Trace;
 use jrsonnet_interner::{IBytes, IStr};
-pub use jrsonnet_macros::Typed;
+use jrsonnet_ir::NumValue;
 use jrsonnet_types::{ComplexValType, ValType};
 
 use crate::{
-	arr::{ArrValue, BytesArray},
-	bail,
-	function::{native::NativeDesc, FuncDesc, FuncVal},
-	typed::CheckType,
-	val::{IndexableVal, NumValue, StrValue, ThunkMapper},
 	ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
+	arr::ArrValue,
+	bail,
+	error::ErrorKind::*,
+	function::FuncVal,
+	typed::CheckType,
+	val::{IndexableVal, StrValue, ThunkMapper},
 };
 
+#[doc(hidden)]
+pub mod __typed_macro_prelude {
+	pub use ::jrsonnet_evaluator::{
+		IStr, ObjValue, ObjValueBuilder, State, Val,
+		error::{ErrorKind, Result as JrResult},
+		typed::{
+			CheckType, ComplexValType, FromUntyped, IntoUntyped, ParseTypedObj, SerializeTypedObj,
+			Typed,
+		},
+	};
+}
+pub use jrsonnet_macros::{FromUntyped, IntoUntyped, Typed};
+
 #[derive(Trace)]
-struct FromUntyped<K: Trace>(PhantomData<fn() -> K>);
-impl<K> ThunkMapper<Val> for FromUntyped<K>
+struct ThunkFromUntyped<K: Trace>(PhantomData<fn() -> K>);
+impl<K> ThunkMapper<Val> for ThunkFromUntyped<K>
 where
-	K: Typed + Trace,
+	K: Typed + FromUntyped + Trace,
 {
 	type Output = K;
 
@@ -26,15 +40,41 @@ where
 		K::from_untyped(from)
 	}
 }
-impl<K: Trace> Default for FromUntyped<K> {
+impl<K: Trace> Default for ThunkFromUntyped<K> {
+	fn default() -> Self {
+		Self(PhantomData)
+	}
+}
+#[derive(Trace)]
+struct ThunkIntoUntyped<K: Trace>(PhantomData<fn() -> K>);
+impl<K> ThunkMapper<K> for ThunkIntoUntyped<K>
+where
+	K: Typed + Trace + IntoUntyped,
+{
+	type Output = Val;
+
+	fn map(self, from: K) -> Result<Self::Output> {
+		K::into_untyped(from)
+	}
+}
+impl<K: Trace> Default for ThunkIntoUntyped<K> {
 	fn default() -> Self {
 		Self(PhantomData)
 	}
 }
 
-pub trait TypedObj: Typed {
-	fn serialize(self, out: &mut ObjValueBuilder) -> Result<()>;
+#[diagnostic::on_unimplemented(
+	note = "don't implement `ParseTypedObj` directly, it is automatically provided by `FromUntyped` derive"
+)]
+pub trait ParseTypedObj: Typed {
 	fn parse(obj: &ObjValue) -> Result<Self>;
+}
+
+#[diagnostic::on_unimplemented(
+	note = "don't implement `SerializeTypedObj` directly, it is automatically provided by `IntoUntyped` derive"
+)]
+pub trait SerializeTypedObj: Typed {
+	fn serialize(self, out: &mut ObjValueBuilder) -> Result<()>;
 	fn into_object(self) -> Result<ObjValue> {
 		let mut builder = ObjValueBuilder::new();
 		self.serialize(&mut builder)?;
@@ -44,31 +84,48 @@ pub trait TypedObj: Typed {
 
 pub trait Typed: Sized {
 	const TYPE: &'static ComplexValType;
+}
+impl<T> Typed for &T
+where
+	T: Typed,
+{
+	const TYPE: &'static ComplexValType = <&T as Typed>::TYPE;
+}
+pub trait IntoUntyped: Typed {
+	// Whatever caller should use `into_lazy_untyped` instead of `into_untyped`
+	fn provides_lazy() -> bool {
+		false
+	}
 	fn into_untyped(typed: Self) -> Result<Val>;
 	fn into_lazy_untyped(typed: Self) -> Thunk<Val> {
 		Thunk::from(Self::into_untyped(typed))
 	}
+}
+
+pub trait IntoUntypedResult: Typed {
+	/// Hack to make builtins be able to return non-result values, and make macros able to convert those values to result
+	/// This method returns identity in impl Typed for Result, and should not be overriden
+	#[doc(hidden)]
+	fn into_untyped_result(typed: Self) -> Result<Val>;
+}
+impl<T> IntoUntypedResult for T
+where
+	T: IntoUntyped,
+{
+	fn into_untyped_result(typed: Self) -> Result<Val> {
+		T::into_untyped(typed)
+	}
+}
+
+pub trait FromUntyped: Typed {
 	fn from_untyped(untyped: Val) -> Result<Self>;
 	fn from_lazy_untyped(lazy: Thunk<Val>) -> Result<Self> {
 		Self::from_untyped(lazy.evaluate()?)
 	}
 
-	// Whatever caller should use `into_lazy_untyped` instead of `into_untyped`
-	fn provides_lazy() -> bool {
-		false
-	}
-
 	// Whatever caller should use `from_lazy_untyped` instead of `from_untyped` when possible
 	fn wants_lazy() -> bool {
 		false
-	}
-
-	/// Hack to make builtins be able to return non-result values, and make macros able to convert those values to result
-	/// This method returns identity in impl Typed for Result, and should not be overriden
-	#[doc(hidden)]
-	fn into_result(typed: Self) -> Result<Val> {
-		let value = Self::into_untyped(typed)?;
-		Ok(value)
 	}
 }
 
@@ -77,38 +134,78 @@ where
 	T: Typed + Trace + Clone,
 {
 	const TYPE: &'static ComplexValType = &ComplexValType::Lazy(T::TYPE);
+}
 
+#[inline]
+fn try_cast_thunk_val<T: 'static>(typed: Thunk<T>) -> Result<Thunk<Val>, Thunk<T>> {
+	if TypeId::of::<T>() == TypeId::of::<Val>() {
+		// SAFETY: We know that it is exactly the same type, and we discard the original after that
+		// to avoid double-free.
+		let transmuted = unsafe { transmute::<Thunk<T>, Thunk<Val>>(typed) };
+		Ok(transmuted)
+	} else {
+		Err(typed)
+	}
+}
+impl<T> IntoUntyped for Thunk<T>
+where
+	T: IntoUntyped + Trace + Clone,
+{
+	#[inline]
 	fn into_untyped(typed: Self) -> Result<Val> {
 		T::into_untyped(typed.evaluate()?)
 	}
-
-	fn from_untyped(untyped: Val) -> Result<Self> {
-		Self::from_lazy_untyped(Thunk::evaluated(untyped))
-	}
-
 	fn provides_lazy() -> bool {
 		true
 	}
 
 	fn into_lazy_untyped(inner: Self) -> Thunk<Val> {
-		#[derive(Trace)]
-		struct IntoUntyped<K: Trace>(PhantomData<fn() -> K>);
-		impl<K> ThunkMapper<K> for IntoUntyped<K>
-		where
-			K: Typed + Trace,
-		{
-			type Output = Val;
+		// Avoid lazy mapping
+		let inner = match try_cast_thunk_val(inner) {
+			Ok(v) => return v,
+			Err(e) => e,
+		};
+		inner.map(<ThunkIntoUntyped<T>>::default())
+	}
+}
+impl<T> IntoUntyped for &Thunk<T>
+where
+	T: IntoUntyped + Trace + Clone,
+{
+	fn into_untyped(typed: Self) -> Result<Val> {
+		T::into_untyped(typed.evaluate()?)
+	}
+	fn provides_lazy() -> bool {
+		true
+	}
 
-			fn map(self, from: K) -> Result<Self::Output> {
-				K::into_untyped(from)
-			}
-		}
-		impl<K: Trace> Default for IntoUntyped<K> {
-			fn default() -> Self {
-				Self(PhantomData)
-			}
-		}
-		inner.map(<IntoUntyped<T>>::default())
+	fn into_lazy_untyped(inner: Self) -> Thunk<Val> {
+		// Avoid lazy mapping
+		let inner = match try_cast_thunk_val(inner.clone()) {
+			Ok(v) => return v,
+			Err(e) => e,
+		};
+		inner.map(<ThunkIntoUntyped<T>>::default())
+	}
+}
+
+#[inline]
+fn try_cast_thunk_t<T: 'static>(typed: Thunk<Val>) -> Result<Thunk<T>, Thunk<Val>> {
+	if TypeId::of::<T>() == TypeId::of::<Val>() {
+		// SAFETY: We know that it is exactly the same type, and we discard the original after that
+		// to avoid double-free.
+		let transmuted = unsafe { transmute::<Thunk<Val>, Thunk<T>>(typed) };
+		Ok(transmuted)
+	} else {
+		Err(typed)
+	}
+}
+impl<T> FromUntyped for Thunk<T>
+where
+	T: Typed + FromUntyped + Trace + Clone,
+{
+	fn from_untyped(untyped: Val) -> Result<Self> {
+		Self::from_lazy_untyped(Thunk::evaluated(untyped))
 	}
 
 	fn wants_lazy() -> bool {
@@ -116,18 +213,22 @@ where
 	}
 
 	fn from_lazy_untyped(inner: Thunk<Val>) -> Result<Self> {
-		Ok(inner.map(<FromUntyped<T>>::default()))
+		// Avoid lazy mapping
+		let inner = match try_cast_thunk_t(inner) {
+			Ok(v) => return Ok(v),
+			Err(e) => e,
+		};
+		Ok(inner.map(<ThunkFromUntyped<T>>::default()))
 	}
 }
-
-pub const MAX_SAFE_INTEGER: f64 = ((1u64 << (f64::MANTISSA_DIGITS)) - 1) as f64;
-pub const MIN_SAFE_INTEGER: f64 = (-((1i64 << (f64::MANTISSA_DIGITS)) - 1)) as f64;
 
 macro_rules! impl_int {
 	($($ty:ty)*) => {$(
 		impl Typed for $ty {
 			const TYPE: &'static ComplexValType =
 				&ComplexValType::BoundedNumber(Some(Self::MIN as f64), Some(Self::MAX as f64));
+		}
+		impl FromUntyped for $ty {
 			fn from_untyped(value: Val) -> Result<Self> {
 				<Self as Typed>::TYPE.check(&value)?;
 				match value {
@@ -140,11 +241,19 @@ macro_rules! impl_int {
 								stringify!($ty)
 							)
 						}
+						#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, reason = "checked by TYPE")]
 						Ok(n as Self)
 					}
 					_ => unreachable!(),
 				}
 			}
+		}
+		impl IntoUntyped for &$ty {
+			fn into_untyped(value: Self) -> Result<Val> {
+				Ok(Val::Num((*value).into()))
+			}
+		}
+		impl IntoUntyped for $ty {
 			fn into_untyped(value: Self) -> Result<Val> {
 				Ok(Val::Num(value.into()))
 			}
@@ -157,6 +266,7 @@ impl_int!(i8 u8 i16 u16 i32 u32);
 macro_rules! impl_bounded_int {
 	($($name:ident = $ty:ty)*) => {$(
 		#[derive(Clone, Copy)]
+		#[allow(clippy::cast_possible_truncation, reason = "overflow is api misuse")]
 		pub struct $name<const MIN: $ty, const MAX: $ty>($ty);
 		impl<const MIN: $ty, const MAX: $ty> $name<MIN, MAX> {
 			pub const fn new(value: $ty) -> Option<$name<MIN, MAX>> {
@@ -178,12 +288,15 @@ macro_rules! impl_bounded_int {
 		}
 
 		impl<const MIN: $ty, const MAX: $ty> Typed for $name<MIN, MAX> {
+			#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, reason = "overflow is api misuse")]
 			const TYPE: &'static ComplexValType =
 				&ComplexValType::BoundedNumber(
 					Some(MIN as f64),
 					Some(MAX as f64),
 				);
+		}
 
+		impl<const MIN: $ty, const MAX: $ty> FromUntyped for $name<MIN, MAX> {
 			fn from_untyped(value: Val) -> Result<Self> {
 				<Self as Typed>::TYPE.check(&value)?;
 				match value {
@@ -196,12 +309,15 @@ macro_rules! impl_bounded_int {
 								stringify!($ty)
 							)
 						}
+						#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "overflow is api misuse, the range is checked by TYPE")]
 						Ok(Self(n as $ty))
 					}
 					_ => unreachable!(),
 				}
 			}
+		}
 
+		impl<const MIN: $ty, const MAX: $ty> IntoUntyped for $name<MIN, MAX> {
 			#[allow(clippy::cast_lossless)]
 			fn into_untyped(value: Self) -> Result<Val> {
 				Ok(Val::try_num(value.0)?)
@@ -220,11 +336,18 @@ impl_bounded_int!(
 
 impl Typed for f64 {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Num);
-
+}
+impl IntoUntyped for &f64 {
+	fn into_untyped(value: Self) -> Result<Val> {
+		Ok(Val::try_num(*value)?)
+	}
+}
+impl IntoUntyped for f64 {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::try_num(value)?)
 	}
-
+}
+impl FromUntyped for f64 {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -237,11 +360,13 @@ impl Typed for f64 {
 pub struct PositiveF64(pub f64);
 impl Typed for PositiveF64 {
 	const TYPE: &'static ComplexValType = &ComplexValType::BoundedNumber(Some(0.0), None);
-
+}
+impl IntoUntyped for &PositiveF64 {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::try_num(value.0)?)
 	}
-
+}
+impl FromUntyped for PositiveF64 {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -252,12 +377,14 @@ impl Typed for PositiveF64 {
 }
 impl Typed for usize {
 	const TYPE: &'static ComplexValType =
-		&ComplexValType::BoundedNumber(Some(0.0), Some(MAX_SAFE_INTEGER));
-
+		&ComplexValType::BoundedNumber(Some(0.0), Some(NumValue::MAX_SAFE_INTEGER));
+}
+impl IntoUntyped for usize {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::try_num(value)?)
 	}
-
+}
+impl FromUntyped for usize {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -267,6 +394,11 @@ impl Typed for usize {
 				if n.trunc() != n {
 					bail!("cannot convert number with fractional part to usize")
 				}
+				#[allow(
+					clippy::cast_possible_truncation,
+					clippy::cast_sign_loss,
+					reason = "the range is checked by TYPE"
+				)]
 				Ok(n as Self)
 			}
 			_ => unreachable!(),
@@ -276,11 +408,13 @@ impl Typed for usize {
 
 impl Typed for IStr {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Str);
-
+}
+impl IntoUntyped for IStr {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::string(value))
 	}
-
+}
+impl FromUntyped for IStr {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -292,11 +426,13 @@ impl Typed for IStr {
 
 impl Typed for String {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Str);
-
+}
+impl IntoUntyped for String {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::string(value))
 	}
-
+}
+impl FromUntyped for String {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -308,11 +444,13 @@ impl Typed for String {
 
 impl Typed for StrValue {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Str);
-
+}
+impl IntoUntyped for StrValue {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Str(value))
 	}
-
+}
+impl FromUntyped for StrValue {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -324,11 +462,18 @@ impl Typed for StrValue {
 
 impl Typed for char {
 	const TYPE: &'static ComplexValType = &ComplexValType::Char;
-
+}
+impl IntoUntyped for &char {
+	fn into_untyped(value: Self) -> Result<Val> {
+		Ok(Val::string(*value))
+	}
+}
+impl IntoUntyped for char {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::string(value))
 	}
-
+}
+impl FromUntyped for char {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -338,12 +483,14 @@ impl Typed for char {
 	}
 }
 
+// TODO: View into vec using ArrayLike?
 impl<T> Typed for Vec<T>
 where
 	T: Typed,
 {
 	const TYPE: &'static ComplexValType = &ComplexValType::ArrayRef(T::TYPE);
-
+}
+impl<T: Typed + IntoUntyped> IntoUntyped for Vec<T> {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Arr(
 			value
@@ -352,7 +499,8 @@ where
 				.collect::<Result<ArrValue>>()?,
 		))
 	}
-
+}
+impl<T: Typed + FromUntyped> FromUntyped for Vec<T> {
 	fn from_untyped(value: Val) -> Result<Self> {
 		let Val::Arr(a) = value else {
 			<Self as Typed>::TYPE.check(&value)?;
@@ -369,21 +517,37 @@ where
 	}
 }
 
-impl<K: Typed + Ord, V: Typed> Typed for BTreeMap<K, V> {
+// TODO: View into BTreeMap using ObjectCore?
+impl<K, V> Typed for BTreeMap<K, V>
+where
+	K: Typed + Ord,
+	V: Typed,
+{
 	const TYPE: &'static ComplexValType = &ComplexValType::AttrsOf(V::TYPE);
-
+}
+impl<K, V> IntoUntyped for BTreeMap<K, V>
+where
+	K: Typed + Ord + IntoUntyped,
+	V: Typed + IntoUntyped,
+{
 	fn into_untyped(typed: Self) -> Result<Val> {
 		let mut out = ObjValueBuilder::with_capacity(typed.len());
 		for (k, v) in typed {
-			let Some(key) = K::into_untyped(k)?.as_str() else {
+			let key = K::into_untyped(k)?;
+			let Some(key) = key.as_str() else {
 				bail!("map key should serialize to string");
 			};
 			let value = V::into_untyped(v)?;
-			out.field(key).value(value);
+			out.field(key.into_flat()).value(value);
 		}
 		Ok(Val::Obj(out.build()))
 	}
-
+}
+impl<K, V> FromUntyped for BTreeMap<K, V>
+where
+	K: FromUntyped + Ord,
+	V: FromUntyped,
+{
 	fn from_untyped(value: Val) -> Result<Self> {
 		Self::TYPE.check(&value)?;
 		let obj = value.as_obj().expect("typecheck should fail");
@@ -416,32 +580,34 @@ impl<K: Typed + Ord, V: Typed> Typed for BTreeMap<K, V> {
 
 impl Typed for Val {
 	const TYPE: &'static ComplexValType = &ComplexValType::Any;
-
+}
+impl IntoUntyped for &Val {
+	#[inline]
+	fn into_untyped(typed: Self) -> Result<Val> {
+		Ok(typed.clone())
+	}
+}
+impl IntoUntyped for Val {
+	#[inline]
 	fn into_untyped(typed: Self) -> Result<Val> {
 		Ok(typed)
 	}
+}
+impl FromUntyped for Val {
 	fn from_untyped(untyped: Val) -> Result<Self> {
 		Ok(untyped)
 	}
 }
 
-// Hack
 #[doc(hidden)]
 impl<T> Typed for Result<T>
 where
 	T: Typed,
 {
 	const TYPE: &'static ComplexValType = &ComplexValType::Any;
-
-	fn into_untyped(_typed: Self) -> Result<Val> {
-		panic!("do not use this conversion")
-	}
-
-	fn from_untyped(_untyped: Val) -> Result<Self> {
-		panic!("do not use this conversion")
-	}
-
-	fn into_result(typed: Self) -> Result<Val> {
+}
+impl<T: IntoUntyped> IntoUntypedResult for Result<T> {
+	fn into_untyped_result(typed: Self) -> Result<Val> {
 		typed.map(T::into_untyped)?
 	}
 }
@@ -450,19 +616,26 @@ where
 impl Typed for IBytes {
 	const TYPE: &'static ComplexValType =
 		&ComplexValType::ArrayRef(&ComplexValType::BoundedNumber(Some(0.0), Some(255.0)));
-
+}
+impl IntoUntyped for &IBytes {
 	fn into_untyped(value: Self) -> Result<Val> {
-		Ok(Val::Arr(ArrValue::bytes(value)))
+		Ok(Val::arr(value.clone()))
 	}
-
+}
+impl IntoUntyped for IBytes {
+	fn into_untyped(value: Self) -> Result<Val> {
+		Ok(Val::arr(value))
+	}
+}
+impl FromUntyped for IBytes {
 	fn from_untyped(value: Val) -> Result<Self> {
 		let Val::Arr(a) = &value else {
 			<Self as Typed>::TYPE.check(&value)?;
 			unreachable!()
 		};
-		if let Some(bytes) = a.as_any().downcast_ref::<BytesArray>() {
-			return Ok(bytes.0.as_slice().into());
-		};
+		if let Some(bytes) = a.as_any().downcast_ref::<IBytes>() {
+			return Ok(bytes.clone());
+		}
 		<Self as Typed>::TYPE.check(&value)?;
 		// Any::downcast_ref::<ByteArray>(&a);
 		let mut out = Vec::with_capacity(a.len());
@@ -477,11 +650,13 @@ impl Typed for IBytes {
 pub struct M1;
 impl Typed for M1 {
 	const TYPE: &'static ComplexValType = &ComplexValType::BoundedNumber(Some(-1.0), Some(-1.0));
-
+}
+impl IntoUntyped for &M1 {
 	fn into_untyped(_: Self) -> Result<Val> {
 		Ok(Val::Num(NumValue::new(-1.0).expect("finite")))
 	}
-
+}
+impl FromUntyped for M1 {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		Ok(Self)
@@ -499,13 +674,22 @@ macro_rules! decl_either {
 			$($id: Typed,)*
 		{
 			const TYPE: &'static ComplexValType = &ComplexValType::UnionRef(&[$($id::TYPE),*]);
-
+		}
+		impl<$($id),*> IntoUntyped for $name<$($id),*>
+		where
+			$($id: Typed + IntoUntyped,)*
+		{
 			fn into_untyped(value: Self) -> Result<Val> {
 				match value {$(
 					$name::$id(v) => $id::into_untyped(v)
 				),*}
 			}
+		}
 
+		impl<$($id),*> FromUntyped for $name<$($id),*>
+		where
+			$($id: Typed + FromUntyped,)*
+		{
 			fn from_untyped(value: Val) -> Result<Self> {
 				$(
 					if $id::TYPE.check(&value).is_ok() {
@@ -544,11 +728,13 @@ pub type MyType = Either![u32, f64, String];
 
 impl Typed for ArrValue {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Arr);
-
+}
+impl IntoUntyped for ArrValue {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Arr(value))
 	}
-
+}
+impl FromUntyped for ArrValue {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -560,11 +746,13 @@ impl Typed for ArrValue {
 
 impl Typed for FuncVal {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Func);
-
+}
+impl IntoUntyped for FuncVal {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Func(value))
 	}
-
+}
+impl FromUntyped for FuncVal {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -574,30 +762,15 @@ impl Typed for FuncVal {
 	}
 }
 
-impl Typed for Cc<FuncDesc> {
-	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Func);
-
-	fn into_untyped(value: Self) -> Result<Val> {
-		Ok(Val::Func(FuncVal::Normal(value)))
-	}
-
-	fn from_untyped(value: Val) -> Result<Self> {
-		<Self as Typed>::TYPE.check(&value)?;
-		match value {
-			Val::Func(FuncVal::Normal(desc)) => Ok(desc),
-			Val::Func(_) => bail!("expected normal function, not builtin"),
-			_ => unreachable!(),
-		}
-	}
-}
-
 impl Typed for ObjValue {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Obj);
-
+}
+impl IntoUntyped for ObjValue {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Obj(value))
 	}
-
+}
+impl FromUntyped for ObjValue {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -609,11 +782,18 @@ impl Typed for ObjValue {
 
 impl Typed for bool {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Bool);
-
+}
+impl IntoUntyped for &bool {
+	fn into_untyped(value: Self) -> Result<Val> {
+		Ok(Val::Bool(*value))
+	}
+}
+impl IntoUntyped for bool {
 	fn into_untyped(value: Self) -> Result<Val> {
 		Ok(Val::Bool(value))
 	}
-
+}
+impl FromUntyped for bool {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		match value {
@@ -622,36 +802,45 @@ impl Typed for bool {
 		}
 	}
 }
+
 impl Typed for IndexableVal {
 	const TYPE: &'static ComplexValType = &ComplexValType::UnionRef(&[
 		&ComplexValType::Simple(ValType::Arr),
 		&ComplexValType::Simple(ValType::Str),
 	]);
-
+}
+impl IntoUntyped for IndexableVal {
 	fn into_untyped(value: Self) -> Result<Val> {
 		match value {
 			Self::Str(s) => Ok(Val::string(s)),
 			Self::Arr(a) => Ok(Val::Arr(a)),
 		}
 	}
-
+}
+impl FromUntyped for IndexableVal {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
 		value.into_indexable()
 	}
 }
 
-pub struct Null;
-impl Typed for Null {
+impl Typed for () {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Null);
-
-	fn into_untyped(_: Self) -> Result<Val> {
+}
+impl IntoUntyped for &() {
+	fn into_untyped((): Self) -> Result<Val> {
 		Ok(Val::Null)
 	}
-
+}
+impl IntoUntyped for () {
+	fn into_untyped((): Self) -> Result<Val> {
+		Ok(Val::Null)
+	}
+}
+impl FromUntyped for () {
 	fn from_untyped(value: Val) -> Result<Self> {
 		<Self as Typed>::TYPE.check(&value)?;
-		Ok(Self)
+		Ok(())
 	}
 }
 
@@ -661,11 +850,19 @@ where
 {
 	const TYPE: &'static ComplexValType =
 		&ComplexValType::UnionRef(&[&ComplexValType::Simple(ValType::Null), T::TYPE]);
-
+}
+impl<T> IntoUntyped for Option<T>
+where
+	T: Typed + IntoUntyped,
+{
 	fn into_untyped(typed: Self) -> Result<Val> {
 		typed.map_or_else(|| Ok(Val::Null), |v| T::into_untyped(v))
 	}
-
+}
+impl<T> FromUntyped for Option<T>
+where
+	T: Typed + FromUntyped,
+{
 	fn from_untyped(untyped: Val) -> Result<Self> {
 		if matches!(untyped, Val::Null) {
 			Ok(None)
@@ -675,43 +872,42 @@ where
 	}
 }
 
-pub struct NativeFn<D: NativeDesc>(D::Value);
-impl<D: NativeDesc> Deref for NativeFn<D> {
-	type Target = D::Value;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-impl<D: NativeDesc> Typed for NativeFn<D> {
-	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Func);
-
-	fn into_untyped(_typed: Self) -> Result<Val> {
-		bail!("can only convert functions from jsonnet to native")
-	}
-
-	fn from_untyped(untyped: Val) -> Result<Self> {
-		Ok(Self(
-			untyped
-				.as_func()
-				.expect("shape is checked")
-				.into_native::<D>(),
-		))
-	}
-}
-
 impl Typed for NumValue {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Num);
-
+}
+impl IntoUntyped for &NumValue {
 	fn into_untyped(typed: Self) -> Result<Val> {
-		Ok(Val::Num(typed))
+		Ok(Val::Num(*typed))
 	}
-
+}
+impl FromUntyped for NumValue {
 	fn from_untyped(untyped: Val) -> Result<Self> {
 		Self::TYPE.check(&untyped)?;
 		match untyped {
 			Val::Num(v) => Ok(v),
 			_ => unreachable!(),
 		}
+	}
+}
+
+pub struct Codepoint(u32);
+impl Codepoint {
+	pub fn try_char(&self) -> Result<char> {
+		Ok(char::from_u32(self.0).ok_or_else(|| InvalidUnicodeCodepointGot(self.0))?)
+	}
+}
+impl Typed for Codepoint {
+	const TYPE: &'static ComplexValType = u32::TYPE;
+}
+impl IntoUntyped for Codepoint {
+	fn into_untyped(typed: Self) -> Result<Val> {
+		u32::into_untyped(typed.0)
+	}
+}
+impl FromUntyped for Codepoint {
+	fn from_untyped(untyped: Val) -> Result<Self> {
+		u32::from_untyped(untyped)
+			.description("invalid codepoint value")
+			.map(Self)
 	}
 }

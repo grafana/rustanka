@@ -1,17 +1,24 @@
 //! faster std.format impl
 #![allow(clippy::too_many_arguments)]
+#![expect(
+	clippy::cast_possible_truncation,
+	clippy::cast_sign_loss,
+	reason = "many safe integer casts, behavior on overflow is not specified"
+)]
+
+use std::fmt::Write as _;
 
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_interner::IStr;
 use jrsonnet_types::ValType;
+use num_bigint::BigUint;
 use thiserror::Error;
 
 use crate::{
-	bail,
-	error::{format_found, suggest_object_fields, ErrorKind::*},
+	Error, ObjValue, Result, Val, bail,
+	error::{ErrorKind::*, format_found, suggest_object_fields},
 	manifest,
-	typed::Typed,
-	Error, ObjValue, Result, Val,
+	typed::{Codepoint, FromUntyped},
 };
 
 #[derive(Debug, Clone, Error, Trace)]
@@ -297,7 +304,11 @@ pub fn parse_codes(mut str: &str) -> Result<Vec<Element<'_>>> {
 
 const NUMBERS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
+#[allow(clippy::cast_precision_loss, reason = "fits exactly")]
+const TWO_POW_64: f64 = (1u128 << 64) as f64;
+
 #[inline]
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn render_integer(
 	out: &mut String,
 	neg: bool,
@@ -312,17 +323,28 @@ pub fn render_integer(
 	caps: bool,
 ) {
 	debug_assert!(iv >= 0.0, "render_integer receives sign using arg");
-	let iv = iv.floor() as i64;
+	let iv = iv.floor();
 	// Digit char indexes in reverse order, i.e
 	// for radix = 16 and n = 12f: [15, 2, 1]
-	let digits = if iv == 0 {
+	let digits = if iv == 0.0 {
 		vec![0u8]
-	} else {
-		let mut v = iv.abs();
+	} else if iv < TWO_POW_64 {
+		let mut v = iv as u64;
+		let radix = radix as u64;
 		let mut nums = Vec::with_capacity(1);
 		while v != 0 {
 			nums.push((v % radix) as u8);
 			v /= radix;
+		}
+		nums
+	} else {
+		let (mantissa, exp) = decompose_f64(iv);
+		let mut v = BigUint::from(mantissa) << exp.unsigned_abs();
+		let radix = BigUint::from(radix as u64);
+		let mut nums = Vec::new();
+		while v != BigUint::ZERO {
+			nums.push(u8::try_from(&v % &radix).expect("digit < radix"));
+			v /= &radix;
 		}
 		nums
 	};
@@ -331,7 +353,7 @@ pub fn render_integer(
 
 	let pref_len = zero_prefix.len() as u16;
 	let zp2 = zp
-		.saturating_sub(if !prefix_in_padding { pref_len } else { 0 })
+		.saturating_sub(if prefix_in_padding { 0 } else { pref_len })
 		.max(precision)
 		.saturating_sub(if prefix_in_padding { pref_len } else { 0 } + digits.len() as u16);
 
@@ -344,7 +366,7 @@ pub fn render_integer(
 	}
 
 	out.reserve(zp2 as usize);
-	if iv != 0 {
+	if iv != 0.0 {
 		out.push_str(zero_prefix);
 	}
 	for _ in 0..zp2 {
@@ -370,6 +392,7 @@ pub fn render_decimal(
 		out, neg, iv, padding, precision, blank, sign, 10, "", false, false,
 	);
 }
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn render_octal(
 	out: &mut String,
 	neg: bool,
@@ -436,43 +459,159 @@ pub fn render_float(
 	ensure_pt: bool,
 	trailing: bool,
 ) {
-	// Represent the rounded number as an integer * 1/10**prec.
-	// Note that it can also be equal to 10**prec and we'll need to carry
-	// over to the wholes.  We operate on the absolute numbers, so that we
-	// don't have trouble with the rounding direction.
-	let denominator = 10.0f64.powi(precision as i32);
-	let numerator = n.abs() * denominator + 0.5;
-	let whole = (numerator / denominator).floor();
-	let frac = numerator.floor() % denominator;
+	let abs = n.abs();
+	let (frac, carry) = round_frac(abs, precision);
+	let whole = if carry {
+		abs.floor() + 1.0
+	} else {
+		abs.floor()
+	};
 
 	#[allow(clippy::bool_to_int_with_if)]
 	let dot_size = if precision == 0 && !ensure_pt { 0 } else { 1 };
 	padding = padding.saturating_sub(dot_size + precision);
 	render_decimal(out, n < 0.0, whole, padding, 0, blank, sign);
+
 	if precision == 0 {
 		if ensure_pt {
 			out.push('.');
 		}
 		return;
 	}
-	if trailing || frac > 0.0 {
-		out.push('.');
-		let mut frac_str = String::new();
-		render_decimal(&mut frac_str, false, frac, precision, 0, false, false);
-		let mut trim = frac_str.len();
-		if !trailing {
-			for b in frac_str.as_bytes().iter().rev() {
-				if *b == b'0' {
-					trim -= 1;
-				} else {
-					break;
-				}
-			}
+
+	// For %g (trailing == false) trailing zeros are then trimmed in place
+	let dot_at = out.len();
+	out.push('.');
+	let digits_at = out.len();
+	frac.write_padded(out, precision);
+	if !trailing {
+		let kept = digits_at + out[digits_at..].trim_end_matches('0').len();
+		out.truncate(kept);
+		if out.len() == digits_at && !ensure_pt {
+			out.truncate(dot_at);
 		}
-		out.push_str(&frac_str[..trim]);
-	} else if ensure_pt {
-		out.push('.');
 	}
+}
+
+fn decompose_f64(n: f64) -> (u64, i32) {
+	const BITS: u32 = f64::MANTISSA_DIGITS - 1;
+	const BIAS: i32 = 1023;
+
+	let pattern = n.to_bits();
+	let exp_field = ((pattern >> BITS) & 0x7ff) as i32;
+	let mantissa = pattern & ((1u64 << BITS) - 1);
+	if exp_field == 0 {
+		(mantissa, 1 - BIAS - BITS.cast_signed())
+	} else {
+		(
+			mantissa | (1u64 << BITS),
+			exp_field - BIAS - BITS.cast_signed(),
+		)
+	}
+}
+
+enum Frac {
+	Small(u128),
+	Big(BigUint),
+}
+impl Frac {
+	fn write_padded(&self, out: &mut String, width: u16) {
+		let width = usize::from(width);
+		match self {
+			Self::Small(v) => write!(out, "{v:0width$}"),
+			Self::Big(v) => write!(out, "{v:0width$}"),
+		}
+		.expect("writing to a String never fails");
+	}
+}
+
+/// bool signifies carry, e.g 0.999 at precision 2 results in 1.000, thus carry.
+// floor((2 * low_bits * 10**prec + 2**k) / 2**(k+1))
+fn round_frac(abs: f64, prec: u16) -> (Frac, bool) {
+	let (mantissa, exp) = decompose_f64(abs);
+	if exp >= 0 {
+		// abs is integral: no fractional bits.
+		return (Frac::Small(0), false);
+	}
+	let k = exp.unsigned_abs();
+	// Fractional part is exactly `low_bits / 2**k` (mantissa is 53 bits).
+	let low_bits = if k >= 64 {
+		mantissa
+	} else {
+		mantissa & ((1u64 << k) - 1)
+	};
+	if low_bits == 0 {
+		return (Frac::Small(0), false);
+	}
+	round_frac_u128(low_bits, k, prec).unwrap_or_else(|| round_frac_big(low_bits, k, prec))
+}
+
+fn round_frac_u128(low_bits: u64, k: u32, prec: u16) -> Option<(Frac, bool)> {
+	if k > 126 {
+		return None;
+	}
+	let ten_pow = 10u128.checked_pow(u32::from(prec))?;
+	let numerator = u128::from(low_bits)
+		.checked_mul(ten_pow)?
+		.checked_mul(2)?
+		.checked_add(1u128 << k)?;
+	let frac = numerator >> (k + 1);
+	Some(if frac == ten_pow {
+		(Frac::Small(0), true)
+	} else {
+		(Frac::Small(frac), false)
+	})
+}
+
+fn round_frac_big(low_bits: u64, k: u32, prec: u16) -> (Frac, bool) {
+	let ten_pow = BigUint::from(10u32).pow(u32::from(prec));
+	let frac = round_ratio(
+		&(BigUint::from(low_bits) * &ten_pow),
+		&(BigUint::from(1u32) << k),
+	);
+	if frac == ten_pow {
+		(Frac::Small(0), true)
+	} else {
+		(Frac::Big(frac), false)
+	}
+}
+
+fn round_ratio(num: &BigUint, den: &BigUint) -> BigUint {
+	((num << 1u32) + den) / (den << 1u32)
+}
+
+fn shorter_exponent(value: f64, sig: u16) -> i32 {
+	if value == 0.0 {
+		return 0;
+	}
+	let abs = value.abs();
+	let e0 = abs.log10().floor() as i32;
+	if rounds_up_to_next_pow10(abs, sig, e0) {
+		e0 + 1
+	} else {
+		e0
+	}
+}
+
+fn rounds_up_to_next_pow10(abs: f64, sig: u16, e0: i32) -> bool {
+	let (mantissa, exp) = decompose_f64(abs);
+	// abs * 10**(sig-1-e0) == num / den
+	let t = i32::from(sig) - 1 - e0;
+	let mut num = BigUint::from(mantissa);
+	let mut den = BigUint::from(1u32);
+	let exp_abs = exp.unsigned_abs();
+	if exp >= 0 {
+		num <<= exp_abs;
+	} else {
+		den <<= exp_abs;
+	}
+	let pow10_t_abs = BigUint::from(10u32).pow(t.unsigned_abs());
+	if t >= 0 {
+		num *= pow10_t_abs;
+	} else {
+		den *= pow10_t_abs;
+	}
+	round_ratio(&num, &den) >= BigUint::from(10u32).pow(u32::from(sig))
 }
 
 #[allow(clippy::fn_params_excessive_bools)]
@@ -488,21 +627,21 @@ pub fn render_float_sci(
 	caps: bool,
 ) {
 	let exponent = if n == 0.0 {
-		0.0
+		0
 	} else {
-		n.abs().log10().floor()
+		shorter_exponent(n, precision.saturating_add(1))
 	};
 
-	let mantissa = if exponent as i16 == -324 {
-		n * 10.0 / 10.0_f64.powf(exponent + 1.0)
+	let mantissa = if exponent == -324 {
+		n * 10.0 / 10.0_f64.powi(exponent + 1)
 	} else {
-		n / 10.0_f64.powf(exponent)
+		n / 10.0_f64.powi(exponent)
 	};
 	let mut exponent_str = String::new();
 	render_decimal(
 		&mut exponent_str,
-		exponent < 0.0,
-		exponent.abs(),
+		exponent < 0,
+		f64::from(exponent.abs()),
 		3,
 		0,
 		false,
@@ -630,12 +769,9 @@ pub fn format_code(
 		}
 		ConvTypeV::Shorter => {
 			let value = f64::from_untyped(value.clone())?;
-			let exponent = if value == 0.0 {
-				0.0
-			} else {
-				value.abs().log10().floor()
-			};
-			if exponent < -4.0 || exponent >= fpprec as f64 {
+			let fpprec = fpprec.max(1);
+			let exponent = shorter_exponent(value, fpprec);
+			if exponent < -4 || exponent >= i32::from(fpprec) {
 				render_float_sci(
 					&mut tmp_out,
 					value,
@@ -648,12 +784,12 @@ pub fn format_code(
 					code.caps,
 				);
 			} else {
-				let digits_before_pt = 1.max(exponent as u16 + 1);
+				let frac_prec = (i32::from(fpprec) - 1 - exponent).max(0) as u16;
 				render_float(
 					&mut tmp_out,
 					value,
 					padding,
-					fpprec - digits_before_pt,
+					frac_prec,
 					clfags.blank,
 					clfags.sign,
 					clfags.alt,
@@ -662,12 +798,9 @@ pub fn format_code(
 			}
 		}
 		ConvTypeV::Char => match value.clone() {
-			Val::Num(n) => {
-				let n = n.get();
-				tmp_out.push(
-					std::char::from_u32(n as u32)
-						.ok_or_else(|| InvalidUnicodeCodepointGot(n as u32))?,
-				);
+			v @ Val::Num(_) => {
+				let codepoint = Codepoint::from_untyped(v)?;
+				tmp_out.push(codepoint.try_char()?);
 			}
 			Val::Str(s) => {
 				let s = s.into_flat();
@@ -685,7 +818,7 @@ pub fn format_code(
 			}
 		},
 		ConvTypeV::Percent => tmp_out.push('%'),
-	};
+	}
 
 	let padding = width.saturating_sub(tmp_out.len() as u16);
 
@@ -847,7 +980,7 @@ pub fn format_obj(str: &str, values: &ObjValue) -> Result<String> {
 #[cfg(test)]
 pub mod test_format {
 	use super::*;
-	use crate::val::NumValue;
+	use crate::NumValue;
 
 	#[test]
 	fn parse() {

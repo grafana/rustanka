@@ -1,0 +1,13 @@
+---
+source: tests/tests/golden.rs
+expression: result
+input_file: tests/golden/string_object_extend.jsonnet
+---
+[
+    "hello{\"a\": 1}",
+    "hello{\"b\": 2}",
+    {
+        "c": 3,
+        "d": 4
+    }
+]

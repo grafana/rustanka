@@ -1,1 +1,2 @@
-self/super/$ are only usable inside objects
+static analysis errors
+    insuper4.jsonnet:1:8-12 error: `super` used outside of object

@@ -2,40 +2,44 @@ use std::rc::Rc;
 
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
-use jrsonnet_parser::{
-	Analysis, AnalyzedExpr, ArgsDesc, AssertStmt, BinaryOpType, BindSpec, CompSpec, Expr,
-	FieldMember, FieldName, ForSpecData, IfSpecData, LiteralType, Member, ObjBody, Param,
-	ParamsDesc, UsedVars,
-};
+use jrsonnet_ir::ImportKind;
 use jrsonnet_types::ValType;
-use rustc_hash::{FxHashMap, FxHashSet};
 
-use self::destructure::destruct;
+use self::{
+	compspec::{evaluate_arr_comp, evaluate_obj_comp},
+	destructure::evaluate_locals_unbound,
+	operator::evaluate_binary_op_special,
+};
 use crate::{
+	CcObjectAssertion, CcUnbound, Context, Error, MaybeUnbound, ObjValue, ObjValueBuilder,
+	ObjectAssertion, Result, ResultExt as _, StaticShapeOopObject, SupThis, Unbound, Val,
+	analyze::{
+		ClosureShape, LArgsDesc, LAssertStmt, LExpr, LFieldMember, LFieldName, LFunction,
+		LIndexPart, LObjAsserts, LObjBody, LObjMembers, LObjStaticMembers, LSlot,
+	},
 	arr::ArrValue,
 	bail,
-	destructure::evaluate_dest,
-	error::{suggest_object_fields, ErrorKind::*},
-	evaluate::operator::{evaluate_add_op, evaluate_binary_op_special, evaluate_unary_op},
-	function::{CallLocation, FuncDesc, FuncVal},
-	gc::WithCapacityExt as _,
+	error::{ErrorKind::*, suggest_object_fields},
+	evaluate::{destructure::fill_letrec_binds, operator::evaluate_unary_op},
+	function::{CallLocation, FuncDesc, FuncVal, prepared::PreparedFuncVal},
 	in_frame,
-	typed::Typed,
-	val::{CachedUnbound, IndexableVal, NumValue, StrValue, Thunk},
-	with_state, Context, Error, ObjValue, ObjValueBuilder, ObjectAssertion, Pending, Result,
-	ResultExt, SupThis, Unbound, Val,
+	typed::{BoundedUsize, FromUntyped as _},
+	val::{CachedUnbound, Thunk},
+	with_state,
 };
+
+pub mod compspec;
 pub mod destructure;
 pub mod operator;
 
 // This is the amount of bytes that need to be left on the stack before increasing the size.
 // It must be at least as large as the stack required by any code that does not call
 // `ensure_sufficient_stack`.
-const RED_ZONE: usize = 100 * 1024; // 100k
+const RED_ZONE: usize = 100 * 1024;
 
 // Only the first stack that is pushed, grows exponentially (2^n * STACK_PER_RECURSION) from then
 // on. This flag has performance relevant characteristics. Don't set it too high.
-const STACK_PER_RECURSION: usize = 1024 * 1024; // 1MB
+const STACK_PER_RECURSION: usize = 1024 * 1024;
 
 /// Grows the stack on demand to prevent stack overflow. Call this in strategic locations
 /// to "break up" recursive calls. E.g. almost any call to `visit_expr` or equivalent can benefit
@@ -47,357 +51,640 @@ pub fn ensure_sufficient_stack<R>(f: impl FnOnce() -> R) -> R {
 	stacker::maybe_grow(RED_ZONE, STACK_PER_RECURSION, f)
 }
 
-pub fn evaluate_trivial(expr: &AnalyzedExpr) -> Option<Val> {
-	fn is_trivial(expr: &AnalyzedExpr) -> bool {
-		match expr.expr() {
-			Expr::Str(_)
-			| Expr::Num(_)
-			| Expr::Literal(LiteralType::False | LiteralType::True | LiteralType::Null) => true,
-			Expr::Arr(a) => a.iter().all(is_trivial),
-			Expr::Parened(e) => is_trivial(e),
-			_ => false,
-		}
+pub fn evaluate_trivial(expr: &LExpr) -> Option<Val> {
+	if let LExpr::Trivial(tv) = expr {
+		Some(tv.clone().into())
+	} else {
+		None
 	}
-	Some(match expr.expr() {
-		Expr::Str(s) => Val::string(s.clone()),
-		Expr::Num(n) => {
-			Val::Num(NumValue::new(*n).expect("parser will not allow non-finite values"))
-		}
-		Expr::Literal(LiteralType::False) => Val::Bool(false),
-		Expr::Literal(LiteralType::True) => Val::Bool(true),
-		Expr::Literal(LiteralType::Null) => Val::Null,
-		Expr::Arr(n) => {
-			if n.iter().any(|e| !is_trivial(e)) {
-				return None;
-			}
-			Val::Arr(ArrValue::eager(
-				n.iter()
-					.map(evaluate_trivial)
-					.map(|e| e.expect("checked trivial"))
-					.collect(),
-			))
-		}
-		Expr::Parened(e) => evaluate_trivial(e)?,
-		_ => return None,
-	})
 }
 
-pub fn evaluate_method(ctx: Context, name: IStr, params: ParamsDesc, body: AnalyzedExpr) -> Val {
-	// Trim the captured context to only include variables the function
-	// body and parameter defaults actually use. Variables not in this set
-	// are excluded, allowing their thunks to be freed.
-	let mut set = FxHashSet::default();
-	body.extend_used_into(&mut set);
-	for Param(_, default) in params.iter() {
-		if let Some(default_expr) = default {
-			default_expr.extend_used_into(&mut set);
-		}
-	}
-	let analysis = Analysis {
-		var: None,
-		used_vars: UsedVars::from_set(set),
-	};
-	let trimmed_ctx = ctx.trimmed(&analysis);
+pub fn evaluate_method(ctx: Context, name: IStr, func: &Rc<LFunction>) -> Val {
 	Val::Func(FuncVal::Normal(Cc::new(FuncDesc {
 		name,
-		ctx: trimmed_ctx,
-		params,
-		body,
+		body_captures: ctx.pack_captures_sup_this(&func.body_shape),
+		func: func.clone(),
 	})))
 }
 
-pub fn evaluate_field_name(ctx: Context, field_name: &FieldName) -> Result<Option<IStr>> {
+pub fn evaluate_field_name(ctx: Context, field_name: &LFieldName) -> Result<Option<IStr>> {
 	Ok(match field_name {
-		FieldName::Fixed(n) => Some(n.clone()),
-		FieldName::Dyn(expr) => in_frame(
-			CallLocation::new(&expr.span()),
+		LFieldName::Fixed(n) => Some(n.clone()),
+		LFieldName::Dyn(expr) => in_frame(
+			// TODO: Spanned<LFieldName>
+			CallLocation::native(),
 			|| "evaluating field name".to_string(),
 			|| {
-				let value = evaluate(ctx, expr)?;
-				if matches!(value, Val::Null) {
-					Ok(None)
+				let v = evaluate(ctx.clone(), expr)?;
+				Ok(if matches!(v, Val::Null) {
+					None
 				} else {
-					Ok(Some(IStr::from_untyped(value)?))
-				}
+					Some(IStr::from_untyped(v)?)
+				})
 			},
 		)?,
 	})
 }
 
-pub fn evaluate_comp(
-	ctx: Context,
-	specs: &[CompSpec],
-	callback: &mut impl FnMut(Context) -> Result<()>,
-) -> Result<()> {
-	match specs.first() {
-		None => callback(ctx)?,
-		Some(CompSpec::IfSpec(IfSpecData(cond))) => {
-			if bool::from_untyped(evaluate(ctx.clone(), cond)?)? {
-				evaluate_comp(ctx, &specs[1..], callback)?;
+pub fn evaluate_thunk(ctx: Context, expr: Rc<LExpr>, tailstrict: bool) -> Result<Thunk<Val>> {
+	match &*expr {
+		LExpr::Slot(LSlot::Local(i)) => return Ok(ctx.local(*i)),
+		LExpr::Slot(LSlot::Capture(i)) => return Ok(ctx.capture(*i)),
+		_ => {
+			if let Some(v) = evaluate_trivial(&expr) {
+				return Ok(Thunk::evaluated(v));
 			}
 		}
-		Some(CompSpec::ForSpec(ForSpecData(var, expr))) => match evaluate(ctx.clone(), expr)? {
-			Val::Arr(list) => {
-				for item in list.iter_lazy() {
-					let fctx = Pending::new();
-					let mut new_bindings = FxHashMap::with_capacity(var.capacity_hint());
-					destruct(var, item, fctx.clone(), &mut new_bindings)?;
-					let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
-
-					evaluate_comp(ctx, &specs[1..], callback)?;
-				}
-			}
-			#[cfg(feature = "exp-object-iteration")]
-			Val::Obj(obj) => {
-				for field in obj.fields(
-					// TODO: Should there be ability to preserve iteration order?
-					#[cfg(feature = "exp-preserve-order")]
-					false,
-				) {
-					let fctx = Pending::new();
-					let mut new_bindings = FxHashMap::with_capacity(var.capacity_hint());
-					let obj = obj.clone();
-					let value = Thunk::evaluated(Val::Arr(ArrValue::lazy(vec![
-						Thunk::evaluated(Val::string(field.clone())),
-						Thunk!(move || obj.get(field).transpose().expect(
-							"field exists, as field name was obtained from object.fields()",
-						)),
-					])));
-					destruct(var, value, fctx.clone(), &mut new_bindings)?;
-					let ctx = ctx.clone().extend_bindings(new_bindings).into_future(fctx);
-
-					evaluate_comp(ctx, &specs[1..], callback)?;
-				}
-			}
-			_ => bail!(InComprehensionCanOnlyIterateOverArray),
-		},
 	}
-	Ok(())
+	Ok(if tailstrict {
+		Thunk::evaluated(evaluate(ctx, &expr)?)
+	} else {
+		Thunk!(move || { evaluate(ctx, &expr) })
+	})
 }
 
-trait CloneableUnbound<T>: Unbound<Bound = T> + Clone {}
-impl<V, T> CloneableUnbound<T> for V where V: Unbound<Bound = T> + Clone {}
+mod names {
+	use crate::names;
 
-fn evaluate_object_locals(
-	fctx: Context,
-	locals: Rc<Vec<BindSpec>>,
-) -> impl CloneableUnbound<Context> {
-	#[derive(Trace, Clone)]
-	struct UnboundLocals {
-		fctx: Context,
-		locals: Rc<Vec<BindSpec>>,
+	names! {
+		anonymous: "anonymous",
 	}
-	impl Unbound for UnboundLocals {
-		type Bound = Context;
-
-		fn bind(&self, sup_this: SupThis) -> Result<Context> {
-			let fctx = Context::new_future();
-			let mut new_bindings =
-				FxHashMap::with_capacity(self.locals.iter().map(BindSpec::capacity_hint).sum());
-			for b in self.locals.iter() {
-				evaluate_dest(b, fctx.clone(), &mut new_bindings)?;
-			}
-
-			let ctx = self.fctx.clone();
-
-			let ctx = ctx
-				.extend_bindings_sup_this(new_bindings, sup_this)
-				.into_future(fctx);
-
-			Ok(ctx)
-		}
-	}
-
-	UnboundLocals { fctx, locals }
-}
-
-pub fn evaluate_field_member<B: Unbound<Bound = Context> + Clone>(
-	builder: &mut ObjValueBuilder,
-	ctx: Context,
-	uctx: B,
-	field: &FieldMember,
-) -> Result<()> {
-	let name = evaluate_field_name(ctx, &field.name)?;
-	let Some(name) = name else {
-		return Ok(());
-	};
-
-	match field {
-		FieldMember {
-			plus,
-			params: None,
-			visibility,
-			value,
-			..
-		} => {
-			#[derive(Trace)]
-			struct UnboundValue<B: Trace> {
-				uctx: B,
-				value: AnalyzedExpr,
-				name: IStr,
-			}
-			impl<B: Unbound<Bound = Context>> Unbound for UnboundValue<B> {
-				type Bound = Val;
-				fn bind(&self, sup_this: SupThis) -> Result<Val> {
-					evaluate_named(self.uctx.bind(sup_this)?, &self.value, self.name.clone())
-				}
-			}
-
-			builder
-				.field(name.clone())
-				.with_add(*plus)
-				.with_visibility(*visibility)
-				.with_location(value.span())
-				.bindable(UnboundValue {
-					uctx,
-					value: value.clone(),
-					name,
-				})?;
-		}
-		FieldMember {
-			params: Some(params),
-			visibility,
-			value,
-			..
-		} => {
-			#[derive(Trace)]
-			struct UnboundMethod<B: Trace> {
-				uctx: B,
-				value: AnalyzedExpr,
-				params: ParamsDesc,
-				name: IStr,
-			}
-			impl<B: Unbound<Bound = Context>> Unbound for UnboundMethod<B> {
-				type Bound = Val;
-				fn bind(&self, sup_this: SupThis) -> Result<Val> {
-					Ok(evaluate_method(
-						self.uctx.bind(sup_this)?,
-						self.name.clone(),
-						self.params.clone(),
-						self.value.clone(),
-					))
-				}
-			}
-
-			builder
-				.field(name.clone())
-				.with_visibility(*visibility)
-				.with_location(value.span())
-				.bindable(UnboundMethod {
-					uctx,
-					value: value.clone(),
-					params: params.clone(),
-					name,
-				})?;
-		}
-	}
-	Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn evaluate_member_list_object(ctx: Context, members: &[Member]) -> Result<ObjValue> {
-	let mut builder = ObjValueBuilder::new();
-	let locals = Rc::new(
-		members
-			.iter()
-			.filter_map(|m| match m {
-				Member::BindStmt(bind) => Some(bind.clone()),
-				_ => None,
-			})
-			.collect::<Vec<_>>(),
-	);
-
-	// We have single context for all fields, so we can cache binds
-	let uctx = CachedUnbound::new(evaluate_object_locals(ctx.clone(), locals));
-
-	for member in members {
-		match member {
-			Member::Field(field) => {
-				evaluate_field_member(&mut builder, ctx.clone(), uctx.clone(), field)?;
-			}
-			Member::AssertStmt(stmt) => {
-				#[derive(Trace)]
-				struct ObjectAssert<B: Trace> {
-					uctx: B,
-					assert: AssertStmt,
+pub fn evaluate(mut ctx: Context, mut expr: &LExpr) -> Result<Val> {
+	loop {
+		return Ok(match expr {
+			LExpr::Trivial(tv) => tv.clone().into(),
+			LExpr::Slot(slot) => ctx.slot(*slot).evaluate()?,
+			LExpr::BadLocal(name) => panic!("unresolvable reference: {name}"),
+			LExpr::ArrConst(rc) => Val::Arr(ArrValue::new(rc.clone())),
+			LExpr::Arr { shape, items } => {
+				let inner = Context::enter_using(&ctx, shape);
+				'eager: {
+					let mut out: Vec<Val> = Vec::with_capacity(items.len());
+					for item in items.iter() {
+						let Ok(r) = evaluate(inner.clone(), item) else {
+							break 'eager;
+						};
+						out.push(r);
+					}
+					return Ok(Val::Arr(ArrValue::new(out)));
 				}
-				impl<B: Unbound<Bound = Context>> ObjectAssertion for ObjectAssert<B> {
-					fn run(&self, sup_this: SupThis) -> Result<()> {
-						let ctx = self.uctx.bind(sup_this)?;
-						evaluate_assert(ctx, &self.assert)
+				Val::Arr(ArrValue::expr(inner, items.clone()))
+			}
+			LExpr::UnaryOp(op, value) => {
+				let value = evaluate(ctx, value)?;
+				evaluate_unary_op(*op, &value)?
+			}
+			LExpr::BinaryOp { lhs, op, rhs } => evaluate_binary_op_special(ctx, lhs, *op, rhs)?,
+			LExpr::LocalExpr(l) => {
+				ctx = ctx
+					.pack_captures_sup_this(&l.frame_shape)
+					.enter(|fill, ctx| {
+						fill_letrec_binds(fill, ctx, &l.binds);
+					});
+				expr = &l.body;
+				continue;
+			}
+			LExpr::IfElse {
+				cond,
+				cond_then,
+				cond_else,
+			} => {
+				let cond_val = evaluate(ctx.clone(), cond)?;
+				let Val::Bool(b) = cond_val else {
+					bail!(TypeMismatch(
+						"if condition",
+						vec![ValType::Bool],
+						cond_val.value_type()
+					))
+				};
+				if b {
+					expr = cond_then;
+					continue;
+				} else if let Some(e) = cond_else {
+					expr = e;
+					continue;
+				}
+				Val::Null
+			}
+			LExpr::Error(s, e) => in_frame(
+				CallLocation::new(s),
+				|| "error statement".to_owned(),
+				|| bail!(RuntimeError(evaluate(ctx, e)?.to_string()?,)),
+			)?,
+			LExpr::AssertExpr { assert, rest } => {
+				evaluate_assert(ctx.clone(), assert)?;
+				expr = rest;
+				continue;
+			}
+
+			LExpr::Function(func) => evaluate_method(
+				ctx,
+				func.name.clone().unwrap_or_else(names::anonymous),
+				func,
+			),
+			LExpr::IdentityFunction => Val::Func(FuncVal::identity()),
+			LExpr::Apply {
+				applicable,
+				args,
+				tailstrict,
+			} => evaluate_apply(
+				ctx,
+				applicable,
+				args,
+				CallLocation::new(&args.span),
+				*tailstrict,
+			)?,
+			LExpr::Index { indexable, parts } => evaluate_index(ctx, indexable, parts)?,
+			LExpr::Obj(body) => evaluate_obj_body(None, ctx, body)?,
+			LExpr::ObjExtend(lhs, body) => {
+				let lhs_val = evaluate(ctx.clone(), lhs)?;
+				match lhs_val {
+					Val::Obj(lhs_obj) => evaluate_obj_body(Some(lhs_obj), ctx, body)?,
+					// Jsonnet spec: `e { body }` desugars to `e + { body }`, so a
+					// non-object lhs takes `+` operator semantics (e.g. a string
+					// lhs concatenates with the manifested object — go-jsonnet
+					// parity, hit by dashboards defined via importstr).
+					lhs_val => {
+						let rhs = evaluate_obj_body(None, ctx, body)?;
+						crate::evaluate::operator::evaluate_add_op(&lhs_val, &rhs)?
 					}
 				}
-				builder.assert(ObjectAssert {
-					uctx: uctx.clone(),
-					assert: stmt.clone(),
-				});
 			}
-			Member::BindStmt(_) => {
-				// Already handled
+			LExpr::ArrComp(comp) => evaluate_arr_comp(ctx, comp)?,
+			LExpr::Slice(slice) => {
+				let val = evaluate(ctx.clone(), &slice.value)?;
+				let indexable = val.into_indexable()?;
+				let start = slice
+					.start
+					.as_ref()
+					.map(|e| evaluate(ctx.clone(), e))
+					.transpose()?
+					.map(|v| -> Result<i32> {
+						i32::from_untyped(v).description("slice start value")
+					})
+					.transpose()?;
+				let end = slice
+					.end
+					.as_ref()
+					.map(|e| evaluate(ctx.clone(), e))
+					.transpose()?
+					.map(|v| -> Result<i32> { i32::from_untyped(v).description("slice end value") })
+					.transpose()?;
+				let step = slice
+					.step
+					.as_ref()
+					.map(|e| evaluate(ctx, e))
+					.transpose()?
+					.map(|v| -> Result<BoundedUsize<1, { i32::MAX as usize }>> {
+						BoundedUsize::from_untyped(v).description("slice step value")
+					})
+					.transpose()?;
+				Val::from(indexable.slice32(start, end, step)?)
 			}
-		}
+			LExpr::Super => Val::Obj(ctx.try_sup_this()?.standalone_super().ok_or(NoSuperFound)?),
+			LExpr::Import {
+				kind,
+				kind_span,
+				path,
+			} => with_state(|state| {
+				let resolved = state.resolve_from(kind_span.0.source_path(), &path.clone())?;
+				Ok::<_, Error>(match kind.value {
+					ImportKind::Normal => in_frame(
+						CallLocation::new(&kind.span),
+						|| "import".to_string(),
+						|| state.import_resolved(resolved),
+					)?,
+					ImportKind::Str => Val::string(state.import_resolved_str(resolved)?),
+					ImportKind::Bin => Val::arr(state.import_resolved_bin(resolved)?),
+				})
+			})?,
+		});
 	}
-	Ok(builder.build())
 }
 
-pub fn evaluate_object(ctx: Context, object: &ObjBody) -> Result<ObjValue> {
-	Ok(match object {
-		ObjBody::MemberList(members) => evaluate_member_list_object(ctx, members)?,
-		ObjBody::ObjComp(obj) => {
-			let mut builder = ObjValueBuilder::new();
-			let locals = Rc::new(
-				obj.pre_locals
-					.iter()
-					.chain(obj.post_locals.iter())
-					.cloned()
-					.collect::<Vec<_>>(),
-			);
-			evaluate_comp(ctx, &obj.compspecs, &mut |ctx| {
-				let uctx = evaluate_object_locals(ctx.clone(), locals.clone());
-
-				evaluate_field_member(&mut builder, ctx, uctx, &obj.field)
-			})?;
-
-			builder.build()
-		}
-	})
-}
-
-pub fn evaluate_apply(
+fn evaluate_apply(
 	ctx: Context,
-	value: &AnalyzedExpr,
-	args: &ArgsDesc,
+	applicable: &LExpr,
+	args: &LArgsDesc,
 	loc: CallLocation<'_>,
 	tailstrict: bool,
 ) -> Result<Val> {
-	let value = evaluate(ctx.clone(), value)?;
-	Ok(match value {
-		Val::Func(f) => {
-			let body = || f.evaluate(ctx, loc, args, tailstrict);
-			if tailstrict {
-				body()?
-			} else {
-				in_frame(loc, || format!("function <{}> call", f.name()), body)?
-			}
-		}
-		v => bail!(OnlyFunctionsCanBeCalledGot(v.value_type())),
-	})
+	let func_val = evaluate(ctx.clone(), applicable)?;
+	let Val::Func(func) = func_val else {
+		bail!(OnlyFunctionsCanBeCalledGot(func_val.value_type()))
+	};
+
+	if func.is_identity() && args.names.is_empty() && args.unnamed.len() == 1 {
+		return evaluate_thunk(ctx, args.unnamed[0].clone(), tailstrict)?.evaluate();
+	}
+
+	let name = func.name();
+
+	if args.names.is_empty() && args.unnamed.len() == 1 && func.params().len() == 1 {
+		use crate::function::prepared::PreparedCall;
+		let prepared_inline = PreparedCall::empty();
+		let arg = evaluate_thunk(ctx, args.unnamed[0].clone(), tailstrict)?;
+		let arg_slice = std::slice::from_ref(&arg);
+		return in_frame(
+			loc,
+			|| format!("function <{name}> call"),
+			|| {
+				func.evaluate_prepared(
+					&prepared_inline,
+					CallLocation::native(),
+					arg_slice,
+					&[],
+					tailstrict,
+				)
+			},
+		);
+	}
+
+	let unnamed = args
+		.unnamed
+		.iter()
+		.cloned()
+		.map(|e| evaluate_thunk(ctx.clone(), e, tailstrict))
+		.collect::<Result<Vec<_>>>()?;
+
+	// Fast path: positional-only multi-arg call fully covering the
+	// params, no defaults.
+	if args.names.is_empty() && unnamed.len() == func.params().len() {
+		use crate::function::prepared::PreparedCall;
+		let prepared_inline = PreparedCall::empty();
+		return in_frame(
+			loc,
+			|| format!("function <{name}> call"),
+			|| {
+				func.evaluate_prepared(
+					&prepared_inline,
+					CallLocation::native(),
+					&unnamed,
+					&[],
+					tailstrict,
+				)
+			},
+		);
+	}
+
+	let named = args
+		.values
+		.iter()
+		.cloned()
+		.map(|e| evaluate_thunk(ctx.clone(), e, tailstrict))
+		.collect::<Result<Vec<_>>>()?;
+	let prepare = PreparedFuncVal::new(func, unnamed.len(), &args.names)
+		.with_description_src(loc, || format!("function <{name}> preparation"))?;
+	in_frame(
+		loc,
+		|| format!("function <{name}> call"),
+		|| prepare.call(CallLocation::native(), &unnamed, &named),
+	)
 }
 
-pub fn evaluate_assert(ctx: Context, assertion: &AssertStmt) -> Result<()> {
-	let value = &assertion.0;
-	let msg = &assertion.1;
+#[allow(clippy::too_many_lines)]
+fn evaluate_index(ctx: Context, indexable: &LExpr, parts: &[LIndexPart]) -> Result<Val> {
+	let mut parts = parts.iter();
+	let mut indexable = if matches!(indexable, LExpr::Super) {
+		let part = parts.next().expect("at least part should exist");
+		// sup_this existence check might also be skipped here for null-coalesce...
+		// But I believe this might cause errors.
+		let sup_this = ctx.try_sup_this()?;
+
+		if !sup_this.has_super() {
+			#[cfg(feature = "exp-null-coaelse")]
+			if part.null_coaelse {
+				return Ok(Val::Null);
+			}
+			bail!(NoSuperFound);
+		}
+		let name = evaluate(ctx.clone(), &part.value)?;
+
+		let Val::Str(name) = name else {
+			bail!(ValueIndexMustBeTypeGot(
+				ValType::Obj,
+				ValType::Str,
+				name.value_type(),
+			))
+		};
+
+		let name = name.into_flat();
+		match sup_this
+			.get_super(name.clone())
+			.with_description_src(&part.span, || format!("super field <{name}> access"))?
+		{
+			Some(v) => v,
+			#[cfg(feature = "exp-null-coaelse")]
+			None if part.null_coaelse => return Ok(Val::Null),
+			None => {
+				let suggestions = suggest_object_fields(
+					&sup_this.standalone_super().expect("super exists"),
+					name.clone(),
+				);
+				bail!(NoSuchField(name, suggestions))
+			}
+		}
+	} else {
+		evaluate(ctx.clone(), indexable)?
+	};
+
+	for part in parts {
+		let ctx = ctx.clone();
+		let loc = CallLocation::new(&part.span);
+		let value = indexable;
+		let key_val = evaluate(ctx, &part.value)?;
+		indexable = match (&value, &key_val) {
+			(Val::Obj(obj), Val::Str(key)) => {
+				let key = key.clone().into_flat();
+				match obj
+					.get(key.clone())
+					.with_description_src(loc, || format!("field <{key}> access"))?
+				{
+					Some(v) => v,
+					#[cfg(feature = "exp-null-coaelse")]
+					None if part.null_coaelse => return Ok(Val::Null),
+					None => {
+						return Err(Error::from(NoSuchField(
+							key.clone(),
+							suggest_object_fields(obj, key.clone()),
+						)))
+						.with_description_src(loc, || format!("field <{key}> access"));
+					}
+				}
+			}
+			(Val::Arr(arr), Val::Num(idx)) => {
+				let n = idx.get();
+				if n.fract() > f64::EPSILON {
+					bail!(FractionalIndex)
+				}
+				let len = arr.len32();
+				if n < 0.0 || n > f64::from(len) {
+					bail!(ArrayBoundsError(n, len));
+				}
+				#[expect(
+					clippy::cast_possible_truncation,
+					clippy::cast_sign_loss,
+					reason = "n is checked range"
+				)]
+				let i = n as u32;
+				arr.get32(i)
+					.with_description_src(loc, || format!("element <{i}> access"))?
+					.ok_or_else(|| ArrayBoundsError(n, len))?
+			}
+			(Val::Str(s), Val::Num(idx)) => {
+				let n = idx.get();
+				if n.fract() > f64::EPSILON {
+					bail!(FractionalIndex)
+				}
+				#[expect(
+					clippy::cast_possible_truncation,
+					clippy::cast_sign_loss,
+					reason = "n is checked positive, overflow will truncate as expected"
+				)]
+				let i = n as usize;
+				let flat = s.clone().into_flat();
+				#[allow(clippy::cast_possible_truncation, reason = "string is max 4g")]
+				if n >= 0.0
+					&& n <= f64::from(u32::MAX)
+					&& let Some(char) = flat.chars().nth(i)
+				{
+					Val::string(char)
+				} else {
+					let len = flat.chars().count();
+					bail!(StringBoundsError(n, len as u32))
+				}
+			}
+			#[cfg(feature = "exp-null-coaelse")]
+			(Val::Null, _) if part.null_coaelse => return Ok(Val::Null),
+			_ => bail!(ValueIndexMustBeTypeGot(
+				value.value_type(),
+				ValType::Str,
+				key_val.value_type()
+			)),
+		};
+	}
+	Ok(indexable)
+}
+
+fn evaluate_obj_body(super_obj: Option<ObjValue>, ctx: Context, body: &LObjBody) -> Result<Val> {
+	match body {
+		LObjBody::MemberList(members) => evaluate_obj_members(super_obj, ctx, members),
+		LObjBody::StaticMembers(members) => {
+			Ok(evaluate_static_obj_members(super_obj, ctx, members))
+		}
+		LObjBody::ObjComp(comp) => evaluate_obj_comp(super_obj, ctx, comp),
+	}
+}
+
+pub fn evaluate_field_member_unbound<B: Unbound<Bound = Context> + Clone>(
+	builder: &mut ObjValueBuilder,
+	ctx: Context,
+	uctx: B,
+	field: &LFieldMember,
+) -> Result<()> {
+	#[derive(Trace)]
+	struct UnboundValue<B: Trace> {
+		uctx: B,
+		value: Rc<(ClosureShape, LExpr)>,
+		name: IStr,
+	}
+	impl<B: Unbound<Bound = Context>> Unbound for UnboundValue<B> {
+		type Bound = Val;
+		fn bind(&self, sup_this: SupThis) -> Result<Val> {
+			let a_ctx = self.uctx.bind(sup_this)?;
+			let b_ctx = Context::enter_using(&a_ctx, &self.value.0);
+			evaluate(b_ctx, &self.value.1)
+		}
+	}
+
+	let LFieldMember {
+		name,
+		plus,
+		visibility,
+		value,
+	} = field;
+	let Some(name) = evaluate_field_name(ctx, name)? else {
+		return Ok(());
+	};
+
+	builder
+		.field(name.clone())
+		.with_add(*plus)
+		.with_visibility(*visibility)
+		.bindable(UnboundValue {
+			uctx,
+			value: value.clone(),
+			name,
+		})
+}
+pub fn evaluate_field_member_static(
+	builder: &mut ObjValueBuilder,
+	field_ctx: Context,
+	value_ctx: Context,
+	field: &LFieldMember,
+) -> Result<()> {
+	let LFieldMember {
+		name,
+		plus,
+		visibility,
+		value,
+	} = field;
+	let Some(name) = evaluate_field_name(field_ctx, name)? else {
+		return Ok(());
+	};
+
+	let env = Context::enter_using(&value_ctx, &value.0);
+	let value = value.clone();
+	builder
+		.field(name)
+		.with_add(*plus)
+		.with_visibility(*visibility)
+		.try_thunk(Thunk!(move || evaluate(env, &value.1)))?;
+	Ok(())
+}
+
+fn evaluate_static_obj_members(
+	super_obj: Option<ObjValue>,
+	ctx: Context,
+	members: &LObjStaticMembers,
+) -> Val {
+	#[derive(Trace)]
+	struct UnboundField<B: Trace> {
+		uctx: B,
+		value: Rc<(ClosureShape, LExpr)>,
+		name: IStr,
+	}
+	impl<B: Unbound<Bound = Context>> Unbound for UnboundField<B> {
+		type Bound = Val;
+		fn bind(&self, sup_this: SupThis) -> Result<Val> {
+			let a_ctx = self.uctx.bind(sup_this)?;
+			let b_ctx = Context::enter_using(&a_ctx, &self.value.0);
+			evaluate(b_ctx, &self.value.1)
+		}
+	}
+
+	let needs_unbound = members.this.is_some() || members.uses_super;
+
+	let mut bindings: Vec<MaybeUnbound> = Vec::with_capacity(members.bindings.len());
+
+	let assertion = if needs_unbound {
+		let uctx = CachedUnbound::new(evaluate_locals_unbound(
+			&ctx,
+			&members.frame_shape,
+			members.this,
+			members.locals.clone(),
+		));
+		for (binding, field) in members.bindings.iter().zip(members.shape.fields()) {
+			if let Some(v) = evaluate_trivial(&binding.1) {
+				bindings.push(MaybeUnbound::Const(v));
+				continue;
+			}
+			bindings.push(MaybeUnbound::Unbound(CcUnbound::new(UnboundField {
+				uctx: uctx.clone(),
+				value: binding.clone(),
+				name: field.name.clone(),
+			})));
+		}
+		members
+			.asserts
+			.as_ref()
+			.map(|a| CcObjectAssertion::new(evaluate_object_assertions_unbound(uctx, a.clone())))
+	} else {
+		let a_ctx = ctx
+			.pack_captures_sup_this(&members.frame_shape)
+			.enter(|fill, ctx| {
+				fill_letrec_binds(fill, ctx, &members.locals);
+			});
+		for binding in &members.bindings {
+			if let Some(v) = evaluate_trivial(&binding.1) {
+				bindings.push(MaybeUnbound::Const(v));
+				continue;
+			}
+			let env = Context::enter_using(&a_ctx, &binding.0);
+			let value = binding.clone();
+			bindings.push(MaybeUnbound::Bound(Thunk!(move || evaluate(env, &value.1))));
+		}
+		members.asserts.as_ref().map(|a| {
+			CcObjectAssertion::new(evaluate_object_assertions_static(a_ctx.clone(), a.clone()))
+		})
+	};
+
+	let mut builder = ObjValueBuilder::with_capacity(0);
+	if let Some(sup) = super_obj {
+		builder.with_super(sup);
+	}
+	builder.extend_with_core(StaticShapeOopObject::new(
+		members.shape.clone(),
+		bindings,
+		assertion,
+	));
+	Val::Obj(builder.build())
+}
+
+fn evaluate_obj_members(
+	super_obj: Option<ObjValue>,
+	ctx: Context,
+	members: &LObjMembers,
+) -> Result<Val> {
+	let mut builder = ObjValueBuilder::with_capacity(members.fields.len());
+	if let Some(sup) = super_obj {
+		builder.with_super(sup);
+	}
+
+	let needs_unbound = members.this.is_some() || members.uses_super;
+
+	if needs_unbound {
+		let uctx = CachedUnbound::new(evaluate_locals_unbound(
+			&ctx,
+			&members.frame_shape,
+			members.this,
+			members.locals.clone(),
+		));
+		for field in &members.fields {
+			evaluate_field_member_unbound(&mut builder, ctx.clone(), uctx.clone(), field)?;
+		}
+		if let Some(asserts_block) = &members.asserts {
+			builder.assert(evaluate_object_assertions_unbound(
+				uctx,
+				asserts_block.clone(),
+			));
+		}
+	} else {
+		let a_ctx = ctx
+			.pack_captures_sup_this(&members.frame_shape)
+			.enter(|fill, ctx| {
+				fill_letrec_binds(fill, ctx, &members.locals);
+			});
+		for field in &members.fields {
+			evaluate_field_member_static(&mut builder, ctx.clone(), a_ctx.clone(), field)?;
+		}
+		if let Some(asserts_block) = &members.asserts {
+			builder.assert(evaluate_object_assertions_static(
+				a_ctx,
+				asserts_block.clone(),
+			));
+		}
+	}
+
+	Ok(Val::Obj(builder.build()))
+}
+
+pub fn evaluate_assert(ctx: Context, assertion: &LAssertStmt) -> Result<()> {
+	let LAssertStmt { cond, message } = assertion;
 	let assertion_result = in_frame(
-		CallLocation::new(&value.span()),
+		CallLocation::new(&cond.span),
 		|| "assertion condition".to_owned(),
-		|| bool::from_untyped(evaluate(ctx.clone(), value)?),
+		|| bool::from_untyped(evaluate(ctx.clone(), cond)?),
 	)?;
 	if !assertion_result {
 		in_frame(
-			CallLocation::new(&value.span()),
+			CallLocation::new(&cond.span),
 			|| "assertion failure".to_owned(),
 			|| {
-				if let Some(msg) = msg {
+				if let Some(msg) = message {
 					bail!(AssertionFailed(evaluate(ctx, msg)?.to_string()?));
 				}
 				bail!(AssertionFailed(Val::Null.to_string()?));
@@ -407,297 +694,47 @@ pub fn evaluate_assert(ctx: Context, assertion: &AssertStmt) -> Result<()> {
 	Ok(())
 }
 
-pub fn evaluate_named(ctx: Context, expr: &AnalyzedExpr, name: IStr) -> Result<Val> {
-	use Expr::*;
-	Ok(match expr.expr() {
-		Function(params, body) => evaluate_method(ctx, name, params.clone(), body.clone()),
-		_ => evaluate(ctx, expr)?,
-	})
-}
-
-#[allow(clippy::too_many_lines)]
-pub fn evaluate(ctx: Context, expr: &AnalyzedExpr) -> Result<Val> {
-	use Expr::*;
-
-	if let Some(trivial) = evaluate_trivial(expr) {
-		return Ok(trivial);
+fn evaluate_object_assertions_unbound<B: Unbound<Bound = Context>>(
+	uctx: B,
+	asserts: Rc<LObjAsserts>,
+) -> impl ObjectAssertion {
+	#[derive(Trace)]
+	struct ObjectAssert<B: Trace> {
+		uctx: B,
+		asserts: Rc<LObjAsserts>,
 	}
-	let loc = expr.span();
-	Ok(match expr.expr() {
-		Literal(LiteralType::This) => Val::Obj(ctx.try_this()?),
-		Literal(LiteralType::Super) => Val::Obj(ctx.try_sup_this()?.standalone_super()?),
-		Literal(LiteralType::Dollar) => Val::Obj(ctx.try_dollar()?),
-		Literal(LiteralType::True) => Val::Bool(true),
-		Literal(LiteralType::False) => Val::Bool(false),
-		Literal(LiteralType::Null) => Val::Null,
-		Parened(e) => evaluate(ctx, e)?,
-		Str(v) => Val::string(v.clone()),
-		Num(v) => Val::try_num(*v)?,
-		// I have tried to remove special behavior from super by implementing standalone-super
-		// expresion, but looks like this case still needs special treatment.
-		//
-		// Note that other jsonnet implementations will fail on `if value in (super)` expression,
-		// because the standalone super literal is not supported, that is because in other
-		// implementations `in super` treated differently from `in smth_else`.
-		BinaryOp(field, BinaryOpType::In, e)
-			if matches!(e.expr(), Expr::Literal(LiteralType::Super)) =>
-		{
-			let sup_this = ctx.try_sup_this()?;
-			// In jsonnet, "field" in e is eager, LHS expression is always executed regardless of super existence.
-			// In jrsonnet, however, this wasn't true, this was kept here for compatibility.
-			if !sup_this.has_super() {
-				return Ok(Val::Bool(false));
+	impl<B: Unbound<Bound = Context>> ObjectAssertion for ObjectAssert<B> {
+		fn run(&self, sup_this: SupThis) -> Result<()> {
+			let a_ctx = self.uctx.bind(sup_this)?;
+			let assert_env = Context::enter_using(&a_ctx, &self.asserts.shape);
+			for assert in &self.asserts.asserts {
+				evaluate_assert(assert_env.clone(), assert)?;
 			}
-			let field = evaluate(ctx, field)?;
-			Val::Bool(sup_this.field_in_super(field.to_string()?))
+			Ok(())
 		}
-		BinaryOp(v1, o, v2) => evaluate_binary_op_special(ctx, v1, *o, v2)?,
-		UnaryOp(o, v) => evaluate_unary_op(*o, &evaluate(ctx, v)?)?,
-		Var(name) => in_frame(
-			CallLocation::new(&loc),
-			|| format!("local <{name}> access"),
-			|| ctx.binding(name.clone())?.evaluate(),
-		)?,
-		Index { indexable, parts } => ensure_sufficient_stack(|| {
-			let mut parts = parts.iter();
-			let mut indexable = if matches!(indexable.expr(), Expr::Literal(LiteralType::Super)) {
-				let part = parts.next().expect("at least part should exist");
-				// sup_this existence check might also be skipped here for null-coalesce...
-				// But I believe this might cause errors.
-				let sup_this = ctx.try_sup_this()?;
-				if !sup_this.has_super() {
-					#[cfg(feature = "exp-null-coaelse")]
-					if part.null_coaelse {
-						return Ok(Val::Null);
-					}
-					bail!(NoSuperFound)
-				}
-				let name = evaluate(ctx.clone(), &part.value)?;
-
-				let Val::Str(name) = name else {
-					bail!(ValueIndexMustBeTypeGot(
-						ValType::Obj,
-						ValType::Str,
-						name.value_type(),
-					))
-				};
-
-				let name = name.into_flat();
-				match sup_this
-					.get_super(name.clone())
-					.with_description_src(&part.value, || format!("field <{name}> access"))?
-				{
-					Some(v) => v,
-					#[cfg(feature = "exp-null-coaelse")]
-					None if part.null_coaelse => return Ok(Val::Null),
-					None => {
-						let suggestions = suggest_object_fields(
-							&sup_this.standalone_super().expect("super exists"),
-							name.clone(),
-						);
-
-						bail!(NoSuchField(name, suggestions))
-					}
-				}
-			} else {
-				evaluate(ctx.clone(), indexable)?
-			};
-
-			for part in parts {
-				indexable = match (indexable, evaluate(ctx.clone(), &part.value)?) {
-					(Val::Obj(v), Val::Str(key)) => match v
-						.get(key.clone().into_flat())
-						.with_description_src(&part.value, || format!("field <{key}> access"))?
-					{
-						Some(v) => v,
-						#[cfg(feature = "exp-null-coaelse")]
-						None if part.null_coaelse => return Ok(Val::Null),
-						None => {
-							let suggestions = suggest_object_fields(&v, key.clone().into_flat());
-
-							return Err(Error::from(NoSuchField(
-								key.clone().into_flat(),
-								suggestions,
-							)))
-							.with_description_src(&part.value, || format!("field <{key}> access"));
-						}
-					},
-					(Val::Obj(_), n) => bail!(ValueIndexMustBeTypeGot(
-						ValType::Obj,
-						ValType::Str,
-						n.value_type(),
-					)),
-					(Val::Arr(v), Val::Num(n)) => {
-						let n = n.get();
-						if n.fract() > f64::EPSILON {
-							bail!(FractionalIndex)
-						}
-						if n < 0.0 {
-							bail!(ArrayBoundsError(n as isize, v.len()));
-						}
-						v.get(n as usize)?
-							.ok_or_else(|| ArrayBoundsError(n as isize, v.len()))?
-					}
-					(Val::Arr(_), Val::Str(n)) => {
-						bail!(AttemptedIndexAnArrayWithString(n.into_flat()))
-					}
-					(Val::Arr(_), n) => bail!(ValueIndexMustBeTypeGot(
-						ValType::Arr,
-						ValType::Num,
-						n.value_type(),
-					)),
-
-					(Val::Str(s), Val::Num(n)) => Val::Str({
-						let n = n.get();
-						if n.fract() > f64::EPSILON {
-							bail!(FractionalIndex)
-						}
-						if n < 0.0 {
-							bail!(ArrayBoundsError(n as isize, s.into_flat().chars().count()));
-						}
-						let v: IStr = s
-							.clone()
-							.into_flat()
-							.chars()
-							.skip(n as usize)
-							.take(1)
-							.collect::<String>()
-							.into();
-						if v.is_empty() {
-							bail!(StringBoundsError(n as usize, s.into_flat().chars().count()))
-						}
-						StrValue::Flat(v)
-					}),
-					(Val::Str(_), n) => bail!(ValueIndexMustBeTypeGot(
-						ValType::Str,
-						ValType::Num,
-						n.value_type(),
-					)),
-					#[cfg(feature = "exp-null-coaelse")]
-					(Val::Null, _) if part.null_coaelse => return Ok(Val::Null),
-					(v, _) => bail!(CantIndexInto(v.value_type())),
-				};
+	}
+	ObjectAssert { uctx, asserts }
+}
+fn evaluate_object_assertions_static(
+	a_ctx: Context,
+	asserts: Rc<LObjAsserts>,
+) -> impl ObjectAssertion {
+	#[derive(Trace)]
+	struct ObjectAssert {
+		assert_env: Context,
+		asserts: Rc<LObjAsserts>,
+	}
+	impl ObjectAssertion for ObjectAssert {
+		fn run(&self, _sup_this: SupThis) -> Result<()> {
+			for assert in &self.asserts.asserts {
+				evaluate_assert(self.assert_env.clone(), assert)?;
 			}
-			Ok(indexable)
-		})?,
-		LocalExpr(bindings, returned) => {
-			let mut new_bindings: FxHashMap<IStr, Thunk<Val>> =
-				FxHashMap::with_capacity(bindings.iter().map(BindSpec::capacity_hint).sum());
-			let fctx = Context::new_future();
-			for b in bindings {
-				evaluate_dest(b, fctx.clone(), &mut new_bindings)?;
-			}
-			let ctx = ctx.extend_bindings(new_bindings).into_future(fctx);
-			evaluate(ctx, &returned.clone())?
+			Ok(())
 		}
-		Arr(items) => {
-			if items.is_empty() {
-				Val::Arr(ArrValue::empty())
-			} else if items.len() == 1 {
-				let item = items[0].clone();
-				let trimmed = ctx.trimmed(item.analysis());
-				Val::Arr(ArrValue::lazy(vec![Thunk!(move || evaluate(
-					trimmed, &item
-				))]))
-			} else {
-				Val::Arr(ArrValue::expr(ctx, items.iter().cloned()))
-			}
-		}
-		ArrComp(expr, comp_specs) => {
-			let mut out = Vec::new();
-			evaluate_comp(ctx, comp_specs, &mut |ctx| {
-				let expr = expr.clone();
-				let trimmed = ctx.trimmed(expr.analysis());
-				out.push(Thunk!(move || evaluate(trimmed, &expr)));
-				Ok(())
-			})?;
-			Val::Arr(ArrValue::lazy(out))
-		}
-		Obj(body) => Val::Obj(evaluate_object(ctx, body)?),
-		ObjExtend(a, b) => evaluate_add_op(
-			&evaluate(ctx.clone(), a)?,
-			&Val::Obj(evaluate_object(ctx, b)?),
-		)?,
-		Apply(value, args, tailstrict) => ensure_sufficient_stack(|| {
-			evaluate_apply(ctx, value, args, CallLocation::new(&loc), *tailstrict)
-		})?,
-		Function(params, body) => {
-			evaluate_method(ctx, "anonymous".into(), params.clone(), body.clone())
-		}
-		AssertExpr(assert, returned) => {
-			evaluate_assert(ctx.clone(), assert)?;
-			evaluate(ctx, returned)?
-		}
-		ErrorStmt(e) => in_frame(
-			CallLocation::new(&loc),
-			|| "error statement".to_owned(),
-			|| bail!(RuntimeError(evaluate(ctx, e)?.to_string()?,)),
-		)?,
-		IfElse {
-			cond,
-			cond_then,
-			cond_else,
-		} => {
-			if in_frame(
-				CallLocation::new(&loc),
-				|| "if condition".to_owned(),
-				|| bool::from_untyped(evaluate(ctx.clone(), &cond.0)?),
-			)? {
-				evaluate(ctx, cond_then)?
-			} else {
-				match cond_else {
-					Some(v) => evaluate(ctx, v)?,
-					None => Val::Null,
-				}
-			}
-		}
-		Slice(value, desc) => {
-			fn parse_idx<T: Typed>(
-				loc: CallLocation<'_>,
-				ctx: Context,
-				expr: Option<&AnalyzedExpr>,
-				desc: &'static str,
-			) -> Result<Option<T>> {
-				if let Some(value) = expr {
-					Ok(in_frame(
-						loc,
-						|| format!("slice {desc}"),
-						|| <Option<T>>::from_untyped(evaluate(ctx, value)?),
-					)?)
-				} else {
-					Ok(None)
-				}
-			}
-
-			let indexable = evaluate(ctx.clone(), value)?;
-			let loc = CallLocation::new(&loc);
-
-			let start = parse_idx(loc, ctx.clone(), desc.start.as_ref(), "start")?;
-			let end = parse_idx(loc, ctx.clone(), desc.end.as_ref(), "end")?;
-			let step = parse_idx(loc, ctx, desc.step.as_ref(), "step")?;
-
-			IndexableVal::into_untyped(indexable.into_indexable()?.slice(start, end, step)?)?
-		}
-		i @ (Import(path) | ImportStr(path) | ImportBin(path)) => {
-			let Expr::Str(path) = &path.expr() else {
-				bail!("computed imports are not supported")
-			};
-			let tmp = loc.clone().0;
-			with_state(|s| {
-				let resolved_path = s.resolve_from(tmp.source_path(), path)?;
-				Ok(match i {
-					Import(_) => in_frame(
-						CallLocation::new(&loc),
-						|| format!("import {:?}", path.clone()),
-						|| s.import_resolved(resolved_path),
-					)?,
-					ImportStr(_) => Val::string(s.import_resolved_str(resolved_path)?),
-					ImportBin(_) => {
-						Val::Arr(ArrValue::bytes(s.import_resolved_bin(resolved_path)?))
-					}
-					_ => unreachable!(),
-				}) as Result<Val>
-			})?
-		}
-	})
+	}
+	let assert_env = Context::enter_using(&a_ctx, &asserts.shape);
+	ObjectAssert {
+		assert_env,
+		asserts,
+	}
 }

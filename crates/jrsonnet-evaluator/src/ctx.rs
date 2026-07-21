@@ -1,56 +1,194 @@
-use std::fmt::Debug;
+use std::{
+	cell::{Cell, OnceCell, RefCell},
+	clone::Clone,
+	fmt::{self, Debug},
+};
 
 use educe::Educe;
 use jrsonnet_gcmodule::{Cc, Trace};
 use jrsonnet_interner::IStr;
-use rustc_hash::FxHashMap;
-
-use jrsonnet_parser::Analysis;
 
 use crate::{
-	error::ErrorKind::*, gc::WithCapacityExt as _, map::LayeredHashMap, ObjValue, Pending, Result,
-	SupThis, Thunk, Val,
+	Result, SupThis, Thunk, Val,
+	analyze::{CaptureSlot, ClosureShape, LSlot, LocalId, LocalSlot},
+	bail, error,
+	error::ErrorKind::*,
 };
-/// Context keeps information about current lexical code location
-///
-/// This information includes local variables, top-level object (`$`), current object (`this`), and super object (`super`)
+
 #[derive(Debug, Trace, Clone, Educe)]
 #[educe(PartialEq)]
-pub struct Context(#[educe(PartialEq(method = Cc::ptr_eq))] Cc<ContextInternal>);
+pub struct Context(#[educe(PartialEq(method = Cc::ptr_eq))] pub(crate) Cc<ContextInternal>);
 
-#[derive(Debug, Trace)]
-struct ContextInternal {
-	dollar: Option<ObjValue>,
-	sup_this: Option<SupThis>,
-	bindings: LayeredHashMap,
+#[derive(Trace)]
+pub(crate) struct ContextInternal {
+	/// Immutable, packed at closure-create time.
+	pub(crate) captures: Cc<Vec<Thunk<Val>>>,
+	/// Filled during closure initialization
+	pub(crate) locals: Cc<LocalsFrame>,
+	pub(crate) sup_this: Option<SupThis>,
 }
+
+impl Debug for ContextInternal {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("ContextInternal")
+			.field("captures", &self.captures.len())
+			.field("locals", &self.locals)
+			.field("sup_this", &self.sup_this.is_some())
+			.finish()
+	}
+}
+
+#[derive(Trace, Debug)]
+pub(crate) struct IterFrame {
+	slots: Vec<RefCell<Option<Thunk<Val>>>>,
+	captured: Cell<bool>,
+}
+impl IterFrame {
+	pub fn new(n: u16) -> IterFrame {
+		let cells: Vec<RefCell<Option<Thunk<Val>>>> = (0..n).map(|_| RefCell::new(None)).collect();
+		IterFrame {
+			slots: cells,
+			captured: Cell::new(false),
+		}
+	}
+	pub fn set(&self, slot: LocalSlot, value: Thunk<Val>) {
+		*self.slots[slot.0 as usize].borrow_mut() = Some(value);
+	}
+}
+
+#[derive(Trace, Debug)]
+pub(crate) enum LocalsFrame {
+	Once1(OnceCell<Thunk<Val>>),
+	/// Letrec/function/object/for frames - slots are filled during frame setup
+	Once(Vec<OnceCell<Thunk<Val>>>),
+	/// Comp-eager fast-path, cells are reset per iteration for the unique frames (i.e for the non-capturing thunks)
+	Iter(IterFrame),
+}
+impl LocalsFrame {
+	pub fn set(&self, slot: LocalSlot, value: Thunk<Val>) {
+		match self {
+			LocalsFrame::Once1(cell) => {
+				debug_assert_eq!(slot.0, 0, "Once1 only holds slot 0");
+				cell.set(value)
+					.map_err(|_| ())
+					.expect("slot already filled");
+			}
+			LocalsFrame::Once(cells) => {
+				cells[slot.0 as usize]
+					.set(value)
+					.map_err(|_| ())
+					.expect("slot already filled");
+			}
+			LocalsFrame::Iter(_) => unreachable!("iter frame has different constructors"),
+		}
+	}
+}
+
+impl LocalsFrame {
+	pub(crate) fn new_once(n: u16) -> Cc<Self> {
+		if n == 1 {
+			return Cc::new(Self::Once1(OnceCell::new()));
+		}
+		let cells: Vec<OnceCell<Thunk<Val>>> = (0..n).map(|_| OnceCell::new()).collect();
+		Cc::new(Self::Once(cells))
+	}
+}
+
+pub(crate) struct IterContext {
+	context: Context,
+}
+impl IterContext {
+	pub(crate) fn create(&self, build: impl FnOnce(&IterFrame)) -> Result<Context> {
+		if !Cc::is_unique(&self.context.0.locals) {
+			bail!(EagerCompspecCaptured);
+		}
+		let LocalsFrame::Iter(frame) = &*self.context.0.locals else {
+			unreachable!("IterContext is only created for Iter ctx");
+		};
+		if frame.captured.get() {
+			bail!(EagerCompspecCaptured);
+		}
+		build(frame);
+		Ok(self.context.clone())
+	}
+}
+
+#[derive(Trace, Clone)]
+pub(crate) struct PackedContext {
+	captures: Cc<Vec<Thunk<Val>>>,
+	n_locals: u16,
+}
+impl PackedContext {
+	pub fn enter(self, sup_this: SupThis, build: impl FnOnce(&LocalsFrame, &Context)) -> Context {
+		let locals = LocalsFrame::new_once(self.n_locals);
+		let val = Context(Cc::new(ContextInternal {
+			captures: self.captures,
+			locals,
+			sup_this: Some(sup_this),
+		}));
+		build(&val.0.locals, &val);
+		val
+	}
+}
+#[derive(Trace, Clone, Educe, Debug)]
+#[educe(PartialEq)]
+pub(crate) struct PackedContextSupThis {
+	#[educe(PartialEq(method = Cc::ptr_eq))]
+	captures: Cc<Vec<Thunk<Val>>>,
+	n_locals: u16,
+	sup_this: Option<SupThis>,
+}
+impl PackedContextSupThis {
+	pub fn enter(self, build: impl FnOnce(&LocalsFrame, &Context)) -> Context {
+		let locals = LocalsFrame::new_once(self.n_locals);
+		let val = Context(Cc::new(ContextInternal {
+			captures: self.captures.clone(),
+			locals,
+			sup_this: self.sup_this,
+		}));
+		build(&val.0.locals, &val);
+		val
+	}
+}
+
 impl Context {
-	pub fn new_future() -> Pending<Self> {
-		Pending::new()
+	#[inline]
+	pub fn slot(&self, slot: LSlot) -> Thunk<Val> {
+		match slot {
+			LSlot::Local(i) => self.local(i),
+			LSlot::Capture(i) => self.capture(i),
+		}
+	}
+	/// Read a local slot from the shared locals frame.
+	///
+	/// # Panics
+	/// If the slot has not yet been filled. The analyzer guarantees
+	/// that slot indices are in range and that letrec setup completes
+	/// before the first read. A panic indicates an analyzer/runtime
+	/// invariant violation, not a user error.
+	#[inline]
+	pub fn local(&self, slot: LocalSlot) -> Thunk<Val> {
+		match &*self.0.locals {
+			LocalsFrame::Once1(cell) => {
+				debug_assert_eq!(slot.0, 0, "Once1 only holds slot 0");
+				cell.get().expect("local read before letrec init").clone()
+			}
+			LocalsFrame::Once(cells) => cells[slot.0 as usize]
+				.get()
+				.expect("local read before letrec init")
+				.clone(),
+			LocalsFrame::Iter(cells) => cells.slots[slot.0 as usize]
+				.borrow()
+				.as_ref()
+				.expect("iter local read before iteration filled it")
+				.clone(),
+		}
 	}
 
-	pub fn dollar(&self) -> Option<&ObjValue> {
-		self.0.dollar.as_ref()
-	}
-
-	pub fn try_dollar(&self) -> Result<ObjValue> {
-		self.0
-			.dollar
-			.clone()
-			.ok_or_else(|| CantUseSelfSupOutsideOfObject.into())
-	}
-
-	pub fn this(&self) -> Option<&ObjValue> {
-		self.0.sup_this.as_ref().map(SupThis::this)
-	}
-
-	pub fn try_this(&self) -> Result<ObjValue> {
-		self.0
-			.sup_this
-			.as_ref()
-			.ok_or_else(|| CantUseSelfSupOutsideOfObject.into())
-			.map(SupThis::this)
-			.cloned()
+	/// Read a captured slot from this closure's capture pack.
+	#[inline]
+	pub fn capture(&self, slot: CaptureSlot) -> Thunk<Val> {
+		(*self.0.captures)[slot.0 as usize].clone()
 	}
 
 	pub fn sup_this(&self) -> Option<&SupThis> {
@@ -61,172 +199,117 @@ impl Context {
 		self.0
 			.sup_this
 			.clone()
-			.ok_or_else(|| CantUseSelfSupOutsideOfObject.into())
+			.ok_or_else(|| error!(CantUseSelfSupOutsideOfObject))
 	}
 
-	pub fn binding(&self, name: IStr) -> Result<Thunk<Val>> {
-		use std::cmp::Ordering;
-
-		use crate::bail;
-
-		if let Some(val) = self.0.bindings.get(&name).cloned() {
-			return Ok(val);
-		}
-
-		let mut heap = Vec::new();
-		self.0.bindings.clone().iter_keys(|k| {
-			let conf = strsim::jaro_winkler(&k as &str, &name as &str);
-			if conf < 0.8 {
-				return;
-			}
-			heap.push((conf, k));
-		});
-		heap.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
-
-		bail!(VariableIsNotDefined(
-			name,
-			heap.into_iter().map(|(_, k)| k).collect()
-		))
-	}
-	pub fn contains_binding(&self, name: IStr) -> bool {
-		self.0.bindings.contains_key(&name)
-	}
-	#[must_use]
-	pub fn into_future(self, ctx: Pending<Self>) -> Self {
-		{
-			ctx.clone().fill(self);
-		}
-		ctx.unwrap()
-	}
-
-	#[must_use]
-	pub fn with_var(self, name: impl Into<IStr>, value: Val) -> Self {
-		let mut new_bindings = FxHashMap::with_capacity(1);
-		new_bindings.insert(name.into(), Thunk::evaluated(value));
-		self.extend_bindings(new_bindings)
-	}
-
-	#[must_use]
-	pub fn extend_bindings_sup_this(
-		self,
-		new_bindings: FxHashMap<IStr, Thunk<Val>>,
-		sup_this: SupThis,
-	) -> Self {
-		let ctx = &self;
-		let dollar = ctx
-			.0
-			.dollar
-			.clone()
-			.or_else(|| Some(sup_this.this().clone()));
-		let bindings = if new_bindings.is_empty() {
-			ctx.0.bindings.clone()
-		} else {
-			ctx.0.bindings.clone().extend(new_bindings)
-		};
+	/// Build a root context: empty captures, externals filled into a
+	/// fresh Once locals frame in declaration order. Used once at
+	/// program entry to construct the context the analyzed root LIR
+	/// runs against.
+	pub(crate) fn root(externals: Vec<Thunk<Val>>) -> Self {
+		let n: u16 = externals
+			.len()
+			.try_into()
+			.expect("more than u16::MAX externals");
+		let cells: Vec<OnceCell<Thunk<Val>>> = externals
+			.into_iter()
+			.map(|t| {
+				let cell = OnceCell::new();
+				cell.set(t).map_err(|_| ()).expect("fresh cell");
+				cell
+			})
+			.collect();
+		debug_assert_eq!(cells.len(), n as usize);
+		let locals = Cc::new(LocalsFrame::Once(cells));
 		Self(Cc::new(ContextInternal {
-			dollar,
-			sup_this: Some(sup_this),
-			bindings,
+			captures: Cc::new(Vec::new()),
+			locals,
+			sup_this: None,
 		}))
 	}
-	/// Create a trimmed context that only retains bindings for variables
-	/// the given expression actually uses. This flattens the LayeredHashMap
-	/// chain into a single flat map, breaking reference chains and allowing
-	/// unreferenced thunks (and everything they hold) to be freed.
-	#[must_use]
-	pub fn trimmed(&self, analysis: &Analysis) -> Self {
-		let used_vars = &analysis.used_vars;
-		let has_var = analysis.var.is_some();
 
-		if used_vars.is_empty() && !has_var {
-			return Self(Cc::new(ContextInternal {
-				dollar: self.0.dollar.clone(),
-				sup_this: self.0.sup_this.clone(),
-				bindings: LayeredHashMap::default(),
-			}));
+	pub(crate) fn pack_captures(&self, shape: &ClosureShape) -> PackedContext {
+		PackedContext {
+			captures: Cc::new(pack_captures(self, &shape.captures)),
+			n_locals: shape.n_locals,
 		}
-
-		let extra = if has_var { 1 } else { 0 };
-		let mut trimmed = FxHashMap::with_capacity(used_vars.len() + extra);
-		if let Some(var) = &analysis.var {
-			if let Some(thunk) = self.0.bindings.get(var) {
-				trimmed.insert(var.clone(), thunk.clone());
-			}
-		}
-		for name in used_vars.set() {
-			if let Some(thunk) = self.0.bindings.get(name) {
-				trimmed.insert(name.clone(), thunk.clone());
-			}
-		}
-		Self(Cc::new(ContextInternal {
-			dollar: self.0.dollar.clone(),
+	}
+	pub(crate) fn pack_captures_sup_this(&self, shape: &ClosureShape) -> PackedContextSupThis {
+		PackedContextSupThis {
+			captures: Cc::new(pack_captures(self, &shape.captures)),
+			n_locals: shape.n_locals,
 			sup_this: self.0.sup_this.clone(),
-			bindings: LayeredHashMap::new(trimmed),
-		}))
+		}
 	}
 
-	#[must_use]
-	pub fn extend_bindings(self, new_bindings: FxHashMap<IStr, Thunk<Val>>) -> Self {
-		if new_bindings.is_empty() {
-			return self;
+	pub(crate) fn enter_iter(
+		parent: &Context,
+		shape: &ClosureShape,
+		cb: impl FnOnce(IterContext) -> Result<()>,
+	) -> Result<()> {
+		let captures = Cc::new(pack_captures(parent, &shape.captures));
+		let locals = IterFrame::new(shape.n_locals);
+		cb(IterContext {
+			context: Self(Cc::new(ContextInternal {
+				captures,
+				locals: Cc::new(LocalsFrame::Iter(locals)),
+				sup_this: parent.0.sup_this.clone(),
+			})),
+		})
+	}
+
+	pub(crate) fn enter_using(parent: &Context, shape: &ClosureShape) -> Self {
+		debug_assert_eq!(shape.n_locals, 0);
+		if shape.captures.is_empty() {
+			if let LocalsFrame::Iter(i) = &*parent.0.locals {
+				i.captured.set(true);
+			}
+			// Value never uses captures, thus evaluating it against the parent gives the same result
+			return parent.clone();
 		}
-		let ctx = &self;
-		let bindings = if new_bindings.is_empty() {
-			ctx.0.bindings.clone()
-		} else {
-			ctx.0.bindings.clone().extend(new_bindings)
-		};
+		let captures = Cc::new(pack_captures(parent, &shape.captures));
 		Self(Cc::new(ContextInternal {
-			dollar: ctx.0.dollar.clone(),
-			sup_this: ctx.0.sup_this.clone(),
-			bindings,
+			captures,
+			locals: parent.0.locals.clone(),
+			sup_this: parent.0.sup_this.clone(),
 		}))
 	}
 }
 
-#[derive(Default)]
-pub struct ContextBuilder {
-	bindings: FxHashMap<IStr, Thunk<Val>>,
-	extend: Option<Context>,
+fn pack_captures(parent: &Context, sources: &[LSlot]) -> Vec<Thunk<Val>> {
+	sources.iter().map(|src| parent.slot(*src)).collect()
 }
 
-impl ContextBuilder {
-	pub fn new() -> Self {
-		Self::with_capacity(0)
-	}
+pub struct InitialContextBuilder {
+	externals: Vec<(IStr, LocalId)>,
+	values: Vec<Thunk<Val>>,
+	next_id: u32,
+}
 
-	pub fn with_capacity(capacity: usize) -> Self {
+impl InitialContextBuilder {
+	pub(crate) fn new() -> Self {
 		Self {
-			bindings: FxHashMap::with_capacity(capacity),
-			extend: None,
+			externals: Vec::new(),
+			values: Vec::new(),
+			next_id: 0,
 		}
 	}
 
-	pub fn extend(parent: Context) -> Self {
-		Self {
-			bindings: FxHashMap::new(),
-			extend: Some(parent),
-		}
+	pub fn bind(&mut self, name: impl Into<IStr>, value: Thunk<Val>) {
+		let name = name.into();
+		let id = LocalId(self.next_id);
+		self.next_id += 1;
+		self.externals.push((name, id));
+		self.values.push(value);
 	}
 
-	/// # Panics
-	///
-	/// If `name` is already bound. Makes no sense to bind same local multiple times,
-	/// unless it is separate context layers.
-	pub fn bind(&mut self, name: impl Into<IStr>, value: Thunk<Val>) -> &mut Self {
-		let old = self.bindings.insert(name.into(), value);
-		assert!(old.is_none(), "variable bound twice in single context call");
-		self
+	pub(crate) fn build(self) -> (Vec<(IStr, LocalId)>, Vec<Thunk<Val>>) {
+		(self.externals, self.values)
 	}
-	pub fn build(self) -> Context {
-		if let Some(parent) = self.extend {
-			parent.extend_bindings(self.bindings)
-		} else {
-			Context(Cc::new(ContextInternal {
-				bindings: LayeredHashMap::new(self.bindings),
-				dollar: None,
-				sup_this: None,
-			}))
-		}
+}
+
+impl Default for InitialContextBuilder {
+	fn default() -> Self {
+		Self::new()
 	}
 }

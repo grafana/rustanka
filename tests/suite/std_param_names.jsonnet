@@ -70,7 +70,7 @@ local names = {
     manifestXmlJsonml: ['value'],
     base64: ['input'],
     base64DecodeBytes: ['str'],
-    base64Decode: ['str'],
+    base64Decode: ['str', 'lossy'],
     reverse: ['arr'],
     sort: ['arr', 'keyF'],
     uniq: ['arr', 'keyF'],
@@ -177,7 +177,34 @@ local names = {
     deg2rad: ['x'],
     rad2deg: ['x'],
     hypot: ['x', 'y'],
-};
+} + (if test.expPreserveOrder then {
+    manifestIni+: ['preserve_order'],
+    manifestJson+: ['preserve_order'],
+    manifestJsonEx+: ['preserve_order'],
+    manifestJsonMinified+: ['preserve_order'],
+    manifestPython+: ['preserve_order'],
+    manifestPythonVars+: ['preserve_order'],
+    manifestToml+: ['preserve_order'],
+    manifestTomlEx+: ['preserve_order'],
+    manifestYamlDoc+: ['preserve_order'],
+    manifestYamlStream+: ['preserve_order'],
+    objectFields+: ['preserve_order'],
+    objectFieldsAll+: ['preserve_order'],
+    objectFieldsEx+: ['preserve_order'],
+    objectKeysValues+: ['preserve_order'],
+    objectKeysValuesAll+: ['preserve_order'],
+    objectValues+: ['preserve_order'],
+    objectValuesAll+: ['preserve_order'],
+    prune+: ['preserve_order'],
+} else {}) + (if test.expBigint then {
+    bigint: ['v'],
+} else {}) + (if test.expRegexp then {
+    regexFullMatch: ['pattern', 'str'],
+    regexGlobalReplace: ['str', 'pattern', 'to'],
+    regexPartialMatch: ['pattern', 'str'],
+    regexQuoteMeta: ['pattern'],
+    regexReplace: ['str', 'pattern', 'to'],
+} else {});
 
 std.all(std.map(function(key) assertNames(key, names[key]), std.objectFields(names)))
 && std.all([

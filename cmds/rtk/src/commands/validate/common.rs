@@ -13,7 +13,7 @@ use jrsonnet_evaluator::{
 	FileImportResolver, ImportResolver, State, Val,
 };
 use jrsonnet_gcmodule::Acyclic;
-use jrsonnet_parser::{SourceFile, SourcePath};
+use jrsonnet_ir::{SourceFile, SourcePath};
 use jrsonnet_stdlib::ContextInitializer;
 use walkdir::WalkDir;
 
@@ -248,7 +248,7 @@ pub fn eval_jsonnet_snippet_array_pooled(
 			}
 		};
 
-		let mut out: Vec<ElementResult> = Vec::with_capacity(arr.len());
+		let mut out: Vec<ElementResult> = Vec::with_capacity(arr.len() as usize);
 		for idx in 0..arr.len() {
 			let elem_result: ElementResult = match arr.get(idx) {
 				Ok(Some(val)) => match val.manifest(JsonFormat::default()) {

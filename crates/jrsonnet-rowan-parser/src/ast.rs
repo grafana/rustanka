@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 
 use crate::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken};
 
-/// The main trait to go from untyped `SyntaxNode`  to a typed ast. The
-/// conversion itself has zero runtime cost: ast and syntax nodes have exactly
+/// The main trait to go from untyped `SyntaxNode`  to a typed ast.
+///
+/// The conversion itself has zero runtime cost: ast and syntax nodes have exactly
 /// the same representation: a pointer to the tree root and a pointer to the
 /// node itself.
 pub trait AstNode {
@@ -76,9 +77,6 @@ pub mod support {
 
 	use super::{AstChildren, AstNode, AstToken, SyntaxKind, SyntaxNode, SyntaxToken};
 
-	pub fn child<N: AstNode>(parent: &SyntaxNode) -> Option<N> {
-		parent.children().find_map(N::cast)
-	}
 	pub fn token_child<N: AstToken>(parent: &SyntaxNode) -> Option<N> {
 		parent.children_with_tokens().find_map(|n| match n {
 			rowan::NodeOrToken::Node(_) => None,

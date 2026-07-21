@@ -4,7 +4,7 @@
 use std::io::{self, Read};
 
 use clap::Parser;
-use jrsonnet_lint::{apply_fixes, lint_snippet, Diagnostic, LintConfig, ParseError};
+use jrsonnet_lint::{Diagnostic, LintConfig, ParseError, apply_fixes, lint_snippet};
 
 #[derive(Parser)]
 #[command(name = "jrsonnet-lint")]

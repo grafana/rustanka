@@ -7,10 +7,10 @@ use std::{env, marker::PhantomData, path::PathBuf};
 
 use clap::Parser;
 use jrsonnet_evaluator::{
-	stack::{limit_stack_depth, StackDepthLimitOverrideGuard},
 	FileImportResolver,
+	stack::{StackDepthLimitOverrideGuard, limit_stack_depth},
 };
-use jrsonnet_gcmodule::{with_thread_object_space, ObjectSpace};
+use jrsonnet_gcmodule::{ObjectSpace, with_thread_object_space};
 pub use manifest::*;
 pub use stdlib::*;
 pub use tla::*;
@@ -38,7 +38,14 @@ pub struct MiscOpts {
 	/// Library search dirs. (right-most wins)
 	/// Any not found `imported` file will be searched in these.
 	/// This can also be specified via `JSONNET_PATH` variable,
-	/// which should contain a colon-separated (semicolon-separated on Windows) list of directories.
+	#[cfg_attr(
+		windows,
+		doc = "which should contain a semicolon-separated list of directories."
+	)]
+	#[cfg_attr(
+		not(windows),
+		doc = "which should contain a colon-separated list of directories."
+	)]
 	#[clap(long, short = 'J')]
 	jpath: Vec<PathBuf>,
 }

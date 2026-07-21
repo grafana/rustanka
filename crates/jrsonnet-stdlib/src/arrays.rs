@@ -1,12 +1,11 @@
 #![allow(non_snake_case)]
 
 use jrsonnet_evaluator::{
-	bail,
-	function::{builtin, FuncVal},
-	runtime_error,
-	typed::{BoundedI32, BoundedUsize, Either2, NativeFn, Typed},
-	val::{equals, ArrValue, IndexableVal},
-	Either, IStr, ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val,
+	Either, IStr, ObjValue, ObjValueBuilder, Result, ResultExt, Thunk, Val, bail, error,
+	function::{FoldKind, NativeFn, builtin},
+	manifest::{ManifestFormat as _, ToStringFormat},
+	typed::{BoundedUsize, Either2, FromUntyped},
+	val::{ArrValue, IndexableVal, equals},
 };
 
 pub fn eval_on_empty(on_empty: Option<Thunk<Val>>) -> Result<Val> {
@@ -18,29 +17,30 @@ pub fn eval_on_empty(on_empty: Option<Thunk<Val>>) -> Result<Val> {
 }
 
 #[builtin]
-pub fn builtin_make_array(sz: BoundedI32<0, { i32::MAX }>, func: FuncVal) -> Result<ArrValue> {
-	if *sz == 0 {
+pub fn builtin_make_array(sz: u32, func: NativeFn!((u32,) -> Val)) -> Result<ArrValue> {
+	if sz == 0 {
 		return Ok(ArrValue::empty());
 	}
-	func.evaluate_trivial().map_or_else(
-		|| Ok(ArrValue::range_exclusive(0, *sz).map(func)),
-		|trivial| {
-			let mut out = Vec::with_capacity(*sz as usize);
-			for _ in 0..*sz {
-				out.push(trivial.clone());
+	// Try eager evaluation: call func(i) immediately for each element.
+	'eager: {
+		let mut out = Vec::with_capacity(sz as usize);
+		for i in 0..sz {
+			match func.call(i) {
+				Ok(v) => out.push(v),
+				Err(_) => break 'eager,
 			}
-			Ok(ArrValue::eager(out))
-		},
-	)
+		}
+		return Ok(ArrValue::new(out));
+	}
+	Ok(ArrValue::make(sz, func))
 }
 
 #[builtin]
-pub fn builtin_repeat(what: Either![IStr, ArrValue], count: usize) -> Result<Val> {
+pub fn builtin_repeat(what: Either![IStr, ArrValue], count: u32) -> Result<Val> {
 	Ok(match what {
-		Either2::A(s) => Val::string(s.repeat(count)),
+		Either2::A(s) => Val::string(s.repeat(count as usize)),
 		Either2::B(arr) => Val::Arr(
-			ArrValue::repeated(arr, count)
-				.ok_or_else(|| runtime_error!("repeated length overflow"))?,
+			ArrValue::repeated(arr, count).ok_or_else(|| error!("repeated length overflow"))?,
 		),
 	})
 }
@@ -53,24 +53,27 @@ pub fn builtin_slice(
 	step: Option<Option<BoundedUsize<1, { i32::MAX as usize }>>>,
 ) -> Result<Val> {
 	indexable
-		.slice(index.flatten(), end.flatten(), step.flatten())
+		.slice32(index.flatten(), end.flatten(), step.flatten())
 		.map(Val::from)
 }
 
 #[builtin]
-pub fn builtin_map(func: FuncVal, arr: IndexableVal) -> ArrValue {
+pub fn builtin_map(func: NativeFn!((Val) -> Val), arr: IndexableVal) -> ArrValue {
 	let arr = arr.to_array();
 	arr.map(func)
 }
 
 #[builtin]
-pub fn builtin_map_with_index(func: FuncVal, arr: IndexableVal) -> ArrValue {
+pub fn builtin_map_with_index(func: NativeFn!((u32, Val) -> Val), arr: IndexableVal) -> ArrValue {
 	let arr = arr.to_array();
 	arr.map_with_index(func)
 }
 
 #[builtin]
-pub fn builtin_map_with_key(func: FuncVal, obj: ObjValue) -> Result<ObjValue> {
+pub fn builtin_map_with_key(
+	func: NativeFn!((IStr, Val) -> Val),
+	obj: ObjValue,
+) -> Result<ObjValue> {
 	let mut out = ObjValueBuilder::new();
 	for (k, v) in obj.iter(
 		// Makes sense mapped object should be ordered the same way, should not break anything when the output is not ordered (the default).
@@ -80,15 +83,14 @@ pub fn builtin_map_with_key(func: FuncVal, obj: ObjValue) -> Result<ObjValue> {
 		true,
 	) {
 		let v = v?;
-		out.field(k.clone())
-			.value(func.evaluate_simple(&(k, v), false)?);
+		out.field(k.clone()).value(func.call(k, v)?);
 	}
 	Ok(out.build())
 }
 
 #[builtin]
 pub fn builtin_flatmap(
-	func: NativeFn<((Either![String, Val],), Val)>,
+	func: NativeFn!((Either![String, Val]) -> Val),
 	arr: IndexableVal,
 ) -> Result<IndexableVal> {
 	use std::fmt::Write;
@@ -96,11 +98,11 @@ pub fn builtin_flatmap(
 		IndexableVal::Str(str) => {
 			let mut out = String::new();
 			for c in str.chars() {
-				match func(Either2::A(c.to_string()))? {
+				match func.call(Either2::A(c.to_string()))? {
 					Val::Str(o) => write!(out, "{o}").unwrap(),
-					Val::Null => continue,
+					Val::Null => {}
 					_ => bail!("in std.join all items should be strings"),
-				};
+				}
 			}
 			Ok(IndexableVal::Str(out.into()))
 		}
@@ -108,47 +110,64 @@ pub fn builtin_flatmap(
 			let mut out = Vec::new();
 			for el in a.iter() {
 				let el = el?;
-				match func(Either2::B(el))? {
+				match func.call(Either2::B(el))? {
 					Val::Arr(o) => {
 						for oe in o.iter() {
 							out.push(oe?);
 						}
 					}
-					Val::Null => continue,
+					Val::Null => {}
 					_ => bail!("in std.join all items should be arrays"),
-				};
+				}
 			}
 			Ok(IndexableVal::Arr(out.into()))
 		}
 	}
 }
 
+type FilterFunc = NativeFn!((Thunk<Val>) -> bool);
+
 #[builtin]
-pub fn builtin_filter(func: FuncVal, arr: ArrValue) -> Result<ArrValue> {
-	arr.filter(|val| bool::from_untyped(func.evaluate_simple(&(val.clone(),), false)?))
+pub fn builtin_filter(func: FilterFunc, arr: ArrValue) -> Result<ArrValue> {
+	arr.filter(func)
 }
 
 #[builtin]
 pub fn builtin_filter_map(
-	filter_func: FuncVal,
-	map_func: FuncVal,
+	filter_func: FilterFunc,
+	map_func: NativeFn!((Val) -> Val),
 	arr: ArrValue,
 ) -> Result<ArrValue> {
-	Ok(builtin_filter(filter_func, arr)?.map(map_func))
+	Ok(arr.filter(filter_func)?.map(map_func))
 }
 
 #[builtin]
-pub fn builtin_foldl(func: FuncVal, arr: Either![ArrValue, IStr], init: Val) -> Result<Val> {
+pub fn builtin_foldl(
+	func: NativeFn!((Val, Either![Val, char]) -> Val),
+	arr: Either![ArrValue, IStr],
+	init: Val,
+) -> Result<Val> {
+	if let (Val::Str(init), Either2::A(arr)) = (&init, &arr)
+		&& let Some(folder) = func.func().as_folder(FoldKind::Left)
+	{
+		let mut buf = String::new();
+		init.into_flat_in(&mut buf);
+		for i in arr.iter_lazy() {
+			ToStringFormat.manifest_buf(&folder.eval(i)?, &mut buf)?;
+		}
+		return Ok(Val::string(buf));
+	}
+
 	let mut acc = init;
 	match arr {
 		Either2::A(arr) => {
 			for i in arr.iter() {
-				acc = func.evaluate_simple(&(acc, i?), false)?;
+				acc = func.call(acc, Either2::A(i?))?;
 			}
 		}
 		Either2::B(arr) => {
-			for i in arr.chars() {
-				acc = func.evaluate_simple(&(acc, Val::string(i)), false)?;
+			for c in arr.chars() {
+				acc = func.call(acc, Either2::B(c))?;
 			}
 		}
 	}
@@ -156,17 +175,32 @@ pub fn builtin_foldl(func: FuncVal, arr: Either![ArrValue, IStr], init: Val) -> 
 }
 
 #[builtin]
-pub fn builtin_foldr(func: FuncVal, arr: Either![ArrValue, IStr], init: Val) -> Result<Val> {
+pub fn builtin_foldr(
+	func: NativeFn!((Either![Val, char], Val) -> Val),
+	arr: Either![ArrValue, IStr],
+	init: Val,
+) -> Result<Val> {
+	if let (Val::Str(init), Either2::A(arr)) = (&init, &arr)
+		&& let Some(folder) = func.func().as_folder(FoldKind::Right)
+	{
+		let mut buf = String::new();
+		for i in arr.iter_lazy() {
+			ToStringFormat.manifest_buf(&folder.eval(i)?, &mut buf)?;
+		}
+		init.into_flat_in(&mut buf);
+		return Ok(Val::string(buf));
+	}
+
 	let mut acc = init;
 	match arr {
 		Either2::A(arr) => {
 			for i in arr.iter().rev() {
-				acc = func.evaluate_simple(&(i?, acc), false)?;
+				acc = func.call(Either2::A(i?), acc)?;
 			}
 		}
 		Either2::B(arr) => {
-			for i in arr.chars().rev() {
-				acc = func.evaluate_simple(&(Val::string(i), acc), false)?;
+			for c in arr.chars().rev() {
+				acc = func.call(Either2::B(c), acc)?;
 			}
 		}
 	}
@@ -205,7 +239,6 @@ pub fn builtin_join(sep: IndexableVal, arr: ArrValue) -> Result<IndexableVal> {
 						out.push(item?);
 					}
 				} else if matches!(item, Val::Null) {
-					continue;
 				} else {
 					bail!("in std.join all items should be arrays");
 				}
@@ -226,7 +259,6 @@ pub fn builtin_join(sep: IndexableVal, arr: ArrValue) -> Result<IndexableVal> {
 					first = false;
 					write!(out, "{item}").unwrap();
 				} else if matches!(item, Val::Null) {
-					continue;
 				} else {
 					bail!("in std.join all items should be strings");
 				}
@@ -241,7 +273,8 @@ pub fn builtin_join(sep: IndexableVal, arr: ArrValue) -> Result<IndexableVal> {
 pub fn builtin_lines(arr: ArrValue) -> Result<IndexableVal> {
 	builtin_join(
 		IndexableVal::Str("\n".into()),
-		ArrValue::extended(arr, ArrValue::eager(vec![Val::string("")])),
+		ArrValue::extended(arr, ArrValue::new(vec![Val::string("")]))
+			.ok_or_else(|| error!("array is too large"))?,
 	)
 }
 
@@ -353,21 +386,30 @@ pub fn builtin_avg(arr: Vec<f64>, onEmpty: Option<Thunk<Val>>) -> Result<Val> {
 	if arr.is_empty() {
 		return eval_on_empty(onEmpty);
 	}
+	#[expect(
+		clippy::cast_precision_loss,
+		reason = "array sizes are bounded to i32 len"
+	)]
 	Ok(Val::try_num(arr.iter().sum::<f64>() / (arr.len() as f64))?)
 }
 
 #[builtin]
 pub fn builtin_remove_at(arr: ArrValue, at: i32) -> Result<ArrValue> {
-	let newArrLeft = arr.clone().slice(None, Some(at), None);
-	let newArrRight = arr.slice(Some(at + 1), None, None);
+	let newArrLeft = arr.clone().slice32(None, Some(at), None);
+	let newArrRight = arr.slice32(Some(at + 1), None, None);
 
-	Ok(ArrValue::extended(newArrLeft, newArrRight))
+	ArrValue::extended(newArrLeft, newArrRight).ok_or_else(|| error!("array is too large"))
 }
 
 #[builtin]
 pub fn builtin_remove(arr: ArrValue, elem: Val) -> Result<ArrValue> {
 	for (index, item) in arr.iter().enumerate() {
 		if equals(&item?, &elem)? {
+			#[expect(
+				clippy::cast_possible_truncation,
+				clippy::cast_possible_wrap,
+				reason = "array sizes are bounded to i32 len"
+			)]
 			return builtin_remove_at(arr.clone(), index as i32);
 		}
 	}
@@ -375,20 +417,22 @@ pub fn builtin_remove(arr: ArrValue, elem: Val) -> Result<ArrValue> {
 }
 
 #[builtin]
-pub fn builtin_flatten_arrays(arrs: Vec<ArrValue>) -> ArrValue {
-	pub fn flatten_inner(values: &[ArrValue]) -> ArrValue {
+pub fn builtin_flatten_arrays(arrs: Vec<ArrValue>) -> Result<ArrValue> {
+	pub fn flatten_inner(values: &[ArrValue]) -> Result<ArrValue> {
 		if values.len() == 1 {
-			return values[0].clone();
+			return Ok(values[0].clone());
 		} else if values.len() == 2 {
-			return ArrValue::extended(values[0].clone(), values[1].clone());
+			return ArrValue::extended(values[0].clone(), values[1].clone())
+				.ok_or_else(|| error!("array is too large"));
 		}
 		let (a, b) = values.split_at(values.len() / 2);
-		ArrValue::extended(flatten_inner(a), flatten_inner(b))
+		ArrValue::extended(flatten_inner(a)?, flatten_inner(b)?)
+			.ok_or_else(|| error!("array is too large"))
 	}
 	if arrs.is_empty() {
-		return ArrValue::empty();
+		return Ok(ArrValue::empty());
 	} else if arrs.len() == 1 {
-		return arrs.into_iter().next().expect("single");
+		return Ok(arrs.into_iter().next().expect("single"));
 	}
 	flatten_inner(&arrs)
 }
@@ -444,7 +488,7 @@ pub fn builtin_prune(
 					out.push(ele);
 				}
 			}
-			Val::Arr(ArrValue::eager(out))
+			Val::arr(out)
 		}
 		Val::Obj(o) => {
 			let mut out = ObjValueBuilder::new();

@@ -3,9 +3,9 @@
 
 #![allow(non_snake_case, clippy::match_like_matches_macro)]
 use crate::{
-	ast::{support, AstChildren, AstNode, AstToken},
 	SyntaxKind::{self, *},
 	SyntaxNode, SyntaxToken, T,
+	ast::{AstChildren, AstNode, AstToken, support},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -228,8 +228,11 @@ pub struct ExprObjExtend {
 	pub(crate) syntax: SyntaxNode,
 }
 impl ExprObjExtend {
-	pub fn expr(&self) -> Option<Expr> {
+	pub fn lhs(&self) -> Option<Expr> {
 		support::children(&self.syntax).next()
+	}
+	pub fn rhs(&self) -> Option<Expr> {
+		support::children(&self.syntax).nth(1usize)
 	}
 }
 
@@ -562,10 +565,20 @@ impl MemberFieldNormal {
 		support::token(&self.syntax, T![+])
 	}
 	pub fn visibility(&self) -> Option<Visibility> {
-		support::token_child(&self.syntax)
+		support::children(&self.syntax).next()
 	}
 	pub fn expr(&self) -> Option<Expr> {
 		support::children(&self.syntax).next()
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Visibility {
+	pub(crate) syntax: SyntaxNode,
+}
+impl Visibility {
+	pub fn colon_token(&self) -> Option<SyntaxToken> {
+		support::token(&self.syntax, T![:])
 	}
 }
 
@@ -581,7 +594,7 @@ impl MemberFieldMethod {
 		support::children(&self.syntax).next()
 	}
 	pub fn visibility(&self) -> Option<Visibility> {
-		support::token_child(&self.syntax)
+		support::children(&self.syntax).next()
 	}
 	pub fn expr(&self) -> Option<Expr> {
 		support::children(&self.syntax).next()
@@ -626,6 +639,37 @@ impl ForSpec {
 		support::token(&self.syntax, T![for])
 	}
 	pub fn bind(&self) -> Option<Destruct> {
+		support::children(&self.syntax).next()
+	}
+	pub fn in_kw_token(&self) -> Option<SyntaxToken> {
+		support::token(&self.syntax, T![in])
+	}
+	pub fn expr(&self) -> Option<Expr> {
+		support::children(&self.syntax).next()
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ForObjSpec {
+	pub(crate) syntax: SyntaxNode,
+}
+impl ForObjSpec {
+	pub fn for_kw_token(&self) -> Option<SyntaxToken> {
+		support::token(&self.syntax, T![for])
+	}
+	pub fn l_brack_token(&self) -> Option<SyntaxToken> {
+		support::token(&self.syntax, T!['['])
+	}
+	pub fn key(&self) -> Option<Name> {
+		support::children(&self.syntax).next()
+	}
+	pub fn r_brack_token(&self) -> Option<SyntaxToken> {
+		support::token(&self.syntax, T![']'])
+	}
+	pub fn visibility(&self) -> Option<Visibility> {
+		support::children(&self.syntax).next()
+	}
+	pub fn value(&self) -> Option<Destruct> {
 		support::children(&self.syntax).next()
 	}
 	pub fn in_kw_token(&self) -> Option<SyntaxToken> {
@@ -832,6 +876,7 @@ pub enum ObjBody {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompSpec {
 	ForSpec(ForSpec),
+	ForObjSpec(ForObjSpec),
 	IfSpec(IfSpec),
 }
 
@@ -929,10 +974,10 @@ pub struct UnaryOperator {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOperatorKind {
-	Plus,
 	Minus,
 	Not,
 	BitNot,
+	Plus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1000,19 +1045,6 @@ pub enum ImportKindKind {
 	ImportstrKw,
 	ImportbinKw,
 	ImportKw,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Visibility {
-	syntax: SyntaxToken,
-	kind: VisibilityKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VisibilityKind {
-	Coloncoloncolon,
-	Coloncolon,
-	Colon,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1628,6 +1660,21 @@ impl AstNode for MemberFieldNormal {
 		&self.syntax
 	}
 }
+impl AstNode for Visibility {
+	fn can_cast(kind: SyntaxKind) -> bool {
+		kind == VISIBILITY
+	}
+	fn cast(syntax: SyntaxNode) -> Option<Self> {
+		if Self::can_cast(syntax.kind()) {
+			Some(Self { syntax })
+		} else {
+			None
+		}
+	}
+	fn syntax(&self) -> &SyntaxNode {
+		&self.syntax
+	}
+}
 impl AstNode for MemberFieldMethod {
 	fn can_cast(kind: SyntaxKind) -> bool {
 		kind == MEMBER_FIELD_METHOD
@@ -1676,6 +1723,21 @@ impl AstNode for FieldNameDynamic {
 impl AstNode for ForSpec {
 	fn can_cast(kind: SyntaxKind) -> bool {
 		kind == FOR_SPEC
+	}
+	fn cast(syntax: SyntaxNode) -> Option<Self> {
+		if Self::can_cast(syntax.kind()) {
+			Some(Self { syntax })
+		} else {
+			None
+		}
+	}
+	fn syntax(&self) -> &SyntaxNode {
+		&self.syntax
+	}
+}
+impl AstNode for ForObjSpec {
+	fn can_cast(kind: SyntaxKind) -> bool {
+		kind == FOR_OBJ_SPEC
 	}
 	fn cast(syntax: SyntaxNode) -> Option<Self> {
 		if Self::can_cast(syntax.kind()) {
@@ -2000,6 +2062,11 @@ impl From<ForSpec> for CompSpec {
 		CompSpec::ForSpec(node)
 	}
 }
+impl From<ForObjSpec> for CompSpec {
+	fn from(node: ForObjSpec) -> CompSpec {
+		CompSpec::ForObjSpec(node)
+	}
+}
 impl From<IfSpec> for CompSpec {
 	fn from(node: IfSpec) -> CompSpec {
 		CompSpec::IfSpec(node)
@@ -2008,13 +2075,14 @@ impl From<IfSpec> for CompSpec {
 impl AstNode for CompSpec {
 	fn can_cast(kind: SyntaxKind) -> bool {
 		match kind {
-			FOR_SPEC | IF_SPEC => true,
+			FOR_SPEC | FOR_OBJ_SPEC | IF_SPEC => true,
 			_ => false,
 		}
 	}
 	fn cast(syntax: SyntaxNode) -> Option<Self> {
 		let res = match syntax.kind() {
 			FOR_SPEC => CompSpec::ForSpec(ForSpec { syntax }),
+			FOR_OBJ_SPEC => CompSpec::ForObjSpec(ForObjSpec { syntax }),
 			IF_SPEC => CompSpec::IfSpec(IfSpec { syntax }),
 			_ => return None,
 		};
@@ -2023,6 +2091,7 @@ impl AstNode for CompSpec {
 	fn syntax(&self) -> &SyntaxNode {
 		match self {
 			CompSpec::ForSpec(it) => &it.syntax,
+			CompSpec::ForObjSpec(it) => &it.syntax,
 			CompSpec::IfSpec(it) => &it.syntax,
 		}
 	}
@@ -2426,16 +2495,16 @@ impl AstToken for UnaryOperator {
 impl UnaryOperatorKind {
 	fn can_cast(kind: SyntaxKind) -> bool {
 		match kind {
-			PLUS | MINUS | NOT | BIT_NOT => true,
+			MINUS | NOT | BIT_NOT | PLUS => true,
 			_ => false,
 		}
 	}
 	pub fn cast(kind: SyntaxKind) -> Option<Self> {
 		let res = match kind {
-			PLUS => Self::Plus,
 			MINUS => Self::Minus,
 			NOT => Self::Not,
 			BIT_NOT => Self::BitNot,
+			PLUS => Self::Plus,
 			_ => return None,
 		};
 		Some(res)
@@ -2638,45 +2707,6 @@ impl ImportKind {
 	}
 }
 impl std::fmt::Display for ImportKind {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		std::fmt::Display::fmt(self.syntax(), f)
-	}
-}
-impl AstToken for Visibility {
-	fn can_cast(kind: SyntaxKind) -> bool {
-		VisibilityKind::can_cast(kind)
-	}
-	fn cast(syntax: SyntaxToken) -> Option<Self> {
-		let kind = VisibilityKind::cast(syntax.kind())?;
-		Some(Visibility { syntax, kind })
-	}
-	fn syntax(&self) -> &SyntaxToken {
-		&self.syntax
-	}
-}
-impl VisibilityKind {
-	fn can_cast(kind: SyntaxKind) -> bool {
-		match kind {
-			COLONCOLONCOLON | COLONCOLON | COLON => true,
-			_ => false,
-		}
-	}
-	pub fn cast(kind: SyntaxKind) -> Option<Self> {
-		let res = match kind {
-			COLONCOLONCOLON => Self::Coloncoloncolon,
-			COLONCOLON => Self::Coloncolon,
-			COLON => Self::Colon,
-			_ => return None,
-		};
-		Some(res)
-	}
-}
-impl Visibility {
-	pub fn kind(&self) -> VisibilityKind {
-		self.kind
-	}
-}
-impl std::fmt::Display for Visibility {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		std::fmt::Display::fmt(self.syntax(), f)
 	}
@@ -3017,6 +3047,11 @@ impl std::fmt::Display for MemberFieldNormal {
 		std::fmt::Display::fmt(self.syntax(), f)
 	}
 }
+impl std::fmt::Display for Visibility {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		std::fmt::Display::fmt(self.syntax(), f)
+	}
+}
 impl std::fmt::Display for MemberFieldMethod {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		std::fmt::Display::fmt(self.syntax(), f)
@@ -3033,6 +3068,11 @@ impl std::fmt::Display for FieldNameDynamic {
 	}
 }
 impl std::fmt::Display for ForSpec {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		std::fmt::Display::fmt(self.syntax(), f)
+	}
+}
+impl std::fmt::Display for ForObjSpec {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		std::fmt::Display::fmt(self.syntax(), f)
 	}

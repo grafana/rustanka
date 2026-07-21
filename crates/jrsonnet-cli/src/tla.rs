@@ -1,12 +1,13 @@
 use clap::Parser;
 use jrsonnet_evaluator::{
-	error::Result, function::TlaArg, gc::WithCapacityExt as _, rustc_hash::FxHashMap, IStr,
+	IStr, error::Result, gc::WithCapacityExt as _, rustc_hash::FxHashMap, tla::TlaArg,
 };
 
 use crate::{ExtFile, ExtStr};
 
 #[derive(Parser)]
 #[clap(next_help_heading = "TOP LEVEL ARGUMENTS")]
+#[allow(clippy::struct_field_names)]
 pub struct TlaOpts {
 	/// Add top level string argument.
 	/// Top level arguments will be passed to function before manifestification stage.
@@ -45,7 +46,7 @@ impl TlaOpts {
 		for ext in &self.tla_code {
 			out.insert(
 				ext.name.as_str().into(),
-				TlaArg::InlineCode(ext.value.as_str().into()),
+				TlaArg::InlineCode(ext.value.clone()),
 			);
 		}
 		for ext in &self.tla_code_file {

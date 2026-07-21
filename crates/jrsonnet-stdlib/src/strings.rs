@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
 
 use jrsonnet_evaluator::{
-	bail,
-	error::{ErrorKind::*, Result},
+	Either, IStr, Val, bail,
+	error::Result,
 	function::builtin,
-	typed::{Either2, Typed, M1},
+	typed::{Codepoint, Either2, FromUntyped, M1},
 	val::{ArrValue, IndexableVal},
-	Either, IStr, Val,
 };
 
 #[builtin]
@@ -20,14 +19,14 @@ pub fn builtin_substr(str: IStr, from: usize, len: usize) -> String {
 }
 
 #[builtin]
-pub fn builtin_char(n: u32) -> Result<char> {
-	Ok(std::char::from_u32(n).ok_or_else(|| InvalidUnicodeCodepointGot(n))?)
+pub fn builtin_char(n: Codepoint) -> Result<char> {
+	n.try_char()
 }
 
 #[builtin]
 pub fn builtin_str_replace(str: String, from: IStr, to: IStr) -> Result<String> {
 	if from.is_empty() {
-		bail!("'from' string must not be zero length");
+		bail!("`from` string must not be zero length");
 	}
 	Ok(str.replace(&from as &str, &to as &str))
 }
@@ -53,7 +52,7 @@ pub fn builtin_is_empty(str: String) -> bool {
 
 #[builtin]
 pub fn builtin_equals_ignore_case(str1: String, str2: String) -> bool {
-	str1.to_ascii_lowercase() == str2.to_ascii_lowercase()
+	str1.eq_ignore_ascii_case(&str2)
 }
 
 #[builtin]
@@ -129,19 +128,16 @@ pub fn builtin_find_substr(pat: IStr, str: IStr) -> ArrValue {
 
 #[builtin]
 pub fn builtin_parse_int(str: IStr) -> Result<f64> {
-	if let Some(raw) = str.strip_prefix('-') {
-		if raw.is_empty() {
-			bail!("integer only consists of a minus")
-		}
+	let (raw, sign) = str.strip_prefix('-').map_or_else(
+		|| (str.strip_prefix('+').unwrap_or(&str), 1.0),
+		|neg| (neg, -1.0),
+	);
 
-		parse_nat::<10>(raw).map(|value| -value)
-	} else {
-		if str.is_empty() {
-			bail!("empty integer")
-		}
-
-		parse_nat::<10>(str.as_str())
+	if raw.is_empty() {
+		bail!("empty integer string: {str:?}")
 	}
+
+	Ok(parse_nat::<10>(raw)? * sign)
 }
 
 #[builtin]
@@ -206,25 +202,23 @@ fn parse_nat<const BASE: u32>(raw: &str) -> Result<f64> {
 #[cfg(feature = "exp-bigint")]
 #[builtin]
 pub fn builtin_bigint(v: Either![f64, IStr]) -> Result<Val> {
-	use jrsonnet_evaluator::runtime_error;
 	use Either2::*;
+	use jrsonnet_evaluator::error;
 	Ok(match v {
-		A(a) => {
-			Val::BigInt(Box::new(a.to_string().parse().map_err(|e| {
-				runtime_error!("number is not convertible to bigint: {e}")
-			})?))
-		}
-		B(b) => Val::BigInt(Box::new(
-			b.as_str()
+		A(a) => Val::BigInt(Box::new(
+			a.to_string()
 				.parse()
-				.map_err(|e| runtime_error!("bad bigint: {e}"))?,
+				.map_err(|e| error!("number is not convertible to bigint: {e}"))?,
+		)),
+		B(b) => Val::BigInt(Box::new(
+			b.as_str().parse().map_err(|e| error!("bad bigint: {e}"))?,
 		)),
 	})
 }
 
 #[builtin]
 pub fn builtin_string_chars(str: IStr) -> ArrValue {
-	ArrValue::chars(str.chars())
+	str.chars().collect()
 }
 
 #[builtin]

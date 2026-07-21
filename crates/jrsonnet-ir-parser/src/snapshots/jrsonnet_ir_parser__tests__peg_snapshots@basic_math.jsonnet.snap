@@ -1,0 +1,155 @@
+---
+source: crates/jrsonnet-ir-parser/src/lib.rs
+assertion_line: 1184
+expression: v
+input_file: crates/jrsonnet-peg-parser/src/tests/basic_math.jsonnet
+---
+Arr(
+    [
+        BinaryOp(
+            BinaryOp {
+                lhs: Trivial(
+                    Num(
+                        2.0,
+                    ),
+                ),
+                op: Add,
+                rhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                        op: Mul,
+                        rhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                    },
+                ),
+            },
+        ),
+        BinaryOp(
+            BinaryOp {
+                lhs: Trivial(
+                    Num(
+                        2.0,
+                    ),
+                ),
+                op: Add,
+                rhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                        op: Mul,
+                        rhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                    },
+                ),
+            },
+        ),
+        BinaryOp(
+            BinaryOp {
+                lhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                        op: Add,
+                        rhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                    },
+                ),
+                op: Add,
+                rhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                        op: Mul,
+                        rhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                    },
+                ),
+            },
+        ),
+        BinaryOp(
+            BinaryOp {
+                lhs: Trivial(
+                    Num(
+                        2.0,
+                    ),
+                ),
+                op: Add,
+                rhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                2.0,
+                            ),
+                        ),
+                        op: Add,
+                        rhs: BinaryOp(
+                            BinaryOp {
+                                lhs: Trivial(
+                                    Num(
+                                        2.0,
+                                    ),
+                                ),
+                                op: Mul,
+                                rhs: Trivial(
+                                    Num(
+                                        2.0,
+                                    ),
+                                ),
+                            },
+                        ),
+                    },
+                ),
+            },
+        ),
+        BinaryOp(
+            BinaryOp {
+                lhs: Trivial(
+                    Num(
+                        2.0,
+                    ),
+                ),
+                op: Add,
+                rhs: BinaryOp(
+                    BinaryOp {
+                        lhs: Trivial(
+                            Num(
+                                3.0,
+                            ),
+                        ),
+                        op: Mul,
+                        rhs: Trivial(
+                            Num(
+                                4.0,
+                            ),
+                        ),
+                    },
+                ),
+            },
+        ),
+    ],
+)

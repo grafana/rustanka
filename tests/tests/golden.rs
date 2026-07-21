@@ -40,8 +40,28 @@ fn run(file: &Path) -> String {
 #[test]
 fn golden() {
 	glob!("../", "golden/*.jsonnet", |path| {
-		let result = run(&path);
+		let result = run(path);
 
-		assert_snapshot!(result)
+		assert_snapshot!(result);
+	});
+}
+
+#[test]
+#[cfg(feature = "exp-null-coaelse")]
+fn golden_null_coalesce() {
+	glob!("../", "golden_null_coalesce/*.jsonnet", |path| {
+		let result = run(path);
+
+		assert_snapshot!(result);
+	});
+}
+
+#[test]
+#[cfg(feature = "exp-destruct")]
+fn golden_destruct() {
+	glob!("../", "golden_destruct/*.jsonnet", |path| {
+		let result = run(path);
+
+		assert_snapshot!(result);
 	});
 }

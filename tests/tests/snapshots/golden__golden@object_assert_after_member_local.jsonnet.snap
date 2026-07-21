@@ -1,0 +1,7 @@
+---
+source: tests/tests/golden.rs
+assertion_line: 45
+expression: result
+input_file: tests/golden/object_assert_after_member_local.jsonnet
+---
+"one"

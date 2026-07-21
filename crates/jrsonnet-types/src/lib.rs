@@ -2,9 +2,9 @@
 
 use std::fmt::Display;
 
-use jrsonnet_gcmodule::Trace;
+use jrsonnet_gcmodule::Acyclic;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Trace)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
 pub enum ValType {
 	Bool,
 	Null,
@@ -40,8 +40,7 @@ impl Display for ValType {
 	}
 }
 
-#[derive(Debug, Clone, PartialEq, Trace)]
-#[trace(skip)]
+#[derive(Debug, Clone, PartialEq, Acyclic)]
 pub enum ComplexValType {
 	Any,
 	Char,
@@ -104,10 +103,8 @@ impl Display for ComplexValType {
 			Self::BoundedNumber(a, b) => write!(
 				f,
 				"BoundedNumber<{}, {}>",
-				a.map(|e| e.to_string())
-					.unwrap_or_else(|| "open".to_owned()),
-				b.map(|e| e.to_string())
-					.unwrap_or_else(|| "open".to_owned())
+				a.map_or_else(|| "open".to_owned(), |e| e.to_string()),
+				b.map_or_else(|| "open".to_owned(), |e| e.to_string())
 			)?,
 			Self::ArrayRef(a) => print_array(a, f)?,
 			Self::Array(a) => print_array(a, f)?,

@@ -1,0 +1,148 @@
+---
+source: crates/jrsonnet-evaluator/src/analyze.rs
+expression: rendered
+input_file: crates/jrsonnet-evaluator/src/analysis_tests/loop_invariant.jsonnet
+---
+--- source ---
+[ i < j for i in std.range(1, 1000) for j in std.range(1, 1000)]
+--- root analysis ---
+object_dependent_depth: none
+local_dependent_depth: 0
+errored: true
+--- diagnostics ---
+   ·                  ╭──── undefined local: std
+1  │ [ i < j for i in std.range(1, 1000) for j in std.range(1, 1000)] 
+   ·                                              ╰──── undefined local: std
+2  │  
+--- lir ---
+ArrComp(
+    LArrComp {
+        value_shape: ClosureShape {
+            captures: [
+                Capture(
+                    CaptureSlot(
+                        0,
+                    ),
+                ),
+            ],
+            n_locals: 0,
+        },
+        value: BinaryOp {
+            lhs: Slot(
+                Capture(
+                    CaptureSlot(
+                        0,
+                    ),
+                ),
+            ),
+            op: Lt,
+            rhs: Slot(
+                Local(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+            ),
+        },
+        compspecs: [
+            For {
+                frame_shape: ClosureShape {
+                    captures: [],
+                    n_locals: 1,
+                },
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                over: Apply {
+                    applicable: Index {
+                        indexable: BadLocal(
+                            "ref",
+                        ),
+                        parts: [
+                            LIndexPart {
+                                span: virtual:<test>:21-26,
+                                value: Trivial(
+                                    Str(
+                                        "range",
+                                    ),
+                                ),
+                            },
+                        ],
+                    },
+                    args: LArgsDesc {
+                        unnamed: [
+                            Trivial(
+                                Num(
+                                    1.0,
+                                ),
+                            ),
+                            Trivial(
+                                Num(
+                                    1000.0,
+                                ),
+                            ),
+                        ],
+                        names: [],
+                        values: [],
+                    } from virtual:<test>:26-35,
+                    tailstrict: false,
+                },
+                loop_invariant: true,
+            },
+            For {
+                frame_shape: ClosureShape {
+                    captures: [
+                        Local(
+                            LocalSlot(
+                                0,
+                            ),
+                        ),
+                    ],
+                    n_locals: 1,
+                },
+                destruct: Full(
+                    LocalSlot(
+                        0,
+                    ),
+                ),
+                over: Apply {
+                    applicable: Index {
+                        indexable: BadLocal(
+                            "ref",
+                        ),
+                        parts: [
+                            LIndexPart {
+                                span: virtual:<test>:49-54,
+                                value: Trivial(
+                                    Str(
+                                        "range",
+                                    ),
+                                ),
+                            },
+                        ],
+                    },
+                    args: LArgsDesc {
+                        unnamed: [
+                            Trivial(
+                                Num(
+                                    1.0,
+                                ),
+                            ),
+                            Trivial(
+                                Num(
+                                    1000.0,
+                                ),
+                            ),
+                        ],
+                        names: [],
+                        values: [],
+                    } from virtual:<test>:54-63,
+                    tailstrict: false,
+                },
+                loop_invariant: true,
+            },
+        ],
+    },
+)

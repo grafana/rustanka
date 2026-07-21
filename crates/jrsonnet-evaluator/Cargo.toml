@@ -1,6 +1,9 @@
 [package]
 name = "jrsonnet-evaluator"
-description = "jsonnet interpreter"
+description = "Rust implementation of the jsonnet language interpreter"
+keywords = ["jsonnet", "interpreter", "config"]
+categories = ["compilers", "template-engine", "config"]
+readme = "README.adoc"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,26 +16,49 @@ build = "build.rs"
 workspace = true
 
 [features]
-default = ["explaining-traces"]
+default = ["explaining-traces", "ir-parser"]
 # Rustc-like trace visualization
-explaining-traces = ["annotate-snippets", "hi-doc"]
+explaining-traces = ["hi-doc"]
 # Allows library authors to throw custom errors
 anyhow-error = ["anyhow"]
+# Use hand-written recursive descent parser
+ir-parser = ["dep:jrsonnet-ir-parser"]
+# Use PEG parser
+peg-parser = ["dep:jrsonnet-peg-parser"]
 
+experimental = [
+  "exp-preserve-order",
+  "exp-destruct",
+  "exp-object-iteration",
+  "exp-bigint",
+  "exp-null-coaelse",
+]
 # Allows to preserve field order in objects
 exp-preserve-order = []
 # Implements field destructuring
-exp-destruct = ["jrsonnet-parser/exp-destruct"]
-# Iteration over objects yields [key, value] elements
-exp-object-iteration = []
+exp-destruct = [
+  "jrsonnet-peg-parser?/exp-destruct",
+  "jrsonnet-ir-parser?/exp-destruct",
+]
+# Iteration over objects using [key]: value syntax
+exp-object-iteration = [
+  "jrsonnet-ir/exp-object-iteration",
+  "jrsonnet-peg-parser?/exp-object-iteration",
+  "jrsonnet-ir-parser?/exp-object-iteration",
+]
 # Bigint type
-exp-bigint = ["num-bigint", "jrsonnet-types/exp-bigint"]
+exp-bigint = ["jrsonnet-types/exp-bigint"]
 # obj?.field, obj?.['field']
-exp-null-coaelse = ["jrsonnet-parser/exp-null-coaelse"]
+exp-null-coaelse = [
+  "jrsonnet-peg-parser?/exp-null-coaelse",
+  "jrsonnet-ir-parser?/exp-null-coaelse",
+]
 
 [dependencies]
 jrsonnet-interner.workspace = true
-jrsonnet-parser.workspace = true
+jrsonnet-ir.workspace = true
+jrsonnet-peg-parser = { workspace = true, optional = true }
+jrsonnet-ir-parser = { workspace = true, optional = true }
 jrsonnet-types.workspace = true
 jrsonnet-macros.workspace = true
 jrsonnet-gcmodule.workspace = true
@@ -49,15 +75,25 @@ strsim.workspace = true
 serde.workspace = true
 
 anyhow = { workspace = true, optional = true }
-# Explaining traces
-annotate-snippets = { workspace = true, optional = true }
 # Better explaining traces
 hi-doc = { workspace = true, optional = true }
 # Bigint
-num-bigint = { workspace = true, features = ["serde"], optional = true }
+num-bigint = { workspace = true, features = ["serde"] }
 
-stacker = "0.1.23"
-educe = { version = "0.6.0", default-features = false, features = ["Clone", "Debug", "Eq", "Hash", "PartialEq"] }
+stacker.workspace = true
+educe = { workspace = true, features = [
+  "Clone",
+  "Debug",
+  "Eq",
+  "Hash",
+  "PartialEq",
+] }
+smallvec.workspace = true
+drop_bomb.workspace = true
 
 [build-dependencies]
-rustversion = "1.0.22"
+rustversion.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+strip-ansi-escapes.workspace = true

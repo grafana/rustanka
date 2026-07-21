@@ -1,14 +1,10 @@
-use std::{any::Any, cell::RefCell, future::Future};
+use std::{any::Any, cell::RefCell, future::Future, rc::Rc};
 
 use jrsonnet_gcmodule::Acyclic;
-use jrsonnet_parser::{
-	AnalyzedExpr, ArgsDesc, AssertStmt, BindSpec, CompSpec, Destruct, Expr, FieldMember, FieldName,
-	ForSpecData, IfSpecData, Member, ObjBody, Param, ParamsDesc, ParserSettings, SliceDesc, Source,
-	SourcePath,
-};
+use jrsonnet_ir::{IStr, Source, SourcePath, visit::Visitor};
 use rustc_hash::FxHashMap;
 
-use crate::{AsPathLike, FileData, ImportResolver, ResolvePathOwned, State};
+use crate::{AsPathLike, FileData, ImportResolver, ResolvePathOwned, Result, State};
 
 pub struct Import {
 	path: ResolvePathOwned,
@@ -16,204 +12,12 @@ pub struct Import {
 }
 
 pub struct FoundImports(Vec<Import>);
-
-// Visits all nodes, trying to find import statements
-#[allow(clippy::too_many_lines)]
-pub fn find_imports(expr: &AnalyzedExpr, out: &mut FoundImports) {
-	fn in_destruct(dest: &Destruct, #[allow(unused_variables)] out: &mut FoundImports) {
-		match dest {
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Array {
-				start,
-				rest: _,
-				end,
-			} => {
-				for dest in start {
-					in_destruct(dest, out);
-				}
-				for dest in end {
-					in_destruct(dest, out);
-				}
-			}
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Object { fields, rest: _ } => {
-				for (_, dest, default) in fields {
-					if let Some(dest) = dest {
-						in_destruct(dest, out);
-					}
-					if let Some(expr) = default {
-						find_imports(expr, out);
-					}
-				}
-			}
-			#[cfg(feature = "exp-destruct")]
-			Destruct::Skip => {}
-			Destruct::Full(_) => {}
-		}
-	}
-	fn in_compspec(specs: &[CompSpec], out: &mut FoundImports) {
-		for spec in specs {
-			match spec {
-				CompSpec::IfSpec(IfSpecData(expr)) => find_imports(expr, out),
-				CompSpec::ForSpec(ForSpecData(destruct, expr)) => {
-					in_destruct(destruct, out);
-					find_imports(expr, out);
-				}
-			}
-		}
-	}
-	fn in_params(params: &ParamsDesc, out: &mut FoundImports) {
-		for Param(dest, default) in &*params.0 {
-			in_destruct(dest, out);
-			if let Some(expr) = default {
-				find_imports(expr, out);
-			}
-		}
-	}
-	fn in_bind(specs: &[BindSpec], out: &mut FoundImports) {
-		for spec in specs {
-			match spec {
-				BindSpec::Field {
-					into: dest,
-					value: expr,
-				} => {
-					in_destruct(dest, out);
-					find_imports(expr, out);
-				}
-				BindSpec::Function {
-					name: _,
-					params,
-					value: expr,
-				} => {
-					in_params(params, out);
-					find_imports(expr, out);
-				}
-			}
-		}
-	}
-	fn in_args(ArgsDesc { unnamed, named }: &ArgsDesc, out: &mut FoundImports) {
-		for expr in unnamed {
-			find_imports(expr, out);
-		}
-		for (_, expr) in named {
-			find_imports(expr, out);
-		}
-	}
-	fn in_obj(obj: &ObjBody, out: &mut FoundImports) {
-		match obj {
-			ObjBody::MemberList(v) => {
-				for member in v {
-					match member {
-						Member::Field(FieldMember {
-							name,
-							params,
-							value,
-							..
-						}) => {
-							match name {
-								FieldName::Fixed(_) => {}
-								FieldName::Dyn(expr) => find_imports(expr, out),
-							}
-							if let Some(params) = params {
-								in_params(params, out);
-							}
-							find_imports(value, out);
-						}
-						Member::BindStmt(_) => todo!(),
-						Member::AssertStmt(AssertStmt(expr, expr2)) => {
-							find_imports(expr, out);
-							if let Some(expr) = expr2 {
-								find_imports(expr, out);
-							}
-						}
-					}
-				}
-			}
-			ObjBody::ObjComp(_) => todo!(),
-		}
-	}
-	match &*expr.expr() {
-		Expr::Import(v) | Expr::ImportStr(v) | Expr::ImportBin(v) => {
-			if let Expr::Str(s) = &*v.expr() {
-				out.0.push(Import {
-					path: ResolvePathOwned::Str(s.to_string()),
-					expression: matches!(&*expr.expr(), Expr::Import(_)),
-				});
-			}
-			// Non-string import will fail in runtime
-		}
-
-		Expr::Literal(_) | Expr::Str(_) | Expr::Num(_) | Expr::Var(_) => {}
-
-		Expr::Arr(arr) => {
-			for expr in arr {
-				find_imports(expr, out);
-			}
-		}
-		Expr::ArrComp(expr, specs) => {
-			find_imports(expr, out);
-			in_compspec(specs, out);
-		}
-		Expr::Obj(obj) => in_obj(obj, out),
-		Expr::ObjExtend(expr, obj) => {
-			find_imports(expr, out);
-			in_obj(obj, out);
-		}
-		Expr::BinaryOp(a, _, b) => {
-			find_imports(a, out);
-			find_imports(b, out);
-		}
-		Expr::AssertExpr(AssertStmt(expr, expr2), then) => {
-			find_imports(expr, out);
-			if let Some(expr) = expr2 {
-				find_imports(expr, out);
-			}
-			find_imports(then, out);
-		}
-		Expr::LocalExpr(specs, expr) => {
-			in_bind(specs, out);
-			find_imports(expr, out);
-		}
-		Expr::Apply(expr, args, _) => {
-			find_imports(expr, out);
-			in_args(args, out);
-		}
-		Expr::Index { indexable, parts } => {
-			find_imports(indexable, out);
-			for part in parts {
-				find_imports(&part.value, out);
-			}
-		}
-		Expr::Function(params, expr) => {
-			in_params(params, out);
-			find_imports(expr, out);
-		}
-		Expr::IfElse {
-			cond: IfSpecData(expr),
-			cond_then,
-			cond_else,
-		} => {
-			find_imports(expr, out);
-			find_imports(cond_then, out);
-			if let Some(expr) = cond_else {
-				find_imports(expr, out);
-			}
-		}
-		Expr::Slice(expr, SliceDesc { start, end, step }) => {
-			find_imports(expr, out);
-			if let Some(expr) = start {
-				find_imports(expr, out);
-			}
-			if let Some(expr) = end {
-				find_imports(expr, out);
-			}
-			if let Some(expr) = step {
-				find_imports(expr, out);
-			}
-		}
-		Expr::Parened(expr) | Expr::UnaryOp(_, expr) | Expr::ErrorStmt(expr) => {
-			find_imports(expr, out);
-		}
+impl Visitor for FoundImports {
+	fn visit_import(&mut self, expression: bool, value: IStr) {
+		self.0.push(Import {
+			path: ResolvePathOwned::Str(value.to_string()),
+			expression,
+		});
 	}
 }
 
@@ -248,9 +52,14 @@ pub trait AsyncImportResolver {
 	) -> impl Future<Output = Result<Vec<u8>, Self::Error>>;
 }
 
-#[derive(Acyclic)]
-struct ResolvedImportResolver {
+#[derive(Acyclic, Default)]
+pub struct ResolvedImportResolver {
 	resolved: RefCell<FxHashMap<(SourcePath, ResolvePathOwned), (SourcePath, bool)>>,
+}
+impl ResolvedImportResolver {
+	pub fn new() -> Self {
+		Self::default()
+	}
 }
 impl ImportResolver for ResolvedImportResolver {
 	fn load_file_contents(&self, _resolved: &SourcePath) -> crate::Result<Vec<u8>> {
@@ -279,7 +88,12 @@ enum Job {
 }
 
 #[allow(clippy::future_not_send)]
-pub async fn async_import<H>(s: State, handler: H, path: &dyn AsPathLike) -> Result<(), H::Error>
+pub async fn async_import<H>(
+	s: State,
+	handler: H,
+	from: &SourcePath,
+	path: &dyn AsPathLike,
+) -> Result<SourcePath, H::Error>
 where
 	H: AsyncImportResolver,
 {
@@ -287,10 +101,9 @@ where
 		.downcast_ref::<ResolvedImportResolver>()
 		.expect("for async imports, import_resolver should be set to ResolvedImportResolver");
 
-	let mut resolved_map = resolved.resolved.borrow_mut();
-
+	let entry = handler.resolve_from(from, path).await?;
 	let mut queue = vec![Job::LoadFile {
-		path: handler.resolve_from_default(path).await?,
+		path: entry.clone(),
 		parse: true,
 	}];
 	while let Some(job) = queue.pop() {
@@ -307,45 +120,51 @@ where
 				}
 			}
 			Job::ParseFile(path) => {
-				if let Some(file) = s.0.file_cache.borrow_mut().get_mut(&path) {
-					if file.parsed.is_none() {
-						let Some(code) = file.get_string() else {
-							continue;
-						};
-						let source = Source::new(path.clone(), code.clone());
-						// If failed - then skip import
-						file.parsed =
-							jrsonnet_parser::parse(&code, &ParserSettings { source }).ok();
-						if let Some(parsed) = &file.parsed {
-							let mut imports = FoundImports(vec![]);
-							find_imports(parsed, &mut imports);
-							for import in imports.0 {
-								queue.push(Job::ResolveImport {
-									from: path.clone(),
-									import,
-								});
-							}
+				if let Some(file) = s.0.file_cache.borrow_mut().get_mut(&path)
+					&& file.parsed.is_none()
+				{
+					let Some(code) = file.get_string() else {
+						continue;
+					};
+					let source = Source::new(path.clone(), code.clone());
+					// If failed - then skip import
+					file.parsed = crate::parse_jsonnet(&code, source).map(Rc::new).ok();
+					if let Some(parsed) = &file.parsed {
+						let mut imports = FoundImports(vec![]);
+						imports.visit_expr(parsed);
+						for import in imports.0 {
+							queue.push(Job::ResolveImport {
+								from: path.clone(),
+								import,
+							});
 						}
 					}
 				}
 			}
 			Job::ResolveImport { from, import } => {
-				if let Some((resolved, expression)) =
-					resolved_map.get_mut(&(from.clone(), import.path.clone()))
 				{
-					if import.expression && !*expression {
-						*expression = true;
-						queue.push(Job::ParseFile(resolved.clone()));
+					let mut resolved_map = resolved.resolved.borrow_mut();
+					if let Some((resolved, expression)) =
+						resolved_map.get_mut(&(from.clone(), import.path.clone()))
+					{
+						if import.expression && !*expression {
+							*expression = true;
+							queue.push(Job::ParseFile(resolved.clone()));
+						}
+						continue;
 					}
-					continue;
 				}
-				let resolved = handler.resolve_from(&from, &import.path).await?;
+				let resolved_path = handler.resolve_from(&from, &import.path).await?;
+				resolved.resolved.borrow_mut().insert(
+					(from.clone(), import.path.clone()),
+					(resolved_path.clone(), import.expression),
+				);
 				queue.push(Job::LoadFile {
-					path: resolved,
+					path: resolved_path,
 					parse: import.expression,
 				});
 			}
 		}
 	}
-	Ok(())
+	Ok(entry)
 }

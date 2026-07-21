@@ -1,6 +1,8 @@
 [package]
 name = "jrsonnet-interner"
-description = "Jrsonnet string interning"
+description = "String interner used by jrsonnet"
+keywords = ["jsonnet", "interner", "string"]
+categories = ["data-structures", "memory-management"]
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

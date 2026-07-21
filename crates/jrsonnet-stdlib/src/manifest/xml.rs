@@ -1,9 +1,8 @@
 use jrsonnet_evaluator::{
-	bail, in_description_frame,
+	Either, ObjValue, Result, ResultExt, Val, bail, in_description_frame,
 	manifest::{ManifestFormat, ToStringFormat},
-	typed::{ComplexValType, Either2, Typed, ValType},
+	typed::{ComplexValType, Either2, FromUntyped, Typed, ValType},
 	val::ArrValue,
-	Either, ObjValue, Result, ResultExt, Val,
 };
 
 pub struct XmlJsonmlFormat {
@@ -32,11 +31,8 @@ enum JSONMLValue {
 }
 impl Typed for JSONMLValue {
 	const TYPE: &'static ComplexValType = &ComplexValType::Simple(ValType::Arr);
-
-	fn into_untyped(_typed: Self) -> Result<Val> {
-		unreachable!("not used, reserved for parseXML?")
-	}
-
+}
+impl FromUntyped for JSONMLValue {
 	fn from_untyped(untyped: Val) -> Result<Self> {
 		let val = <Either![ArrValue, String]>::from_untyped(untyped)
 			.description("parsing JSONML value (an array or string)")?;
@@ -46,17 +42,17 @@ impl Typed for JSONMLValue {
 		};
 		if arr.is_empty() {
 			bail!("JSONML value should have tag (array length should be >=1)");
-		};
+		}
 		let tag = String::from_untyped(
-			arr.get(0)
+			arr.get32(0)
 				.description("getting JSONML tag")?
 				.expect("length checked"),
 		)
 		.description("parsing JSONML tag")?;
 
-		let (has_attrs, attrs) = if arr.len() >= 2 {
+		let (has_attrs, attrs) = if arr.len32() >= 2 {
 			let maybe_attrs = arr
-				.get(1)
+				.get32(1)
 				.with_description(|| "getting JSONML attrs")?
 				.expect("length checked");
 			if let Val::Obj(attrs) = maybe_attrs {
@@ -72,21 +68,16 @@ impl Typed for JSONMLValue {
 			attrs,
 			children: in_description_frame(
 				|| "parsing children".to_owned(),
-				|| {
-					Typed::from_untyped(Val::Arr(arr.slice(
-						Some(if has_attrs { 2 } else { 1 }),
-						None,
-						None,
-					)))
-				},
+				|| FromUntyped::from_untyped(Val::Arr(arr.slice(if has_attrs { 2 } else { 1 }..))),
 			)?,
 		})
 	}
 }
 
 impl ManifestFormat for XmlJsonmlFormat {
-	fn manifest_buf(&self, val: Val, buf: &mut String) -> Result<()> {
-		let val = JSONMLValue::from_untyped(val).with_description(|| "parsing JSONML value")?;
+	fn manifest_buf(&self, val: &Val, buf: &mut String) -> Result<()> {
+		let val =
+			JSONMLValue::from_untyped(val.clone()).with_description(|| "parsing JSONML value")?;
 		manifest_jsonml(&val, buf, self)
 	}
 }
@@ -115,7 +106,7 @@ fn manifest_jsonml(v: &JSONMLValue, buf: &mut String, opts: &XmlJsonmlFormat) ->
 				let value = if let Val::Str(s) = value {
 					s.to_string()
 				} else {
-					ToStringFormat.manifest(value)?
+					ToStringFormat.manifest(&value)?
 				};
 				escape_string_xml_buf(&value, buf);
 				buf.push('"');
