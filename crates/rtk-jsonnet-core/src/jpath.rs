@@ -1,30 +1,34 @@
+use std::borrow::Cow;
 use std::env;
 use std::io;
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error("{0} is not a valid path")]
-    InvalidPath(PathBuf),
-    #[error("could not find project root directory (no tkrc.yaml or jsonnetfile.json found in the parent directories of {path})")]
-    CouldNotFindRoot { path: PathBuf },
-    #[error("could not find environment base directory (no {entrypoint} found between {path} and {root_directory})")]
-    CouldNotFindBaseDirectory {
-        path: PathBuf,
-        root_directory: PathBuf,
-        entrypoint: PathBuf,
-    },
+	#[error(transparent)]
+	Io(#[from] io::Error),
+	#[error("{0} is not a valid path")]
+	InvalidPath(PathBuf),
+	#[error(
+		"could not find project root directory (no tkrc.yaml or jsonnetfile.json found in the parent directories of {path})"
+	)]
+	CouldNotFindRoot { path: PathBuf },
+	#[error(
+		"could not find environment base directory (no {entrypoint} found between {path} and {root_directory})"
+	)]
+	CouldNotFindBaseDirectory {
+		path: PathBuf,
+		root_directory: PathBuf,
+		entrypoint: PathBuf,
+	},
 }
 
 #[derive(Debug)]
 pub struct JPath {
-    /// The project root directory (contains jsonnetfile.json or tkrc.yaml)
-    pub root_directory: PathBuf,
+	/// The project root directory (contains jsonnetfile.json or tkrc.yaml)
+	pub root_directory: PathBuf,
 	/// The environment base directory (contains the entrypoint)
 	pub base_directory: PathBuf,
 	/// The entrypoint file path (absolute)
@@ -34,175 +38,193 @@ pub struct JPath {
 }
 
 impl JPath {
-    /// Default entrypoint filename for environments
-    const DEFAULT_ENTRYPOINT: &str = "main.jsonnet";
+	/// Default entrypoint filename for environments
+	pub const DEFAULT_ENTRYPOINT: &str = "main.jsonnet";
 
-    /// Files that indicate a project root (in order of precedence)
-    const ROOT_MARKERS: &[&str] = &["tkrc.yaml", "tkrc.yml", "jsonnetfile.json"];
+	/// Files that indicate a project root (in order of precedence)
+	const ROOT_MARKERS: &[&str] = &["tkrc.yaml", "tkrc.yml", "jsonnetfile.json"];
 
-    /// Resolve jpath for the given path (file or directory)
-    ///
-    /// This finds:
-    /// - Project root directory: directory containing tkrc.yaml or jsonnetfile.json
-    /// - Environment base directory: directory containing main.jsonnet
-    /// - Import paths: [base, lib, base/vendor, root/vendor]
-    pub fn resolve<P>(path: P) -> Result<JPath, Error>
-    where
-        P: AsRef<Path>,
-    {
-        let abs_path = JPath::make_absolute(Cow::Borrowed(path.as_ref()))?;
+	/// Resolve jpath for the given path (file or directory)
+	///
+	/// This finds:
+	/// - Project root directory: directory containing tkrc.yaml or jsonnetfile.json
+	/// - Environment base directory: directory containing main.jsonnet
+	/// - Import paths: [base, lib, base/vendor, root/vendor]
+	pub fn resolve<P>(path: P) -> Result<JPath, Error>
+	where
+		P: AsRef<Path>,
+	{
+		let abs_path = JPath::make_absolute(Cow::Borrowed(path.as_ref()))?;
 
-        let root_directory = JPath::find_root_directory(&abs_path)?;
-        let base_directory = JPath::find_base_directory(&abs_path, &root_directory)?;
+		let root_directory = JPath::find_root_directory(&abs_path)?;
+		let base_directory = JPath::find_base_directory(&abs_path, &root_directory)?;
 
-        let entrypoint = JPath::get_entrypoint(&abs_path)?;
-        let entrypoint = base_directory.join(entrypoint);
+		let entrypoint = JPath::get_entrypoint(&abs_path)?;
+		let entrypoint = base_directory.join(entrypoint);
 
-        let import_paths = vec![
-            base_directory.clone(),
-            root_directory.join("lib"),
-            base_directory.join("vendor"),
-            root_directory.join("vendor"),
-        ];
-        
-        Ok(JPath { root_directory, base_directory, entrypoint, import_paths })
-    }
+		let import_paths = vec![
+			base_directory.clone(),
+			root_directory.join("lib"),
+			base_directory.join("vendor"),
+			root_directory.join("vendor"),
+		];
 
-    /// Find the environment base directory by looking for the entrypoint.
-    fn find_base_directory(path: &Path, root_directory: &Path) -> Result<PathBuf, Error> {
-        let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?.into_owned();
-        let entrypoint = JPath::get_entrypoint(&abs_path)?;
+		Ok(JPath {
+			root_directory,
+			base_directory,
+			entrypoint,
+			import_paths,
+		})
+	}
 
-        if let Some(base_directory) = JPath::find_nearest_directory_with_file_bounded(abs_path.clone(), &root_directory, &path) {
-            Ok(base_directory)
-        } else {
-            Err(Error::CouldNotFindBaseDirectory {
-                entrypoint: entrypoint.to_owned(),
-                path: abs_path,
-                root_directory: root_directory.to_owned(),
-            })
-        }
-    }
+	/// Find the environment base directory by looking for the entrypoint.
+	fn find_base_directory(path: &Path, root_directory: &Path) -> Result<PathBuf, Error> {
+		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?.into_owned();
+		let entrypoint = JPath::get_entrypoint(path)?;
 
-    /// Get a "close" directory- this is defined as:
-    /// - If `path` is a directory, return that as a pathbuf.
-    /// - If `path` is a file, return the parent directory.
-    /// - If `path` is a directory that hasn't been created yet, return that
-    ///   directory.
-    /// - If `path` is a file that hasn't been created yet, return the parent
-    ///   directory of that file.
-    fn find_close_directory(path: Cow<'_, Path>) -> Result<Cow<'_, Path>, Error> {
-        let abs_path = JPath::make_absolute(path)?;
+		if let Some(base_directory) = JPath::find_nearest_directory_with_file_bounded(
+			abs_path.clone(),
+			root_directory,
+			entrypoint,
+		) {
+			Ok(base_directory)
+		} else {
+			Err(Error::CouldNotFindBaseDirectory {
+				entrypoint: entrypoint.to_owned(),
+				path: abs_path,
+				root_directory: root_directory.to_owned(),
+			})
+		}
+	}
 
-        // If the `path` doesn't exist yet, guess whether it's a directory based
-        // on the existince of an extension.
-        if !abs_path.exists() {
-            if abs_path.extension().is_some() {
-                if let Some(parent) = abs_path.parent() {
-                    return Ok(match abs_path {
-                        Cow::Borrowed(_) => Cow::Owned(parent.to_owned()),
-                        Cow::Owned(mut owned) => {
-                            owned.pop();
-                            Cow::Owned(owned)
-                        },
-                    });
-                } else {
-                    return Err(Error::InvalidPath(abs_path.into_owned()));
-                }
-            }
-            return Ok(abs_path);
-        }
+	/// Get a "close" directory- this is defined as:
+	/// - If `path` is a directory, return that as a pathbuf.
+	/// - If `path` is a file, return the parent directory.
+	/// - If `path` is a directory that hasn't been created yet, return that
+	///   directory.
+	/// - If `path` is a file that hasn't been created yet, return the parent
+	///   directory of that file.
+	fn find_close_directory(path: Cow<'_, Path>) -> Result<Cow<'_, Path>, Error> {
+		let abs_path = JPath::make_absolute(path)?;
 
-        if abs_path.is_dir() {
-            Ok(abs_path)
-        } else {
-            if let Some(parent) = abs_path.parent() {
-                return Ok(match abs_path {
-                    Cow::Borrowed(_) => Cow::Owned(parent.to_owned()),
-                    Cow::Owned(mut owned) => {
-                        owned.pop();
-                        Cow::Owned(owned)
-                    },
-                });
-            } else {
-                return Err(Error::InvalidPath(abs_path.into_owned()));
-            }
-        }
-    }
+		// If the `path` doesn't exist yet, guess whether it's a directory based
+		// on the existince of an extension.
+		if !abs_path.exists() {
+			if abs_path.extension().is_some() {
+				if let Some(parent) = abs_path.parent() {
+					return Ok(match abs_path {
+						Cow::Borrowed(_) => Cow::Owned(parent.to_owned()),
+						Cow::Owned(mut owned) => {
+							owned.pop();
+							Cow::Owned(owned)
+						}
+					});
+				} else {
+					return Err(Error::InvalidPath(abs_path.into_owned()));
+				}
+			}
+			return Ok(abs_path);
+		}
 
-    /// Find the project root directory by looking for marker files.
-    fn find_root_directory(path: &Path) -> Result<PathBuf, Error> {
-        let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?;
+		if abs_path.is_dir() {
+			Ok(abs_path)
+		} else {
+			if let Some(parent) = abs_path.parent() {
+				return Ok(match abs_path {
+					Cow::Borrowed(_) => Cow::Owned(parent.to_owned()),
+					Cow::Owned(mut owned) => {
+						owned.pop();
+						Cow::Owned(owned)
+					}
+				});
+			} else {
+				return Err(Error::InvalidPath(abs_path.into_owned()));
+			}
+		}
+	}
 
-        for marker in JPath::ROOT_MARKERS {
-            // abs_path is cloned here in order to be used as a buffer while
-            // searching for the nearest directory.
-            let abs_path = abs_path.clone().into_owned();
-            if let Some(root_directory) = JPath::find_nearest_directory_with_file(abs_path, marker.as_ref()) {
-                return Ok(root_directory);
-            }
-        }
+	/// Find the project root directory by looking for marker files.
+	fn find_root_directory(path: &Path) -> Result<PathBuf, Error> {
+		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?;
 
-        Err(Error::CouldNotFindRoot { path: abs_path.into_owned() })
-    }
+		for marker in JPath::ROOT_MARKERS {
+			// abs_path is cloned here in order to be used as a buffer while
+			// searching for the nearest directory.
+			let abs_path = abs_path.clone().into_owned();
+			if let Some(root_directory) =
+				JPath::find_nearest_directory_with_file(abs_path, marker.as_ref())
+			{
+				return Ok(root_directory);
+			}
+		}
 
-    /// Find the nearest parent directory containing the specified file.
-    fn find_nearest_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
-        let mut current = path;
-        loop {
-            current.push(file);
-            if current.exists() {
-                current.pop();
-                return Some(current);
-            }
-            if !current.pop() {
-                return None;
-            }
-        }
-    }
+		Err(Error::CouldNotFindRoot {
+			path: abs_path.into_owned(),
+		})
+	}
 
-    /// Find the nearest parent directory containing the specified file, bounded
-    /// by a root directory.
-    fn find_nearest_directory_with_file_bounded(
-        path: PathBuf,
-        root: &Path,
-        file: &Path,
-    ) -> Option<PathBuf> {
-        let mut current = path;
-        loop {
-            current.push(file);
-            if current.exists() {
-                current.pop();
-                return Some(current);
-            }
-            if current == root || !current.pop() {
-                return None;
-            }
-        }
-    }
+	/// Find the nearest parent directory containing the specified file.
+	fn find_nearest_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
+		let mut current = path;
+		loop {
+			current.push(file);
+			if current.exists() {
+				current.pop();
+				return Some(current);
+			}
+			// Pop the file we just pushed, then ascend to the parent.
+			current.pop();
+			if !current.pop() {
+				return None;
+			}
+		}
+	}
 
-    /// Get the entrypoint from `path`.
-    fn get_entrypoint(path: &Path) -> Result<&Path, Error> {
-        if path.is_dir() {
-            return Ok(JPath::DEFAULT_ENTRYPOINT.as_ref());
-        }
+	/// Find the nearest parent directory containing the specified file, bounded
+	/// by a root directory.
+	fn find_nearest_directory_with_file_bounded(
+		path: PathBuf,
+		root: &Path,
+		file: &Path,
+	) -> Option<PathBuf> {
+		let mut current = path;
+		loop {
+			current.push(file);
+			if current.exists() {
+				current.pop();
+				return Some(current);
+			}
+			// Pop the file we just pushed, then ascend to the parent -
+			// unless the root (checked above, inclusively) stopped the walk.
+			current.pop();
+			if current == root || !current.pop() {
+				return None;
+			}
+		}
+	}
 
-        if let Some(entrypoint) = path.file_name() {
-            Ok(entrypoint.as_ref())
-        } else {
-            Err(Error::InvalidPath(path.to_owned()))
-        }
-    }
+	/// Get the entrypoint from `path`.
+	fn get_entrypoint(path: &Path) -> Result<&Path, Error> {
+		if path.is_dir() {
+			return Ok(JPath::DEFAULT_ENTRYPOINT.as_ref());
+		}
 
-    /// Takes in `path` and makes it absolute.
-    fn make_absolute(path: Cow<'_, Path>) -> Result<Cow<'_, Path>, Error> {
-        let path_ref = path.as_ref();
-        if path_ref.is_absolute() {
-            Ok(path)
-        } else {
-            Ok(Cow::Owned(env::current_dir()?.join(path_ref)))
-        }
-    }
+		if let Some(entrypoint) = path.file_name() {
+			Ok(entrypoint.as_ref())
+		} else {
+			Err(Error::InvalidPath(path.to_owned()))
+		}
+	}
+
+	/// Takes in `path` and makes it absolute.
+	fn make_absolute(path: Cow<'_, Path>) -> Result<Cow<'_, Path>, Error> {
+		let path_ref = path.as_ref();
+		if path_ref.is_absolute() {
+			Ok(path)
+		} else {
+			Ok(Cow::Owned(env::current_dir()?.join(path_ref)))
+		}
+	}
 }
 
 #[cfg(test)]
@@ -274,10 +296,12 @@ mod tests {
 
 		let result = JPath::resolve(temp.path().to_str().unwrap());
 		assert!(result.is_err());
-		assert!(result
-			.unwrap_err()
-			.to_string()
-			.contains("could not find project root"));
+		assert!(
+			result
+				.unwrap_err()
+				.to_string()
+				.contains("could not find project root")
+		);
 	}
 
 	#[test]
@@ -367,9 +391,11 @@ mod tests {
 
 		let jpath = JPath::resolve(root.join("env").to_str().unwrap());
 		assert!(jpath.is_err());
-		assert!(jpath
-			.unwrap_err()
-			.to_string()
-			.contains("could not find environment base"));
+		assert!(
+			jpath
+				.unwrap_err()
+				.to_string()
+				.contains("could not find environment base")
+		);
 	}
 }
