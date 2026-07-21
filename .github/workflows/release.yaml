@@ -16,14 +16,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
             artifact_name: rtk
             asset_name: rtk-linux-amd64
             platform: linux-amd64
             docker_platform: linux/amd64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-22.04-arm
             artifact_name: rtk
             asset_name: rtk-linux-arm64
             platform: linux-arm64
@@ -62,18 +62,43 @@ jobs:
           target: ${{ matrix.target }}
           cache: false
 
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # Each Linux job builds natively for its own arch; musl-gcc is only needed
+      # for the C dependencies (ring, mimalloc-sys), not for linking.
+      - name: Install musl toolchain
+        if: contains(matrix.target, 'musl')
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y musl-tools
 
       - name: Build binaries
         run: |
           cargo build --release --package rtk --target ${{ matrix.target }}
           cargo build --release --package jrsonnet --target ${{ matrix.target }}
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          # Point cc-rs at musl-gcc so C deps compile against musl instead of
+          # the runner's glibc headers. Linking needs no override: rustc links
+          # musl targets self-contained with the rust-std-bundled musl libc.
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          # Ubuntu's musl-gcc spec replaces the include path with musl-only
+          # headers, hiding the Linux kernel headers that mimalloc needs
+          # (linux/mman.h). -idirafter appends them at the END of the search
+          # order, so musl's own headers still shadow any glibc ones.
+          CFLAGS_x86_64_unknown_linux_musl: -idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu
+          CFLAGS_aarch64_unknown_linux_musl: -idirafter /usr/include -idirafter /usr/include/aarch64-linux-gnu
+
+      - name: Verify static linking
+        if: contains(matrix.target, 'musl')
+        run: |
+          for bin in rtk jrsonnet; do
+            p=target/${{ matrix.target }}/release/$bin
+            if readelf -d "$p" | grep -q NEEDED; then
+              echo "$bin is dynamically linked:"
+              readelf -d "$p"
+              exit 1
+            fi
+            "$p" --version
+          done
 
       - name: Upload rtk artifact
         uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4
