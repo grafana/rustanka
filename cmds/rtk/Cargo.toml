@@ -36,8 +36,8 @@ jrsonnet-gcmodule.workspace = true
 
 # Kubernetes client for diff command
 k8s = { path = "../../crates/k8s" }
-kube = { version = "3.0.0", features = ["runtime", "derive", "client"] }
-k8s-openapi = { version = "0.27.0", features = ["v1_31"] }
+kube.workspace = true
+k8s-openapi.workspace = true
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 bon = "3.8.2"
 rtk-diff = { path = "../../crates/diff" }

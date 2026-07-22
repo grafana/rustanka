@@ -1,0 +1,991 @@
+use jrsonnet_evaluator::error::ErrorKind;
+use jrsonnet_evaluator::typed::ValType;
+use jrsonnet_evaluator::val::ArrValue;
+use jrsonnet_evaluator::{Error, IBytes, IStr, ObjValue, ObjValueBuilder, Val};
+use serde::de::value::StrDeserializer;
+use serde::de::{
+	self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
+};
+use serde::{Deserialize, Deserializer, Serialize, forward_to_deserialize_any, ser};
+
+use crate::{Evaluation, Evaluator, Value};
+
+impl<'de> Deserialize<'de> for Value {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		Val::deserialize(deserializer).map(Value)
+	}
+}
+
+impl<'de> Deserializer<'de> for Value {
+	type Error = Error;
+
+	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.0 {
+			Val::Bool(boolean) => visitor.visit_bool(boolean),
+			Val::Null => visitor.visit_unit(),
+			Val::Str(string) => visitor.visit_str(&string.into_flat()),
+			Val::Num(number) => {
+				let number = number.get();
+				// Mirrors `Val`'s `Serialize` implementation: integral numbers
+				// deserialize as integers so integer-typed fields accept them.
+				#[expect(clippy::cast_possible_truncation)]
+				if number.fract() == 0.0 {
+					visitor.visit_i64(number as i64)
+				} else {
+					visitor.visit_f64(number)
+				}
+			}
+			Val::Arr(array) => visitor.visit_seq(SeqDeserializer::new(array)),
+			Val::Obj(object) => visitor.visit_map(MapDeserializer::new(object)),
+			Val::Func(_) => Err(de::Error::custom("tried to manifest function")),
+		}
+	}
+
+	fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.0 {
+			Val::Null => visitor.visit_none(),
+			_ => visitor.visit_some(self),
+		}
+	}
+
+	fn deserialize_newtype_struct<V>(
+		self,
+		_: &'static str,
+		visitor: V,
+	) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		visitor.visit_newtype_struct(self)
+	}
+
+	fn deserialize_enum<V>(
+		self,
+		_: &'static str,
+		_: &'static [&'static str],
+		visitor: V,
+	) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.0 {
+			Val::Str(string) => visitor.visit_enum(EnumDeserializer {
+				variant: string.into_flat(),
+				value: None,
+			}),
+			Val::Obj(object) => {
+				let Ok([variant]) = <[IStr; 1]>::try_from(object.fields()) else {
+					return Err(de::Error::custom("expected an object with a single field"));
+				};
+				let value = object
+					.get(variant.clone())?
+					.expect("iterating over fields; the field exists");
+				visitor.visit_enum(EnumDeserializer {
+					variant,
+					value: Some(Value(value)),
+				})
+			}
+			_ => Err(Error::new(ErrorKind::TypeMismatch(
+				"enum",
+				vec![ValType::Str, ValType::Obj],
+				self.0.value_type(),
+			))),
+		}
+	}
+
+	/// Skips the value without evaluating anything beneath it, unlike
+	/// forwarding to [`Deserializer::deserialize_any`], which would force
+	/// every thunk the value transitively contains.
+	fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		visitor.visit_unit()
+	}
+
+	forward_to_deserialize_any! {
+		bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+		bytes byte_buf unit unit_struct seq tuple tuple_struct map struct
+		identifier
+	}
+}
+
+struct SeqDeserializer {
+	array: ArrValue,
+	index: usize,
+}
+
+impl SeqDeserializer {
+	fn new(array: ArrValue) -> Self {
+		SeqDeserializer { array, index: 0 }
+	}
+}
+
+impl<'de> SeqAccess<'de> for SeqDeserializer {
+	type Error = Error;
+
+	fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+	where
+		T: DeserializeSeed<'de>,
+	{
+		let Some(element) = self.array.get(self.index)? else {
+			return Ok(None);
+		};
+		self.index += 1;
+		seed.deserialize(Value(element)).map(Some)
+	}
+
+	fn size_hint(&self) -> Option<usize> {
+		Some(self.array.len().saturating_sub(self.index))
+	}
+}
+
+struct MapDeserializer {
+	object: ObjValue,
+	fields: std::vec::IntoIter<IStr>,
+	field: Option<IStr>,
+}
+
+impl MapDeserializer {
+	fn new(object: ObjValue) -> Self {
+		let fields = object.fields().into_iter();
+		MapDeserializer {
+			object,
+			fields,
+			field: None,
+		}
+	}
+}
+
+impl<'de> MapAccess<'de> for MapDeserializer {
+	type Error = Error;
+
+	fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+	where
+		K: DeserializeSeed<'de>,
+	{
+		let Some(field) = self.fields.next() else {
+			return Ok(None);
+		};
+		let key = seed.deserialize(StrDeserializer::<Error>::new(&field))?;
+		self.field = Some(field);
+		Ok(Some(key))
+	}
+
+	fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+	where
+		V: DeserializeSeed<'de>,
+	{
+		let field = self
+			.field
+			.take()
+			.expect("next_value_seed is only called after next_key_seed");
+		let value = self
+			.object
+			.get(field)?
+			.expect("iterating over fields; the field exists");
+		seed.deserialize(Value(value))
+	}
+
+	fn size_hint(&self) -> Option<usize> {
+		Some(self.fields.len())
+	}
+}
+
+struct EnumDeserializer {
+	variant: IStr,
+	value: Option<Value>,
+}
+
+impl<'de> EnumAccess<'de> for EnumDeserializer {
+	type Error = Error;
+	type Variant = VariantDeserializer;
+
+	fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+	where
+		V: DeserializeSeed<'de>,
+	{
+		let variant = seed.deserialize(StrDeserializer::<Error>::new(&self.variant))?;
+		Ok((variant, VariantDeserializer { value: self.value }))
+	}
+}
+
+struct VariantDeserializer {
+	value: Option<Value>,
+}
+
+impl<'de> VariantAccess<'de> for VariantDeserializer {
+	type Error = Error;
+
+	fn unit_variant(self) -> Result<(), Self::Error> {
+		match self.value {
+			None => Ok(()),
+			Some(_) => Err(de::Error::invalid_type(
+				Unexpected::NewtypeVariant,
+				&"unit variant",
+			)),
+		}
+	}
+
+	fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+	where
+		T: DeserializeSeed<'de>,
+	{
+		match self.value {
+			Some(value) => seed.deserialize(value),
+			None => Err(de::Error::invalid_type(
+				Unexpected::UnitVariant,
+				&"newtype variant",
+			)),
+		}
+	}
+
+	fn tuple_variant<V>(self, _: usize, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.value {
+			Some(value) => value.deserialize_seq(visitor),
+			None => Err(de::Error::invalid_type(
+				Unexpected::UnitVariant,
+				&"tuple variant",
+			)),
+		}
+	}
+
+	fn struct_variant<V>(
+		self,
+		_: &'static [&'static str],
+		visitor: V,
+	) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.value {
+			Some(value) => value.deserialize_map(visitor),
+			None => Err(de::Error::invalid_type(
+				Unexpected::UnitVariant,
+				&"struct variant",
+			)),
+		}
+	}
+}
+
+impl Serialize for Value {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		self.0.serialize(serializer)
+	}
+}
+
+impl Serialize for Evaluation {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		self.0
+			.as_ref()
+			.expect("the evaluation is only empty while being dropped")
+			.serialize(serializer)
+	}
+}
+
+pub struct ValueSerializer;
+
+impl ValueSerializer {
+	fn wrap_variant(variant: Option<IStr>, value: Val) -> Value {
+		let Some(variant) = variant else {
+			return Value(value);
+		};
+		let mut fields = ObjValue::builder_with_capacity(1);
+		fields.field(variant).value(value);
+		Value(Val::Obj(fields.build()))
+	}
+}
+
+impl rtk_jsonnet_core::ValueSerializer<'_> for ValueSerializer {
+	type Evaluator = Evaluator;
+	type Value = Value;
+
+	fn new(_: &Self::Evaluator) -> Self {
+		ValueSerializer
+	}
+}
+
+impl ser::Serializer for ValueSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	type SerializeSeq = SeqSerializer;
+	type SerializeTuple = SeqSerializer;
+	type SerializeTupleStruct = SeqSerializer;
+	type SerializeTupleVariant = SeqSerializer;
+	type SerializeMap = MapSerializer;
+	type SerializeStruct = MapSerializer;
+	type SerializeStructVariant = MapSerializer;
+
+	fn serialize_bool(self, boolean: bool) -> Result<Value, Error> {
+		Ok(Value(Val::Bool(boolean)))
+	}
+
+	fn serialize_i8(self, number: i8) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	fn serialize_i16(self, number: i16) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	fn serialize_i32(self, number: i32) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	/// Unlike jrsonnet's own `Val::from_serde`, which stringifies 64-bit
+	/// integers, these stay numbers: erroring outside the safe integer range
+	/// keeps numbers round-trippable through the [`Deserializer`] above.
+	fn serialize_i64(self, number: i64) -> Result<Value, Error> {
+		Ok(Value(Val::try_num(number)?))
+	}
+
+	fn serialize_u8(self, number: u8) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	fn serialize_u16(self, number: u16) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	fn serialize_u32(self, number: u32) -> Result<Value, Error> {
+		Ok(Value(Val::num(number)))
+	}
+
+	fn serialize_u64(self, number: u64) -> Result<Value, Error> {
+		Ok(Value(Val::try_num(number)?))
+	}
+
+	fn serialize_f32(self, number: f32) -> Result<Value, Error> {
+		Ok(Value(Val::try_num(number)?))
+	}
+
+	fn serialize_f64(self, number: f64) -> Result<Value, Error> {
+		Ok(Value(Val::try_num(number)?))
+	}
+
+	fn serialize_char(self, character: char) -> Result<Value, Error> {
+		Ok(Value(Val::string(character.to_string())))
+	}
+
+	fn serialize_str(self, string: &str) -> Result<Value, Error> {
+		Ok(Value(Val::string(string)))
+	}
+
+	fn serialize_bytes(self, bytes: &[u8]) -> Result<Value, Error> {
+		Ok(Value(Val::arr(IBytes::from(bytes))))
+	}
+
+	fn serialize_none(self) -> Result<Value, Error> {
+		Ok(Value(Val::Null))
+	}
+
+	fn serialize_some<T>(self, value: &T) -> Result<Value, Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		value.serialize(self)
+	}
+
+	fn serialize_unit(self) -> Result<Value, Error> {
+		Ok(Value(Val::Null))
+	}
+
+	fn serialize_unit_struct(self, _: &'static str) -> Result<Value, Error> {
+		Ok(Value(Val::Null))
+	}
+
+	fn serialize_unit_variant(
+		self,
+		_: &'static str,
+		_: u32,
+		variant: &'static str,
+	) -> Result<Value, Error> {
+		Ok(Value(Val::string(variant)))
+	}
+
+	fn serialize_newtype_struct<T>(self, _: &'static str, value: &T) -> Result<Value, Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		value.serialize(self)
+	}
+
+	fn serialize_newtype_variant<T>(
+		self,
+		_: &'static str,
+		_: u32,
+		variant: &'static str,
+		value: &T,
+	) -> Result<Value, Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		let Value(value) = value.serialize(ValueSerializer)?;
+		Ok(ValueSerializer::wrap_variant(Some(variant.into()), value))
+	}
+
+	fn serialize_seq(self, length: Option<usize>) -> Result<Self::SerializeSeq, Error> {
+		Ok(SeqSerializer {
+			variant: None,
+			elements: Vec::with_capacity(length.unwrap_or_default()),
+		})
+	}
+
+	fn serialize_tuple(self, length: usize) -> Result<Self::SerializeTuple, Error> {
+		self.serialize_seq(Some(length))
+	}
+
+	fn serialize_tuple_struct(
+		self,
+		_: &'static str,
+		length: usize,
+	) -> Result<Self::SerializeTupleStruct, Error> {
+		self.serialize_seq(Some(length))
+	}
+
+	fn serialize_tuple_variant(
+		self,
+		_: &'static str,
+		_: u32,
+		variant: &'static str,
+		length: usize,
+	) -> Result<Self::SerializeTupleVariant, Error> {
+		Ok(SeqSerializer {
+			variant: Some(variant.into()),
+			elements: Vec::with_capacity(length),
+		})
+	}
+
+	fn serialize_map(self, length: Option<usize>) -> Result<Self::SerializeMap, Error> {
+		Ok(MapSerializer {
+			variant: None,
+			fields: ObjValue::builder_with_capacity(length.unwrap_or_default()),
+			field: None,
+		})
+	}
+
+	fn serialize_struct(
+		self,
+		_: &'static str,
+		length: usize,
+	) -> Result<Self::SerializeStruct, Error> {
+		self.serialize_map(Some(length))
+	}
+
+	fn serialize_struct_variant(
+		self,
+		_: &'static str,
+		_: u32,
+		variant: &'static str,
+		length: usize,
+	) -> Result<Self::SerializeStructVariant, Error> {
+		Ok(MapSerializer {
+			variant: Some(variant.into()),
+			fields: ObjValue::builder_with_capacity(length),
+			field: None,
+		})
+	}
+}
+
+pub struct SeqSerializer {
+	variant: Option<IStr>,
+	elements: Vec<Val>,
+}
+
+impl ser::SerializeSeq for SeqSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_element<T>(&mut self, element: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		let Value(element) = element.serialize(ValueSerializer)?;
+		self.elements.push(element);
+		Ok(())
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		Ok(ValueSerializer::wrap_variant(
+			self.variant,
+			Val::arr(self.elements),
+		))
+	}
+}
+
+impl ser::SerializeTuple for SeqSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_element<T>(&mut self, element: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		ser::SerializeSeq::serialize_element(self, element)
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		ser::SerializeSeq::end(self)
+	}
+}
+
+impl ser::SerializeTupleStruct for SeqSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, field: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		ser::SerializeSeq::serialize_element(self, field)
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		ser::SerializeSeq::end(self)
+	}
+}
+
+impl ser::SerializeTupleVariant for SeqSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, field: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		ser::SerializeSeq::serialize_element(self, field)
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		ser::SerializeSeq::end(self)
+	}
+}
+
+pub struct MapSerializer {
+	variant: Option<IStr>,
+	fields: ObjValueBuilder,
+	field: Option<IStr>,
+}
+
+impl ser::SerializeMap for MapSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_key<T>(&mut self, key: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		let Value(key) = key.serialize(ValueSerializer)?;
+		self.field = Some(key.to_string()?);
+		Ok(())
+	}
+
+	fn serialize_value<T>(&mut self, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		let field = self
+			.field
+			.take()
+			.expect("serialize_value is only called after serialize_key");
+		let Value(value) = value.serialize(ValueSerializer)?;
+		self.fields.field(field).try_value(value)?;
+		Ok(())
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		Ok(ValueSerializer::wrap_variant(
+			self.variant,
+			Val::Obj(self.fields.build()),
+		))
+	}
+}
+
+impl ser::SerializeStruct for MapSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, field: &'static str, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		ser::SerializeMap::serialize_entry(self, field, value)
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		ser::SerializeMap::end(self)
+	}
+}
+
+impl ser::SerializeStructVariant for MapSerializer {
+	type Ok = Value;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, field: &'static str, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		ser::SerializeMap::serialize_entry(self, field, value)
+	}
+
+	fn end(self) -> Result<Value, Error> {
+		ser::SerializeMap::end(self)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeMap;
+
+	use jrsonnet_evaluator::val::StrValue;
+	use jrsonnet_evaluator::{State, Val};
+	use serde::{Deserialize, Serialize};
+
+	use crate::{Value, ValueSerializer};
+
+	fn eval(snippet: &str) -> Val {
+		State::builder()
+			.build()
+			.evaluate_snippet("test", snippet)
+			.expect("snippet evaluates")
+	}
+
+	fn from_val<T: for<'de> Deserialize<'de>>(
+		snippet: &str,
+	) -> Result<T, jrsonnet_evaluator::Error> {
+		T::deserialize(Value(eval(snippet)))
+	}
+
+	fn to_val<T: Serialize>(value: &T) -> Result<Val, jrsonnet_evaluator::Error> {
+		value.serialize(ValueSerializer).map(|value| value.0)
+	}
+
+	#[derive(Debug, Deserialize, PartialEq, Serialize)]
+	#[serde(rename_all = "camelCase")]
+	struct Fixture {
+		name: String,
+		count: u32,
+		ratio: f64,
+		enabled: bool,
+		#[serde(default)]
+		missing: Option<String>,
+		present: Option<String>,
+		tags: Vec<String>,
+		nested: Nested,
+		mapping: BTreeMap<String, i64>,
+	}
+
+	#[derive(Debug, Deserialize, PartialEq, Serialize)]
+	struct Nested {
+		value: f64,
+	}
+
+	#[derive(Debug, Deserialize, PartialEq, Serialize)]
+	#[serde(rename_all = "kebab-case")]
+	enum UnitEnum {
+		GoJsonnet,
+		Jrsonnet,
+	}
+
+	#[derive(Debug, Deserialize, PartialEq, Serialize)]
+	#[serde(rename_all = "lowercase")]
+	enum TaggedEnum {
+		Str(String),
+		Pair(u8, u8),
+		Obj { a: bool },
+	}
+
+	fn fixture() -> Fixture {
+		Fixture {
+			name: "rtk!".into(),
+			count: 3,
+			ratio: 1.5,
+			enabled: true,
+			missing: None,
+			present: Some("yes".into()),
+			tags: vec!["a".into(), "b".into()],
+			nested: Nested { value: 4.0 },
+			mapping: BTreeMap::from([("one".into(), 1), ("two".into(), 2)]),
+		}
+	}
+
+	#[test]
+	fn deserializes_struct() {
+		let fixture: Fixture = from_val(
+			r#"{
+            name: "rtk" + "!",
+            count: 2 + 1,
+            ratio: 1.5,
+            enabled: true,
+            present: "yes",
+            missing: null,
+            tags: ["a", "b"],
+            nested: { value: 4 },
+            mapping: { one: 1, two: 2 },
+            ignored: { err: error "never evaluated" },
+        }"#,
+		)
+		.unwrap();
+		assert_eq!(fixture, self::fixture());
+	}
+
+	#[test]
+	fn skipped_fields_stay_lazy() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Sparse {
+			kept: bool,
+		}
+		let sparse: Sparse = from_val(
+			r#"{
+            kept: true,
+            expensive: [error "boom"],
+        }"#,
+		)
+		.unwrap();
+		assert_eq!(sparse, Sparse { kept: true });
+	}
+
+	#[test]
+	fn computed_fields_are_evaluated() {
+		let mapping: BTreeMap<String, i64> = from_val(r#"{ ["k" + "ey"]: 40 + 2 }"#).unwrap();
+		assert_eq!(mapping, BTreeMap::from([("key".into(), 42)]));
+	}
+
+	#[test]
+	fn hidden_fields_are_not_deserialized() {
+		let mapping: BTreeMap<String, i64> = from_val(r"{ visible: 1, hidden:: 2 }").unwrap();
+		assert_eq!(mapping, BTreeMap::from([("visible".into(), 1)]));
+	}
+
+	#[test]
+	fn deserializes_unit_enum_from_string() {
+		let value: UnitEnum = from_val(r#""go-jsonnet""#).unwrap();
+		assert_eq!(value, UnitEnum::GoJsonnet);
+		let value: UnitEnum = from_val(r#""jrsonnet""#).unwrap();
+		assert_eq!(value, UnitEnum::Jrsonnet);
+	}
+
+	#[test]
+	fn deserializes_tagged_enum_variants() {
+		let value: TaggedEnum = from_val(r#"{ str: "hi" }"#).unwrap();
+		assert_eq!(value, TaggedEnum::Str("hi".into()));
+		let value: TaggedEnum = from_val(r"{ pair: [1, 2] }").unwrap();
+		assert_eq!(value, TaggedEnum::Pair(1, 2));
+		let value: TaggedEnum = from_val(r"{ obj: { a: true } }").unwrap();
+		assert_eq!(value, TaggedEnum::Obj { a: true });
+	}
+
+	#[test]
+	#[expect(clippy::float_cmp)]
+	fn integral_numbers_fit_integer_and_float_fields() {
+		let value: i64 = from_val("3").unwrap();
+		assert_eq!(value, 3);
+		let value: f64 = from_val("3").unwrap();
+		assert_eq!(value, 3.0);
+		let value: u8 = from_val("255").unwrap();
+		assert_eq!(value, 255);
+	}
+
+	#[test]
+	fn type_mismatches_error() {
+		assert!(from_val::<i64>("1.5").is_err());
+		assert!(from_val::<u8>("256").is_err());
+		assert!(from_val::<u32>(r#""nope""#).is_err());
+		assert!(from_val::<String>("3").is_err());
+		assert!(from_val::<String>("function(x) x").is_err());
+	}
+
+	#[test]
+	fn null_and_options() {
+		let value: Option<String> = from_val("null").unwrap();
+		assert_eq!(value, None);
+		let value: Option<String> = from_val(r#""set""#).unwrap();
+		assert_eq!(value, Some("set".into()));
+		let value: () = from_val("null").unwrap();
+		assert_eq!(value, ());
+	}
+
+	#[test]
+	fn evaluation_errors_propagate() {
+		#[derive(Debug, Deserialize)]
+		struct Failing {
+			#[allow(dead_code)]
+			bad: String,
+		}
+		let result: Result<Failing, _> = (|| {
+			let val = State::builder()
+				.build()
+				.evaluate_snippet("test", r#"{ bad: error "boom" }"#)?;
+			Failing::deserialize(Value(val))
+		})();
+		let error = result.expect_err("field evaluation fails");
+		assert!(
+			error.to_string().contains("boom"),
+			"unexpected error: {error}"
+		);
+	}
+
+	#[test]
+	fn deserializes_val_from_serde_data() {
+		let value = Value::deserialize(Value(eval(r#"{ a: [1, "two", null] }"#))).unwrap();
+		let obj = value.0.as_obj().expect("an object");
+		assert_eq!(obj.fields().len(), 1);
+	}
+
+	#[test]
+	fn deserializes_inline_environment() {
+		let environment: rtk_spec::v1alpha1::Environment = from_val(
+			r#"{
+            apiVersion: "tanka.dev/v1alpha1",
+            kind: "Environment",
+            metadata: { name: "environments/demo", labels: { team: "platform" } },
+            spec: {
+                apiServer: "https://127.0.0.1:6443",
+                namespace: "demo",
+                injectLabels: true,
+            },
+            data: { never: error "data must stay lazy" },
+        }"#,
+		)
+		.unwrap();
+		assert_eq!(
+			environment.metadata.name.as_deref(),
+			Some("environments/demo")
+		);
+		assert_eq!(environment.spec.namespace.as_deref(), Some("demo"));
+		assert!(environment.spec.inject_labels);
+		let api_server = environment
+			.spec
+			.api_server
+			.as_ref()
+			.expect("apiServer is set");
+		assert_eq!(api_server.as_str(), "https://127.0.0.1:6443/");
+	}
+
+	fn str_of(value: Option<Val>) -> Option<jrsonnet_evaluator::IStr> {
+		value
+			.as_ref()
+			.and_then(Val::as_str)
+			.map(StrValue::into_flat)
+	}
+
+	#[test]
+	fn serializes_struct_to_object() {
+		let value = to_val(&fixture()).unwrap();
+		let object = value.as_obj().expect("an object");
+		assert_eq!(
+			str_of(object.get("name".into()).unwrap()),
+			Some("rtk!".into())
+		);
+		assert_eq!(
+			object.get("count".into()).unwrap().and_then(|v| v.as_num()),
+			Some(3.0),
+		);
+		// `missing: None` serializes as an explicit null field
+		assert!(matches!(
+			object.get("missing".into()).unwrap(),
+			Some(Val::Null),
+		));
+	}
+
+	#[test]
+	fn round_trips_through_serde() {
+		let fixture = fixture();
+		let value = to_val(&fixture).unwrap();
+		assert_eq!(Fixture::deserialize(Value(value)).unwrap(), fixture);
+
+		for variant in [
+			TaggedEnum::Str("hi".into()),
+			TaggedEnum::Pair(1, 2),
+			TaggedEnum::Obj { a: true },
+		] {
+			let value = to_val(&variant).unwrap();
+			assert_eq!(TaggedEnum::deserialize(Value(value)).unwrap(), variant);
+		}
+	}
+
+	#[test]
+	fn sixty_four_bit_integers_stay_numbers() {
+		let value = to_val(&42i64).unwrap();
+		assert_eq!(value.as_num(), Some(42.0));
+		let value = to_val(&42u64).unwrap();
+		assert_eq!(value.as_num(), Some(42.0));
+		// beyond the safe integer range is an error instead of silent precision loss
+		assert!(to_val(&u64::MAX).is_err());
+		assert!(to_val(&i64::MIN).is_err());
+	}
+
+	#[test]
+	fn non_finite_floats_error() {
+		assert!(to_val(&f64::NAN).is_err());
+		assert!(to_val(&f64::INFINITY).is_err());
+	}
+
+	#[test]
+	fn serializes_unit_enum_to_string() {
+		let value = to_val(&UnitEnum::GoJsonnet).unwrap();
+		assert_eq!(str_of(Some(value)), Some("go-jsonnet".into()));
+	}
+
+	#[test]
+	fn serializes_integer_map_keys_as_strings() {
+		let value = to_val(&BTreeMap::from([(1, "one"), (2, "two")])).unwrap();
+		let object = value.as_obj().expect("an object");
+		assert_eq!(str_of(object.get("1".into()).unwrap()), Some("one".into()));
+	}
+
+	#[test]
+	fn serializes_through_evaluator_wiring() {
+		use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
+
+		let implementation = crate::Implementation::new(std::iter::empty()).unwrap();
+		let serializer = implementation.create_evaluator().create_serializer();
+		let value = fixture().serialize(serializer).unwrap();
+		assert_eq!(Fixture::deserialize(value).unwrap(), fixture());
+	}
+
+	#[test]
+	fn serializes_environment_to_val() {
+		let environment: rtk_spec::v1alpha1::Environment = from_val(
+			r#"{
+				metadata: { name: "environments/demo" },
+				spec: { apiServer: "https://127.0.0.1:6443", namespace: "demo" },
+			}"#,
+		)
+		.unwrap();
+		let value = to_val(&environment).unwrap();
+		let object = value.as_obj().expect("an object");
+		let spec = object
+			.get("spec".into())
+			.unwrap()
+			.and_then(|v| v.as_obj())
+			.expect("a spec object");
+		assert_eq!(
+			str_of(spec.get("apiServer".into()).unwrap()),
+			Some("https://127.0.0.1:6443/".into()),
+		);
+		assert_eq!(
+			str_of(spec.get("namespace".into()).unwrap()),
+			Some("demo".into()),
+		);
+	}
+}

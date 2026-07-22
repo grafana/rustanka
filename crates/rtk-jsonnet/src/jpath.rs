@@ -31,6 +31,8 @@ pub struct JPath {
 	pub root_directory: PathBuf,
 	/// The environment base directory (contains the entrypoint)
 	pub base_directory: PathBuf,
+    /// The tkrc file path (absolute)
+    pub rc: Option<PathBuf>,
 	/// The entrypoint file path (absolute)
 	pub entrypoint: PathBuf,
 	/// Import paths for jsonnet evaluation, in order of prescedence.
@@ -56,7 +58,7 @@ impl JPath {
 	{
 		let abs_path = JPath::make_absolute(Cow::Borrowed(path.as_ref()))?;
 
-		let root_directory = JPath::find_root_directory(&abs_path)?;
+		let (root_directory, rc) = JPath::find_root_directory_and_rc(&abs_path)?;
 		let base_directory = JPath::find_base_directory(&abs_path, &root_directory)?;
 
 		let entrypoint = JPath::get_entrypoint(&abs_path)?;
@@ -72,6 +74,7 @@ impl JPath {
 		Ok(JPath {
 			root_directory,
 			base_directory,
+            rc,
 			entrypoint,
 			import_paths,
 		})
@@ -144,7 +147,8 @@ impl JPath {
 	}
 
 	/// Find the project root directory by looking for marker files.
-	fn find_root_directory(path: &Path) -> Result<PathBuf, Error> {
+    /// If a tkrc is found in the 
+	fn find_root_directory_and_rc(path: &Path) -> Result<(PathBuf, Option<PathBuf>), Error> {
 		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?;
 
 		for marker in JPath::ROOT_MARKERS {
@@ -154,7 +158,12 @@ impl JPath {
 			if let Some(root_directory) =
 				JPath::find_nearest_directory_with_file(abs_path, marker.as_ref())
 			{
-				return Ok(root_directory);
+                if marker.starts_with("tkrc") {
+                    let rc = Some(root_directory.join(marker));
+                    return Ok((root_directory, rc));
+                } else {
+                    return Ok((root_directory, None));
+                }
 			}
 		}
 

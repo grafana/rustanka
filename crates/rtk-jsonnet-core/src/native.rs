@@ -1,40 +1,34 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Evaluator;
 
-/// Values passed to a [`Function`], with numeric indices and named indicies.
-pub trait Arguments: Sized {
-	type Evaluator: Evaluator;
+/// Values passed to a [`Function`].
+pub trait Arguments<'a>: Sized {
+	type Evaluator: Evaluator<'a>;
 
 	/// Gets the argument at `index` as a [`Value`] modeled by the [`Evaluator`].
 	fn get_indexed(
 		&self,
 		index: usize,
-	) -> Result<Option<<Self::Evaluator as Evaluator>::Value>, <Self::Evaluator as Evaluator>::Error>;
-
-	/// Gets the named argument `name` as a [`Value`] modeled by the [`Evaluator`].
-	fn get_named<N>(
-		&self,
-		name: &N,
-	) -> Result<Option<<Self::Evaluator as Evaluator>::Value>, <Self::Evaluator as Evaluator>::Error>
-	where
-		N: AsRef<str>;
+	) -> Result<
+		Option<<Self::Evaluator as Evaluator<'a>>::Value>,
+		<Self::Evaluator as Evaluator<'a>>::Error,
+	>;
 }
 
 /// A dummy implementation of [`Arguments`] for [`Evaluator`]s that
 /// don't provide native function interop.
-pub struct InfallibleArguments<E: 'static> {
+pub struct InfallibleArguments<'a, E: 'a> {
 	_inner: Infallible,
-	_phantom: PhantomData<&'static E>,
+	_phantom: PhantomData<&'a E>,
 }
 
-impl<E> Arguments for InfallibleArguments<E>
+impl<'a, E> Arguments<'a> for InfallibleArguments<'a, E>
 where
-	E: 'static + Evaluator,
+	E: Evaluator<'a>,
 {
 	type Evaluator = E;
 
@@ -42,52 +36,55 @@ where
 	fn get_indexed(
 		&self,
 		_: usize,
-	) -> Result<Option<<Self::Evaluator as Evaluator>::Value>, <Self::Evaluator as Evaluator>::Error>
-	{
-		unreachable!()
-	}
-
-	#[inline]
-	fn get_named<N>(
-		&self,
-		_: &N,
-	) -> Result<Option<<Self::Evaluator as Evaluator>::Value>, <Self::Evaluator as Evaluator>::Error>
-	where
-		N: AsRef<str>,
-	{
+	) -> Result<
+		Option<<Self::Evaluator as Evaluator<'a>>::Value>,
+		<Self::Evaluator as Evaluator<'a>>::Error,
+	> {
 		unreachable!()
 	}
 }
 
-pub trait Function {
-	type Evaluator: Evaluator;
+pub trait Function<'a> {
+	type Evaluator: Evaluator<'a>;
+
+	fn argv(&self) -> (usize, Option<usize>);
 
 	fn call(
 		&self,
 		evaluator: &Self::Evaluator,
-		arguments: <Self::Evaluator as Evaluator>::Arguments,
-	) -> Result<<Self::Evaluator as Evaluator>::Value, <Self::Evaluator as Evaluator>::Error>;
+		arguments: <Self::Evaluator as Evaluator<'a>>::Arguments<'_>,
+	) -> Result<<Self::Evaluator as Evaluator<'a>>::Value, <Self::Evaluator as Evaluator<'a>>::Error>;
 }
 
-pub trait Value: DeserializeOwned + Serialize {
-	type Evaluator: Evaluator<Value = Self>;
+pub trait Value<'a>
+where
+	Self: Deserializer<'a> + Deserialize<'a> + Serialize,
+{
+	type Evaluator: Evaluator<'a, Value = Self>;
 
-	/// Creates a new [`Value`] by serializing `value`.
-	fn new<V>(
-		evaluator: &Self::Evaluator,
-		value: V,
-	) -> Result<Self, <Self::Evaluator as Evaluator>::Error>
-	where
-		V: Serialize,
-	{
-		Ok(V::serialize(&value, evaluator.create_serializer())?)
-	}
+	type Serializer: ValueSerializer<'a, Evaluator = Self::Evaluator, Value = Self>;
 
 	/// Gets the value at `index`, provided this value is an array.
-	fn get_indexed(&self, index: usize) -> Result<Self, <Self::Evaluator as Evaluator>::Error>;
+	fn get_indexed(
+		&self,
+		index: usize,
+	) -> Result<Option<Self>, <Self::Evaluator as Evaluator<'a>>::Error>;
 
 	/// Gets the value at `key`, provided this value is an object.
-	fn get_keyed<K>(&self, key: &K) -> Result<Self, <Self::Evaluator as Evaluator>::Error>
+	fn get_keyed<K>(
+		&self,
+		key: &K,
+	) -> Result<Option<Self>, <Self::Evaluator as Evaluator<'a>>::Error>
 	where
 		K: AsRef<str>;
+}
+
+pub trait ValueSerializer<'a>
+where
+	Self: Serializer,
+{
+	type Evaluator: Evaluator<'a, Value = Self::Value>;
+	type Value: Value<'a, Serializer = Self>;
+
+	fn new(evaluator: &Self::Evaluator) -> Self;
 }

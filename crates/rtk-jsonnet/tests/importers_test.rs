@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use rtk_jsonnet_core::importers::{ImporterIndex, TargetFile};
+use rtk_jsonnet::importers::{ImporterIndex, TargetFile};
 
 fn root() -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/findImporters")
