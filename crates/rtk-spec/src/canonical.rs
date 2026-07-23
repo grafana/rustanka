@@ -39,7 +39,7 @@ impl Rc {
 
 impl DeepMergeFrom<Environment> for Rc {
     fn merge_from(&mut self, other: Environment) {
-        self.spec.merge_from(other.spec);    
+        DeepMergeFrom::merge_from(&mut self.spec, other.spec);    
     }
 }
 

@@ -1,3 +1,4 @@
+use k8s_openapi::DeepMerge;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -24,4 +25,17 @@ pub struct RcSpec {
     pub expect_versions: Option<Versions>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jsonnet_implementation: Option<JsonentImplementationOrConfig>,
+}
+
+impl DeepMerge for RcSpec {
+    fn merge_from(&mut self, other: Self) {
+        if let Some(api_server) = other.api_server {
+            self.api_server = Some(api_server);
+        }
+
+        self.disable_native_functions |= other.disable_native_functions;
+
+        self.expect_versions.merge_from(other.expect_versions);
+        self.jsonnet_implementation.merge_from(other.jsonnet_implementation);
+    }
 }

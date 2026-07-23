@@ -135,8 +135,8 @@ impl DeepMerge for JsonentImplementationFlags {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum JsonnetImplementation {
 	Reference,
-	#[default]
 	GoJsonnet,
+	#[default]
 	Jrsonnet,
 	Binary(PathBuf),
 }
@@ -259,6 +259,15 @@ pub enum JsonentImplementationOrConfig {
 	JsonnetImplementationConfig(JsonnetImplementationConfig),
 }
 
+impl JsonentImplementationOrConfig {
+    pub fn implementation(&self) -> &JsonnetImplementation {
+        match self {
+            JsonentImplementationOrConfig::JsonnetImplementation(implementation) => implementation,
+            JsonentImplementationOrConfig::JsonnetImplementationConfig(config) => &config.type_,
+        }
+    }
+}
+
 impl DeepMerge for JsonentImplementationOrConfig {
     fn merge_from(&mut self, other: Self) {
         match (self, other) {
@@ -268,6 +277,12 @@ impl DeepMerge for JsonentImplementationOrConfig {
             ) if a.type_ == b.type_ => a.merge_from(b),
             (a, b) => *a = b,
         }
+    }
+}
+
+impl Default for JsonentImplementationOrConfig {
+    fn default() -> Self {
+        JsonentImplementationOrConfig::JsonnetImplementation(JsonnetImplementation::default())
     }
 }
 

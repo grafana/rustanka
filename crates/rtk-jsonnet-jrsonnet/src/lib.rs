@@ -17,7 +17,7 @@ use jrsonnet_evaluator::{FileImportResolver, IStr, State, Thunk, Val};
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_stdlib::ContextInitializer;
 use rtk_jsonnet_core::{FlagsExt, Function};
-use rtk_spec::canonical::{Environment, Rc};
+use rtk_spec::canonical::Rc;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 mod native;
@@ -89,10 +89,10 @@ struct OutputFormatConfig {
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {
-	#[error("an evaluator error occurred")]
+    #[error("an evaluator error occurred")]
 	Evaluator(#[from] EvaluatorError),
-	#[error("a flag-parsing error occurred")]
-	FlagParsing(#[from] FlagError),
+    #[error("a flag error occurred")]
+    Flag(#[from] FlagError),
 }
 
 impl From<Infallible> for Error {
@@ -113,6 +113,14 @@ impl Evaluator {
 	thread_local! {
 		static CURRENT: RefCell<Option<Evaluator>> = RefCell::new(None);
 	}
+}
+
+impl fmt::Debug for Evaluator {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("Evaluator")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
@@ -136,44 +144,39 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 	fn name() -> &'static str {
 		"jrsonnet"
 	}
-
-	fn with_environment(&mut self, environment: &'a Environment) -> Result<&mut Self, Self::Error> {
-		self.config.merge_from_flags(environment.flags()?);
-		Ok(self)
-	}
-
-	fn with_rc(&mut self, rc: &'a Rc) -> Result<&mut Self, Self::Error> {
+    
+	fn with_rc(&mut self, rc: &'a Rc) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
 		self.config.merge_from_flags(rc.flags()?);
 		Ok(self)
 	}
 
-	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, Self::Error> {
+	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
 		self.import_resolver = Some(FileImportResolver::new(import_paths));
 		Ok(self)
 	}
 
-	fn with_external_code<K, V>(
+	fn with_external_code(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error> {
-		self.context_initializer.add_ext_code(key, value)?;
+	) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
+		self.context_initializer.add_ext_code(key, value).map_err(EvaluatorError)?;
 		Ok(self)
 	}
 
-	fn with_external_variable<K, V>(
+	fn with_external_variable(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error> {
+	) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
 		self.context_initializer
 			.add_ext_str(key.into(), value.into());
 		Ok(self)
 	}
 
-	fn with_native_function<F>(&mut self, key: &'a str, func: F) -> Result<&mut Self, Self::Error>
+	fn with_native_function<F>(&mut self, key: &'a str, func: F) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error>
 	where
-		F: 'static + rtk_jsonnet_core::Function<'a, Evaluator = Self>,
+		F: 'static + rtk_jsonnet_core::Function<'a, Self>,
 	{
 		#[derive(Debug, Trace)]
 		struct FunctionWrapper<F: 'static> {
@@ -188,7 +191,7 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 		// neccesary wrappers.
 		impl<'a, F> Builtin for FunctionWrapper<F>
 		where
-			F: 'static + Function<'a, Evaluator = Evaluator>,
+			F: 'static + Function<'a, Evaluator>,
 		{
 			fn name(&self) -> &str {
 				&self.name
@@ -210,12 +213,7 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 					if let Some(evaluator) = evaluator.borrow().as_ref() {
 						match self.func.call(evaluator, args) {
 							Ok(value) => Ok(value.0),
-							Err(error) => match error {
-								EvaluatorError::Jrsonnet(error) => Err(error),
-								_ => Err(jrsonnet_evaluator::Error::new(
-									jrsonnet_evaluator::RuntimeError(format!("{error}").into()),
-								)),
-							},
+							Err(error) => Err(error.0),
 						}
 					} else {
 						panic!("no evaluator present");
@@ -254,21 +252,21 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 		Ok(self)
 	}
 
-	fn with_top_level_argument<K, V>(
+	fn with_top_level_argument(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error> {
+	) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
 		self.top_level_arguments
 			.insert(key.into(), TlaArg::String(value.into()));
 		Ok(self)
 	}
 
-	fn with_top_level_code<K, V>(
+	fn with_top_level_code(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error> {
+	) -> Result<&mut Self, <Self::Implementation as rtk_jsonnet_core::Implementation>::Error> {
 		self.top_level_arguments
 			.insert(key.into(), TlaArg::InlineCode(value.to_owned()));
 		Ok(self)
@@ -368,12 +366,8 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 }
 
 #[derive(Clone, Debug, Error)]
-pub enum EvaluatorError {
-	#[error("a jrsonnet evaluation error occurred: {0}")]
-	Jrsonnet(#[from] jrsonnet_evaluator::Error),
-	#[error("a flag-parsing error occurred")]
-	FlagParsing(#[from] FlagError),
-}
+#[error("an evaluator error occurred")]
+pub struct EvaluatorError(#[from] jrsonnet_evaluator::Error);
 
 #[derive(Debug)]
 pub struct Evaluation(pub(crate) Option<jrsonnet_evaluator::Val>);

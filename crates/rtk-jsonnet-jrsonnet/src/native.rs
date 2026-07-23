@@ -22,7 +22,7 @@ impl<'a> rtk_jsonnet_core::Arguments<'a> for Arguments<'a> {
 			.and_then(|thunk| thunk.as_ref().and_then(|thunk| Some(thunk.evaluate())))
 			.transpose()
 			.and_then(|value| Ok(value.map(Value)))
-			.map_err(EvaluatorError::Jrsonnet)
+			.map_err(EvaluatorError)
 	}
 }
 
@@ -41,7 +41,7 @@ impl<'a> rtk_jsonnet_core::Value<'a> for Value {
 			let item = arr.get(index)?;
 			Ok(item.map(Value))
 		} else {
-			Err(EvaluatorError::Jrsonnet(Error::new(
+			Err(EvaluatorError(Error::new(
 				ErrorKind::TypeMismatch("", vec![ValType::Arr], self.0.value_type()),
 			)))
 		}
@@ -58,7 +58,7 @@ impl<'a> rtk_jsonnet_core::Value<'a> for Value {
 			let item = obj.get(key.as_ref().into())?;
 			Ok(item.map(Value))
 		} else {
-			Err(EvaluatorError::Jrsonnet(Error::new(
+			Err(EvaluatorError(Error::new(
 				ErrorKind::TypeMismatch("", vec![ValType::Obj], self.0.value_type()),
 			)))
 		}

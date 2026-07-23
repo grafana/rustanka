@@ -44,16 +44,14 @@ where
 	}
 }
 
-pub trait Function<'a> {
-	type Evaluator: Evaluator<'a>;
-
+pub trait Function<'a, E: Evaluator<'a>> {
 	fn argv(&self) -> (usize, Option<usize>);
 
 	fn call(
 		&self,
-		evaluator: &Self::Evaluator,
-		arguments: <Self::Evaluator as Evaluator<'a>>::Arguments<'_>,
-	) -> Result<<Self::Evaluator as Evaluator<'a>>::Value, <Self::Evaluator as Evaluator<'a>>::Error>;
+		evaluator: &E,
+		arguments: <E as Evaluator<'a>>::Arguments<'_>,
+	) -> Result<<E as Evaluator<'a>>::Value, <E as Evaluator<'a>>::Error>;
 }
 
 pub trait Value<'a>

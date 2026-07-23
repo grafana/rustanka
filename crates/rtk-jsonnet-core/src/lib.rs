@@ -30,35 +30,34 @@ pub trait Evaluator<'a>: 'a + Sized {
 		<<Self::Value as Value<'a>>::Serializer as ValueSerializer<'a>>::new(self)
 	}
 
-	fn with_environment(&mut self, environment: &'a Environment) -> Result<&mut Self, Self::Error>;
-	fn with_rc(&mut self, rc: &'a Rc) -> Result<&mut Self, Self::Error>;
-	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, Self::Error>;
+	fn with_rc(&mut self, rc: &'a Rc) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
+	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
 
-	fn with_external_code<K, V>(
+	fn with_external_code(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error>;
-	fn with_external_variable<K, V>(
+	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
+	fn with_external_variable(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error>;
+	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
 
-	fn with_native_function<F>(&mut self, key: &'a str, func: F) -> Result<&mut Self, Self::Error>
+	fn with_native_function<F>(&mut self, key: &'a str, func: F) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>
 	where
-		F: 'static + Function<'a, Evaluator = Self>;
+		F: 'static + Function<'a, Self>;
 
-	fn with_top_level_argument<K, V>(
+	fn with_top_level_argument(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error>;
-	fn with_top_level_code<K, V>(
+	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
+	fn with_top_level_code(
 		&mut self,
 		key: &'a str,
 		value: &'a str,
-	) -> Result<&mut Self, Self::Error>;
+	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
 
 	fn evaluate_file<P>(self, path: P) -> Result<Self::Evaluation, <Self as Evaluator<'a>>::Error>
 	where
@@ -157,6 +156,7 @@ pub trait Implementation: Sized {
 	type Flag: Flag<Implementation = Self>;
 	type Error: Error
 		+ From<Self::InitializationError>
+        + From<<Self::Flag as Flag>::Error>
 		+ for<'a> From<<Self::Evaluator<'a> as Evaluator<'a>>::Error>;
 	type InitializationError: Error;
 

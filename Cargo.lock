@@ -4851,8 +4851,11 @@ dependencies = [
  "rayon",
  "regex",
  "rtk-jsonnet-core",
+ "rtk-jsonnet-jrsonnet",
+ "rtk-spec",
  "tempfile",
  "thiserror 2.0.18",
+ "tracing",
  "walkdir",
 ]
 
