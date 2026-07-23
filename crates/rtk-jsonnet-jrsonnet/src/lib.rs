@@ -17,7 +17,7 @@ use jrsonnet_evaluator::{FileImportResolver, IStr, State, Thunk, Val};
 use jrsonnet_gcmodule::Trace;
 use jrsonnet_stdlib::ContextInitializer;
 use rtk_jsonnet_core::{FlagsExt, Function};
-use rtk_spec::v1alpha1::{Environment, Rc};
+use rtk_spec::canonical::{Environment, Rc};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 mod native;

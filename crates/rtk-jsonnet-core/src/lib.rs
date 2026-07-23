@@ -4,7 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use rtk_spec::v1alpha1::{Environment, JsonentImplementationOrConfig, Rc};
+use rtk_spec::canonical::{Environment, JsonentImplementationOrConfig, Rc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod native;
