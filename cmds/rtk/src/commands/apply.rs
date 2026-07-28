@@ -269,12 +269,8 @@ pub async fn apply_environment<W: Write>(
 					);
 				}
 				Err(e) => {
-					return Err(anyhow::anyhow!(
-						"failed to apply {}/{}: {}",
-						diff.gvk.kind,
-						diff.name,
-						e
-					));
+					return Err(e)
+						.context(format!("failed to apply {}/{}", diff.gvk.kind, diff.name));
 				}
 			}
 		}

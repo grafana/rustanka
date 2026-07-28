@@ -242,12 +242,7 @@ pub async fn prune_environment<W: Write>(
 				deleted.push(diff.clone());
 			}
 			Err(e) => {
-				return Err(anyhow::anyhow!(
-					"failed to delete {}/{}: {}",
-					diff.gvk.kind,
-					diff.name,
-					e
-				));
+				return Err(e).context(format!("failed to delete {}/{}", diff.gvk.kind, diff.name));
 			}
 		}
 	}
