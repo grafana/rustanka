@@ -93,6 +93,71 @@ async fn run_apply_test(test_dir: &std::path::Path, discovery_mode: DiscoveryMod
 	);
 }
 
+/// Run an apply that expects a Kubernetes API write failure, and assert the
+/// underlying API message is preserved in the returned error chain.
+async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
+	let env_dir = test_dir.join("environment");
+	let cluster_dir = test_dir.join("cluster");
+	let cluster_state = test_utils::load_manifests_from_dir(&cluster_dir);
+
+	let api_message =
+		"configmaps \"my-config\" is forbidden: User \"test\" cannot patch resource \"configmaps\"";
+	let fail_writes = serde_json::json!({
+		"kind": "Status",
+		"apiVersion": "v1",
+		"metadata": {},
+		"status": "Failure",
+		"message": api_message,
+		"reason": "Forbidden",
+		"code": 403
+	});
+
+	let server = k8s_mock::HttpMockK8sServer::builder()
+		.discovery_mode(DiscoveryMode::Aggregated)
+		.resources(cluster_state)
+		.fail_writes(fail_writes)
+		.build()
+		.start()
+		.await;
+
+	let spec = rtk::spec::Spec {
+		context_names: Some(vec!["mock-context".to_string()]),
+		..rtk::spec::Spec::default()
+	};
+	let connection =
+		rtk::k8s::client::ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
+			.await
+			.expect("failed to create connection");
+
+	let mut output = Vec::new();
+	let opts = ApplyOpts {
+		auto_approve: AutoApprove::Always,
+		color: ColorMode::Never,
+		..Default::default()
+	};
+
+	let err = apply_environment(
+		env_dir.as_path(),
+		Some(connection),
+		GlobalEvaluatorOptions::default(),
+		EvaluatorOptions::default(),
+		opts,
+		&mut output,
+	)
+	.await
+	.expect_err("apply should fail when the API rejects writes");
+
+	let rendered = format!("{err:?}");
+	assert!(
+		rendered.contains(api_message),
+		"expected kube API message in error chain, got:\n{rendered}"
+	);
+	assert!(
+		rendered.contains("failed to apply ConfigMap/my-config"),
+		"expected apply context in error, got:\n{rendered}"
+	);
+}
+
 /// Run an apply test that expects no changes (idempotent case).
 ///
 /// The environment's manifests already match the cluster state.
@@ -179,4 +244,10 @@ mod tests {
 
 	// No-changes tests: cluster already matches environment
 	apply_no_changes_test!(configmap_unchanged);
+
+	#[tokio::test]
+	async fn apply_failure_preserves_kube_api_error() {
+		let test_dir = test_utils::diff_fixture_dir("configmap_modified");
+		run_apply_failure_preserves_api_error(&test_dir).await;
+	}
 }

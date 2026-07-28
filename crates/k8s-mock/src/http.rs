@@ -68,6 +68,9 @@ pub struct HttpMockK8sServer {
 	/// Values are OpenAPI schema JSON documents.
 	#[builder(default)]
 	openapi_schemas: HashMap<String, serde_json::Value>,
+	/// When set, non-dry-run PATCH/POST/DELETE return this Kubernetes Status body.
+	/// Dry-run requests still succeed so diff can complete before apply fails.
+	fail_writes: Option<serde_json::Value>,
 }
 
 /// A running HTTP mock server instance.
@@ -112,7 +115,7 @@ impl HttpMockK8sServer {
 
 		mount_version(&server, &exchanges).await;
 		mount_discovery(&server, &discovery, self.discovery_mode, &exchanges).await;
-		mount_resources(&server, &shared_resources, &exchanges).await;
+		mount_resources(&server, &shared_resources, &exchanges, self.fail_writes).await;
 		mount_openapi(&server, &self.openapi_schemas, &exchanges).await;
 
 		RunningHttpMockK8sServer { server, exchanges }
@@ -622,10 +625,21 @@ fn merge_type_from_content_type(req: &Request) -> MergeType {
 	}
 }
 
+fn write_failure_response(
+	exchanges: &SharedExchanges,
+	req: &Request,
+	status: &serde_json::Value,
+) -> ResponseTemplate {
+	let code = status.get("code").and_then(|c| c.as_u64()).unwrap_or(500) as u16;
+	record_exchange(exchanges, req, code, &status.to_string());
+	ResponseTemplate::new(code).set_body_json(status)
+}
+
 async fn mount_resources(
 	server: &MockServer,
 	resources: &SharedResources,
 	exchanges: &SharedExchanges,
+	fail_writes: Option<serde_json::Value>,
 ) {
 	let patch_resources = Arc::clone(resources);
 	let post_resources = Arc::clone(resources);
@@ -635,6 +649,9 @@ async fn mount_resources(
 	let post_exchanges = Arc::clone(exchanges);
 	let delete_exchanges = Arc::clone(exchanges);
 	let get_exchanges = Arc::clone(exchanges);
+	let patch_fail_writes = fail_writes.clone();
+	let post_fail_writes = fail_writes.clone();
+	let delete_fail_writes = fail_writes;
 
 	// PATCH endpoints - merge request body with existing resource
 	// If dry-run is not set, persist the changes
@@ -644,6 +661,12 @@ async fn mount_resources(
 			let path_str = req.url.path();
 			let query = req.url.query().unwrap_or("");
 			let is_dry_run = query.contains("dryRun");
+
+			if !is_dry_run {
+				if let Some(ref status) = patch_fail_writes {
+					return write_failure_response(&patch_exchanges, req, status);
+				}
+			}
 
 			let (api_path, name) = parse_resource_path(path_str);
 			let name = name.unwrap_or_default();
@@ -691,6 +714,12 @@ async fn mount_resources(
 			let query = req.url.query().unwrap_or("");
 			let is_dry_run = query.contains("dryRun");
 
+			if !is_dry_run {
+				if let Some(ref status) = post_fail_writes {
+					return write_failure_response(&post_exchanges, req, status);
+				}
+			}
+
 			let body: serde_json::Value =
 				serde_json::from_slice(&req.body).unwrap_or(serde_json::Value::Null);
 
@@ -718,6 +747,14 @@ async fn mount_resources(
 	Mock::given(method("DELETE"))
 		.and(path_regex(r"^/api(s)?/.*"))
 		.respond_with(move |req: &Request| {
+			let query = req.url.query().unwrap_or("");
+			let is_dry_run = query.contains("dryRun");
+			if !is_dry_run {
+				if let Some(ref status) = delete_fail_writes {
+					return write_failure_response(&delete_exchanges, req, status);
+				}
+			}
+
 			let path_str = req.url.path();
 			let (api_path, name) = parse_resource_path(path_str);
 			let name = name.unwrap_or_default();
