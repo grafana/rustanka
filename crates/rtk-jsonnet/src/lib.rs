@@ -4,6 +4,6 @@ pub mod imports;
 pub mod jpath;
 mod scan;
 
+pub use crate::engine::{Engine, Error};
 #[doc(inline)]
 pub use rtk_jsonnet_core::*;
-pub use crate::engine::{Error, Engine};

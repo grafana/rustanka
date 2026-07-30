@@ -1,45 +1,73 @@
 use std::convert::Infallible;
+use std::error::Error;
+use std::fmt::{self, Formatter};
 use std::marker::PhantomData;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, forward_to_deserialize_any};
 
 use crate::Evaluator;
 
 /// Values passed to a [`Function`].
-pub trait Arguments<'a>: Sized {
+pub trait Arguments<'a, 'b>: Deserializer<'b> + Sized {
 	type Evaluator: Evaluator<'a>;
-
-	/// Gets the argument at `index` as a [`Value`] modeled by the [`Evaluator`].
-	fn get_indexed(
-		&self,
-		index: usize,
-	) -> Result<
-		Option<<Self::Evaluator as Evaluator<'a>>::Value>,
-		<Self::Evaluator as Evaluator<'a>>::Error,
-	>;
 }
 
 /// A dummy implementation of [`Arguments`] for [`Evaluator`]s that
 /// don't provide native function interop.
-pub struct InfallibleArguments<'a, E: 'a> {
+pub struct InfallibleArguments<'a, 'b, E> {
 	_inner: Infallible,
-	_phantom: PhantomData<&'a E>,
+	_phantom: PhantomData<fn(&'a (), &'b (), E)>,
 }
 
-impl<'a, E> Arguments<'a> for InfallibleArguments<'a, E>
+impl<'a, 'de, E> Deserializer<'de> for InfallibleArguments<'a, 'de, E> {
+	type Error = InfallibleError<'de, E>;
+
+	fn deserialize_any<V>(self, _: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		unreachable!()
+	}
+
+	forward_to_deserialize_any! {
+		bytes identifier bool byte_buf char enum f32 f64 i128 i16 i32 i64 i8
+		ignored_any map newtype_struct option seq str string struct tuple
+		tuple_struct u128 u16 u32 u64 u8 unit unit_struct
+	}
+}
+
+impl<'a, 'b, E> Arguments<'a, 'b> for InfallibleArguments<'a, 'b, E>
 where
 	E: Evaluator<'a>,
 {
 	type Evaluator = E;
+}
 
-	#[inline]
-	fn get_indexed(
-		&self,
-		_: usize,
-	) -> Result<
-		Option<<Self::Evaluator as Evaluator<'a>>::Value>,
-		<Self::Evaluator as Evaluator<'a>>::Error,
-	> {
+pub struct InfallibleError<'a, E> {
+	_inner: Infallible,
+	_phantom: PhantomData<fn(&'a (), E)>,
+}
+
+impl<'a, E> fmt::Debug for InfallibleError<'a, E> {
+	fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
+		unreachable!()
+	}
+}
+
+impl<'a, E> fmt::Display for InfallibleError<'a, E> {
+	fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
+		unreachable!()
+	}
+}
+
+impl<'a, E> Error for InfallibleError<'a, E> {}
+
+impl<'a, E> de::Error for InfallibleError<'a, E> {
+	fn custom<T>(_: T) -> Self
+	where
+		T: fmt::Display,
+	{
 		unreachable!()
 	}
 }
@@ -47,10 +75,10 @@ where
 pub trait Function<'a, E: Evaluator<'a>> {
 	fn argv(&self) -> (usize, Option<usize>);
 
-	fn call(
+	fn call<'b>(
 		&self,
 		evaluator: &E,
-		arguments: <E as Evaluator<'a>>::Arguments<'_>,
+		arguments: <E as Evaluator<'a>>::Arguments<'b>,
 	) -> Result<<E as Evaluator<'a>>::Value, <E as Evaluator<'a>>::Error>;
 }
 
@@ -79,7 +107,7 @@ where
 
 pub trait ValueSerializer<'a>
 where
-	Self: Serializer,
+	Self: Serializer<Ok = Self::Value>,
 {
 	type Evaluator: Evaluator<'a, Value = Self::Value>;
 	type Value: Value<'a, Serializer = Self>;

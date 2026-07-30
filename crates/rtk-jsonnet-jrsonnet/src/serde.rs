@@ -1,14 +1,68 @@
 use jrsonnet_evaluator::error::ErrorKind;
 use jrsonnet_evaluator::typed::ValType;
 use jrsonnet_evaluator::val::ArrValue;
-use jrsonnet_evaluator::{Error, IBytes, IStr, ObjValue, ObjValueBuilder, Val};
+use jrsonnet_evaluator::{Error, IBytes, IStr, ObjValue, ObjValueBuilder, Thunk, Val};
 use serde::de::value::StrDeserializer;
 use serde::de::{
 	self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
 };
 use serde::{Deserialize, Deserializer, Serialize, forward_to_deserialize_any, ser};
 
-use crate::{Evaluation, Evaluator, Value};
+use crate::{Arguments, Evaluation, Evaluator, Value};
+
+impl<'de> Arguments<'de> {
+	fn seq_access(self) -> impl SeqAccess<'de, Error = Error> {
+		struct ArgumentsSeqAccess<'de>(<&'de [Option<Thunk<Val>>] as IntoIterator>::IntoIter);
+
+		impl<'de> SeqAccess<'de> for ArgumentsSeqAccess<'de> {
+			type Error = Error;
+
+			fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+			where
+				T: DeserializeSeed<'de>,
+			{
+				match self.0.next() {
+					Some(Some(thunk)) => match thunk.evaluate() {
+						Ok(value) => Ok(Some(T::deserialize(seed, Value(value))?)),
+						Err(error) => Err(error),
+					},
+					Some(None) => Ok(Some(T::deserialize(seed, Value(Val::Null))?)),
+					None => Ok(None),
+				}
+			}
+
+			fn size_hint(&self) -> Option<usize> {
+				self.0.size_hint().1
+			}
+		}
+
+		ArgumentsSeqAccess(self.0.into_iter())
+	}
+}
+
+impl<'de> Deserializer<'de> for Arguments<'de> {
+	type Error = Error;
+
+	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		visitor.visit_seq(self.seq_access())
+	}
+
+	fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		visitor.visit_seq(self.seq_access())
+	}
+
+	forward_to_deserialize_any! {
+		bytes bool byte_buf char enum f32 f64 i128 i16 i32 i64 i8 identifier
+		ignored_any map newtype_struct option str string struct tuple
+		tuple_struct u128 u16 u32 u64 u8 unit unit_struct
+	}
+}
 
 impl<'de> Deserialize<'de> for Value {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

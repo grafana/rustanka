@@ -12,12 +12,12 @@ use crate::v1alpha1::common::{JsonentImplementationOrConfig, Strategy, Versions}
 /// The `spec` of an [`Environment`].
 #[derive(CustomResource, Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
 #[kube(
-    group = "tanka.dev",
-    version = "v1alpha1",
-    kind = "Environment",
-    derive = "Default",
-    doc = "A `CustomResource` representing a Tanka environment.",
-    attr = "non_exhaustive",
+	group = "tanka.dev",
+	version = "v1alpha1",
+	kind = "Environment",
+	derive = "Default",
+	doc = "A `CustomResource` representing a Tanka environment.",
+	attr = "non_exhaustive"
 )]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -48,28 +48,32 @@ pub struct EnvironmentSpec {
 }
 
 impl DeepMerge for EnvironmentSpec {
-    fn merge_from(&mut self, other: Self) {
-        if let Some(api_server) = other.api_server {
-            self.api_server = Some(api_server);
-        }
+	fn merge_from(&mut self, other: Self) {
+		if let Some(api_server) = other.api_server {
+			self.api_server = Some(api_server);
+		}
 
-        merge_strategies::list::set(&mut self.context_names, other.context_names);
-        
-        if let Some(namespace) = other.namespace {
-            self.namespace = Some(namespace);
-        }
+		merge_strategies::list::set(&mut self.context_names, other.context_names);
 
-        self.diff_strategy.merge_from(other.diff_strategy);
-        self.apply_strategy.merge_from(other.apply_strategy);
+		if let Some(namespace) = other.namespace {
+			self.namespace = Some(namespace);
+		}
 
-        self.inject_labels = self.inject_labels || other.inject_labels;
+		self.diff_strategy.merge_from(other.diff_strategy);
+		self.apply_strategy.merge_from(other.apply_strategy);
 
-        merge_strategies::list::set(&mut self.tanka_env_label_from_fields, other.tanka_env_label_from_fields);
+		self.inject_labels = self.inject_labels || other.inject_labels;
 
-        self.resource_defaults.merge_from(other.resource_defaults);
-        self.expect_versions.merge_from(other.expect_versions);
-        self.export_jsonnet_implementation.merge_from(other.export_jsonnet_implementation);
-    }
+		merge_strategies::list::set(
+			&mut self.tanka_env_label_from_fields,
+			other.tanka_env_label_from_fields,
+		);
+
+		self.resource_defaults.merge_from(other.resource_defaults);
+		self.expect_versions.merge_from(other.expect_versions);
+		self.export_jsonnet_implementation
+			.merge_from(other.export_jsonnet_implementation);
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -84,8 +88,10 @@ pub struct ResourceDefaults {
 }
 
 impl DeepMerge for ResourceDefaults {
-    fn merge_from(&mut self, other: Self) {
-        merge_strategies::hashmap::granular(&mut self.annotations, other.annotations, |a, b| *a = b);
-        merge_strategies::hashmap::granular(&mut self.labels, other.labels, |a, b| *a = b);
-    }
+	fn merge_from(&mut self, other: Self) {
+		merge_strategies::hashmap::granular(&mut self.annotations, other.annotations, |a, b| {
+			*a = b
+		});
+		merge_strategies::hashmap::granular(&mut self.labels, other.labels, |a, b| *a = b);
+	}
 }

@@ -1,6 +1,6 @@
-use std::path::Path;
 use std::fs::File;
 use std::io;
+use std::path::Path;
 
 use thiserror::Error;
 
@@ -38,17 +38,18 @@ impl Rc {
 }
 
 impl DeepMergeFrom<Environment> for Rc {
-    fn merge_from(&mut self, other: Environment) {
-        DeepMergeFrom::merge_from(&mut self.spec, other.spec);    
-    }
+	fn merge_from(&mut self, other: Environment) {
+		DeepMergeFrom::merge_from(&mut self.spec, other.spec);
+	}
 }
 
 impl DeepMergeFrom<EnvironmentSpec> for RcSpec {
-    fn merge_from(&mut self, other: EnvironmentSpec) {
-        if let Some(api_server) = other.api_server {
-            self.api_server = Some(api_server);
-        }
-        self.expect_versions.merge_from(other.expect_versions);
-        self.jsonnet_implementation.merge_from(other.export_jsonnet_implementation);
-    }
+	fn merge_from(&mut self, other: EnvironmentSpec) {
+		if let Some(api_server) = other.api_server {
+			self.api_server = Some(api_server);
+		}
+		self.expect_versions.merge_from(other.expect_versions);
+		self.jsonnet_implementation
+			.merge_from(other.export_jsonnet_implementation);
+	}
 }

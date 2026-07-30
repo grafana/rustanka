@@ -16,13 +16,15 @@ use crate::merge_strategies;
 /// A specified major version of `helm`- ie `v3`/`v4`.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum HelmVersion {
-    #[default]
-    V3,
-    V4,
+	#[default]
+	V3,
+	V4,
 }
 
 impl DeepMerge for HelmVersion {
-    fn merge_from(&mut self, other: Self) { *self = other; }
+	fn merge_from(&mut self, other: Self) {
+		*self = other;
+	}
 }
 
 impl<'de> Deserialize<'de> for HelmVersion {
@@ -39,17 +41,17 @@ impl<'de> Deserialize<'de> for HelmVersion {
 				write!(formatter, "a valid helm version")
 			}
 
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                match v {
-                    3 => Ok(HelmVersion::V3),
-                    4 => Ok(HelmVersion::V4),
-                    1|2 => Err(E::custom(format!("helm v{v} is not supported"))),
-                    _ => Err(E::custom(format!("{v} is not a valid helm version"))),
-                }
-            }
+			fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				match v {
+					3 => Ok(HelmVersion::V3),
+					4 => Ok(HelmVersion::V4),
+					1 | 2 => Err(E::custom(format!("helm v{v} is not supported"))),
+					_ => Err(E::custom(format!("{v} is not a valid helm version"))),
+				}
+			}
 
 			fn visit_str<E>(self, string: &str) -> Result<Self::Value, E>
 			where
@@ -68,9 +70,9 @@ impl FromStr for HelmVersion {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s {
-            "3"|"v3"|"V3" => Ok(HelmVersion::V3),
-            "4"|"v4"|"V4" => Ok(HelmVersion::V4),
-            _ => Err(HelmVersionFromStrError(s.into())),
+			"3" | "v3" | "V3" => Ok(HelmVersion::V3),
+			"4" | "v4" | "V4" => Ok(HelmVersion::V4),
+			_ => Err(HelmVersionFromStrError(s.into())),
 		}
 	}
 }
@@ -90,15 +92,15 @@ impl JsonSchema for HelmVersion {
 }
 
 impl Serialize for HelmVersion {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {   
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
 		match self {
 			HelmVersion::V3 => serializer.serialize_str("v3"),
-            HelmVersion::V4 => serializer.serialize_str("v4"),
+			HelmVersion::V4 => serializer.serialize_str("v4"),
 		}
-    }
+	}
 }
 
 /// The error returned by `<HelmVersion as FromStr>::Err`.
@@ -106,30 +108,30 @@ impl Serialize for HelmVersion {
 pub struct HelmVersionFromStrError(Box<str>);
 
 impl fmt::Display for HelmVersionFromStrError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match &*self.0 {
-            "1"|"v1"|"V1" => formatter.write_str("v1 helm is not supported"),
-            "2"|"v2"|"V2" => formatter.write_str("v2 helm is not supported"),
-            _ => write!(formatter, "{:?} is not a valid helm version", self.0),
-        }
-    }
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+		match &*self.0 {
+			"1" | "v1" | "V1" => formatter.write_str("v1 helm is not supported"),
+			"2" | "v2" | "V2" => formatter.write_str("v2 helm is not supported"),
+			_ => write!(formatter, "{:?} is not a valid helm version", self.0),
+		}
+	}
 }
 
-impl Error for HelmVersionFromStrError { }
+impl Error for HelmVersionFromStrError {}
 
 /// Flags passed to a specified [`JsonnetImplementation`].
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct JsonentImplementationFlags(pub FxHashMap<Box<str>, Box<str>>);
 
 impl DeepMerge for JsonentImplementationFlags {
-    fn merge_from(&mut self, other: Self) {
-        merge_strategies::hashmap::granular(&mut self.0, other.0, |a, b| *a = b);
-    }
+	fn merge_from(&mut self, other: Self) {
+		merge_strategies::hashmap::granular(&mut self.0, other.0, |a, b| *a = b);
+	}
 }
 
 /// A specified preferred Jsonnet implementation for this [`Enviornment`] or
 /// project.
-/// 
+///
 /// The Jsonnet engine has the option to ignore this preference if it cannot
 /// provide the specified implementation.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -142,7 +144,9 @@ pub enum JsonnetImplementation {
 }
 
 impl DeepMerge for JsonnetImplementation {
-    fn merge_from(&mut self, other: Self) { *self = other; }
+	fn merge_from(&mut self, other: Self) {
+		*self = other;
+	}
 }
 
 impl<'de> Deserialize<'de> for JsonnetImplementation {
@@ -244,10 +248,10 @@ pub struct JsonnetImplementationConfig {
 }
 
 impl DeepMerge for JsonnetImplementationConfig {
-    fn merge_from(&mut self, other: Self) {
-        self.type_.merge_from(other.type_);
-        self.flags.merge_from(other.flags);
-    }
+	fn merge_from(&mut self, other: Self) {
+		self.type_.merge_from(other.type_);
+		self.flags.merge_from(other.flags);
+	}
 }
 
 /// A helper type that can de/serialize as either a [`JsonnetImplementation`] or
@@ -260,50 +264,54 @@ pub enum JsonentImplementationOrConfig {
 }
 
 impl JsonentImplementationOrConfig {
-    pub fn implementation(&self) -> &JsonnetImplementation {
-        match self {
-            JsonentImplementationOrConfig::JsonnetImplementation(implementation) => implementation,
-            JsonentImplementationOrConfig::JsonnetImplementationConfig(config) => &config.type_,
-        }
-    }
+	pub fn implementation(&self) -> &JsonnetImplementation {
+		match self {
+			JsonentImplementationOrConfig::JsonnetImplementation(implementation) => implementation,
+			JsonentImplementationOrConfig::JsonnetImplementationConfig(config) => &config.type_,
+		}
+	}
 }
 
 impl DeepMerge for JsonentImplementationOrConfig {
-    fn merge_from(&mut self, other: Self) {
-        match (self, other) {
-            (
-                JsonentImplementationOrConfig::JsonnetImplementationConfig(a),
-                JsonentImplementationOrConfig::JsonnetImplementationConfig(b)
-            ) if a.type_ == b.type_ => a.merge_from(b),
-            (a, b) => *a = b,
-        }
-    }
+	fn merge_from(&mut self, other: Self) {
+		match (self, other) {
+			(
+				JsonentImplementationOrConfig::JsonnetImplementationConfig(a),
+				JsonentImplementationOrConfig::JsonnetImplementationConfig(b),
+			) if a.type_ == b.type_ => a.merge_from(b),
+			(a, b) => *a = b,
+		}
+	}
 }
 
 impl Default for JsonentImplementationOrConfig {
-    fn default() -> Self {
-        JsonentImplementationOrConfig::JsonnetImplementation(JsonnetImplementation::default())
-    }
+	fn default() -> Self {
+		JsonentImplementationOrConfig::JsonnetImplementation(JsonnetImplementation::default())
+	}
 }
 
 /// A strategy used for `kubectl apply` and `kubectl diff`- `client` or `server`.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Strategy {
-    Client,
-    Server,
+	Client,
+	Server,
 }
 
 impl DeepMerge for Strategy {
-    fn merge_from(&mut self, other: Self) { *self = other; }
+	fn merge_from(&mut self, other: Self) {
+		*self = other;
+	}
 }
 
-/// A [`semver::Version`] with a [`JsonSchema`] implementation. 
+/// A [`semver::Version`] with a [`JsonSchema`] implementation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Version(pub semver::Version);
 
 impl DeepMerge for Version {
-    fn merge_from(&mut self, other: Self) { *self = other; }
+	fn merge_from(&mut self, other: Self) {
+		*self = other;
+	}
 }
 
 impl JsonSchema for Version {
@@ -317,9 +325,9 @@ impl JsonSchema for Version {
 
 	fn json_schema(_: &mut SchemaGenerator) -> Schema {
 		json_schema!({
-            "type": "string",
-            "pattern": r#"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#,
-        })
+			"type": "string",
+			"pattern": r#"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#,
+		})
 	}
 }
 
@@ -328,7 +336,9 @@ impl JsonSchema for Version {
 pub struct VersionReq(pub semver::VersionReq);
 
 impl DeepMerge for VersionReq {
-    fn merge_from(&mut self, other: Self) { *self = other; }
+	fn merge_from(&mut self, other: Self) {
+		*self = other;
+	}
 }
 
 impl JsonSchema for VersionReq {
@@ -342,9 +352,9 @@ impl JsonSchema for VersionReq {
 
 	fn json_schema(_: &mut SchemaGenerator) -> Schema {
 		json_schema!({
-            "type": "string",
-            "pattern": r#"^(>=|<=|>|<|=|~|\^)?\s*v?(\d+|[xX*])(\.(\d+|[xX*]))?(\.(\d+|[xX*]))?(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"#,
-        })
+			"type": "string",
+			"pattern": r#"^(>=|<=|>|<|=|~|\^)?\s*v?(\d+|[xX*])(\.(\d+|[xX*]))?(\.(\d+|[xX*]))?(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"#,
+		})
 	}
 }
 
@@ -352,23 +362,23 @@ impl JsonSchema for VersionReq {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Versions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub binaries: Option<FxHashMap<PathBuf, VersionReq>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kubectl: Option<VersionReq>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub binaries: Option<FxHashMap<PathBuf, VersionReq>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub kubectl: Option<VersionReq>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tanka: Option<VersionReq>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub helm: Option<HelmVersion>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub helm: Option<HelmVersion>,
 }
 
 impl DeepMerge for Versions {
-    fn merge_from(&mut self, other: Self) {
-        merge_strategies::hashmap::granular(&mut self.binaries, other.binaries, |a, b| *a = b);
-        self.kubectl.merge_from(other.kubectl);
-        self.tanka.merge_from(other.tanka);
-        self.helm.merge_from(other.helm);
-    }
+	fn merge_from(&mut self, other: Self) {
+		merge_strategies::hashmap::granular(&mut self.binaries, other.binaries, |a, b| *a = b);
+		self.kubectl.merge_from(other.kubectl);
+		self.tanka.merge_from(other.tanka);
+		self.helm.merge_from(other.helm);
+	}
 }
 
 #[inline(always)]

@@ -10,6 +10,7 @@ version.workspace = true
 rayon.workspace = true
 regex.workspace = true
 rtk-jsonnet-core.workspace = true
+rtk-jsonnet-helm.workspace = true
 rtk-jsonnet-jrsonnet.workspace = true
 rtk-spec.workspace = true
 thiserror.workspace = true

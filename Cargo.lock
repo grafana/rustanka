@@ -4851,6 +4851,7 @@ dependencies = [
  "rayon",
  "regex",
  "rtk-jsonnet-core",
+ "rtk-jsonnet-helm",
  "rtk-jsonnet-jrsonnet",
  "rtk-spec",
  "tempfile",
@@ -4865,6 +4866,17 @@ version = "0.5.0-pre99"
 dependencies = [
  "rtk-spec",
  "serde",
+]
+
+[[package]]
+name = "rtk-jsonnet-helm"
+version = "0.5.0-pre99"
+dependencies = [
+ "rtk-jsonnet-core",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
 ]
 
 [[package]]
