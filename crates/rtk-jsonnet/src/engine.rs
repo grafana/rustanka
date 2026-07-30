@@ -1,4 +1,6 @@
 use std::convert::Infallible;
+use std::fmt;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
 
@@ -115,13 +117,12 @@ impl Evaluator {
 		Ok(self)
 	}
 
-	pub fn with_native_function<'a, E, F>(
+	pub fn with_native_function<'a, F>(
 		&mut self,
 		key: &'a str,
 		function: F,
 	) -> Result<&mut Self, Error>
 	where
-		E: rtk_jsonnet_core::Evaluator<'a>,
 		F: 'static + Function<'a, JrsonnetEvaluator>,
 	{
 		call_implementation_evaluator_method!(self, with_native_function, key, function);
@@ -142,6 +143,44 @@ impl Evaluator {
 		call_implementation_evaluator_method!(self, with_top_level_code, key, value);
 		Ok(self)
 	}
+
+	pub fn evaluate_file<P>(mut self, path: P) -> Result<Evaluation, Error>
+	where
+		P: AsRef<Path> + fmt::Debug,
+	{
+		let implementation = self.selected_implementation();
+		self.populate_evaluator(implementation)?;
+		match self.evaluator.take().expect("evaluator was populated") {
+			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
+				.evaluate_file(path)
+				.map(Evaluation::Jrsonnet)
+				.map_err(|error| JrsonnetError::Evaluator(error).into()),
+		}
+	}
+
+	pub fn evaluate_snippet<S>(mut self, snippet: S) -> Result<Evaluation, Error>
+	where
+		S: AsRef<str> + fmt::Debug,
+	{
+		let implementation = self.selected_implementation();
+		self.populate_evaluator(implementation)?;
+		match self.evaluator.take().expect("evaluator was populated") {
+			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
+				.evaluate_snippet(snippet)
+				.map(Evaluation::Jrsonnet)
+				.map_err(|error| JrsonnetError::Evaluator(error).into()),
+		}
+	}
+
+	fn selected_implementation(&self) -> JsonnetImplementation {
+		self.rc
+			.spec
+			.jsonnet_implementation
+			.as_ref()
+			.map(|implementation| implementation.implementation())
+			.cloned()
+			.unwrap_or_default()
+	}
 }
 
 impl Evaluator {
@@ -149,6 +188,13 @@ impl Evaluator {
 		&mut self,
 		implementation: JsonnetImplementation,
 	) -> Result<&mut ImplementationEvaluator, Error> {
+		let flags_disable_native_functions = self
+			.rc
+			.flags::<JrsonnetFlag>()
+			.map_err(JrsonnetError::Flag)?
+			.any(|flag| matches!(flag, JrsonnetFlag::DisableNativeFunctions(true)));
+		let disable_native_functions =
+			self.rc.spec.disable_native_functions || flags_disable_native_functions;
 		let mut implementations = self
 			.engine
 			.implementations
@@ -174,8 +220,12 @@ impl Evaluator {
 			}
 		};
 
-		call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
-		//call_implementation_evaluator_method!(@with: evaluator, with_native_function, KUSTOMIZE GOES HERE);
+		if !disable_native_functions {
+			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_native_functions::Plugin::new());
+			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_regex::Plugin::new());
+			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
+			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_kustomize::Plugin::new());
+		}
 
 		Ok(evaluator)
 	}
@@ -184,6 +234,22 @@ impl Evaluator {
 #[derive(Debug)]
 enum ImplementationEvaluator {
 	Jrsonnet(JrsonnetEvaluator),
+}
+
+#[derive(Debug)]
+pub enum Evaluation {
+	Jrsonnet(rtk_jsonnet_jrsonnet::Evaluation),
+}
+
+impl serde::Serialize for Evaluation {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		match self {
+			Evaluation::Jrsonnet(evaluation) => evaluation.serialize(serializer),
+		}
+	}
 }
 
 #[derive(Debug, Default)]
@@ -224,5 +290,75 @@ impl Implementations {
 				Ok(())
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rtk_spec::canonical::Rc;
+
+	use super::Engine;
+
+	#[test]
+	fn evaluates_composed_native_plugins() {
+		let evaluation = Engine::new(Rc::default())
+			.create_evaluator()
+			.evaluate_snippet(
+				r#"{
+					escaped: std.native("escapeStringRegex")("a.b"),
+					json: std.native("manifestJsonFromJson")('{"a":1}', 2),
+					matched: std.native("regexMatch")("^a", "abc"),
+					parsedJson: std.native("parseJson")('{"a":1}'),
+					parsedYaml: std.native("parseYaml")("mode: 0755"),
+					sha256: std.native("sha256")("foo"),
+					substituted: std.native("regexSubst")("a", "banana", "o"),
+					yaml: std.native("manifestYamlFromJson")('{"a":1}'),
+				}"#,
+			)
+			.unwrap();
+		assert_eq!(
+			serde_json::to_value(evaluation).unwrap(),
+			serde_json::json!({
+				"escaped": "a\\.b",
+				"json": "{\n  \"a\": 1\n}\n",
+				"matched": true,
+				"parsedJson": {"a": 1},
+				"parsedYaml": [{"mode": 493}],
+				"sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+				"substituted": "bonono",
+				"yaml": "a: 1\n",
+			})
+		);
+	}
+
+	#[test]
+	fn honors_top_level_native_function_disable() {
+		let mut rc = Rc::default();
+		rc.spec.disable_native_functions = true;
+		let result = Engine::new(rc)
+			.create_evaluator()
+			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn honors_implementation_native_function_disable_flag() {
+		let rc: Rc = serde_json::from_value(serde_json::json!({
+			"apiVersion": "tanka.dev/v1alpha1",
+			"kind": "Rc",
+			"metadata": { "name": "test" },
+			"spec": {
+				"disableNativeFunctions": false,
+				"jsonnetImplementation": {
+					"type": "jrsonnet",
+					"flags": { "disableNativeFunctions": "true" }
+				}
+			}
+		}))
+		.unwrap();
+		let result = Engine::new(rc)
+			.create_evaluator()
+			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
+		assert!(result.is_err());
 	}
 }

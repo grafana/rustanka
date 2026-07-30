@@ -143,6 +143,9 @@ rtk-jsonnet = { path = "./crates/rtk-jsonnet", version = "0.5.0-pre99" }
 rtk-jsonnet-core = { path = "./crates/rtk-jsonnet-core", version = "0.5.0-pre99" }
 rtk-jsonnet-helm = { path = "./crates/rtk-jsonnet-helm", version = "0.5.0-pre99" }
 rtk-jsonnet-jrsonnet = { path = "./crates/rtk-jsonnet-jrsonnet", version = "0.5.0-pre99" }
+rtk-jsonnet-kustomize = { path = "./crates/rtk-jsonnet-kustomize", version = "0.5.0-pre99" }
+rtk-jsonnet-native-functions = { path = "./crates/rtk-jsonnet-native-functions", version = "0.5.0-pre99" }
+rtk-jsonnet-regex = { path = "./crates/rtk-jsonnet-regex", version = "0.5.0-pre99" }
 rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
 
 castaway = "0.2.4"

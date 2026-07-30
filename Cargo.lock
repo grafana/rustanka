@@ -4853,7 +4853,12 @@ dependencies = [
  "rtk-jsonnet-core",
  "rtk-jsonnet-helm",
  "rtk-jsonnet-jrsonnet",
+ "rtk-jsonnet-kustomize",
+ "rtk-jsonnet-native-functions",
+ "rtk-jsonnet-regex",
  "rtk-spec",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -4891,8 +4896,41 @@ dependencies = [
  "rtk-spec",
  "rustc-hash 2.1.1",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "rtk-jsonnet-kustomize"
+version = "0.5.0-pre99"
+dependencies = [
+ "rtk-jsonnet-core",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rtk-jsonnet-native-functions"
+version = "0.5.0-pre99"
+dependencies = [
+ "hex",
+ "rtk-jsonnet-core",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
+name = "rtk-jsonnet-regex"
+version = "0.5.0-pre99"
+dependencies = [
+ "regex",
+ "rtk-jsonnet-core",
+ "serde",
 ]
 
 [[package]]

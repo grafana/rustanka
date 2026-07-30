@@ -75,6 +75,10 @@ impl<'a, E> de::Error for InfallibleError<'a, E> {
 pub trait Function<'a, E: Evaluator<'a>> {
 	fn argv(&self) -> (usize, Option<usize>);
 
+	fn parameter_names(&self) -> Option<&'static [&'static str]> {
+		None
+	}
+
 	fn call<'b>(
 		&self,
 		evaluator: &E,

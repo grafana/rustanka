@@ -348,10 +348,13 @@ impl Serialize for Evaluation {
 	where
 		S: ser::Serializer,
 	{
-		self.0
-			.as_ref()
-			.expect("the evaluation is only empty while being dropped")
-			.serialize(serializer)
+		Evaluator::CURRENT.with(|current| {
+			let _guard = crate::CurrentEvaluatorGuard::new(current, std::rc::Rc::clone(&self.1));
+			self.0
+				.as_ref()
+				.expect("the evaluation is only empty while being dropped")
+				.serialize(serializer)
+		})
 	}
 }
 

@@ -12,12 +12,17 @@ regex.workspace = true
 rtk-jsonnet-core.workspace = true
 rtk-jsonnet-helm.workspace = true
 rtk-jsonnet-jrsonnet.workspace = true
+rtk-jsonnet-kustomize.workspace = true
+rtk-jsonnet-native-functions.workspace = true
+rtk-jsonnet-regex.workspace = true
 rtk-spec.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
 
 [lints]

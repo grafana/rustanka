@@ -20,6 +20,12 @@ impl Plugin {
 	}
 }
 
+impl Default for Plugin {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl<'a, E> jsonnet::Plugin<'a, E> for Plugin
 where
 	E: jsonnet::Evaluator<'a>,
@@ -46,7 +52,7 @@ impl State {
 	fn get() -> &'static State {
 		static STATE: OnceLock<State> = OnceLock::new();
 		STATE.get_or_init(|| State {
-			template_cache: RwLock::new(FxHashMap::with_hasher(FxBuildHasher::default())),
+			template_cache: RwLock::new(FxHashMap::with_hasher(FxBuildHasher)),
 		})
 	}
 
@@ -54,7 +60,7 @@ impl State {
 		name: &str,
 		chart_path: &Path,
 		chart_meta: Option<&str>,
-		options: &functions::template::Options<'_>,
+		options: &functions::template::Options,
 	) -> Box<str> {
 		let hashed = {
 			let mut hasher = FxHasher::default();

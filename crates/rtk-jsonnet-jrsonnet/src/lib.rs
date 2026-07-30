@@ -4,6 +4,7 @@ use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fmt::{self, Formatter, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc as StdRc;
 use std::str::FromStr;
 
 use ::serde::{Deserialize, Serialize};
@@ -111,7 +112,27 @@ pub struct Evaluator {
 
 impl Evaluator {
 	thread_local! {
-		static CURRENT: RefCell<Option<Evaluator>> = RefCell::new(None);
+		static CURRENT: RefCell<Option<StdRc<Evaluator>>> = const { RefCell::new(None) };
+	}
+}
+
+struct CurrentEvaluatorGuard<'a> {
+	current: &'a RefCell<Option<StdRc<Evaluator>>>,
+	previous: Option<StdRc<Evaluator>>,
+}
+
+impl<'a> CurrentEvaluatorGuard<'a> {
+	fn new(current: &'a RefCell<Option<StdRc<Evaluator>>>, evaluator: StdRc<Evaluator>) -> Self {
+		Self {
+			current,
+			previous: current.replace(Some(evaluator)),
+		}
+	}
+}
+
+impl Drop for CurrentEvaluatorGuard<'_> {
+	fn drop(&mut self) {
+		self.current.replace(self.previous.take());
 	}
 }
 
@@ -252,12 +273,18 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 				signature: FunctionSignature::new({
 					let (argv, argd) = func.argv();
 					let argd = argv - argd.unwrap_or_default();
+					let parameter_names = func.parameter_names();
+					if let Some(parameter_names) = parameter_names {
+						assert_eq!(parameter_names.len(), argv);
+					}
 
 					let mut params = Vec::with_capacity(argv);
 
-					for i in 0..=argv {
+					for i in 0..argv {
 						params.push(ParamParse::new(
-							ParamName::Unnamed,
+							parameter_names.map_or(ParamName::Unnamed, |names| {
+								ParamName::Named(names[i].into())
+							}),
 							if i >= argd {
 								ParamDefault::Exists
 							} else {
@@ -317,8 +344,9 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 		};
 		self.state = Some(state.clone());
 
+		let current_evaluator = StdRc::new(self);
 		Evaluator::CURRENT.with(move |evaluator| {
-			let old_evaluator = evaluator.replace(Some(self));
+			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
 
 			let result = (|| {
 				let val = state.import(path.as_ref())?;
@@ -333,12 +361,10 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 					val
 				};
 
-				Ok(Evaluation(Some(val)))
+				Ok(val)
 			})();
 
-			evaluator.replace(old_evaluator);
-
-			result
+			result.map(|value| Evaluation(Some(value), current_evaluator))
 		})
 	}
 
@@ -363,8 +389,9 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 		};
 		self.state = Some(state.clone());
 
+		let current_evaluator = StdRc::new(self);
 		Evaluator::CURRENT.with(move |evaluator| {
-			let old_evaluator = evaluator.replace(Some(self));
+			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
 
 			let result = (|| {
 				let val = state.evaluate_snippet("<anonymous>", snippet.as_ref())?;
@@ -379,12 +406,10 @@ impl<'a> rtk_jsonnet_core::Evaluator<'a> for Evaluator {
 					val
 				};
 
-				Ok(Evaluation(Some(val)))
+				Ok(val)
 			})();
 
-			evaluator.replace(old_evaluator);
-
-			result
+			result.map(|value| Evaluation(Some(value), current_evaluator))
 		})
 	}
 }
@@ -407,7 +432,10 @@ impl<'a> rtk_jsonnet_core::EvaluatorError<'a> for EvaluatorError {
 }
 
 #[derive(Debug)]
-pub struct Evaluation(pub(crate) Option<jrsonnet_evaluator::Val>);
+pub struct Evaluation(
+	pub(crate) Option<jrsonnet_evaluator::Val>,
+	pub(crate) StdRc<Evaluator>,
+);
 
 impl<'a> rtk_jsonnet_core::Evaluation<'a> for Evaluation {}
 
@@ -628,6 +656,55 @@ impl FromStr for OutputFormat {
 			"jrsonnet" => Ok(OutputFormat::Jrsonnet),
 			_ => Err(OutputFormatFromStrError),
 		}
+	}
+}
+
+#[cfg(test)]
+mod native_function_tests {
+	use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
+	use serde::{Deserialize, Serialize};
+
+	#[derive(Debug)]
+	struct Add;
+
+	impl<'a> rtk_jsonnet_core::Function<'a, super::Evaluator> for Add {
+		fn argv(&self) -> (usize, Option<usize>) {
+			(2, None)
+		}
+
+		fn parameter_names(&self) -> Option<&'static [&'static str]> {
+			Some(&["left", "right"])
+		}
+
+		fn call<'b>(
+			&self,
+			evaluator: &super::Evaluator,
+			arguments: super::Arguments<'b>,
+		) -> Result<super::Value, super::EvaluatorError> {
+			let (left, right) = <(i64, i64)>::deserialize(arguments)?;
+			Ok((left + right).serialize(evaluator.create_serializer())?)
+		}
+	}
+
+	fn evaluate(snippet: &str) -> Result<serde_json::Value, String> {
+		let implementation = super::Implementation::new(std::iter::empty()).unwrap();
+		let mut evaluator = implementation.create_evaluator();
+		evaluator.with_native_function("add", Add).unwrap();
+		let evaluation = evaluator
+			.evaluate_snippet(snippet)
+			.map_err(|error| error.to_string())?;
+		serde_json::to_value(evaluation).map_err(|error| error.to_string())
+	}
+
+	#[test]
+	fn invokes_native_with_exact_positional_arity() {
+		assert_eq!(evaluate("std.native('add')(2, 3)").unwrap(), 5);
+		assert!(evaluate("std.native('add')(2, 3, 4)").is_err());
+	}
+
+	#[test]
+	fn invokes_native_with_named_arguments() {
+		assert_eq!(evaluate("std.native('add')(right=3, left=2)").unwrap(), 5);
 	}
 }
 
