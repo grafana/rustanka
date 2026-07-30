@@ -34,12 +34,6 @@ pub use crate::serde::ValueSerializer;
 struct Config {
 	/// Output format configuration for the bundled Jrsonnet implementation.
 	output_format: OutputFormatConfig,
-
-	/// When true, disables Tanka-specific native functions (manifestYamlFromJson,
-	/// parseYaml, parseJson, etc.). This is useful when tk uses jrsonnet binary
-	/// via exportJsonnetImplementation, where these native functions are not available
-	/// and the jsonnet code falls back to std.manifestYamlDoc.
-	disable_native_functions: bool,
 }
 
 impl Config {
@@ -54,9 +48,6 @@ impl Config {
 				}
 				Flag::OutputFormatStdManifestYamlStream(output_format) => {
 					self.output_format.std_manifest_yaml_stream = Some(output_format)
-				}
-				Flag::DisableNativeFunctions(disable_native_functions) => {
-					self.disable_native_functions = disable_native_functions
 				}
 			}
 		}
@@ -455,7 +446,6 @@ pub enum Flag {
 	OutputFormatFloats(OutputFormat),
 	OutputFormatStdManifestYamlDoc(OutputFormat),
 	OutputFormatStdManifestYamlStream(OutputFormat),
-	DisableNativeFunctions(bool),
 }
 
 impl rtk_jsonnet_core::Flag for Flag {
@@ -466,24 +456,15 @@ impl rtk_jsonnet_core::Flag for Flag {
 	type Value = FlagValue;
 
 	fn new(key: Self::Key, value: Self::Value) -> Result<Self, Self::Error> {
-		match value {
-			FlagValue::Bool(boolean) => {
-				if key == FlagKey::DisableNativeFunctions {
-					Ok(Flag::DisableNativeFunctions(boolean))
-				} else {
-					Err(FlagError::MismatchedKeyValue(key, value))
-				}
+		let FlagValue::OutputFormat(output_format) = value;
+		match key {
+			FlagKey::OutputFormatFloats => Ok(Flag::OutputFormatFloats(output_format)),
+			FlagKey::OutputFormatStdManifestYamlDoc => {
+				Ok(Flag::OutputFormatStdManifestYamlDoc(output_format))
 			}
-			FlagValue::OutputFormat(output_format) => match key {
-				FlagKey::OutputFormatFloats => Ok(Flag::OutputFormatFloats(output_format)),
-				FlagKey::OutputFormatStdManifestYamlDoc => {
-					Ok(Flag::OutputFormatStdManifestYamlDoc(output_format))
-				}
-				FlagKey::OutputFormatStdManifestYamlStream => {
-					Ok(Flag::OutputFormatStdManifestYamlStream(output_format))
-				}
-				_ => Err(FlagError::MismatchedKeyValue(key, value)),
-			},
+			FlagKey::OutputFormatStdManifestYamlStream => {
+				Ok(Flag::OutputFormatStdManifestYamlStream(output_format))
+			}
 		}
 	}
 }
@@ -494,8 +475,6 @@ pub enum FlagError {
 	InvalidFlagKey(#[from] FlagKeyFromStrError),
 	#[error("invalid flag value: {0}")]
 	InvalidFlagValue(#[from] FlagValueFromStrError),
-	#[error("invalid flag key/value pair; {0} and {1} are not meant to be paired together")]
-	MismatchedKeyValue(FlagKey, FlagValue),
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -507,7 +486,6 @@ pub enum FlagKey {
 	OutputFormatStdManifestYamlDoc,
 	#[serde(rename = "outputFormat.std.manifestYamlStream")]
 	OutputFormatStdManifestYamlStream,
-	DisableNativeFunctions,
 }
 
 impl FlagKey {
@@ -515,7 +493,6 @@ impl FlagKey {
 		FlagKey::OutputFormatFloats,
 		FlagKey::OutputFormatStdManifestYamlDoc,
 		FlagKey::OutputFormatStdManifestYamlStream,
-		FlagKey::DisableNativeFunctions,
 	];
 }
 
@@ -529,7 +506,6 @@ impl fmt::Display for FlagKey {
 			FlagKey::OutputFormatStdManifestYamlStream => {
 				formatter.write_str("outputFormat.std.manifestYamlStream")
 			}
-			FlagKey::DisableNativeFunctions => formatter.write_str("disableNativeFunctions"),
 		}
 	}
 }
@@ -542,7 +518,6 @@ impl FromStr for FlagKey {
 			"outputFormat.floats" => Ok(FlagKey::OutputFormatFloats),
 			"outputFormat.std.manifestYamlDoc" => Ok(FlagKey::OutputFormatStdManifestYamlDoc),
 			"outputFormat.std.manifestYamlStream" => Ok(FlagKey::OutputFormatStdManifestYamlStream),
-			"disableNativeFunctions" => Ok(FlagKey::DisableNativeFunctions),
 			_ => Err(FlagKeyFromStrError),
 		}
 	}
@@ -574,14 +549,12 @@ impl StdError for FlagKeyFromStrError {}
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum FlagValue {
-	Bool(bool),
 	OutputFormat(OutputFormat),
 }
 
 impl fmt::Display for FlagValue {
 	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
 		match self {
-			FlagValue::Bool(boolean) => <bool as fmt::Display>::fmt(boolean, formatter),
 			FlagValue::OutputFormat(output_format) => {
 				<OutputFormat as fmt::Display>::fmt(output_format, formatter)
 			}
@@ -593,9 +566,6 @@ impl FromStr for FlagValue {
 	type Err = FlagValueFromStrError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if let Ok(boolean) = s.parse::<bool>() {
-			return Ok(FlagValue::Bool(boolean));
-		}
 		if let Ok(output_format) = s.parse::<OutputFormat>() {
 			return Ok(FlagValue::OutputFormat(output_format));
 		}

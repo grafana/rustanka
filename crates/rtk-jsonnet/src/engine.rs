@@ -188,13 +188,7 @@ impl Evaluator {
 		&mut self,
 		implementation: JsonnetImplementation,
 	) -> Result<&mut ImplementationEvaluator, Error> {
-		let flags_disable_native_functions = self
-			.rc
-			.flags::<JrsonnetFlag>()
-			.map_err(JrsonnetError::Flag)?
-			.any(|flag| matches!(flag, JrsonnetFlag::DisableNativeFunctions(true)));
-		let disable_native_functions =
-			self.rc.spec.disable_native_functions || flags_disable_native_functions;
+		let disable_native_functions = self.rc.spec.disable_native_functions;
 		let mut implementations = self
 			.engine
 			.implementations
@@ -335,27 +329,6 @@ mod tests {
 	fn honors_top_level_native_function_disable() {
 		let mut rc = Rc::default();
 		rc.spec.disable_native_functions = true;
-		let result = Engine::new(rc)
-			.create_evaluator()
-			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn honors_implementation_native_function_disable_flag() {
-		let rc: Rc = serde_json::from_value(serde_json::json!({
-			"apiVersion": "tanka.dev/v1alpha1",
-			"kind": "Rc",
-			"metadata": { "name": "test" },
-			"spec": {
-				"disableNativeFunctions": false,
-				"jsonnetImplementation": {
-					"type": "jrsonnet",
-					"flags": { "disableNativeFunctions": "true" }
-				}
-			}
-		}))
-		.unwrap();
 		let result = Engine::new(rc)
 			.create_evaluator()
 			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
