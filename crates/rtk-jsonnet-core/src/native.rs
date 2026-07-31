@@ -44,6 +44,28 @@ where
 	type Evaluator = E;
 }
 
+pub trait Array<'a>
+where
+	Self: Clone + Deserialize<'a> + Serialize,
+{
+	type Evaluator: Evaluator<'a, Value = Self::Value>;
+	type Value: Value<'a, Array = Self>;
+
+	fn len(&self) -> usize;
+
+	fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
+
+	fn get(
+		&self,
+		index: usize,
+	) -> Result<Option<Self::Value>, <Self::Evaluator as Evaluator<'a>>::Error>;
+	fn iter(
+		&self,
+	) -> impl Iterator<Item = Result<Self::Value, <Self::Evaluator as Evaluator<'a>>::Error>>;
+}
+
 pub struct InfallibleError<'a, E> {
 	_inner: Infallible,
 	_phantom: PhantomData<fn(&'a (), E)>,
@@ -86,27 +108,42 @@ pub trait Function<'a, E: Evaluator<'a>> {
 	) -> Result<<E as Evaluator<'a>>::Value, <E as Evaluator<'a>>::Error>;
 }
 
+pub trait Object<'a>
+where
+	Self: Clone + Deserialize<'a> + Serialize,
+{
+	type Evaluator: Evaluator<'a, Value = Self::Value>;
+	type Value: Value<'a, Object = Self>;
+
+	fn fields(&self) -> impl Iterator<Item = &str>;
+	fn has(&self, key: &str) -> Result<bool, <Self::Evaluator as Evaluator<'a>>::Error>;
+	fn get(&self, key: &str) -> Result<Self::Value, <Self::Evaluator as Evaluator<'a>>::Error>;
+}
+
 pub trait Value<'a>
 where
-	Self: Deserializer<'a> + Deserialize<'a> + Serialize,
+	Self: Clone + Deserialize<'a> + Serialize,
 {
 	type Evaluator: Evaluator<'a, Value = Self>;
 
+	type Deserializer: ValueDeserializer<'a, Evaluator = Self::Evaluator, Value = Self>;
 	type Serializer: ValueSerializer<'a, Evaluator = Self::Evaluator, Value = Self>;
 
-	/// Gets the value at `index`, provided this value is an array.
-	fn get_indexed(
-		&self,
-		index: usize,
-	) -> Result<Option<Self>, <Self::Evaluator as Evaluator<'a>>::Error>;
+	type Array: Array<'a, Evaluator = Self::Evaluator, Value = Self>;
+	type Object: Object<'a, Evaluator = Self::Evaluator, Value = Self>;
 
-	/// Gets the value at `key`, provided this value is an object.
-	fn get_keyed<K>(
-		&self,
-		key: &K,
-	) -> Result<Option<Self>, <Self::Evaluator as Evaluator<'a>>::Error>
-	where
-		K: AsRef<str>;
+	fn into_array(self) -> Result<Self::Array, Self>;
+	fn into_object(self) -> Result<Self::Object, Self>;
+}
+
+pub trait ValueDeserializer<'a>
+where
+	Self: Deserializer<'a, Error = <Self::Evaluator as Evaluator<'a>>::Error>,
+{
+	type Evaluator: Evaluator<'a, Value = Self::Value>;
+	type Value: Value<'a, Deserializer = Self>;
+
+	fn new(evaluator: &Self::Evaluator, value: Self::Value) -> Self;
 }
 
 pub trait ValueSerializer<'a>

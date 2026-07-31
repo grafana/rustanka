@@ -4,12 +4,15 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use ::serde::{Deserialize, Deserializer, Serialize, Serializer};
 use rtk_spec::canonical::{Environment, JsonentImplementationOrConfig, Rc};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod native;
 
-pub use crate::native::{Arguments, Function, InfallibleArguments, Value, ValueSerializer};
+pub use crate::native::{
+	Arguments, Array, Function, InfallibleArguments, Object, Value, ValueDeserializer,
+	ValueSerializer,
+};
 
 pub trait Evaluator<'a>: 'a + Sized {
 	type Implementation: Implementation<Evaluator<'a> = Self>;
@@ -22,6 +25,11 @@ pub trait Evaluator<'a>: 'a + Sized {
 	fn new(implementation: &Self::Implementation) -> Self;
 
 	fn name() -> &'static str;
+
+	#[inline]
+	fn create_deserializer(&self, value: Self::Value) -> <Self::Value as Value<'a>>::Deserializer {
+		<<Self::Value as Value<'a>>::Deserializer as ValueDeserializer<'a>>::new(self, value)
+	}
 
 	#[inline]
 	fn create_serializer(&self) -> <Self::Value as Value<'a>>::Serializer {
@@ -90,7 +98,7 @@ pub trait EvaluatorError<'a>
 where
     Self: Error
         + for<'b> From<<<Self::Evaluator as Evaluator<'a>>::Arguments<'b> as Deserializer<'b>>::Error>
-        + From<<<Self::Evaluator as Evaluator<'a>>::Value as Deserializer<'a>>::Error>
+        + From<<<<Self::Evaluator as Evaluator<'a>>::Value as Value<'a>>::Deserializer as Deserializer<'a>>::Error>
 		+ From<<<<Self::Evaluator as Evaluator<'a>>::Value as Value<'a>>::Serializer as Serializer>::Error>,
 {
     type Evaluator: Evaluator<'a, Error = Self>;

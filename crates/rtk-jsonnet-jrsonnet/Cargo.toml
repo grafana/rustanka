@@ -7,7 +7,6 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-castaway.workspace = true
 jrsonnet-evaluator.workspace = true
 jrsonnet-gcmodule.workspace = true
 jrsonnet-stdlib.workspace = true

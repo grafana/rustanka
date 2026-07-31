@@ -11,6 +11,7 @@ use rtk_jsonnet_jrsonnet::{
 };
 use rtk_spec::DeepMerge;
 use rtk_spec::canonical::{JsonnetImplementation, Rc};
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 /// An error returned by one of the various Jsonnet implementations.
@@ -30,9 +31,9 @@ impl From<Infallible> for Error {
 pub struct Engine(Arc<EngineInternals>);
 
 impl Engine {
-	pub fn new(rc: Rc) -> Engine {
+	pub fn new(options: Options) -> Engine {
 		Engine(Arc::new_cyclic(|engine| EngineInternals {
-			rc,
+			options,
 			implementations: RwLock::new(Implementations {
 				engine: engine.clone(),
 				..Default::default()
@@ -43,22 +44,26 @@ impl Engine {
 	pub fn create_evaluator(&self) -> Evaluator {
 		Evaluator {
 			engine: self.0.clone(),
-			rc: self.0.rc.clone(),
+			options: self.0.options.clone(),
 			evaluator: None,
 		}
+	}
+
+	pub fn options(&self) -> &Options {
+		&self.0.options
 	}
 }
 
 #[derive(Debug)]
 struct EngineInternals {
-	rc: Rc,
+	options: Options,
 	implementations: RwLock<Implementations>,
 }
 
 #[derive(Debug)]
 pub struct Evaluator {
 	engine: Arc<EngineInternals>,
-	rc: Rc,
+	options: Options,
 	evaluator: Option<ImplementationEvaluator>,
 }
 
@@ -67,7 +72,7 @@ macro_rules! call_implementation_evaluator_method {
         match &mut $self.evaluator {
             Some(ImplementationEvaluator::Jrsonnet(jrsonnet)) => jrsonnet.$method($($argument),*)?,
             None => {
-                let implementation = $self.rc.spec.jsonnet_implementation
+                let implementation = $self.options.rc.spec.jsonnet_implementation
                     .as_ref()
                     .map(|i| i.implementation())
                     .cloned()
@@ -93,8 +98,9 @@ macro_rules! call_implementation_evaluator_method {
 
 impl Evaluator {
 	pub fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, Error> {
-		self.rc.spec.merge_from(rc.spec);
+		self.options.rc.spec.merge_from(rc.spec);
 		let implementation = self
+			.options
 			.rc
 			.spec
 			.jsonnet_implementation
@@ -103,7 +109,7 @@ impl Evaluator {
 			.cloned()
 			.unwrap_or_default();
 		self.populate_evaluator(implementation)?;
-		call_implementation_evaluator_method!(@no_insert: self, with_rc, &self.rc);
+		call_implementation_evaluator_method!(@no_insert: self, with_rc, &self.options.rc);
 		Ok(self)
 	}
 
@@ -173,7 +179,8 @@ impl Evaluator {
 	}
 
 	fn selected_implementation(&self) -> JsonnetImplementation {
-		self.rc
+		self.options
+			.rc
 			.spec
 			.jsonnet_implementation
 			.as_ref()
@@ -188,7 +195,6 @@ impl Evaluator {
 		&mut self,
 		implementation: JsonnetImplementation,
 	) -> Result<&mut ImplementationEvaluator, Error> {
-		let disable_native_functions = self.rc.spec.disable_native_functions;
 		let mut implementations = self
 			.engine
 			.implementations
@@ -214,7 +220,7 @@ impl Evaluator {
 			}
 		};
 
-		if !disable_native_functions {
+		if !self.options.rc.spec.disable_native_functions {
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_native_functions::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_regex::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
@@ -272,6 +278,7 @@ impl Implementations {
 			}
 			JsonnetImplementation::Jrsonnet if self.jrsonnet.is_none() => {
 				let flags = engine
+					.options
 					.rc
 					.flags::<JrsonnetFlag>()
 					.map_err(JrsonnetError::Flag)?;
@@ -287,15 +294,49 @@ impl Implementations {
 	}
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+	pub rc: Rc,
+
+	pub ext_code: FxHashMap<Box<str>, Box<str>>,
+	pub ext_variables: FxHashMap<Box<str>, Box<str>>,
+	pub top_level_arguments: FxHashMap<Box<str>, Box<str>>,
+	pub top_level_code: FxHashMap<Box<str>, Box<str>>,
+}
+
+impl Options {
+	pub fn apply(&self, evaluator: &mut Evaluator) -> Result<(), Error> {
+		evaluator.with_rc(self.rc.clone())?;
+
+		for (top_level_code, value) in &self.ext_code {
+			evaluator.with_external_code(top_level_code, value)?;
+		}
+		for (top_level_args, value) in &self.ext_variables {
+			evaluator.with_external_variable(top_level_args, value)?;
+		}
+
+		for (top_level_args, value) in &self.top_level_arguments {
+			evaluator.with_top_level_argument(top_level_args, value)?;
+		}
+		for (top_level_code, value) in &self.top_level_code {
+			evaluator.with_top_level_code(top_level_code, value)?;
+		}
+
+		Ok(())
+	}
+
+	pub fn has_top_level_args(&self) -> bool {
+		!self.top_level_arguments.is_empty() || !self.top_level_code.is_empty()
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use rtk_spec::canonical::Rc;
-
-	use super::Engine;
+	use super::*;
 
 	#[test]
 	fn evaluates_composed_native_plugins() {
-		let evaluation = Engine::new(Rc::default())
+		let evaluation = Engine::new(Options::default())
 			.create_evaluator()
 			.evaluate_snippet(
 				r#"{
@@ -327,9 +368,9 @@ mod tests {
 
 	#[test]
 	fn honors_top_level_native_function_disable() {
-		let mut rc = Rc::default();
-		rc.spec.disable_native_functions = true;
-		let result = Engine::new(rc)
+		let mut options = Options::default();
+		options.rc.spec.disable_native_functions = true;
+		let result = Engine::new(options)
 			.create_evaluator()
 			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
 		assert!(result.is_err());

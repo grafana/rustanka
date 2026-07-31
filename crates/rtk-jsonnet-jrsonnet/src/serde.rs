@@ -1,3 +1,5 @@
+use std::fmt;
+
 use jrsonnet_evaluator::error::ErrorKind;
 use jrsonnet_evaluator::typed::ValType;
 use jrsonnet_evaluator::val::ArrValue;
@@ -8,14 +10,27 @@ use serde::de::{
 };
 use serde::{Deserialize, Deserializer, Serialize, forward_to_deserialize_any, ser};
 
-use crate::{Arguments, Evaluation, Evaluator, Value};
+use crate::native::{Array, Object};
+use crate::{Arguments, Evaluation, Evaluator, EvaluatorError, Value};
+
+/// Required because [`ValueDeserializer`] (and [`Arguments`]) use
+/// [`EvaluatorError`] as their serde error type, as demanded by
+/// [`rtk_jsonnet_core::ValueDeserializer`].
+impl de::Error for EvaluatorError {
+	fn custom<T>(message: T) -> Self
+	where
+		T: fmt::Display,
+	{
+		EvaluatorError(<Error as de::Error>::custom(message))
+	}
+}
 
 impl<'de> Arguments<'de> {
-	fn seq_access(self) -> impl SeqAccess<'de, Error = Error> {
+	fn seq_access(self) -> impl SeqAccess<'de, Error = EvaluatorError> {
 		struct ArgumentsSeqAccess<'de>(<&'de [Option<Thunk<Val>>] as IntoIterator>::IntoIter);
 
 		impl<'de> SeqAccess<'de> for ArgumentsSeqAccess<'de> {
-			type Error = Error;
+			type Error = EvaluatorError;
 
 			fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
 			where
@@ -23,10 +38,15 @@ impl<'de> Arguments<'de> {
 			{
 				match self.0.next() {
 					Some(Some(thunk)) => match thunk.evaluate() {
-						Ok(value) => Ok(Some(T::deserialize(seed, Value(value))?)),
-						Err(error) => Err(error),
+						Ok(value) => {
+							Ok(Some(T::deserialize(seed, ValueDeserializer(Value(value)))?))
+						}
+						Err(error) => Err(error.into()),
 					},
-					Some(None) => Ok(Some(T::deserialize(seed, Value(Val::Null))?)),
+					Some(None) => Ok(Some(T::deserialize(
+						seed,
+						ValueDeserializer(Value(Val::Null)),
+					)?)),
 					None => Ok(None),
 				}
 			}
@@ -41,7 +61,7 @@ impl<'de> Arguments<'de> {
 }
 
 impl<'de> Deserializer<'de> for Arguments<'de> {
-	type Error = Error;
+	type Error = EvaluatorError;
 
 	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
 	where
@@ -73,14 +93,30 @@ impl<'de> Deserialize<'de> for Value {
 	}
 }
 
-impl<'de> Deserializer<'de> for Value {
-	type Error = Error;
+/// Deserializes Rust values out of a [`Value`] through the serde data model.
+///
+/// This is the eager path: every thunk a requested field transitively
+/// contains is forced, and functions error. Use [`Value`]'s
+/// `into_array`/`into_object` navigation to walk a tree lazily instead.
+pub struct ValueDeserializer(pub(crate) Value);
+
+impl rtk_jsonnet_core::ValueDeserializer<'_> for ValueDeserializer {
+	type Evaluator = Evaluator;
+	type Value = Value;
+
+	fn new(_: &Evaluator, value: Value) -> Self {
+		ValueDeserializer(value)
+	}
+}
+
+impl<'de> Deserializer<'de> for ValueDeserializer {
+	type Error = EvaluatorError;
 
 	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
 	where
 		V: Visitor<'de>,
 	{
-		match self.0 {
+		match self.0.0 {
 			Val::Bool(boolean) => visitor.visit_bool(boolean),
 			Val::Null => visitor.visit_unit(),
 			Val::Str(string) => visitor.visit_str(&string.into_flat()),
@@ -105,7 +141,7 @@ impl<'de> Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self.0 {
+		match self.0.0 {
 			Val::Null => visitor.visit_none(),
 			_ => visitor.visit_some(self),
 		}
@@ -131,7 +167,7 @@ impl<'de> Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self.0 {
+		match self.0.0 {
 			Val::Str(string) => visitor.visit_enum(EnumDeserializer {
 				variant: string.into_flat(),
 				value: None,
@@ -151,8 +187,9 @@ impl<'de> Deserializer<'de> for Value {
 			_ => Err(Error::new(ErrorKind::TypeMismatch(
 				"enum",
 				vec![ValType::Str, ValType::Obj],
-				self.0.value_type(),
-			))),
+				self.0.0.value_type(),
+			))
+			.into()),
 		}
 	}
 
@@ -185,7 +222,7 @@ impl SeqDeserializer {
 }
 
 impl<'de> SeqAccess<'de> for SeqDeserializer {
-	type Error = Error;
+	type Error = EvaluatorError;
 
 	fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
 	where
@@ -195,7 +232,8 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
 			return Ok(None);
 		};
 		self.index += 1;
-		seed.deserialize(Value(element)).map(Some)
+		seed.deserialize(ValueDeserializer(Value(element)))
+			.map(Some)
 	}
 
 	fn size_hint(&self) -> Option<usize> {
@@ -221,7 +259,7 @@ impl MapDeserializer {
 }
 
 impl<'de> MapAccess<'de> for MapDeserializer {
-	type Error = Error;
+	type Error = EvaluatorError;
 
 	fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
 	where
@@ -230,7 +268,7 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 		let Some(field) = self.fields.next() else {
 			return Ok(None);
 		};
-		let key = seed.deserialize(StrDeserializer::<Error>::new(&field))?;
+		let key = seed.deserialize(StrDeserializer::<EvaluatorError>::new(&field))?;
 		self.field = Some(field);
 		Ok(Some(key))
 	}
@@ -247,7 +285,7 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 			.object
 			.get(field)?
 			.expect("iterating over fields; the field exists");
-		seed.deserialize(Value(value))
+		seed.deserialize(ValueDeserializer(Value(value)))
 	}
 
 	fn size_hint(&self) -> Option<usize> {
@@ -261,14 +299,14 @@ struct EnumDeserializer {
 }
 
 impl<'de> EnumAccess<'de> for EnumDeserializer {
-	type Error = Error;
+	type Error = EvaluatorError;
 	type Variant = VariantDeserializer;
 
 	fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
 	where
 		V: DeserializeSeed<'de>,
 	{
-		let variant = seed.deserialize(StrDeserializer::<Error>::new(&self.variant))?;
+		let variant = seed.deserialize(StrDeserializer::<EvaluatorError>::new(&self.variant))?;
 		Ok((variant, VariantDeserializer { value: self.value }))
 	}
 }
@@ -278,7 +316,7 @@ struct VariantDeserializer {
 }
 
 impl<'de> VariantAccess<'de> for VariantDeserializer {
-	type Error = Error;
+	type Error = EvaluatorError;
 
 	fn unit_variant(self) -> Result<(), Self::Error> {
 		match self.value {
@@ -295,7 +333,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		T: DeserializeSeed<'de>,
 	{
 		match self.value {
-			Some(value) => seed.deserialize(value),
+			Some(value) => seed.deserialize(ValueDeserializer(value)),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"newtype variant",
@@ -308,7 +346,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.value {
-			Some(value) => value.deserialize_seq(visitor),
+			Some(value) => ValueDeserializer(value).deserialize_seq(visitor),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"tuple variant",
@@ -325,7 +363,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.value {
-			Some(value) => value.deserialize_map(visitor),
+			Some(value) => ValueDeserializer(value).deserialize_map(visitor),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"struct variant",
@@ -340,6 +378,54 @@ impl Serialize for Value {
 		S: ser::Serializer,
 	{
 		self.0.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for Array {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		match Val::deserialize(deserializer)? {
+			Val::Arr(array) => Ok(Array(array)),
+			value => Err(de::Error::custom(format!(
+				"invalid type: {}, expected array",
+				value.value_type()
+			))),
+		}
+	}
+}
+
+impl Serialize for Array {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		Val::Arr(self.0.clone()).serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for Object {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		match Val::deserialize(deserializer)? {
+			Val::Obj(object) => Ok(Object::new(object)),
+			value => Err(de::Error::custom(format!(
+				"invalid type: {}, expected object",
+				value.value_type()
+			))),
+		}
+	}
+}
+
+impl Serialize for Object {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: ser::Serializer,
+	{
+		Val::Obj(self.inner.clone()).serialize(serializer)
 	}
 }
 
@@ -717,7 +803,8 @@ mod tests {
 	use jrsonnet_evaluator::{State, Val};
 	use serde::{Deserialize, Serialize};
 
-	use crate::{Value, ValueSerializer};
+	use crate::serde::ValueDeserializer;
+	use crate::{EvaluatorError, Value, ValueSerializer};
 
 	fn eval(snippet: &str) -> Val {
 		State::builder()
@@ -726,10 +813,8 @@ mod tests {
 			.expect("snippet evaluates")
 	}
 
-	fn from_val<T: for<'de> Deserialize<'de>>(
-		snippet: &str,
-	) -> Result<T, jrsonnet_evaluator::Error> {
-		T::deserialize(Value(eval(snippet)))
+	fn from_val<T: for<'de> Deserialize<'de>>(snippet: &str) -> Result<T, EvaluatorError> {
+		T::deserialize(ValueDeserializer(Value(eval(snippet))))
 	}
 
 	fn to_val<T: Serialize>(value: &T) -> Result<Val, jrsonnet_evaluator::Error> {
@@ -888,22 +973,93 @@ mod tests {
 			#[allow(dead_code)]
 			bad: String,
 		}
-		let result: Result<Failing, _> = (|| {
+		let result: Result<Failing, EvaluatorError> = (|| {
 			let val = State::builder()
 				.build()
 				.evaluate_snippet("test", r#"{ bad: error "boom" }"#)?;
-			Failing::deserialize(Value(val))
+			Failing::deserialize(ValueDeserializer(Value(val)))
 		})();
 		let error = result.expect_err("field evaluation fails");
+		let source = std::error::Error::source(&error).expect("the evaluator error has a cause");
 		assert!(
-			error.to_string().contains("boom"),
-			"unexpected error: {error}"
+			source.to_string().contains("boom"),
+			"unexpected error: {source}"
 		);
 	}
 
 	#[test]
+	fn into_object_navigates_lazily() {
+		use rtk_jsonnet_core::{Object as _, Value as _};
+
+		let value = Value(eval(
+			r#"{ ok: 1, boom: error "nope", f: function(x) x, hidden:: 2 }"#,
+		));
+		let object = value.into_object().expect("an object");
+		assert_eq!(object.fields().collect::<Vec<_>>(), ["boom", "f", "ok"]);
+		assert!(object.has("boom").unwrap());
+		assert!(!object.has("hidden").unwrap());
+		assert!(!object.has("absent").unwrap());
+		// Only the requested field is forced: the error field never fires and
+		// the function survives untouched.
+		assert_eq!(object.get("ok").unwrap().0.as_num(), Some(1.0));
+		assert!(matches!(object.get("f").unwrap().0, Val::Func(_)));
+		assert!(object.get("boom").is_err());
+		assert!(object.get("absent").is_err());
+	}
+
+	#[test]
+	fn into_array_accesses_elements_lazily() {
+		use rtk_jsonnet_core::{Array as _, Value as _};
+
+		let value = Value(eval(r#"[1, error "boom", 3]"#));
+		let array = value.into_array().expect("an array");
+		assert_eq!(array.len(), 3);
+		assert!(!array.is_empty());
+		assert_eq!(
+			array.get(0).unwrap().and_then(|element| element.0.as_num()),
+			Some(1.0),
+		);
+		assert!(array.get(1).is_err());
+		assert!(array.get(3).unwrap().is_none());
+		let elements: Vec<_> = array.iter().collect();
+		assert_eq!(elements.len(), 3);
+		assert!(elements[0].is_ok());
+		assert!(elements[1].is_err());
+		assert!(elements[2].is_ok());
+	}
+
+	#[test]
+	fn into_conversions_reject_other_types() {
+		use rtk_jsonnet_core::Value as _;
+
+		let value = Value(eval("3"));
+		let value = value.into_array().expect_err("not an array");
+		let value = value.into_object().expect_err("not an object");
+		assert_eq!(value.0.as_num(), Some(3.0));
+	}
+
+	#[test]
+	fn array_and_object_round_trip_serde() {
+		use rtk_jsonnet_core::{Array as _, Object as _};
+
+		use crate::{Array, Object};
+
+		let array = Array::deserialize(ValueDeserializer(Value(eval("[1, 2]")))).unwrap();
+		assert_eq!(array.len(), 2);
+		assert_eq!(serde_json::to_string(&array).unwrap(), "[1,2]");
+		assert!(Array::deserialize(ValueDeserializer(Value(eval("{}")))).is_err());
+
+		let object = Object::deserialize(ValueDeserializer(Value(eval("{ a: 1 }")))).unwrap();
+		assert!(object.has("a").unwrap());
+		assert_eq!(serde_json::to_string(&object).unwrap(), r#"{"a":1}"#);
+		assert!(Object::deserialize(ValueDeserializer(Value(eval("[]")))).is_err());
+	}
+
+	#[test]
 	fn deserializes_val_from_serde_data() {
-		let value = Value::deserialize(Value(eval(r#"{ a: [1, "two", null] }"#))).unwrap();
+		let value =
+			Value::deserialize(ValueDeserializer(Value(eval(r#"{ a: [1, "two", null] }"#))))
+				.unwrap();
 		let obj = value.0.as_obj().expect("an object");
 		assert_eq!(obj.fields().len(), 1);
 	}
@@ -968,7 +1124,10 @@ mod tests {
 	fn round_trips_through_serde() {
 		let fixture = fixture();
 		let value = to_val(&fixture).unwrap();
-		assert_eq!(Fixture::deserialize(Value(value)).unwrap(), fixture);
+		assert_eq!(
+			Fixture::deserialize(ValueDeserializer(Value(value))).unwrap(),
+			fixture
+		);
 
 		for variant in [
 			TaggedEnum::Str("hi".into()),
@@ -976,7 +1135,10 @@ mod tests {
 			TaggedEnum::Obj { a: true },
 		] {
 			let value = to_val(&variant).unwrap();
-			assert_eq!(TaggedEnum::deserialize(Value(value)).unwrap(), variant);
+			assert_eq!(
+				TaggedEnum::deserialize(ValueDeserializer(Value(value))).unwrap(),
+				variant
+			);
 		}
 	}
 
@@ -1015,9 +1177,12 @@ mod tests {
 		use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
 
 		let implementation = crate::Implementation::new(std::iter::empty()).unwrap();
-		let serializer = implementation.create_evaluator().create_serializer();
-		let value = fixture().serialize(serializer).unwrap();
-		assert_eq!(Fixture::deserialize(value).unwrap(), fixture());
+		let evaluator = implementation.create_evaluator();
+		let value = fixture().serialize(evaluator.create_serializer()).unwrap();
+		assert_eq!(
+			Fixture::deserialize(evaluator.create_deserializer(value)).unwrap(),
+			fixture()
+		);
 	}
 
 	#[test]

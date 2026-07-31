@@ -19,6 +19,7 @@ serde_json = "1.0"
 serde-saphyr.workspace = true
 serde_yaml_with_quirks.workspace = true
 tabwriter = "1.4"
+either.workspace = true
 rayon = "1.10"
 rustc-hash.workspace = true
 walkdir = "2.5"
@@ -53,7 +54,6 @@ thiserror.workspace = true
 dirs = "6.0.0"
 http = "1.4.0"
 tempfile = "3.10"
-either = "1.15.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 mimallocator = { workspace = true, optional = true }

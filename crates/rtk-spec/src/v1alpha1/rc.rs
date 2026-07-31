@@ -24,6 +24,8 @@ pub struct RcSpec {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub expect_versions: Option<Versions>,
 	#[serde(skip_serializing_if = "Option::is_none")]
+	pub max_stack_depth: Option<usize>,
+	#[serde(skip_serializing_if = "Option::is_none")]
 	pub jsonnet_implementation: Option<JsonentImplementationOrConfig>,
 }
 
@@ -36,6 +38,9 @@ impl DeepMerge for RcSpec {
 		self.disable_native_functions |= other.disable_native_functions;
 
 		self.expect_versions.merge_from(other.expect_versions);
+
+		self.max_stack_depth = self.max_stack_depth.or(other.max_stack_depth);
+
 		self.jsonnet_implementation
 			.merge_from(other.jsonnet_implementation);
 	}

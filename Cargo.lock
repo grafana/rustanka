@@ -415,15 +415,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
-name = "castaway"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1010,9 +1001,12 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "encode_unicode"
@@ -4845,9 +4839,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtk-environments"
+version = "0.5.0-pre99"
+dependencies = [
+ "anyhow",
+ "either",
+ "k8s-openapi 0.28.0",
+ "rtk-jsonnet",
+ "rtk-jsonnet-core",
+ "rtk-spec",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "rtk-jsonnet"
 version = "0.5.0-pre99"
 dependencies = [
+ "clap",
  "rayon",
  "regex",
  "rtk-jsonnet-core",
@@ -4857,11 +4869,13 @@ dependencies = [
  "rtk-jsonnet-native-functions",
  "rtk-jsonnet-regex",
  "rtk-spec",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+ "url",
  "walkdir",
 ]
 
@@ -4888,7 +4902,6 @@ dependencies = [
 name = "rtk-jsonnet-jrsonnet"
 version = "0.5.0-pre99"
 dependencies = [
- "castaway",
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
  "jrsonnet-stdlib",

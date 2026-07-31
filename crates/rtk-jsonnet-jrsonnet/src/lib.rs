@@ -24,11 +24,11 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 mod native;
 mod serde;
 
-pub use native::{Arguments, Value};
+pub use native::{Arguments, Array, Object, Value};
 use thiserror::Error;
 use tracing::Level;
 
-pub use crate::serde::ValueSerializer;
+pub use crate::serde::{ValueDeserializer, ValueSerializer};
 
 #[derive(Clone, Debug, Default)]
 struct Config {

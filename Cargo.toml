@@ -148,7 +148,7 @@ rtk-jsonnet-native-functions = { path = "./crates/rtk-jsonnet-native-functions",
 rtk-jsonnet-regex = { path = "./crates/rtk-jsonnet-regex", version = "0.5.0-pre99" }
 rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
 
-castaway = "0.2.4"
+either = { version = "1.15.0", features = [ "serde" ] }
 rayon = "1.10"
 kube = { version = "4.2.0", features = ["runtime", "derive", "client"] }
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
