@@ -416,6 +416,7 @@ struct ObjValueInner {
 
 thread_local! {
 	static RUNNING_ASSERTIONS: RefCell<FxHashSet<ObjValue>> = RefCell::default();
+	static SUPPRESSED_ASSERTIONS: RefCell<FxHashSet<ObjValue>> = RefCell::default();
 }
 fn has_running_assertions() -> bool {
 	RUNNING_ASSERTIONS.with_borrow(|v| !v.is_empty())
@@ -423,6 +424,28 @@ fn has_running_assertions() -> bool {
 /// Returns false if already asserting
 fn start_asserting(obj: &ObjValue) -> bool {
 	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()))
+}
+fn is_assertion_suppressed(obj: &ObjValue) -> bool {
+	SUPPRESSED_ASSERTIONS.with_borrow(|v| v.contains(obj))
+}
+struct AssertionSuppressionGuard {
+	obj: ObjValue,
+	inserted: bool,
+}
+impl AssertionSuppressionGuard {
+	fn new(obj: ObjValue) -> Self {
+		let inserted = SUPPRESSED_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()));
+		Self { obj, inserted }
+	}
+}
+impl Drop for AssertionSuppressionGuard {
+	fn drop(&mut self) {
+		if self.inserted {
+			SUPPRESSED_ASSERTIONS.with_borrow_mut(|v| {
+				v.remove(&self.obj);
+			});
+		}
+	}
 }
 // == Rustanka custom features ==
 
@@ -440,6 +463,7 @@ pub fn should_skip_assertions() -> bool {
 /// Resets all thread-local state in obj to defaults.
 pub fn reset_obj_thread_locals() {
 	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
+	SUPPRESSED_ASSERTIONS.with_borrow_mut(|v| v.clear());
 	SKIP_ASSERTIONS.with(|v| v.set(false));
 }
 
@@ -820,20 +844,19 @@ impl ObjValue {
 				}
 			}
 		};
-		let result = self.get_idx_uncached(key, core, assertion_reentry);
+		// A pending field may be read by an assertion while that field is still being
+		// evaluated. Suppress assertions for that object until the re-entry unwinds,
+		// including any sibling fields needed to finish evaluating the pending field.
+		let _suppression = assertion_reentry.then(|| AssertionSuppressionGuard::new(self.clone()));
+		let result = self.get_idx_uncached(key, core);
 		{
 			let mut cache = self.0.value_cache.borrow_mut();
 			cache.insert(cache_key, CacheValue::Cached(result.clone()));
 		}
 		result
 	}
-	fn get_idx_uncached(
-		&self,
-		key: IStr,
-		core: CoreIdx,
-		assertion_reentry: bool,
-	) -> Result<Option<Val>> {
-		if !assertion_reentry {
+	fn get_idx_uncached(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
+		if !is_assertion_suppressed(self) {
 			self.run_assertions()?;
 		}
 		let mut first_add = None;
