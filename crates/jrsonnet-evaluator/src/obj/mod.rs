@@ -420,6 +420,9 @@ thread_local! {
 fn is_asserting(obj: &ObjValue) -> bool {
 	RUNNING_ASSERTIONS.with_borrow(|v| v.contains(obj))
 }
+fn has_running_assertions() -> bool {
+	RUNNING_ASSERTIONS.with_borrow(|v| !v.is_empty())
+}
 /// Returns false if already asserting
 fn start_asserting(obj: &ObjValue) -> bool {
 	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()))
@@ -437,31 +440,10 @@ pub fn should_skip_assertions() -> bool {
 	SKIP_ASSERTIONS.with(|v| v.get())
 }
 
-// Feature 2: ASSERTION_DEPTH - prevents infinite recursion when assertions access fields
-thread_local! {
-	static ASSERTION_DEPTH: Cell<u32> = const { Cell::new(0) };
-}
-pub fn is_in_assertion() -> bool {
-	ASSERTION_DEPTH.with(|v| v.get() > 0)
-}
-struct AssertionGuard;
-impl AssertionGuard {
-	fn new() -> Self {
-		ASSERTION_DEPTH.with(|v| v.set(v.get() + 1));
-		AssertionGuard
-	}
-}
-impl Drop for AssertionGuard {
-	fn drop(&mut self) {
-		ASSERTION_DEPTH.with(|v| v.set(v.get() - 1));
-	}
-}
-
 /// Resets all thread-local state in obj to defaults.
 pub fn reset_obj_thread_locals() {
 	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
 	SKIP_ASSERTIONS.with(|v| v.set(false));
-	ASSERTION_DEPTH.with(|v| v.set(0));
 }
 
 fn finish_asserting(obj: &ObjValue) {
@@ -829,7 +811,7 @@ impl ObjValue {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
 					CacheValue::Pending => {
-						if !is_asserting(self) && !is_in_assertion() {
+						if !is_asserting(self) && !has_running_assertions() {
 							bail!(InfiniteRecursionDetected);
 						}
 					}
@@ -847,12 +829,7 @@ impl ObjValue {
 		result
 	}
 	fn get_idx_uncached(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
-		// If we're already inside an assertion evaluation, skip running assertions
-		// to avoid infinite recursion when assertions access fields on the same object.
-		// The assertions will complete when the original assertion evaluation finishes.
-		if !is_in_assertion() {
-			self.run_assertions()?;
-		}
+		self.run_assertions()?;
 		let mut first_add = None;
 		let mut add_stack: Vec<Val> = Vec::new();
 		let mut skip = Saturating(0);
@@ -969,16 +946,12 @@ impl ObjValue {
 		if should_skip_assertions() {
 			return Ok(());
 		}
-		if is_in_assertion() {
-			return Ok(());
-		}
 		if self.0.assertions_ran.get() {
 			return Ok(());
 		}
 		if !start_asserting(self) {
 			return Ok(());
 		}
-		let _guard = AssertionGuard::new();
 		let mut assertion_err: Option<crate::error::Error> = None;
 		self.0.cores.for_each_enumerated(&mut |idx, ele| {
 			if assertion_err.is_some() {
