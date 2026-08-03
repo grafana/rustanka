@@ -417,9 +417,6 @@ struct ObjValueInner {
 thread_local! {
 	static RUNNING_ASSERTIONS: RefCell<FxHashSet<ObjValue>> = RefCell::default();
 }
-fn is_asserting(obj: &ObjValue) -> bool {
-	RUNNING_ASSERTIONS.with_borrow(|v| v.contains(obj))
-}
 fn has_running_assertions() -> bool {
 	RUNNING_ASSERTIONS.with_borrow(|v| !v.is_empty())
 }
@@ -804,32 +801,41 @@ impl ObjValue {
 
 	fn get_idx(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
 		let cache_key = (key.clone(), core);
-		{
+		let assertion_reentry = {
 			let mut cache = self.0.value_cache.borrow_mut();
 			// entry_ref candidate?
 			match cache.entry(cache_key.clone()) {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
 					CacheValue::Pending => {
-						if !is_asserting(self) && !has_running_assertions() {
+						if !has_running_assertions() {
 							bail!(InfiniteRecursionDetected);
 						}
+						true
 					}
 				},
 				Entry::Vacant(v) => {
 					v.insert(CacheValue::Pending);
+					false
 				}
 			}
-		}
-		let result = self.get_idx_uncached(key, core);
+		};
+		let result = self.get_idx_uncached(key, core, assertion_reentry);
 		{
 			let mut cache = self.0.value_cache.borrow_mut();
 			cache.insert(cache_key, CacheValue::Cached(result.clone()));
 		}
 		result
 	}
-	fn get_idx_uncached(&self, key: IStr, core: CoreIdx) -> Result<Option<Val>> {
-		self.run_assertions()?;
+	fn get_idx_uncached(
+		&self,
+		key: IStr,
+		core: CoreIdx,
+		assertion_reentry: bool,
+	) -> Result<Option<Val>> {
+		if !assertion_reentry {
+			self.run_assertions()?;
+		}
 		let mut first_add = None;
 		let mut add_stack: Vec<Val> = Vec::new();
 		let mut skip = Saturating(0);
