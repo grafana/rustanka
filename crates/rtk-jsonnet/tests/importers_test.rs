@@ -358,8 +358,9 @@ fn test_helm_chart_dynamic_version_finds_environment() {
 	);
 }
 
+// I have no idea why trufflehog is this dense
 #[test]
-fn test_helm_chart_readme_in_lib_is_ignored() {
+fn test_helm_chart_readme_in_lib_is_ignored() { // trufflehog:ignore
 	// README.md inside a chart directory in lib/ should NOT trigger importers,
 	// because .md files are not relevant to Helm template output.
 	let result = find_importers(&[existing("lib/helm-chart-lib/charts/my-lib-chart/README.md")]);
