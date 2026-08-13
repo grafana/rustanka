@@ -1,12 +1,13 @@
 use rtk_jsonnet_core as jsonnet;
+use rtk_jsonnet_core::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct Function;
 
-impl<'a, E> jsonnet::Function<'a, E> for Function
+impl<E> jsonnet::Function<E> for Function
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 {
 	fn argv(&self) -> (usize, Option<usize>) {
 		(1, None)
@@ -16,11 +17,7 @@ where
 		Some(&["str"])
 	}
 
-	fn call<'b>(
-		&self,
-		evaluator: &E,
-		arguments: <E as jsonnet::Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as jsonnet::Evaluator<'a>>::Value, <E as jsonnet::Evaluator<'a>>::Error> {
+	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let Arguments { pattern } = Arguments::deserialize(arguments)?;
 		escape(&pattern)
 			.serialize(evaluator.create_serializer())

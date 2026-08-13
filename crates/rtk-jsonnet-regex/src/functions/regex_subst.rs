@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use rtk_jsonnet_core as jsonnet;
+use rtk_jsonnet_core::Context;
 use rtk_jsonnet_core::EvaluatorError as _;
 use serde::{Deserialize, Serialize};
 
@@ -17,9 +18,9 @@ impl Function {
 	}
 }
 
-impl<'a, E> jsonnet::Function<'a, E> for Function
+impl<E> jsonnet::Function<E> for Function
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 {
 	fn argv(&self) -> (usize, Option<usize>) {
 		(3, None)
@@ -29,15 +30,12 @@ where
 		Some(&["regex", "src", "repl"])
 	}
 
-	fn call<'b>(
-		&self,
-		evaluator: &E,
-		arguments: <E as jsonnet::Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as jsonnet::Evaluator<'a>>::Value, <E as jsonnet::Evaluator<'a>>::Error> {
+	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let Arguments { regex, src, repl } = Arguments::deserialize(arguments)?;
-		let regex = self.state.parse(&regex).map_err(|error| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(format!("regex parse failed: {error}"))
-		})?;
+		let regex = self
+			.state
+			.parse(&regex)
+			.map_err(|error| E::Error::custom(format!("regex parse failed: {error}")))?;
 		let replaced = regex.replace_all(&src, repl.as_str()).into_owned();
 
 		replaced

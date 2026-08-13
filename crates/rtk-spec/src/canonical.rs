@@ -4,7 +4,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::{DeepMerge, DeepMergeFrom};
+use crate::DeepMergeFrom;
 
 pub use crate::v1alpha1::*;
 
@@ -26,20 +26,23 @@ impl Rc {
 		let mut reader = File::open(path.as_ref())?;
 
 		let mut iterator = serde_saphyr::read::<_, Rc>(&mut reader);
+
 		let Some(result) = iterator.next() else {
 			return Ok(Rc::default());
 		};
 		let deserialized = result?;
+
 		if iterator.next().is_some() {
 			return Err(RcError::ContainedMultipleDocuments);
 		}
+
 		Ok(deserialized)
 	}
 }
 
-impl DeepMergeFrom<Environment> for Rc {
-	fn merge_from(&mut self, other: Environment) {
-		DeepMergeFrom::merge_from(&mut self.spec, other.spec);
+impl<'a, D: EnvironmentData<'a>> DeepMergeFrom<Environment<'a, D>> for Rc {
+	fn merge_from(&mut self, other: Environment<'a, D>) {
+		self.spec.merge_from(other.spec);
 	}
 }
 

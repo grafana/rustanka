@@ -26,15 +26,11 @@ impl Default for Plugin {
 	}
 }
 
-impl<'a, E> jsonnet::Plugin<'a, E> for Plugin
+impl<E> jsonnet::Plugin<E> for Plugin
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + jsonnet::Context<Evaluator = E>,
 {
-	fn install(
-		self,
-		evaluator: &mut E,
-	) -> Result<(), <<E as jsonnet::Evaluator<'a>>::Implementation as jsonnet::Implementation>::Error>
-	{
+	fn install(self, evaluator: &mut E) -> Result<(), E::Error> {
 		evaluator.with_native_function(
 			"helmTemplate",
 			functions::template::Function::new(self.state),

@@ -1,4 +1,5 @@
 use rtk_jsonnet_core as jsonnet;
+use rtk_jsonnet_core::Context;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -9,9 +10,9 @@ fn hash(value: &str) -> String {
 	hex::encode(Sha256::digest(value.as_bytes()))
 }
 
-impl<'a, E> jsonnet::Function<'a, E> for Function
+impl<E> jsonnet::Function<E> for Function
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 {
 	fn argv(&self) -> (usize, Option<usize>) {
 		(1, None)
@@ -21,11 +22,7 @@ where
 		Some(&["str"])
 	}
 
-	fn call<'b>(
-		&self,
-		evaluator: &E,
-		arguments: <E as jsonnet::Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as jsonnet::Evaluator<'a>>::Value, <E as jsonnet::Evaluator<'a>>::Error> {
+	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let (value,) = <(String,)>::deserialize(arguments)?;
 		Ok(hash(&value).serialize(evaluator.create_serializer())?)
 	}

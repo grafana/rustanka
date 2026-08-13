@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use rtk_spec::canonical::{Environment, JsonentImplementationOrConfig, Rc};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use rtk_spec::v1alpha1::EnvironmentData;
+use serde::{Deserialize, Deserializer, Serializer};
 
 mod native;
 
@@ -14,101 +15,84 @@ pub use crate::native::{
 	ValueSerializer,
 };
 
-pub trait Evaluator<'a>: 'a + Sized {
-	type Implementation: Implementation<Evaluator<'a> = Self>;
+pub trait Context: Clone + Sized {
+	type Evaluator: Evaluator<Context = Self>;
 
-	type Arguments<'b>: Arguments<'a, 'b>;
-	type Error: EvaluatorError<'a, Evaluator = Self>;
-	type Evaluation: Evaluation<'a>;
-	type Value: Value<'a, Evaluator = Self>;
+	#[inline]
+	fn create_deserializer(
+		&self,
+		value: <Self::Evaluator as Evaluator>::Value,
+	) -> <<Self::Evaluator as Evaluator>::Value as Value>::Deserializer {
+		<<<Self::Evaluator as Evaluator>::Value as Value>::Deserializer as ValueDeserializer>::new(
+			self, value,
+		)
+	}
+
+	#[inline]
+	fn create_serializer(&self) -> <<Self::Evaluator as Evaluator>::Value as Value>::Serializer {
+		<<<Self::Evaluator as Evaluator>::Value as Value>::Serializer as ValueSerializer>::new(self)
+	}
+}
+
+pub trait Evaluator: Sized {
+	type Implementation: Implementation<Evaluator = Self>;
+
+	type Arguments: Arguments;
+	type Context: Context<Evaluator = Self>;
+	type Error: EvaluatorError<Evaluator = Self>;
+	type Value: Value<Evaluator = Self>;
 
 	fn new(implementation: &Self::Implementation) -> Self;
 
-	fn name() -> &'static str;
+	fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, Self::Error>;
 
-	#[inline]
-	fn create_deserializer(&self, value: Self::Value) -> <Self::Value as Value<'a>>::Deserializer {
-		<<Self::Value as Value<'a>>::Deserializer as ValueDeserializer<'a>>::new(self, value)
-	}
+	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, Self::Error>;
 
-	#[inline]
-	fn create_serializer(&self) -> <Self::Value as Value<'a>>::Serializer {
-		<<Self::Value as Value<'a>>::Serializer as ValueSerializer<'a>>::new(self)
-	}
-
-	fn with_rc(
-		&mut self,
-		rc: &'a Rc,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
-	fn with_import_paths(
-		&mut self,
-		import_paths: Vec<PathBuf>,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
-
-	fn with_plugin<P>(
-		&mut self,
-		p: P,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>
+	fn with_plugin<P>(&mut self, plugin: P) -> Result<&mut Self, Self::Error>
 	where
-		P: Plugin<'a, Self>;
+		P: Plugin<Self>;
 
-	fn with_external_code(
-		&mut self,
-		key: &'a str,
-		value: &'a str,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
-	fn with_external_variable(
-		&mut self,
-		key: &'a str,
-		value: &'a str,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
+	fn with_external_code(&mut self, key: &str, value: &str) -> Result<&mut Self, Self::Error>;
 
-	fn with_native_function<F>(
-		&mut self,
-		key: &'a str,
-		func: F,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>
+	fn with_external_variable(&mut self, key: &str, value: &str) -> Result<&mut Self, Self::Error>;
+
+	fn with_native_function<F>(&mut self, key: &str, func: F) -> Result<&mut Self, Self::Error>
 	where
-		F: 'static + Function<'a, Self>;
+		F: 'static + Function<Self>;
 
-	fn with_top_level_argument(
-		&mut self,
-		key: &'a str,
-		value: &'a str,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
-	fn with_top_level_code(
-		&mut self,
-		key: &'a str,
-		value: &'a str,
-	) -> Result<&mut Self, <Self::Implementation as Implementation>::Error>;
+	fn with_top_level_argument(&mut self, key: &str, value: &str)
+	-> Result<&mut Self, Self::Error>;
 
-	fn evaluate_file<P>(self, path: P) -> Result<Self::Evaluation, <Self as Evaluator<'a>>::Error>
+	fn with_top_level_code(&mut self, key: &str, value: &str) -> Result<&mut Self, Self::Error>;
+
+	fn evaluate_file<P>(
+		self,
+		path: P,
+	) -> Result<(Self::Context, Self::Value), <Self as Evaluator>::Error>
 	where
-		P: 'a + AsRef<Path> + fmt::Debug;
+		P: AsRef<Path> + fmt::Debug;
 
 	fn evaluate_snippet<S>(
 		self,
 		snippet: S,
-	) -> Result<Self::Evaluation, <Self as Evaluator<'a>>::Error>
+	) -> Result<(Self::Context, Self::Value), <Self as Evaluator>::Error>
 	where
-		S: 'a + AsRef<str> + fmt::Debug;
+		S: AsRef<str> + fmt::Debug;
 }
 
-pub trait EvaluatorError<'a>
+pub trait EvaluatorError
 where
     Self: Error
-        + for<'b> From<<<Self::Evaluator as Evaluator<'a>>::Arguments<'b> as Deserializer<'b>>::Error>
-        + From<<<<Self::Evaluator as Evaluator<'a>>::Value as Value<'a>>::Deserializer as Deserializer<'a>>::Error>
-		+ From<<<<Self::Evaluator as Evaluator<'a>>::Value as Value<'a>>::Serializer as Serializer>::Error>,
+        + for<'de> From<<<Self::Evaluator as Evaluator>::Arguments as Deserializer<'de>>::Error>
+        + for<'de> From<<<<Self::Evaluator as Evaluator>::Value as Value>::Deserializer as Deserializer<'de>>::Error>
+		+ From<<<<Self::Evaluator as Evaluator>::Value as Value>::Serializer as Serializer>::Error>,
 {
-    type Evaluator: Evaluator<'a, Error = Self>;
+    type Evaluator: Evaluator<Error = Self>;
 
     fn custom<T>(message: T) -> Self
     where
-        T: Into<String>;
+        T: fmt::Display;
 }
-
-pub trait Evaluation<'a>: 'a + Sized + Serialize {}
 
 pub trait Flag: Sized {
 	type Implementation: Implementation<Flag = Self>;
@@ -130,9 +114,12 @@ pub trait FlagsExt: __sealant::Sealed {
 		F: Flag;
 }
 
-impl __sealant::Sealed for Environment {}
+impl<'a, D> __sealant::Sealed for Environment<'a, D> where D: EnvironmentData<'a> {}
 
-impl FlagsExt for Environment {
+impl<'a, D> FlagsExt for Environment<'a, D>
+where
+	D: EnvironmentData<'a>,
+{
 	fn flags<F>(&self) -> Result<impl Iterator<Item = F>, <F as Flag>::Error>
 	where
 		F: Flag,
@@ -189,24 +176,21 @@ impl FlagsExt for Rc {
 }
 
 pub trait Implementation: Sized {
-	type Evaluator<'a>: Evaluator<'a, Implementation = Self>;
+	type Evaluator: Evaluator<Implementation = Self>;
 	type Flag: Flag<Implementation = Self>;
 	type Error: Error
 		+ From<Self::InitializationError>
 		+ From<<Self::Flag as Flag>::Error>
-		+ for<'a> From<<Self::Evaluator<'a> as Evaluator<'a>>::Error>;
+		+ From<<Self::Evaluator as Evaluator>::Error>;
 	type InitializationError: Error;
 
-	fn new<'a>(flags: impl Iterator<Item = Self::Flag>) -> Result<Self, Self::InitializationError>;
+	fn new(flags: impl Iterator<Item = Self::Flag>) -> Result<Self, Self::InitializationError>;
 
-	fn create_evaluator(&self) -> Self::Evaluator<'_> {
+	fn create_evaluator(&self) -> Self::Evaluator {
 		Self::Evaluator::new(self)
 	}
 }
 
-pub trait Plugin<'a, E: Evaluator<'a>> {
-	fn install(
-		self,
-		evaluator: &mut E,
-	) -> Result<(), <<E as Evaluator<'a>>::Implementation as Implementation>::Error>;
+pub trait Plugin<E: Evaluator> {
+	fn install(self, evaluator: &mut E) -> Result<(), E::Error>;
 }

@@ -4,24 +4,24 @@ use std::fmt::{self, Formatter};
 use std::marker::PhantomData;
 
 use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, forward_to_deserialize_any};
+use serde::{Deserializer, Serializer, forward_to_deserialize_any};
 
 use crate::Evaluator;
 
 /// Values passed to a [`Function`].
-pub trait Arguments<'a, 'b>: Deserializer<'b> + Sized {
-	type Evaluator: Evaluator<'a>;
+pub trait Arguments: (for<'de> Deserializer<'de>) + Sized {
+	type Evaluator: Evaluator;
 }
 
 /// A dummy implementation of [`Arguments`] for [`Evaluator`]s that
 /// don't provide native function interop.
-pub struct InfallibleArguments<'a, 'b, E> {
+pub struct InfallibleArguments<E> {
 	_inner: Infallible,
-	_phantom: PhantomData<fn(&'a (), &'b (), E)>,
+	_phantom: PhantomData<fn(E)>,
 }
 
-impl<'a, 'de, E> Deserializer<'de> for InfallibleArguments<'a, 'de, E> {
-	type Error = InfallibleError<'de, E>;
+impl<'de, E> Deserializer<'de> for InfallibleArguments<E> {
+	type Error = InfallibleError;
 
 	fn deserialize_any<V>(self, _: V) -> Result<V::Value, Self::Error>
 	where
@@ -37,19 +37,23 @@ impl<'a, 'de, E> Deserializer<'de> for InfallibleArguments<'a, 'de, E> {
 	}
 }
 
-impl<'a, 'b, E> Arguments<'a, 'b> for InfallibleArguments<'a, 'b, E>
+impl<E> Arguments for InfallibleArguments<E>
 where
-	E: Evaluator<'a>,
+	E: Evaluator,
 {
 	type Evaluator = E;
 }
 
-pub trait Array<'a>
+pub trait Array
 where
-	Self: Clone + Deserialize<'a> + Serialize,
+	Self: Clone + Into<Self::Value>,
 {
-	type Evaluator: Evaluator<'a, Value = Self::Value>;
-	type Value: Value<'a, Array = Self>;
+	type Evaluator: Evaluator<Value = Self::Value>;
+	type Value: Value<Array = Self>;
+
+	type Iter<'a>: Iterator<Item = Result<Self::Value, <Self::Evaluator as Evaluator>::Error>> + 'a
+	where
+		Self: 'a;
 
 	fn len(&self) -> usize;
 
@@ -60,32 +64,30 @@ where
 	fn get(
 		&self,
 		index: usize,
-	) -> Result<Option<Self::Value>, <Self::Evaluator as Evaluator<'a>>::Error>;
-	fn iter(
-		&self,
-	) -> impl Iterator<Item = Result<Self::Value, <Self::Evaluator as Evaluator<'a>>::Error>>;
+	) -> Result<Option<Self::Value>, <Self::Evaluator as Evaluator>::Error>;
+
+	fn iter(&self) -> Self::Iter<'_>;
 }
 
-pub struct InfallibleError<'a, E> {
+pub struct InfallibleError {
 	_inner: Infallible,
-	_phantom: PhantomData<fn(&'a (), E)>,
 }
 
-impl<'a, E> fmt::Debug for InfallibleError<'a, E> {
+impl fmt::Debug for InfallibleError {
 	fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
 		unreachable!()
 	}
 }
 
-impl<'a, E> fmt::Display for InfallibleError<'a, E> {
+impl fmt::Display for InfallibleError {
 	fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
 		unreachable!()
 	}
 }
 
-impl<'a, E> Error for InfallibleError<'a, E> {}
+impl Error for InfallibleError {}
 
-impl<'a, E> de::Error for InfallibleError<'a, E> {
+impl de::Error for InfallibleError {
 	fn custom<T>(_: T) -> Self
 	where
 		T: fmt::Display,
@@ -94,64 +96,69 @@ impl<'a, E> de::Error for InfallibleError<'a, E> {
 	}
 }
 
-pub trait Function<'a, E: Evaluator<'a>> {
+pub trait Function<E: Evaluator> {
 	fn argv(&self) -> (usize, Option<usize>);
 
 	fn parameter_names(&self) -> Option<&'static [&'static str]> {
 		None
 	}
 
-	fn call<'b>(
+	fn call(
 		&self,
 		evaluator: &E,
-		arguments: <E as Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as Evaluator<'a>>::Value, <E as Evaluator<'a>>::Error>;
+		arguments: <E as Evaluator>::Arguments,
+	) -> Result<<E as Evaluator>::Value, <E as Evaluator>::Error>;
 }
 
-pub trait Object<'a>
+pub trait Object
 where
-	Self: Clone + Deserialize<'a> + Serialize,
+	Self: Clone + Into<Self::Value>,
 {
-	type Evaluator: Evaluator<'a, Value = Self::Value>;
-	type Value: Value<'a, Object = Self>;
+	type Evaluator: Evaluator<Value = Self::Value>;
+	type Value: Value<Object = Self>;
 
-	fn fields(&self) -> impl Iterator<Item = &str>;
-	fn has(&self, key: &str) -> Result<bool, <Self::Evaluator as Evaluator<'a>>::Error>;
-	fn get(&self, key: &str) -> Result<Self::Value, <Self::Evaluator as Evaluator<'a>>::Error>;
+	type ValuesIter<'a>: Iterator<Item = Result<Self::Value, <Self::Evaluator as Evaluator>::Error>>
+	where
+		Self: 'a;
+
+	fn has(&self, key: &str) -> Result<bool, <Self::Evaluator as Evaluator>::Error>;
+	fn get(&self, key: &str) -> Result<Self::Value, <Self::Evaluator as Evaluator>::Error>;
+
+	fn values(&self) -> Self::ValuesIter<'_>;
 }
 
-pub trait Value<'a>
+pub trait Value
 where
-	Self: Clone + Deserialize<'a> + Serialize,
+	Self: Clone + fmt::Debug,
 {
-	type Evaluator: Evaluator<'a, Value = Self>;
+	type Evaluator: Evaluator<Value = Self>;
 
-	type Deserializer: ValueDeserializer<'a, Evaluator = Self::Evaluator, Value = Self>;
-	type Serializer: ValueSerializer<'a, Evaluator = Self::Evaluator, Value = Self>;
+	type Deserializer: ValueDeserializer<Evaluator = Self::Evaluator, Value = Self>;
+	type Serializer: ValueSerializer<Evaluator = Self::Evaluator, Value = Self>;
 
-	type Array: Array<'a, Evaluator = Self::Evaluator, Value = Self>;
-	type Object: Object<'a, Evaluator = Self::Evaluator, Value = Self>;
+	type Array: Array<Evaluator = Self::Evaluator, Value = Self>;
+	type Object: Object<Evaluator = Self::Evaluator, Value = Self>;
 
 	fn into_array(self) -> Result<Self::Array, Self>;
 	fn into_object(self) -> Result<Self::Object, Self>;
 }
 
-pub trait ValueDeserializer<'a>
+pub trait ValueDeserializer
 where
-	Self: Deserializer<'a, Error = <Self::Evaluator as Evaluator<'a>>::Error>,
+	Self: for<'de> Deserializer<'de, Error = <Self::Evaluator as Evaluator>::Error>,
 {
-	type Evaluator: Evaluator<'a, Value = Self::Value>;
-	type Value: Value<'a, Deserializer = Self>;
+	type Evaluator: Evaluator<Value = Self::Value>;
+	type Value: Value<Deserializer = Self>;
 
-	fn new(evaluator: &Self::Evaluator, value: Self::Value) -> Self;
+	fn new(context: &<Self::Evaluator as Evaluator>::Context, value: Self::Value) -> Self;
 }
 
-pub trait ValueSerializer<'a>
+pub trait ValueSerializer
 where
 	Self: Serializer<Ok = Self::Value>,
 {
-	type Evaluator: Evaluator<'a, Value = Self::Value>;
-	type Value: Value<'a, Serializer = Self>;
+	type Evaluator: Evaluator<Value = Self::Value>;
+	type Value: Value<Serializer = Self>;
 
-	fn new(evaluator: &Self::Evaluator) -> Self;
+	fn new(evaluator: &<Self::Evaluator as Evaluator>::Context) -> Self;
 }

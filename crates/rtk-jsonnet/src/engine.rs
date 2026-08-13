@@ -2,11 +2,15 @@ use std::convert::Infallible;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc as StdRc;
 use std::sync::{Arc, RwLock, Weak};
 
-use rtk_jsonnet_core::{Evaluator as _, FlagsExt, Function, Implementation};
+use rtk_jsonnet_core::{
+	Context as _, Evaluator as _, FlagsExt, Function, Implementation, Value as _,
+};
 use rtk_jsonnet_jrsonnet::{
-	Error as JrsonnetError, Evaluator as JrsonnetEvaluator, Flag as JrsonnetFlag,
+	Error as JrsonnetError, Evaluation as JrsonnetEvaluation, Evaluator as JrsonnetEvaluator,
+	EvaluatorError as JrsonnetEvaluatorError, Flag as JrsonnetFlag,
 	Implementation as JrsonnetImplementation,
 };
 use rtk_spec::DeepMerge;
@@ -24,6 +28,12 @@ pub enum Error {
 impl From<Infallible> for Error {
 	fn from(_: Infallible) -> Self {
 		unreachable!()
+	}
+}
+
+impl From<JrsonnetEvaluatorError> for Error {
+	fn from(error: JrsonnetEvaluatorError) -> Self {
+		JrsonnetError::Evaluator(error).into()
 	}
 }
 
@@ -105,11 +115,11 @@ impl Evaluator {
 			.spec
 			.jsonnet_implementation
 			.as_ref()
-			.map(|i| i.implementation())
+			.map(rtk_spec::canonical::JsonentImplementationOrConfig::implementation)
 			.cloned()
 			.unwrap_or_default();
 		self.populate_evaluator(implementation)?;
-		call_implementation_evaluator_method!(@no_insert: self, with_rc, &self.options.rc);
+		call_implementation_evaluator_method!(@no_insert: self, with_rc, self.options.rc.clone());
 		Ok(self)
 	}
 
@@ -123,13 +133,9 @@ impl Evaluator {
 		Ok(self)
 	}
 
-	pub fn with_native_function<'a, F>(
-		&mut self,
-		key: &'a str,
-		function: F,
-	) -> Result<&mut Self, Error>
+	pub fn with_native_function<F>(&mut self, key: &str, function: F) -> Result<&mut Self, Error>
 	where
-		F: 'static + Function<'a, JrsonnetEvaluator>,
+		F: 'static + Function<JrsonnetEvaluator>,
 	{
 		call_implementation_evaluator_method!(self, with_native_function, key, function);
 		Ok(self)
@@ -154,11 +160,14 @@ impl Evaluator {
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
-		let implementation = self.selected_implementation();
-		self.populate_evaluator(implementation)?;
+		if self.evaluator.is_none() {
+			let implementation = self.selected_implementation();
+			self.populate_evaluator(implementation)?;
+		}
 		match self.evaluator.take().expect("evaluator was populated") {
 			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
 				.evaluate_file(path)
+				.map(JrsonnetEvaluation::from)
 				.map(Evaluation::Jrsonnet)
 				.map_err(|error| JrsonnetError::Evaluator(error).into()),
 		}
@@ -168,11 +177,14 @@ impl Evaluator {
 	where
 		S: AsRef<str> + fmt::Debug,
 	{
-		let implementation = self.selected_implementation();
-		self.populate_evaluator(implementation)?;
+		if self.evaluator.is_none() {
+			let implementation = self.selected_implementation();
+			self.populate_evaluator(implementation)?;
+		}
 		match self.evaluator.take().expect("evaluator was populated") {
 			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
 				.evaluate_snippet(snippet)
+				.map(JrsonnetEvaluation::from)
 				.map(Evaluation::Jrsonnet)
 				.map_err(|error| JrsonnetError::Evaluator(error).into()),
 		}
@@ -184,7 +196,7 @@ impl Evaluator {
 			.spec
 			.jsonnet_implementation
 			.as_ref()
-			.map(|implementation| implementation.implementation())
+			.map(rtk_spec::canonical::JsonentImplementationOrConfig::implementation)
 			.cloned()
 			.unwrap_or_default()
 	}
@@ -204,20 +216,20 @@ impl Evaluator {
 		implementations.maybe_init_implementation(implementation.clone())?;
 
 		// TODO: Fix for multiple implementations.
-		let evaluator = match (implementation, &*implementations) {
-			(
-				JsonnetImplementation::Jrsonnet,
-				Implementations {
-					jrsonnet: Some(jrsonnet),
-					..
-				},
-			) => self.evaluator.insert(ImplementationEvaluator::Jrsonnet(
+		let evaluator = if let (
+			JsonnetImplementation::Jrsonnet,
+			Implementations {
+				jrsonnet: Some(jrsonnet),
+				..
+			},
+		) = (implementation, &*implementations)
+		{
+			self.evaluator.insert(ImplementationEvaluator::Jrsonnet(
 				jrsonnet.create_evaluator(),
-			)),
-			_ => {
-				drop(implementations);
-				return self.populate_evaluator(JsonnetImplementation::Jrsonnet);
-			}
+			))
+		} else {
+			drop(implementations);
+			return self.populate_evaluator(JsonnetImplementation::Jrsonnet);
 		};
 
 		if !self.options.rc.spec.disable_native_functions {
@@ -238,7 +250,21 @@ enum ImplementationEvaluator {
 
 #[derive(Debug)]
 pub enum Evaluation {
-	Jrsonnet(rtk_jsonnet_jrsonnet::Evaluation),
+	Jrsonnet(JrsonnetEvaluation),
+}
+
+impl Evaluation {
+	pub fn into_value(self) -> EvaluationValue {
+		match self {
+			Evaluation::Jrsonnet(evaluation) => {
+				let value = evaluation.value().clone();
+				EvaluationValue::Jrsonnet {
+					evaluation: StdRc::new(evaluation),
+					value,
+				}
+			}
+		}
+	}
 }
 
 impl serde::Serialize for Evaluation {
@@ -248,6 +274,163 @@ impl serde::Serialize for Evaluation {
 	{
 		match self {
 			Evaluation::Jrsonnet(evaluation) => evaluation.serialize(serializer),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub enum EvaluationValue {
+	Jrsonnet {
+		evaluation: StdRc<JrsonnetEvaluation>,
+		value: rtk_jsonnet_jrsonnet::Value,
+	},
+}
+
+impl EvaluationValue {
+	pub fn into_array(self) -> Result<EvaluationArray, Self> {
+		match self {
+			EvaluationValue::Jrsonnet { evaluation, value } => match value.into_array() {
+				Ok(array) => Ok(EvaluationArray::Jrsonnet { evaluation, array }),
+				Err(value) => Err(EvaluationValue::Jrsonnet { evaluation, value }),
+			},
+		}
+	}
+
+	pub fn into_object(self) -> Result<EvaluationObject, Self> {
+		match self {
+			EvaluationValue::Jrsonnet { evaluation, value } => match value.into_object() {
+				Ok(object) => Ok(EvaluationObject::Jrsonnet { evaluation, object }),
+				Err(value) => Err(EvaluationValue::Jrsonnet { evaluation, value }),
+			},
+		}
+	}
+
+	pub fn deserialize<'de, T>(self) -> Result<T, Error>
+	where
+		T: serde::Deserialize<'de>,
+	{
+		match self {
+			EvaluationValue::Jrsonnet { evaluation, value } => evaluation
+				.with_context(|context| T::deserialize(context.create_deserializer(value)))
+				.map_err(Error::from),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub enum EvaluationArray {
+	Jrsonnet {
+		evaluation: StdRc<JrsonnetEvaluation>,
+		array: rtk_jsonnet_jrsonnet::Array,
+	},
+}
+
+impl EvaluationArray {
+	pub fn into_values(self) -> EvaluationArrayValues {
+		match self {
+			EvaluationArray::Jrsonnet { evaluation, array } => EvaluationArrayValues::Jrsonnet {
+				evaluation,
+				values: array.into_values(),
+			},
+		}
+	}
+}
+
+pub enum EvaluationArrayValues {
+	Jrsonnet {
+		evaluation: StdRc<JrsonnetEvaluation>,
+		values: rtk_jsonnet_jrsonnet::ArrayValues,
+	},
+}
+
+impl Iterator for EvaluationArrayValues {
+	type Item = Result<EvaluationValue, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			EvaluationArrayValues::Jrsonnet { evaluation, values } => {
+				evaluation.with_context(|_| {
+					values.next().map(|value| {
+						value
+							.map(|value| EvaluationValue::Jrsonnet {
+								evaluation: StdRc::clone(evaluation),
+								value,
+							})
+							.map_err(Error::from)
+					})
+				})
+			}
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub enum EvaluationObject {
+	Jrsonnet {
+		evaluation: StdRc<JrsonnetEvaluation>,
+		object: rtk_jsonnet_jrsonnet::Object,
+	},
+}
+
+impl EvaluationObject {
+	pub fn has(&self, key: &str) -> Result<bool, Error> {
+		use rtk_jsonnet_core::Object as _;
+
+		match self {
+			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
+				.with_context(|_| object.has(key))
+				.map_err(Error::from),
+		}
+	}
+
+	pub fn get(&self, key: &str) -> Result<EvaluationValue, Error> {
+		use rtk_jsonnet_core::Object as _;
+
+		match self {
+			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
+				.with_context(|_| object.get(key))
+				.map(|value| EvaluationValue::Jrsonnet {
+					evaluation: StdRc::clone(evaluation),
+					value,
+				})
+				.map_err(Error::from),
+		}
+	}
+
+	pub fn into_values(self) -> EvaluationObjectValues {
+		match self {
+			EvaluationObject::Jrsonnet { evaluation, object } => EvaluationObjectValues::Jrsonnet {
+				evaluation,
+				values: object.into_values(),
+			},
+		}
+	}
+}
+
+pub enum EvaluationObjectValues {
+	Jrsonnet {
+		evaluation: StdRc<JrsonnetEvaluation>,
+		values: rtk_jsonnet_jrsonnet::ObjectValues,
+	},
+}
+
+impl Iterator for EvaluationObjectValues {
+	type Item = Result<EvaluationValue, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			EvaluationObjectValues::Jrsonnet { evaluation, values } => {
+				evaluation.with_context(|_| {
+					values.next().map(|value| {
+						value
+							.map(|value| EvaluationValue::Jrsonnet {
+								evaluation: StdRc::clone(evaluation),
+								value,
+							})
+							.map_err(Error::from)
+					})
+				})
+			}
 		}
 	}
 }
@@ -374,5 +557,44 @@ mod tests {
 			.create_evaluator()
 			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn lazily_traverses_native_function_values_with_their_context() {
+		let value = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet(
+				r#"{
+					array: [std.native("sha256")("array")],
+					object: { value: std.native("sha256")("object") },
+				}"#,
+			)
+			.unwrap()
+			.into_value();
+		let object = value.into_object().expect("an object");
+
+		let array = object.get("array").unwrap().into_array().expect("an array");
+		let array_value: String = array
+			.into_values()
+			.next()
+			.expect("an element")
+			.unwrap()
+			.deserialize()
+			.unwrap();
+		assert_eq!(
+			array_value,
+			"dbe42cc09c16704aa3d60127c60b4e1646fc6da1d4764aa517de053e65a663d7"
+		);
+
+		let nested = object
+			.get("object")
+			.unwrap()
+			.into_object()
+			.expect("an object");
+		let object_value: String = nested.get("value").unwrap().deserialize().unwrap();
+		assert_eq!(
+			object_value,
+			"2958d416d08aa5a472d7b509036cb7eafd542add84527e66a145ea64cb4cdc75"
+		);
 	}
 }

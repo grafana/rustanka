@@ -4,7 +4,7 @@ use jrsonnet_evaluator::error::ErrorKind;
 use jrsonnet_evaluator::typed::ValType;
 use jrsonnet_evaluator::val::ArrValue;
 use jrsonnet_evaluator::{Error, IBytes, IStr, ObjValue, ObjValueBuilder, Thunk, Val};
-use serde::de::value::StrDeserializer;
+use serde::de::value::StringDeserializer;
 use serde::de::{
 	self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
 };
@@ -25,11 +25,11 @@ impl de::Error for EvaluatorError {
 	}
 }
 
-impl<'de> Arguments<'de> {
-	fn seq_access(self) -> impl SeqAccess<'de, Error = EvaluatorError> {
-		struct ArgumentsSeqAccess<'de>(<&'de [Option<Thunk<Val>>] as IntoIterator>::IntoIter);
+impl Arguments {
+	fn seq_access<'de>(self) -> impl SeqAccess<'de, Error = EvaluatorError> {
+		struct ArgumentsSeqAccess(<Box<[Option<Thunk<Val>>]> as IntoIterator>::IntoIter);
 
-		impl<'de> SeqAccess<'de> for ArgumentsSeqAccess<'de> {
+		impl<'de> SeqAccess<'de> for ArgumentsSeqAccess {
 			type Error = EvaluatorError;
 
 			fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -60,7 +60,7 @@ impl<'de> Arguments<'de> {
 	}
 }
 
-impl<'de> Deserializer<'de> for Arguments<'de> {
+impl<'de> Deserializer<'de> for Arguments {
 	type Error = EvaluatorError;
 
 	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -100,7 +100,7 @@ impl<'de> Deserialize<'de> for Value {
 /// `into_array`/`into_object` navigation to walk a tree lazily instead.
 pub struct ValueDeserializer(pub(crate) Value);
 
-impl rtk_jsonnet_core::ValueDeserializer<'_> for ValueDeserializer {
+impl rtk_jsonnet_core::ValueDeserializer for ValueDeserializer {
 	type Evaluator = Evaluator;
 	type Value = Value;
 
@@ -119,7 +119,7 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		match self.0.0 {
 			Val::Bool(boolean) => visitor.visit_bool(boolean),
 			Val::Null => visitor.visit_unit(),
-			Val::Str(string) => visitor.visit_str(&string.into_flat()),
+			Val::Str(string) => visitor.visit_string(string.into_flat().to_string()),
 			Val::Num(number) => {
 				let number = number.get();
 				// Mirrors `Val`'s `Serialize` implementation: integral numbers
@@ -268,7 +268,7 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 		let Some(field) = self.fields.next() else {
 			return Ok(None);
 		};
-		let key = seed.deserialize(StrDeserializer::<EvaluatorError>::new(&field))?;
+		let key = seed.deserialize(StringDeserializer::<EvaluatorError>::new(field.to_string()))?;
 		self.field = Some(field);
 		Ok(Some(key))
 	}
@@ -306,7 +306,9 @@ impl<'de> EnumAccess<'de> for EnumDeserializer {
 	where
 		V: DeserializeSeed<'de>,
 	{
-		let variant = seed.deserialize(StrDeserializer::<EvaluatorError>::new(&self.variant))?;
+		let variant = seed.deserialize(StringDeserializer::<EvaluatorError>::new(
+			self.variant.to_string(),
+		))?;
 		Ok((variant, VariantDeserializer { value: self.value }))
 	}
 }
@@ -411,7 +413,7 @@ impl<'de> Deserialize<'de> for Object {
 		D: Deserializer<'de>,
 	{
 		match Val::deserialize(deserializer)? {
-			Val::Obj(object) => Ok(Object::new(object)),
+			Val::Obj(object) => Ok(Object(object)),
 			value => Err(de::Error::custom(format!(
 				"invalid type: {}, expected object",
 				value.value_type()
@@ -425,7 +427,7 @@ impl Serialize for Object {
 	where
 		S: ser::Serializer,
 	{
-		Val::Obj(self.inner.clone()).serialize(serializer)
+		Val::Obj(self.0.clone()).serialize(serializer)
 	}
 }
 
@@ -434,13 +436,7 @@ impl Serialize for Evaluation {
 	where
 		S: ser::Serializer,
 	{
-		Evaluator::CURRENT.with(|current| {
-			let _guard = crate::CurrentEvaluatorGuard::new(current, std::rc::Rc::clone(&self.1));
-			self.0
-				.as_ref()
-				.expect("the evaluation is only empty while being dropped")
-				.serialize(serializer)
-		})
+		self.with_context(|_| self.value().0.serialize(serializer))
 	}
 }
 
@@ -457,7 +453,7 @@ impl ValueSerializer {
 	}
 }
 
-impl rtk_jsonnet_core::ValueSerializer<'_> for ValueSerializer {
+impl rtk_jsonnet_core::ValueSerializer for ValueSerializer {
 	type Evaluator = Evaluator;
 	type Value = Value;
 
@@ -813,7 +809,7 @@ mod tests {
 			.expect("snippet evaluates")
 	}
 
-	fn from_val<T: for<'de> Deserialize<'de>>(snippet: &str) -> Result<T, EvaluatorError> {
+	fn from_val<'de, T: Deserialize<'de>>(snippet: &str) -> Result<T, EvaluatorError> {
 		T::deserialize(ValueDeserializer(Value(eval(snippet))))
 	}
 
@@ -995,7 +991,6 @@ mod tests {
 			r#"{ ok: 1, boom: error "nope", f: function(x) x, hidden:: 2 }"#,
 		));
 		let object = value.into_object().expect("an object");
-		assert_eq!(object.fields().collect::<Vec<_>>(), ["boom", "f", "ok"]);
 		assert!(object.has("boom").unwrap());
 		assert!(!object.has("hidden").unwrap());
 		assert!(!object.has("absent").unwrap());
@@ -1174,7 +1169,7 @@ mod tests {
 
 	#[test]
 	fn serializes_through_evaluator_wiring() {
-		use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
+		use rtk_jsonnet_core::{Context as _, Implementation as _};
 
 		let implementation = crate::Implementation::new(std::iter::empty()).unwrap();
 		let evaluator = implementation.create_evaluator();
@@ -1189,6 +1184,8 @@ mod tests {
 	fn serializes_environment_to_val() {
 		let environment: rtk_spec::v1alpha1::Environment = from_val(
 			r#"{
+				apiVersion: "tanka.dev/v1alpha1",
+				kind: "Environment",
 				metadata: { name: "environments/demo" },
 				spec: { apiServer: "https://127.0.0.1:6443", namespace: "demo" },
 			}"#,

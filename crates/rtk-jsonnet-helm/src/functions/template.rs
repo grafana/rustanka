@@ -7,6 +7,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 
 use rtk_jsonnet_core as jsonnet;
+use rtk_jsonnet_core::Context;
 use rtk_jsonnet_core::EvaluatorError as _;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::{Deserialize, Serialize};
@@ -24,9 +25,9 @@ impl Function {
 	}
 }
 
-impl<'a, E> jsonnet::Function<'a, E> for Function
+impl<E> jsonnet::Function<E> for Function
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 {
 	fn argv(&self) -> (usize, Option<usize>) {
 		(3, None)
@@ -36,32 +37,26 @@ where
 		Some(&["name", "chart", "opts"])
 	}
 
-	fn call<'b>(
-		&self,
-		evaluator: &E,
-		arguments: <E as jsonnet::Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as jsonnet::Evaluator<'a>>::Value, <E as jsonnet::Evaluator<'a>>::Error> {
+	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let (name, chart, options) = <(String, String, Options)>::deserialize(arguments)?;
 
 		let called_from = &options.called_from;
 
 		let mut chart_path = {
 			if called_from.is_empty() {
-				return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(
-					"calledFrom cannot be an empty string",
-				));
+				return Err(E::Error::custom("calledFrom cannot be an empty string"));
 			}
 
 			let called_from_path: &Path = called_from.as_ref();
 
 			let Some(called_from_dir) = called_from_path.parent() else {
-				return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
+				return Err(E::Error::custom(format!(
 					"calledFrom has no parent directory: {called_from}"
 				)));
 			};
 
 			if !called_from_dir.exists() {
-				return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
+				return Err(E::Error::custom(format!(
 					"calledFrom directory does not exist: {}",
 					called_from_dir.display()
 				)));
@@ -75,7 +70,7 @@ where
 			let chart_absolute = called_from_dir.join(&*chart_relative);
 
 			if !chart_absolute.exists() {
-				return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
+				return Err(E::Error::custom(format!(
 					"chart path does not exist: {}",
 					chart_absolute.display()
 				)));
@@ -147,44 +142,36 @@ where
 		command.stdout(Stdio::piped());
 		command.stderr(Stdio::piped());
 
-		let mut child = command.spawn().map_err(|error| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(format!("failed to execute helm: {error}"))
-		})?;
+		let mut child = command
+			.spawn()
+			.map_err(|error| E::Error::custom(format!("failed to execute helm: {error}")))?;
 
 		if let Some(json) = options.values.as_ref() {
-			let mut stdin = child.stdin.take().ok_or_else(|| {
-				<E as jsonnet::Evaluator<'a>>::Error::custom("failed to capture helm stdin")
-			})?;
+			let mut stdin = child
+				.stdin
+				.take()
+				.ok_or_else(|| E::Error::custom("failed to capture helm stdin"))?;
 			serde_json::to_writer(&mut stdin, json).map_err(|error| {
-				<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-					"failed to write values to helm stdin: {error}"
-				))
+				E::Error::custom(format!("failed to write values to helm stdin: {error}"))
 			})?;
 			stdin.flush().map_err(|error| {
-				<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-					"failed to write values to helm stdin: {error}"
-				))
+				E::Error::custom(format!("failed to write values to helm stdin: {error}"))
 			})?;
 		}
 
 		let (status, stdout_buffer, stderr_buffer) =
-			drain_output(child).map_err(<E as jsonnet::Evaluator<'a>>::Error::custom)?;
+			drain_output(child).map_err(E::Error::custom)?;
 
 		if !status.success() {
 			let stderr = String::from_utf8_lossy(&stderr_buffer);
-			return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-				"helm template failed: {stderr}"
-			)));
+			return Err(E::Error::custom(format!("helm template failed: {stderr}")));
 		}
 
-		let yaml_content = String::from_utf8(stdout_buffer).map_err(|error| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-				"invalid UTF-8 in helm output: {error}"
-			))
-		})?;
+		let yaml_content = String::from_utf8(stdout_buffer)
+			.map_err(|error| E::Error::custom(format!("invalid UTF-8 in helm output: {error}")))?;
 
 		let value = parse_helm_yaml_output(&yaml_content, options.name_format.as_deref())
-			.map_err(<E as jsonnet::Evaluator<'a>>::Error::custom)?;
+			.map_err(E::Error::custom)?;
 
 		let serializer = evaluator.create_serializer();
 		let evaluator_value = value.serialize(serializer)?;

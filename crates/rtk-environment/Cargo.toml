@@ -1,0 +1,27 @@
+[package]
+name = "rtk-environments"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+either.workspace = true
+gtmpl = "0.7.1"
+k8s-openapi.workspace = true
+regex.workspace = true
+rtk-jsonnet.workspace = true
+rtk-jsonnet-core.workspace = true
+rtk-spec.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[lints]
+workspace = true

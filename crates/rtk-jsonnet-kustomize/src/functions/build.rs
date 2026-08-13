@@ -6,15 +6,16 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 
 use rtk_jsonnet_core as jsonnet;
+use rtk_jsonnet_core::Context;
 use rtk_jsonnet_core::EvaluatorError as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct Function;
 
-impl<'a, E> jsonnet::Function<'a, E> for Function
+impl<E> jsonnet::Function<E> for Function
 where
-	E: jsonnet::Evaluator<'a>,
+	E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 {
 	fn argv(&self) -> (usize, Option<usize>) {
 		(2, None)
@@ -24,19 +25,12 @@ where
 		Some(&["path", "opts"])
 	}
 
-	fn call<'b>(
-		&self,
-		evaluator: &E,
-		arguments: <E as jsonnet::Evaluator<'a>>::Arguments<'b>,
-	) -> Result<<E as jsonnet::Evaluator<'a>>::Value, <E as jsonnet::Evaluator<'a>>::Error> {
+	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let (path, options) = <(String, Options)>::deserialize(arguments)?;
 		let called_from = options.called_from.ok_or_else(|| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(
-				"kustomizeBuild requires calledFrom field (usually std.thisFile)",
-			)
+			E::Error::custom("kustomizeBuild requires calledFrom field (usually std.thisFile)")
 		})?;
-		let kustomize_path = resolve_path(&path, &called_from)
-			.map_err(<E as jsonnet::Evaluator<'a>>::Error::custom)?;
+		let kustomize_path = resolve_path(&path, &called_from).map_err(E::Error::custom)?;
 
 		let mut command = Command::new("kustomize");
 		command
@@ -45,27 +39,22 @@ where
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped());
 
-		let child = command.spawn().map_err(|error| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-				"failed to execute kustomize: {error}"
-			))
-		})?;
-		let (status, stdout, stderr) =
-			drain_output(child).map_err(<E as jsonnet::Evaluator<'a>>::Error::custom)?;
+		let child = command
+			.spawn()
+			.map_err(|error| E::Error::custom(format!("failed to execute kustomize: {error}")))?;
+		let (status, stdout, stderr) = drain_output(child).map_err(E::Error::custom)?;
 
 		if !status.success() {
-			return Err(<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
+			return Err(E::Error::custom(format!(
 				"kustomize build failed: {}",
 				String::from_utf8_lossy(&stderr)
 			)));
 		}
 
 		let yaml = String::from_utf8(stdout).map_err(|error| {
-			<E as jsonnet::Evaluator<'a>>::Error::custom(format!(
-				"failed to read kustomize output: {error}"
-			))
+			E::Error::custom(format!("failed to read kustomize output: {error}"))
 		})?;
-		let value = parse_output(&yaml).map_err(<E as jsonnet::Evaluator<'a>>::Error::custom)?;
+		let value = parse_output(&yaml).map_err(E::Error::custom)?;
 
 		Ok(value.serialize(evaluator.create_serializer())?)
 	}
