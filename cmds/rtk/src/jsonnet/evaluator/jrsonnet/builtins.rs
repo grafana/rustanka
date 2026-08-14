@@ -35,20 +35,9 @@ use sha2::{Digest, Sha256};
 // map is keyed by `nameFormat`, the cache key must include `nameFormat` too.
 static HELM_TEMPLATE_CACHE: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
 
-/// When `Some`, every `helmTemplate` cache key touched by any worker thread (a
-/// hit or a freshly computed value) is recorded here. The export driver enables
-/// this once, for the whole run, so it can persist only the entries that were
-/// actually used back to the on-disk `helm-cache` directory (pruning stale
-/// entries that were preloaded but never referenced). When `None` (the
-/// default), disk caching is off and `helmTemplate` behaves exactly as before
-/// (process-global in-memory cache only). This is process-global rather than
-/// thread-local because a single `main.jsonnet` can expand into many
-/// environments evaluated across different worker threads.
-static HELM_DISK_TOUCHED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-
-/// Serializes tests that touch the process-global Helm caches above. Cargo runs
+/// Serializes tests that touch the process-global Helm cache above. Cargo runs
 /// tests in parallel within a single process, so without this lock concurrent
-/// tests would clobber the shared `HELM_DISK_TOUCHED` recording state.
+/// tests would clobber each other's cache entries.
 #[cfg(test)]
 pub(crate) static HELM_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -74,50 +63,6 @@ fn get_helm_cache() -> &'static RwLock<Option<HashMap<String, String>>> {
 		}
 	}
 	&HELM_TEMPLATE_CACHE
-}
-
-/// Record that `key` was touched, if disk-cache recording is enabled. No-op
-/// otherwise. Safe to call from any worker thread.
-pub(crate) fn record_helm_disk_touch(key: &str) {
-	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
-	if let Some(set) = guard.as_mut() {
-		set.insert(key.to_owned());
-	}
-}
-
-/// Begin recording touched Helm cache keys for the whole process. Called once
-/// by the export driver before the parallel export loop. The previous state is
-/// overwritten; pair every call with [`helm_disk_cache_take`].
-pub fn helm_disk_cache_begin() {
-	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
-	*guard = Some(HashSet::new());
-}
-
-/// Stop recording and return the set of cache keys touched since
-/// [`helm_disk_cache_begin`]. Disables disk-cache recording.
-pub fn helm_disk_cache_take() -> HashSet<String> {
-	let mut guard = HELM_DISK_TOUCHED.lock().unwrap_or_else(|e| e.into_inner());
-	guard.take().unwrap_or_default()
-}
-
-/// Look up the manifested-JSON value cached for `key`, if present. Used by the
-/// export driver to persist touched entries to disk.
-pub fn helm_cache_get_json(key: &str) -> Option<String> {
-	let cache = get_helm_cache();
-	let read = cache.read().unwrap_or_else(|e| e.into_inner());
-	read.as_ref().and_then(|map| map.get(key).cloned())
-}
-
-/// Insert a manifested-JSON value into the global Helm cache under `key` unless
-/// an entry already exists. Used by the export driver to preload entries
-/// previously persisted to the on-disk `helm-cache` directory. Existing
-/// in-memory entries (e.g. computed earlier in this process) take precedence.
-pub fn helm_cache_put_json(key: String, json: String) {
-	let cache = get_helm_cache();
-	let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
-	if let Some(map) = write.as_mut() {
-		map.entry(key).or_insert(json);
-	}
 }
 
 /// State of a single `rtkMemoize` cache slot.
@@ -938,7 +883,6 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 				let val: Val = serde_json::from_str(cached_json).map_err(|e| {
 					RuntimeError(format!("failed to parse cached helm output: {e}").into())
 				})?;
-				record_helm_disk_touch(&cache_key);
 				return Ok(val);
 			}
 		}
@@ -1058,10 +1002,9 @@ pub fn helm_template(name: String, chart: String, opts: ObjValue) -> Result<Val>
 			let cache = get_helm_cache();
 			let mut write = cache.write().unwrap_or_else(|e| e.into_inner());
 			if let Some(ref mut map) = *write {
-				map.insert(cache_key.clone(), json);
+				map.insert(cache_key, json);
 			}
 		}
-		record_helm_disk_touch(&cache_key);
 	}
 
 	Ok(val)
@@ -1286,50 +1229,6 @@ mod tests {
 		} else {
 			panic!("Expected array");
 		}
-	}
-
-	#[test]
-	fn test_helm_cache_put_get_is_or_insert() {
-		let _guard = HELM_CACHE_TEST_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-
-		let key = "test_put_get_key".to_string();
-		assert_eq!(helm_cache_get_json(&key), None);
-
-		helm_cache_put_json(key.clone(), "first".to_string());
-		assert_eq!(helm_cache_get_json(&key), Some("first".to_string()));
-
-		// Existing in-memory entries take precedence over later inserts (this is
-		// what lets fresh in-process values win over preloaded disk entries).
-		helm_cache_put_json(key.clone(), "second".to_string());
-		assert_eq!(helm_cache_get_json(&key), Some("first".to_string()));
-	}
-
-	#[test]
-	fn test_helm_disk_touch_recording() {
-		let _guard = HELM_CACHE_TEST_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-
-		// Recording disabled by default: touches are dropped.
-		helm_disk_cache_take(); // ensure clean state
-		record_helm_disk_touch("ignored_when_disabled");
-		assert!(helm_disk_cache_take().is_empty());
-
-		// After begin, touches are recorded (and deduplicated).
-		helm_disk_cache_begin();
-		record_helm_disk_touch("a");
-		record_helm_disk_touch("b");
-		record_helm_disk_touch("a");
-		let touched = helm_disk_cache_take();
-		assert_eq!(touched.len(), 2);
-		assert!(touched.contains("a"));
-		assert!(touched.contains("b"));
-
-		// take() also disables recording: subsequent touches are dropped.
-		record_helm_disk_touch("c");
-		assert!(helm_disk_cache_take().is_empty());
 	}
 
 	#[test]
