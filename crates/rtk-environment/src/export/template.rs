@@ -366,9 +366,13 @@ mod tests {
 
 	fn render(format: &str, manifest: &Value) -> String {
 		let environment = environment("demo", "environments/demo", &[("tier", "test")]);
+		render_for(&environment, format, manifest)
+	}
+
+	fn render_for(environment: &Environment<'static>, format: &str, manifest: &Value) -> String {
 		FilenameTemplate::new(format)
 			.expect("a valid template")
-			.specialize(&environment)
+			.specialize(environment)
 			.expect("the template specializes")
 			.render(manifest)
 			.expect("the template renders")
@@ -507,5 +511,60 @@ mod tests {
 		);
 		// An unterminated action is all text, as tk treats it.
 		assert_eq!(replace_outside_actions("a/{{ .b", "/", "!"), "a!{{ .b");
+	}
+
+	#[test]
+	fn decides_between_branches_on_an_environments_labels() {
+		// Baking a label's value into the template is a textual substitution, so
+		// what it leaves behind has to be something a comparison can be written
+		// against. This is the shape tk's own users write.
+		let format = concat!(
+			r#"{{ if not env.metadata.labels.fluxExport }}flux-disabled"#,
+			r#"{{ else if eq env.metadata.labels.fluxExport "true" }}flux"#,
+			r#"{{ else }}flux-disabled{{ end }}/{{.kind}}"#,
+		);
+
+		for (label, expected) in [
+			(Some("true"), "flux/ConfigMap"),
+			(Some("false"), "flux-disabled/ConfigMap"),
+			(Some("something-else"), "flux-disabled/ConfigMap"),
+			(None, "flux-disabled/ConfigMap"),
+		] {
+			let labels = label.map(|label| [("fluxExport", label)]);
+			let environment = environment(
+				"demo",
+				"environments/demo",
+				labels.as_ref().map_or(&[][..], |labels| &labels[..]),
+			);
+
+			assert_eq!(
+				render_for(&environment, format, &config_map()),
+				expected,
+				"for fluxExport={label:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_label_an_environment_does_not_have_compares_as_empty() {
+		// A missing label leaves an empty string behind rather than nothing at
+		// all: the comparison has to stay a comparison instead of becoming a
+		// parse error.
+		let environment = environment("demo", "environments/demo", &[]);
+		let service = json!({
+			"apiVersion": "v1",
+			"kind": "Service",
+			"metadata": { "name": "my-service", "namespace": "demo" },
+		});
+
+		let format = concat!(
+			r#"{{.kind}}-{{ if eq env.metadata.labels.namespaced "true" }}"#,
+			r#"{{ .metadata.namespace | default "global" }}-{{ end }}{{.metadata.name}}"#,
+		);
+
+		assert_eq!(
+			render_for(&environment, format, &service),
+			"Service-my-service"
+		);
 	}
 }

@@ -28,7 +28,44 @@ tracing.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
+criterion = "0.7"
+serde_json.workspace = true
+stats_alloc = "0.1.10"
 tempfile.workspace = true
+
+[features]
+# Exposes the filename machinery for the benchmarks to measure.
+benchmarking = []
+
+[[bench]]
+name = "specialize_template"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_segment"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "specialize_template_memory"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename_memory"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_segment_memory"
+harness = false
+required-features = ["benchmarking"]
 
 [lints]
 workspace = true

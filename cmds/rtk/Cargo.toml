@@ -67,8 +67,6 @@ mimallocator = { workspace = true, optional = true }
 tempfile = "3.10"
 assert_matches = "1.5.0"
 rstest = "0.26.1"
-criterion = "0.7"
-stats_alloc = "0.1.10"
 indoc.workspace = true
 toml = "0.8"
 patch = "0.7"
@@ -88,34 +86,9 @@ default = ["mimalloc"]
 mimalloc = ["mimallocator"]
 # Use the system allocator instead of mimalloc
 system-alloc = []
-benchmarking = []
 
-[[bench]]
-name = "export_specialize_template"
-harness = false
-required-features = ["benchmarking"]
 
-[[bench]]
-name = "export_specialize_template_memory"
-harness = false
-required-features = ["benchmarking"]
 
-[[bench]]
-name = "sanitize_path_component"
-harness = false
-required-features = ["benchmarking"]
 
-[[bench]]
-name = "sanitize_path_component_memory"
-harness = false
-required-features = ["benchmarking"]
 
-[[bench]]
-name = "render_filename"
-harness = false
-required-features = ["benchmarking"]
 
-[[bench]]
-name = "render_filename_memory"
-harness = false
-required-features = ["benchmarking"]

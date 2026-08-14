@@ -4774,7 +4774,6 @@ dependencies = [
  "bon",
  "bytes 1.11.1",
  "clap",
- "criterion 0.7.0",
  "dirs",
  "either",
  "gtmpl",
@@ -4812,7 +4811,6 @@ dependencies = [
  "serde_yaml",
  "serde_yaml_with_quirks",
  "sha2 0.10.9",
- "stats_alloc",
  "tabwriter",
  "tempfile",
  "thiserror 2.0.18",
@@ -4846,6 +4844,7 @@ name = "rtk-environments"
 version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
+ "criterion 0.7.0",
  "either",
  "gtmpl",
  "k8s-openapi 0.28.0",
@@ -4860,6 +4859,7 @@ dependencies = [
  "serde-saphyr 0.0.11",
  "serde_json",
  "sha2 0.11.0",
+ "stats_alloc",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

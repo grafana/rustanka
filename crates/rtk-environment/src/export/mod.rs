@@ -41,7 +41,7 @@ mod load;
 mod manifest;
 mod process;
 mod selector;
-mod template;
+pub(crate) mod template;
 mod writer;
 
 pub use crate::export::data::OptionalData;

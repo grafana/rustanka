@@ -967,3 +967,107 @@ fn passes_top_level_arguments_to_an_inline_environment() {
 		"unexpected: {manifest}"
 	);
 }
+
+#[test]
+fn names_exported_files_by_the_extension_it_was_given() {
+	for extension in ["yaml", "yml", "json"] {
+		let project = Project::new();
+		static_environment(
+			&project,
+			"environments/demo",
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+			CONFIG_MAP,
+		);
+
+		let exported = engine()
+			.export_bulk(
+				vec![project.path().join("environments/demo")],
+				&Options {
+					extension: extension.to_owned(),
+					..options(&project)
+				},
+			)
+			.expect("the export succeeds");
+
+		assert_eq!(exported.failed(), 0);
+		assert_eq!(
+			exported.reports[0].files,
+			[PathBuf::from(format!("v1.ConfigMap-settings.{extension}"))]
+		);
+
+		// Only the name changes: what tk writes is YAML whatever it is called.
+		let exported = project.exported();
+		let manifest = &exported[&format!("v1.ConfigMap-settings.{extension}")];
+		assert!(manifest.starts_with("apiVersion: v1\n"), "{manifest}");
+	}
+}
+
+#[test]
+fn stops_the_whole_export_once_one_environment_cannot_be_written() {
+	let project = Project::new();
+
+	// Every environment exports one resource, and the one from `b` has no name to
+	// build a filename out of. Rendering nothing is not something to skip past, so
+	// it stops the export — and whichever environments had not started by then are
+	// reported as never having had their turn.
+	for (name, resource) in [
+		("a", "a-resource"),
+		("b", ""),
+		("c", "c-resource"),
+		("d", "d-resource"),
+	] {
+		project.write(
+			&format!("environments/{name}/main.jsonnet"),
+			&format!(
+				r"{{
+					apiVersion: 'tanka.dev/v1alpha1',
+					kind: 'Environment',
+					metadata: {{ name: '{name}' }},
+					spec: {{ namespace: '{name}' }},
+					data: {{
+						resource: {{
+							apiVersion: 'v1',
+							kind: 'ConfigMap',
+							metadata: {{ name: '{resource}' }},
+						}},
+					}},
+				}}"
+			),
+		);
+	}
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments")],
+			&Options {
+				recursive: true,
+				parallelism: 1,
+				format: "{{.metadata.name}}".to_owned(),
+				..options(&project)
+			},
+		)
+		.expect("the export itself to run");
+
+	let fatal: Vec<&rtk_environments::export::Report> = exported
+		.reports
+		.iter()
+		.filter(|report| {
+			report
+				.error
+				.as_ref()
+				.is_some_and(|error| error.report().contains("rendered nothing"))
+		})
+		.collect();
+	assert_eq!(fatal.len(), 1, "expected exactly one environment to fail");
+	assert!(fatal[0].error.as_ref().expect("an error").fatal());
+
+	// The rest were either already done or never started; none of them failed on
+	// their own account.
+	let skipped = exported
+		.reports
+		.iter()
+		.filter(|report| report.error.as_ref().is_some_and(|error| error.skipped()))
+		.count();
+	assert!(skipped > 0, "nothing was reported as skipped: {exported:?}");
+	assert_eq!(exported.failed(), 1 + skipped);
+}

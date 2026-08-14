@@ -1,3 +1,5 @@
+#[cfg(feature = "benchmarking")]
+pub mod benchmarking;
 mod discover;
 mod engine;
 pub mod export;

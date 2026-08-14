@@ -669,8 +669,13 @@ pub struct Discovered {
 	pub env_name: Option<String>,
 	/// The exportJsonnetImplementation from the inline environment spec, if present
 	/// This is used to determine whether to use jrsonnet-compatible output formatting
+	// Read by nothing since exporting moved to rtk-environments, which discovers
+	// for itself. Kept only until `diff --list-modified-envs`, the one caller left,
+	// moves over too and this whole module goes.
+	#[allow(dead_code)]
 	pub export_jsonnet_implementation: Option<EvaluatorImplementation>,
 	/// Labels from the environment metadata (for selector filtering)
+	#[allow(dead_code)]
 	pub labels: FxHashMap<Box<str>, Box<str>>,
 }
 

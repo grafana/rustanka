@@ -17,8 +17,6 @@ use rayon::prelude::*;
 use tabwriter::TabWriter;
 
 pub mod discover;
-pub mod export;
-pub mod helm_cache;
 
 use crate::jsonnet::jpath;
 use crate::spec::{Environment, EnvironmentData, Spec};
