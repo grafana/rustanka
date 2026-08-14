@@ -11,6 +11,8 @@ anyhow.workspace = true
 either.workspace = true
 gtmpl = "0.7.1"
 k8s-openapi.workspace = true
+kube-core.workspace = true
+rayon.workspace = true
 regex.workspace = true
 rtk-jsonnet.workspace = true
 rtk-jsonnet-core.workspace = true
@@ -19,9 +21,14 @@ rustc-hash.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

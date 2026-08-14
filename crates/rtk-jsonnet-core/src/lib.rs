@@ -4,16 +4,18 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use ::serde::{Deserialize, Deserializer, Serializer};
 use rtk_spec::canonical::{Environment, JsonentImplementationOrConfig, Rc};
 use rtk_spec::v1alpha1::EnvironmentData;
-use serde::{Deserialize, Deserializer, Serializer};
 
 mod native;
+pub mod serde;
 
 pub use crate::native::{
-	Arguments, Array, Function, InfallibleArguments, Object, Value, ValueDeserializer,
+	Arguments, Array, Function, Hidden, InfallibleArguments, Object, Value, ValueDeserializer,
 	ValueSerializer,
 };
+pub use crate::serde::{ParkGuard, RAW_VALUE_TOKEN, RawValue, TransferSlot, ValueError};
 
 pub trait Context: Clone + Sized {
 	type Evaluator: Evaluator<Context = Self>;

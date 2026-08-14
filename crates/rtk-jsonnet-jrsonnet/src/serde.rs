@@ -10,6 +10,8 @@ use serde::de::{
 };
 use serde::{Deserialize, Deserializer, Serialize, forward_to_deserialize_any, ser};
 
+use rtk_jsonnet_core::{RAW_VALUE_TOKEN, Value as _};
+
 use crate::native::{Array, Object};
 use crate::{Arguments, Evaluation, Evaluator, EvaluatorError, Value};
 
@@ -147,14 +149,21 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		}
 	}
 
+	/// Hands the value over out of band when asked for a
+	/// [`RawValue`](rtk_jsonnet_core::RawValue), so it can be captured without
+	/// being deserialized (and without forcing anything beneath it).
 	fn deserialize_newtype_struct<V>(
 		self,
-		_: &'static str,
+		name: &'static str,
 		visitor: V,
 	) -> Result<V::Value, Self::Error>
 	where
 		V: Visitor<'de>,
 	{
+		if name == RAW_VALUE_TOKEN {
+			let _guard = self.0.park();
+			return visitor.visit_unit();
+		}
 		visitor.visit_newtype_struct(self)
 	}
 
@@ -561,10 +570,19 @@ impl ser::Serializer for ValueSerializer {
 		Ok(Value(Val::string(variant)))
 	}
 
-	fn serialize_newtype_struct<T>(self, _: &'static str, value: &T) -> Result<Value, Error>
+	/// Takes the value back out of band when serializing a
+	/// [`RawValue`](rtk_jsonnet_core::RawValue), so a value that was captured
+	/// from an evaluation round-trips unchanged instead of going through the
+	/// serde data model.
+	fn serialize_newtype_struct<T>(self, name: &'static str, value: &T) -> Result<Value, Error>
 	where
 		T: ?Sized + Serialize,
 	{
+		if name == RAW_VALUE_TOKEN
+			&& let Some(parked) = Value::take_parked()
+		{
+			return Ok(parked);
+		}
 		value.serialize(self)
 	}
 
@@ -985,21 +1003,69 @@ mod tests {
 
 	#[test]
 	fn into_object_navigates_lazily() {
-		use rtk_jsonnet_core::{Object as _, Value as _};
+		use rtk_jsonnet_core::{Hidden, Object as _, Value as _};
 
 		let value = Value(eval(
 			r#"{ ok: 1, boom: error "nope", f: function(x) x, hidden:: 2 }"#,
 		));
 		let object = value.into_object().expect("an object");
-		assert!(object.has("boom").unwrap());
-		assert!(!object.has("hidden").unwrap());
-		assert!(!object.has("absent").unwrap());
+		assert!(object.has("boom", Hidden::Skip).unwrap());
+		assert!(!object.has("absent", Hidden::Skip).unwrap());
 		// Only the requested field is forced: the error field never fires and
 		// the function survives untouched.
-		assert_eq!(object.get("ok").unwrap().0.as_num(), Some(1.0));
-		assert!(matches!(object.get("f").unwrap().0, Val::Func(_)));
-		assert!(object.get("boom").is_err());
-		assert!(object.get("absent").is_err());
+		assert_eq!(
+			object.get_or_bail("ok", Hidden::Skip).unwrap().0.as_num(),
+			Some(1.0)
+		);
+		assert!(matches!(
+			object.get_or_bail("f", Hidden::Skip).unwrap().0,
+			Val::Func(_)
+		));
+		assert!(object.get("boom", Hidden::Skip).is_err());
+		// An absent field is `None` rather than an error, unless it is demanded.
+		assert!(object.get("absent", Hidden::Skip).unwrap().is_none());
+		assert!(object.get_or_bail("absent", Hidden::Skip).is_err());
+	}
+
+	#[test]
+	fn hidden_fields_are_reached_only_when_asked_for() {
+		use rtk_jsonnet_core::{Hidden, Object as _, Value as _};
+
+		let object = Value(eval(r"{ visible: 1, hidden:: 2 }"))
+			.into_object()
+			.expect("an object");
+
+		// Hiding a field keeps it out of the manifested output, not out of
+		// reach, so which of the two a lookup wants has to be said.
+		assert!(!object.has("hidden", Hidden::Skip).unwrap());
+		assert!(object.has("hidden", Hidden::Include).unwrap());
+
+		assert!(object.get("hidden", Hidden::Skip).unwrap().is_none());
+		assert_eq!(
+			object
+				.get("hidden", Hidden::Include)
+				.unwrap()
+				.and_then(|hidden| hidden.as_number()),
+			Some(2.0)
+		);
+
+		// Visible fields are found either way.
+		for hidden in [Hidden::Skip, Hidden::Include] {
+			assert!(object.get("visible", hidden).unwrap().is_some());
+			assert!(object.has("visible", hidden).unwrap());
+		}
+
+		// Demanding a hidden field that was asked to be skipped says it is not
+		// there, rather than suggesting the very field it just refused.
+		let error = object
+			.get_or_bail("hidden", Hidden::Skip)
+			.expect_err("the field was skipped");
+		let message = format!("{:?}", std::error::Error::source(&error));
+		assert!(message.contains("hidden"), "unexpected error: {message}");
+		assert!(
+			object.get_or_bail("hidden", Hidden::Include).is_ok(),
+			"including hidden fields should find it"
+		);
 	}
 
 	#[test]
@@ -1045,7 +1111,7 @@ mod tests {
 		assert!(Array::deserialize(ValueDeserializer(Value(eval("{}")))).is_err());
 
 		let object = Object::deserialize(ValueDeserializer(Value(eval("{ a: 1 }")))).unwrap();
-		assert!(object.has("a").unwrap());
+		assert!(object.has("a", rtk_jsonnet_core::Hidden::Skip).unwrap());
 		assert_eq!(serde_json::to_string(&object).unwrap(), r#"{"a":1}"#);
 		assert!(Object::deserialize(ValueDeserializer(Value(eval("[]")))).is_err());
 	}
@@ -1206,5 +1272,153 @@ mod tests {
 			str_of(spec.get("namespace".into()).unwrap()),
 			Some("demo".into()),
 		);
+	}
+
+	#[test]
+	fn raw_values_are_captured_without_forcing_them() {
+		use rtk_jsonnet_core::RawValue;
+
+		let raw: RawValue<Value> = from_val(r#"{ boom: error "must stay lazy", ok: 1 }"#).unwrap();
+		let object = raw.get().0.as_obj().expect("an object");
+		assert_eq!(object.fields().len(), 2);
+		// Only what we ask for is forced.
+		assert_eq!(
+			object.get("ok".into()).unwrap().and_then(|v| v.as_num()),
+			Some(1.0)
+		);
+		assert!(object.get("boom".into()).is_err());
+	}
+
+	#[test]
+	fn raw_values_round_trip_through_the_value_serializer() {
+		use rtk_jsonnet_core::RawValue;
+
+		let raw: RawValue<Value> = from_val(r#"{ a: [1, "two"] }"#).unwrap();
+		let value = to_val(&raw).unwrap();
+		// The very same value came back, not a copy rebuilt through serde.
+		assert_eq!(
+			serde_json::to_value(Value(value)).unwrap(),
+			serde_json::json!({ "a": [1, "two"] })
+		);
+	}
+
+	#[test]
+	fn raw_values_serialize_to_foreign_serializers_as_their_contents() {
+		use rtk_jsonnet_core::RawValue;
+
+		let raw: RawValue<Value> = from_val(r"{ a: 1 }").unwrap();
+		assert_eq!(serde_json::to_string(&raw).unwrap(), r#"{"a":1}"#);
+		// Nothing is left parked behind by that fallback.
+		assert!(<Value as rtk_jsonnet_core::Value>::take_parked().is_none());
+	}
+
+	#[test]
+	fn raw_values_reject_foreign_deserializers() {
+		use rtk_jsonnet_core::RawValue;
+
+		let error = serde_json::from_str::<RawValue<Value>>(r#"{"a":1}"#)
+			.expect_err("a json deserializer cannot produce a jsonnet value");
+		assert!(
+			error.to_string().contains("jsonnet implementation"),
+			"unexpected error: {error}"
+		);
+	}
+
+	#[test]
+	fn accessors_read_values_without_deserializing_them() {
+		use rtk_jsonnet_core::{Hidden, Object as _, Value as _};
+
+		// The concatenation is past jrsonnet's rope threshold, so `rope` is not a
+		// flat string and has to be put together to be read.
+		let snippet = format!(
+			r#"{{
+				string: "flat",
+				rope: "{}" + "{}",
+				number: 40 + 2,
+				fraction: 0.5,
+				enabled: true,
+				nothing: null,
+				array: [1],
+				object: {{}},
+				boom: error "must stay lazy",
+			}}"#,
+			"a".repeat(60),
+			"b".repeat(60),
+		);
+		let object = Value(eval(&snippet)).into_object().expect("an object");
+
+		let string = object.get_or_bail("string", Hidden::Skip).unwrap();
+		assert_eq!(&*string.as_str().expect("a string"), "flat");
+		let rope = object.get_or_bail("rope", Hidden::Skip).unwrap();
+		let rope = rope.as_str().expect("a string");
+		assert_eq!(rope.len(), 120);
+		assert!(rope.starts_with("aaa") && rope.ends_with("bbb"));
+
+		let field = |key: &str| object.get_or_bail(key, Hidden::Skip).unwrap();
+
+		assert_eq!(field("number").as_number(), Some(42.0));
+		assert_eq!(field("fraction").as_number(), Some(0.5));
+		assert_eq!(field("enabled").as_bool(), Some(true));
+		assert!(field("nothing").is_null());
+		assert_eq!(
+			field("array").as_array().map(|array| {
+				use rtk_jsonnet_core::Array as _;
+				array.len()
+			}),
+			Some(1)
+		);
+		assert!(field("object").as_object().is_some());
+
+		// Reading one kind of value as another says no rather than failing.
+		assert!(field("number").as_str().is_none());
+		assert!(field("string").as_number().is_none());
+		assert!(!field("string").is_null());
+
+		// And none of that forced the field that would have failed.
+		assert!(object.get("boom", Hidden::Skip).is_err());
+	}
+
+	#[test]
+	fn getting_an_absent_field_is_not_an_error() {
+		use rtk_jsonnet_core::{Hidden, Object as _, Value as _};
+
+		let object = Value(eval(r"{ present: 1 }"))
+			.into_object()
+			.expect("an object");
+
+		assert!(object.get("present", Hidden::Skip).unwrap().is_some());
+		assert!(object.get("absent", Hidden::Skip).unwrap().is_none());
+
+		// Demanding it says what was probably meant instead.
+		let error = object
+			.get_or_bail("presnet", Hidden::Skip)
+			.expect_err("no such field");
+		let message = format!("{:?}", std::error::Error::source(&error));
+		assert!(message.contains("present"), "unexpected error: {message}");
+	}
+
+	#[test]
+	fn manifests_like_tk_does() {
+		use jrsonnet_evaluator::manifest::{JsonFormat, ManifestFormat};
+		use rtk_jsonnet_core::Value as _;
+
+		// Integral floats beyond i64 are the case the serde data model cannot
+		// represent, and the reason manifests go through `manifest_into`.
+		let snippet = r"{ big: 1e100, negativeZero: -0, ratio: 0.1, whole: 3.0 }";
+		let value = Value(eval(snippet));
+
+		let mut buffer = String::from("keeps existing contents: ");
+		value.manifest_into(&mut buffer).unwrap();
+		let (prefix, manifested) = buffer.split_at("keeps existing contents: ".len());
+		assert_eq!(prefix, "keeps existing contents: ");
+		assert_eq!(
+			manifested,
+			JsonFormat::default().manifest(&eval(snippet)).unwrap()
+		);
+
+		let parsed: serde_json::Value = serde_json::from_str(manifested).unwrap();
+		assert_eq!(parsed["big"].as_f64(), Some(1e100));
+		assert_eq!(parsed["whole"].as_i64(), Some(3));
+		assert_eq!(parsed["ratio"].as_f64(), Some(0.1));
 	}
 }

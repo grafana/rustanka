@@ -48,13 +48,82 @@ pub struct Environment<'a, D: EnvironmentData<'a> = Empty> {
 	_phatom: PhantomData<&'a ()>,
 }
 
-impl<'a> Environment<'a> {
-	pub fn from_spec(spec: EnvironmentSpec) -> Environment<'a> {
-		Environment {
-			spec,
-			..Default::default()
+impl Environment<'_> {
+	/// Start building an [`Environment`].
+	///
+	/// ```
+	/// # use rtk_spec::canonical::{Environment, EnvironmentSpec};
+	/// let environment = Environment::new()
+	///     .with_spec(EnvironmentSpec::default())
+	///     .build()
+	///     .unwrap();
+	/// assert_eq!(environment.spec.namespace(), "default");
+	/// ```
+	pub fn new() -> EnvironmentBuilder<'static> {
+		EnvironmentBuilder {
+			metadata: ObjectMeta::default(),
+			spec: None,
+			data: Empty,
+			_phantom: PhantomData,
 		}
 	}
+}
+
+/// Builds an [`Environment`], which cannot be constructed literally because it
+/// is `#[non_exhaustive]`. See [`Environment::new`].
+#[derive(Clone, Debug, Default)]
+pub struct EnvironmentBuilder<'a, D: EnvironmentData<'a> = Empty> {
+	metadata: ObjectMeta,
+	spec: Option<EnvironmentSpec>,
+	data: D,
+	_phantom: PhantomData<&'a ()>,
+}
+
+impl<'a, D: EnvironmentData<'a>> EnvironmentBuilder<'a, D> {
+	#[must_use]
+	pub fn with_metadata(mut self, metadata: ObjectMeta) -> Self {
+		self.metadata = metadata;
+		self
+	}
+
+	#[must_use]
+	pub fn with_spec(mut self, spec: EnvironmentSpec) -> Self {
+		self.spec = Some(spec);
+		self
+	}
+
+	/// Attach the environment's evaluated manifests, changing what kind of
+	/// [`Environment`] is being built.
+	#[must_use]
+	pub fn with_data<D2: EnvironmentData<'a>>(self, data: D2) -> EnvironmentBuilder<'a, D2> {
+		EnvironmentBuilder {
+			metadata: self.metadata,
+			spec: self.spec,
+			data,
+			_phantom: PhantomData,
+		}
+	}
+
+	pub fn build(self) -> Result<Environment<'a, D>, EnvironmentBuilderError> {
+		let Some(spec) = self.spec else {
+			return Err(EnvironmentBuilderError::MissingSpec);
+		};
+
+		Ok(Environment {
+			metadata: self.metadata,
+			spec,
+			data: self.data,
+			_phatom: PhantomData,
+		})
+	}
+}
+
+/// A required part of an [`Environment`] was missing. See [`Environment::new`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum EnvironmentBuilderError {
+	#[error("an environment requires a spec")]
+	MissingSpec,
 }
 
 impl<'a, D: EnvironmentData<'a>> Environment<'a, D> {
@@ -490,6 +559,19 @@ pub struct EnvironmentSpec {
 	pub expect_versions: Option<Versions>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub export_jsonnet_implementation: Option<JsonentImplementationOrConfig>,
+}
+
+impl EnvironmentSpec {
+	/// The namespace resources without one of their own are exported into.
+	///
+	/// Tanka defaults this to `default` when a `spec.json` (or an inline
+	/// environment) leaves `spec.namespace` unset, so anything that injects
+	/// namespaces must go through here rather than reading the field.
+	pub fn namespace(&self) -> &str {
+		const DEFAULT_NAMESPACE: &str = "default";
+
+		self.namespace.as_deref().unwrap_or(DEFAULT_NAMESPACE)
+	}
 }
 
 impl DeepMerge for EnvironmentSpec {

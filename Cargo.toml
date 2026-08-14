@@ -151,7 +151,17 @@ rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
 either = { version = "1.15.0", features = [ "serde" ] }
 rayon = "1.10"
 kube = { version = "4.2.0", features = ["runtime", "derive", "client"] }
+# Client-less kube types. Pinned to the same version `kube` depends on, so the
+# `Selector`/`ObjectMeta` types stay identical across the workspace.
+kube-core = { version = "4.2.0", default-features = false }
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
+tokio = { version = "1.49.0", features = [
+  "fs",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+] }
 schemars = { version = "1.2.1", features = ["url2"] }
 semver = { version = "1.0.28", features = ["serde"] }
 walkdir = "2.5"

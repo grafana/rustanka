@@ -1,5 +1,7 @@
 mod discover;
 mod engine;
+pub mod export;
+mod metadata;
 
 pub use discover::{Discover, Discovered};
 pub use engine::Engine;
@@ -15,4 +17,3 @@ pub enum Error {
 	#[error(transparent)]
 	Evaluation(#[from] rtk_jsonnet::Error),
 }
- 

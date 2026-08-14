@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use either::{Either, Left, Right};
 use rtk_jsonnet::jpath::JPath;
-use rtk_jsonnet::{Engine, EvaluationArrayValues, EvaluationObjectValues, EvaluationValue};
+use rtk_jsonnet::{Engine, EvaluationArrayValues, EvaluationObjectValues, EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use tracing::Level;
@@ -96,7 +96,14 @@ impl Discover {
 		let main_path = path.join("main.jsonnet");
 		let options = engine.options();
 
-		let (snippet, import_paths) = if options.has_top_level_args() {
+		let jpath = JPath::resolve(&main_path)?;
+		let entrypoint = jpath
+			.entrypoint
+			.strip_prefix(&jpath.base_directory)
+			.unwrap_or(&jpath.entrypoint)
+			.to_string_lossy();
+
+		let snippet = if options.has_top_level_args() {
 			let argument_count = options.top_level_arguments.len() + options.top_level_code.len();
 			let mut arguments =
 				String::with_capacity((argument_count * (4 + ", ".len())).next_power_of_two());
@@ -125,39 +132,25 @@ impl Discover {
 				}
 			}
 
-			let resolved = JPath::resolve(&main_path)?;
-			let entrypoint = resolved
-				.entrypoint
-				.strip_prefix(&resolved.base_directory)
-				.unwrap_or(&resolved.entrypoint)
-				.to_string_lossy();
-			(
-				format!(
-					r#"function({parameters})
-						local main = (import "{entrypoint}")({arguments});
-						{METADATA_EVAL_SCRIPT}"#
-				),
-				resolved.import_paths,
+			format!(
+				r#"function({parameters})
+					local main = (import "{entrypoint}")({arguments});
+					{METADATA_EVAL_SCRIPT}"#
 			)
 		} else {
-			let resolved = JPath::resolve(&main_path)?;
-			let entrypoint = resolved
-				.entrypoint
-				.strip_prefix(&resolved.base_directory)
-				.unwrap_or(&resolved.entrypoint)
-				.to_string_lossy();
-			(
-				format!(r#"local main = import "{entrypoint}"; {METADATA_EVAL_SCRIPT}"#),
-				resolved.import_paths,
-			)
+			format!(r#"local main = import "{entrypoint}"; {METADATA_EVAL_SCRIPT}"#)
 		};
+
+		// Inline environments are named by the Jsonnet that declares them, but
+		// their namespace still comes from where the entrypoint lives.
+		let namespace = namespace_of(&jpath);
 
 		let mut evaluator = engine.create_evaluator();
 		options.apply(&mut evaluator)?;
-		evaluator.with_import_paths(import_paths)?;
+		evaluator.with_import_paths(jpath.import_paths)?;
 		let evaluation = evaluator.evaluate_snippet(snippet)?;
 
-		match DiscoverInlineEnvs::discover_inline_env(path, evaluation.into_value())? {
+		match DiscoverInlineEnvs::discover_inline_env(path, namespace, evaluation.into_value())? {
 			Some(Left(discovered)) => Ok(Some(Left(discovered))),
 			other => Ok(other),
 		}
@@ -184,7 +177,19 @@ impl Discover {
 	fn read_spec_json(spec_path: &Path) -> Result<Environment<'static>, Error> {
 		let content = fs::read_to_string(spec_path)?;
 		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
-		Ok(environment.without_data())
+		let mut environment = environment.without_data();
+
+		// A static environment is named after its directory and carries its
+		// entrypoint as its namespace, whatever `spec.json` says. Best effort:
+		// an environment whose entrypoint cannot be resolved fails later, when
+		// it is evaluated, with a better error than discovery could give.
+		if let Some(directory) = spec_path.parent()
+			&& let Ok(jpath) = JPath::resolve(directory)
+		{
+			crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
+		}
+
+		Ok(environment)
 	}
 
 	fn discover_environment(&mut self, path: Arc<PathBuf>) -> Result<Option<Discovered>, Error> {
@@ -206,7 +211,7 @@ impl Discover {
 		path_buf.pop();
 
 		match Self::inline_environments(&self.engine, path)? {
-			Some(Left(discovered)) => return Ok(Some(discovered)),
+			Some(Left(discovered)) => Ok(Some(discovered)),
 			Some(Right(discovered)) => {
 				self.inline_environments = Some(discovered);
 				Ok(None)
@@ -301,11 +306,13 @@ impl Iterator for Discover {
 enum DiscoverInlineEnvs {
 	Array {
 		path: Arc<PathBuf>,
+		namespace: Option<Arc<str>>,
 		iter: EvaluationArrayValues,
 		recursion: Option<Box<DiscoverInlineEnvs>>,
 	},
 	Object {
 		path: Arc<PathBuf>,
+		namespace: Option<Arc<str>>,
 		iter: EvaluationObjectValues,
 		recursion: Option<Box<DiscoverInlineEnvs>>,
 	},
@@ -314,17 +321,31 @@ enum DiscoverInlineEnvs {
 impl DiscoverInlineEnvs {
 	fn discover_inline_env(
 		path: Arc<PathBuf>,
+		namespace: Option<Arc<str>>,
 		value: EvaluationValue,
 	) -> Result<Option<Either<Discovered, Self>>, Error> {
 		let deserializable = value.clone();
 		match value.into_object() {
 			Ok(object) => {
-				if object.has("apiVersion")? && object.has("kind")? {
+				// The metadata script leaves nothing but environments behind, but
+				// checking the kind is cheap and keeps a stray object from being
+				// deserialized as one.
+				if object.has("apiVersion", Hidden::Skip)?
+					&& object
+						.get("kind", Hidden::Skip)?
+						.and_then(|kind| kind.as_str())
+						.as_deref() == Some("Environment")
+				{
 					let environment: Environment<'static> = deserializable.deserialize()?;
-					return Ok(Some(Left(Discovered::from_environment(path, environment))));
+					return Ok(Some(Left(Discovered::from_environment(
+						path,
+						namespace.as_deref(),
+						environment,
+					))));
 				}
 				Ok(Some(Right(Self::Object {
 					path,
+					namespace,
 					iter: object.into_values(),
 					recursion: None,
 				})))
@@ -332,6 +353,7 @@ impl DiscoverInlineEnvs {
 			Err(value) => match value.into_array() {
 				Ok(array) => Ok(Some(Right(Self::Array {
 					path,
+					namespace,
 					iter: array.into_values(),
 					recursion: None,
 				}))),
@@ -357,15 +379,25 @@ impl Iterator for DiscoverInlineEnvs {
 		*self.recursion() = None;
 
 		loop {
-			let (path, value) = match self {
-				Self::Array { path, iter, .. } => (path.clone(), iter.next()?),
-				Self::Object { path, iter, .. } => (path.clone(), iter.next()?),
+			let (path, namespace, value) = match self {
+				Self::Array {
+					path,
+					namespace,
+					iter,
+					..
+				} => (path.clone(), namespace.clone(), iter.next()?),
+				Self::Object {
+					path,
+					namespace,
+					iter,
+					..
+				} => (path.clone(), namespace.clone(), iter.next()?),
 			};
 			let value = match value {
 				Ok(value) => value,
 				Err(error) => return Some(Err(error.into())),
 			};
-			match Self::discover_inline_env(path, value) {
+			match Self::discover_inline_env(path, namespace, value) {
 				Ok(Some(Left(discovered))) => return Some(Ok(discovered)),
 				Ok(Some(Right(recursion))) => {
 					*self.recursion() = Some(Box::new(recursion));
@@ -382,13 +414,32 @@ impl Iterator for DiscoverInlineEnvs {
 }
 
 impl Discovered {
-	fn from_environment(path: Arc<PathBuf>, environment: Environment<'_>) -> Self {
+	fn from_environment(
+		path: Arc<PathBuf>,
+		namespace: Option<&str>,
+		environment: Environment<'_>,
+	) -> Self {
+		let mut environment = environment.without_data();
+		if let Some(namespace) = namespace {
+			environment.metadata.namespace = Some(namespace.to_owned());
+		}
+
 		Self {
 			path,
 			is_static: false,
-			environment: environment.without_data(),
+			environment,
 		}
 	}
+}
+
+/// An environment's `metadata.namespace`: its entrypoint, relative to the
+/// project root. See [`crate::metadata::apply_paths`].
+fn namespace_of(jpath: &JPath) -> Option<Arc<str>> {
+	jpath
+		.entrypoint
+		.strip_prefix(&jpath.root_directory)
+		.ok()
+		.map(|relative| relative.to_string_lossy().as_ref().into())
 }
 
 #[cfg(test)]
@@ -455,7 +506,7 @@ mod tests {
 				.spec
 				.export_jsonnet_implementation
 				.as_ref()
-				.map(|implementation| implementation.implementation()),
+				.map(rtk_spec::canonical::JsonentImplementationOrConfig::implementation),
 			Some(&rtk_spec::canonical::JsonnetImplementation::Jrsonnet)
 		);
 		assert_eq!(

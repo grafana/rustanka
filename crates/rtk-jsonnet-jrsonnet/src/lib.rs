@@ -24,7 +24,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap};
 mod native;
 mod serde;
 
-pub use native::{Arguments, Array, ArrayValues, Object, ObjectValues, Value};
+pub use native::{Arguments, Array, ArrayValues, Object, ObjectFields, ObjectValues, Str, Value};
 use thiserror::Error;
 use tracing::Level;
 
@@ -105,6 +105,17 @@ pub struct Evaluator {
 impl Evaluator {
 	thread_local! {
 		static CURRENT: RefCell<Option<StdRc<Evaluator>>> = const { RefCell::new(None) };
+	}
+
+	/// The evaluator whose context is in effect on this thread, if any.
+	///
+	/// Set for the duration of [`Evaluation::with_context`], which is when
+	/// values are deserialized, so anything that captures a value out of an
+	/// evaluation can capture what keeps it usable at the same time. The handle
+	/// is shared rather than copied, so the captured context is the very same
+	/// one, not a duplicate of it.
+	pub fn current() -> Option<StdRc<Evaluator>> {
+		Evaluator::CURRENT.with(|current| current.borrow().clone())
 	}
 }
 
@@ -406,6 +417,12 @@ pub struct Evaluation(pub(crate) Option<Value>, pub(crate) StdRc<Evaluator>);
 impl Evaluation {
 	pub fn new(context: Evaluator, value: Value) -> Self {
 		Self(Some(value), StdRc::new(context))
+	}
+
+	/// Pair a value with a context that is already shared, as
+	/// [`Evaluator::current`] hands it out.
+	pub fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
+		Self(Some(value), context)
 	}
 
 	pub fn context(&self) -> &Evaluator {

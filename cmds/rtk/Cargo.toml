@@ -39,7 +39,7 @@ jrsonnet-gcmodule.workspace = true
 k8s = { path = "../../crates/k8s" }
 kube.workspace = true
 k8s-openapi.workspace = true
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
+tokio.workspace = true
 bon = "3.8.2"
 rtk-diff = { path = "../../crates/diff" }
 
