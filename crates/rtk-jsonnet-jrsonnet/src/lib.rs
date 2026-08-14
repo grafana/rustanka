@@ -103,11 +103,15 @@ impl OutputFormatConfig {
 	}
 }
 
+/// Whatever this implementation could not do.
+///
+/// Both variants render as the error underneath them: a reader wants the reason,
+/// and being told an error occurred on the way to it is not one.
 #[derive(Clone, Debug, Error)]
 pub enum Error {
-	#[error("an evaluator error occurred")]
+	#[error(transparent)]
 	Evaluator(#[from] EvaluatorError),
-	#[error("a flag error occurred")]
+	#[error(transparent)]
 	Flag(#[from] FlagError),
 }
 
@@ -455,8 +459,9 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 	}
 }
 
+/// An error jrsonnet itself raised, which already reads as one.
 #[derive(Clone, Debug, Error)]
-#[error("an evaluator error occurred")]
+#[error(transparent)]
 pub struct EvaluatorError(#[from] jrsonnet_evaluator::Error);
 
 impl rtk_jsonnet_core::EvaluatorError for EvaluatorError {

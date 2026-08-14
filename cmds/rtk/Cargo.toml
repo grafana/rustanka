@@ -43,6 +43,11 @@ tokio.workspace = true
 bon = "3.8.2"
 rtk-diff = { path = "../../crates/diff" }
 
+# The exporter, and the Jsonnet engine it evaluates environments with
+rtk-environments.workspace = true
+rtk-jsonnet.workspace = true
+rtk-spec.workspace = true
+
 # Telemetry
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

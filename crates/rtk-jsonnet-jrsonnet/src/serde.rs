@@ -994,10 +994,9 @@ mod tests {
 			Failing::deserialize(ValueDeserializer(Value(val)))
 		})();
 		let error = result.expect_err("field evaluation fails");
-		let source = std::error::Error::source(&error).expect("the evaluator error has a cause");
 		assert!(
-			source.to_string().contains("boom"),
-			"unexpected error: {source}"
+			error.to_string().contains("boom"),
+			"unexpected error: {error}"
 		);
 	}
 
@@ -1060,8 +1059,10 @@ mod tests {
 		let error = object
 			.get_or_bail("hidden", Hidden::Skip)
 			.expect_err("the field was skipped");
-		let message = format!("{:?}", std::error::Error::source(&error));
-		assert!(message.contains("hidden"), "unexpected error: {message}");
+		assert!(
+			error.to_string().contains("hidden"),
+			"unexpected error: {error}"
+		);
 		assert!(
 			object.get_or_bail("hidden", Hidden::Include).is_ok(),
 			"including hidden fields should find it"
@@ -1393,8 +1394,10 @@ mod tests {
 		let error = object
 			.get_or_bail("presnet", Hidden::Skip)
 			.expect_err("no such field");
-		let message = format!("{:?}", std::error::Error::source(&error));
-		assert!(message.contains("present"), "unexpected error: {message}");
+		assert!(
+			error.to_string().contains("present"),
+			"unexpected error: {error}"
+		);
 	}
 
 	#[test]

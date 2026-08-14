@@ -307,6 +307,23 @@ impl Error {
 				| Error::ForeignFile { .. }
 		)
 	}
+
+	/// Whether this stands in for an export that was never attempted.
+	///
+	/// One environment reported like this says nothing about itself: something
+	/// else went wrong first, and this one never got its turn.
+	pub fn skipped(&self) -> bool {
+		matches!(self, Error::Skipped)
+	}
+
+	/// Render this error and its causes, the way a user wants to read them.
+	///
+	/// Most of what goes wrong here goes wrong underneath something: a failed
+	/// write knows the path it was writing, but the reason it failed belongs to
+	/// the error beneath it. Displaying one of these on its own leaves that out.
+	pub fn report(&self) -> String {
+		render(self)
+	}
 }
 
 impl From<rtk_jsonnet::Error> for Error {
@@ -535,8 +552,6 @@ impl Engine {
 			.map(selector::parse)
 			.transpose()?;
 
-		prepare_output_dir(&export)?;
-
 		let pool = rayon::ThreadPoolBuilder::new()
 			.num_threads(options.parallelism.max(1))
 			// Jsonnet evaluation recurses deeply.
@@ -559,11 +574,16 @@ impl Engine {
 				dispatched: 0,
 				outstanding: FxHashSet::default(),
 				reports: Vec::new(),
+				prepared: false,
 			};
 			driver.run().await
 		})?;
 
-		reconcile(&export, &exported)?;
+		// An export that found nothing to do leaves no trace of having run, as tk
+		// does not: no output directory, and no index claiming it is empty.
+		if !exported.reports.is_empty() {
+			reconcile(&export, &exported)?;
+		}
 
 		Ok(exported)
 	}
@@ -586,6 +606,9 @@ struct BulkExport<'p> {
 	/// Environments handed to a worker that have not reported back yet.
 	outstanding: FxHashSet<usize>,
 	reports: Vec<Report>,
+	/// Whether the output directory has been made yet. Deferred until there is
+	/// something to put in it.
+	prepared: bool,
 }
 
 #[expect(
@@ -703,6 +726,14 @@ impl BulkExport<'_> {
 		let Some(discovered) = self.next_environment()? else {
 			return Ok(false);
 		};
+
+		// Now that there is an environment to export, somewhere to put it. Left
+		// until here so that finding none leaves the filesystem alone, and so that
+		// an ambiguous set is refused before anything is created.
+		if !self.prepared {
+			prepare_output_dir(&self.export)?;
+			self.prepared = true;
+		}
 
 		let index = self.dispatched;
 		self.dispatched += 1;

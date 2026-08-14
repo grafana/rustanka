@@ -21,7 +21,9 @@ use thiserror::Error;
 /// An error returned by one of the various Jsonnet implementations.
 #[derive(Debug, Error)]
 pub enum Error {
-	#[error("a jrsonnet error occurred")]
+	/// Renders as the error underneath it: which implementation raised it is
+	/// already clear from what it says, and is not the reason for it.
+	#[error(transparent)]
 	Jrsonnet(#[from] JrsonnetError),
 }
 
