@@ -18,7 +18,6 @@ use super::common::{
 	create_tokio_runtime, get_or_create_connection, setup_diff_engine, DiffEngineConfig,
 };
 use crate::{
-	environments::discover::{Discover, Discovered},
 	environments::{extract_manifests, process_manifests},
 	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{
@@ -257,10 +256,10 @@ pub async fn diff_manifests<W: Write>(
 
 /// Async implementation of the diff command.
 #[instrument(skip_all, fields(path = %args.path.display()))]
-async fn run_async<W: Write>(args: DiffArgs, writer: W) -> Result<DiffResult> {
+async fn run_async<W: Write>(args: DiffArgs, mut writer: W) -> Result<DiffResult> {
 	// Handle --list-modified-envs mode: find all environments and check each for changes
 	if args.list_modified_envs {
-		return list_modified_environments(&args, &mut std::io::sink()).await;
+		return list_modified_environments(&args, &mut writer).await;
 	}
 
 	let global_opts = args.jsonnet.into_global_evaluator_options();
@@ -291,32 +290,33 @@ async fn list_modified_environments<W: Write>(
 ) -> Result<DiffResult> {
 	// Discover all environments in the path
 	tracing::debug!(path = %args.path.display(), "discovering environments");
-	let evaluator = DefaultEvaluator::new(GlobalEvaluatorOptions::default());
-	let envs: Vec<Discovered> = Discover::new(evaluator, vec![args.path.clone()])
-		.collect::<Result<Vec<_>>>()
-		.context("discovering environments")?;
+	let engine =
+		rtk_environments::Engine::new(rtk_jsonnet::Engine::new(rtk_jsonnet::Options::default()));
+	// Discovery holds evaluated Jsonnet, which is reference counted and cannot
+	// leave this thread, so its errors are rendered here rather than carried.
+	let envs: Vec<rtk_environments::Discovered> = engine
+		.discover(vec![args.path.clone()])
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(|error| anyhow::anyhow!("discovering environments: {error}"))?;
 
-	// Filter environments by --name if specified
+	// Filter environments by --name if specified, preferring an exact match
 	let envs: Vec<_> = if let Some(ref target_name) = args.name {
-		// First try exact match on env_name
+		let name_of = |env: &rtk_environments::Discovered| {
+			env.environment.metadata.name.clone().unwrap_or_default()
+		};
+
 		let exact: Vec<_> = envs
 			.iter()
-			.filter(|e| e.env_name.as_deref() == Some(target_name.as_str()))
+			.filter(|e| name_of(e) == *target_name)
 			.cloned()
 			.collect();
 
-		if !exact.is_empty() {
-			exact
-		} else {
-			// Fall back to substring match
+		if exact.is_empty() {
 			envs.into_iter()
-				.filter(|e| {
-					e.env_name
-						.as_ref()
-						.map(|n| n.contains(target_name))
-						.unwrap_or(false)
-				})
+				.filter(|e| name_of(e).contains(target_name))
 				.collect()
+		} else {
+			exact
 		}
 	} else {
 		envs
@@ -345,9 +345,10 @@ async fn list_modified_environments<W: Write>(
 	for env in &envs {
 		let env_path = env.path.to_string_lossy().to_string();
 		let display_name = env
-			.env_name
-			.as_ref()
-			.map(|n| n.to_string())
+			.environment
+			.metadata
+			.name
+			.clone()
 			.unwrap_or_else(|| env_path.clone());
 
 		let global_opts = GlobalEvaluatorOptions::builder()
@@ -357,8 +358,12 @@ async fn list_modified_environments<W: Write>(
 			.tla_codes(tla_code.clone())
 			.max_stack(max_stack)
 			.build();
+		// Only an environment declared alongside others has to be picked out by
+		// name; one that is the whole of what its entrypoint evaluates to is
+		// better evaluated directly, which is what calling a function of top
+		// level arguments takes.
 		let eval_opts = EvaluatorOptions {
-			env_name: env.env_name.clone(),
+			env_name: env.selected_by().map(str::to_owned),
 			..Default::default()
 		};
 

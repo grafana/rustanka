@@ -102,8 +102,29 @@ pub struct Discovered {
 	pub path: Arc<PathBuf>,
 	/// Whether this environment has a `spec.json`.
 	pub is_static: bool,
+	/// Whether the entrypoint evaluates to this environment and nothing else,
+	/// rather than declaring it somewhere inside a larger structure.
+	pub standalone: bool,
 	/// The discovered environment.
 	pub environment: Environment<'static>,
+}
+
+impl Discovered {
+	/// The name this environment has to be selected by, if it has to be at all.
+	///
+	/// A file may declare several environments, in which case exporting or
+	/// diffing one of them means picking it out from inside Jsonnet, by name.
+	/// An environment that is the whole of what its entrypoint evaluates to — or
+	/// that has a `spec.json` of its own — needs no picking out, and is better
+	/// off without it: the entrypoint can then simply be evaluated, which is what
+	/// it takes for one that is a function of top level arguments to be called.
+	pub fn selected_by(&self) -> Option<&str> {
+		if self.is_static || self.standalone {
+			return None;
+		}
+
+		self.environment.metadata.name.as_deref()
+	}
 }
 
 pub struct Discover {
@@ -161,7 +182,12 @@ impl Discover {
 		let evaluation = evaluator.evaluate_snippet(snippet)?;
 
 		match DiscoverInlineEnvs::discover_inline_env(path, namespace, evaluation.into_value())? {
-			Some(Left(discovered)) => Ok(Some(Left(discovered))),
+			// The entrypoint evaluated to one environment and nothing else, so
+			// there is nothing to pick it out from.
+			Some(Left(mut discovered)) => {
+				discovered.standalone = true;
+				Ok(Some(Left(discovered)))
+			}
 			other => Ok(other),
 		}
 	}
@@ -215,6 +241,7 @@ impl Discover {
 			return Ok(Some(Discovered {
 				path,
 				is_static: true,
+				standalone: true,
 				environment,
 			}));
 		}
@@ -437,6 +464,7 @@ impl Discovered {
 		Self {
 			path,
 			is_static: false,
+			standalone: false,
 			environment,
 		}
 	}
@@ -487,6 +515,97 @@ mod tests {
 
 	fn test_engine() -> Engine {
 		Engine::new(rtk_jsonnet::Options::default())
+	}
+
+	/// An environment declared in Jsonnet, optionally alongside another.
+	fn inline(root: &Path, alongside: bool) {
+		fs::create_dir_all(root.join("env")).unwrap();
+		// Resolving an entrypoint's import paths needs a project to resolve within.
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+
+		let declare = |name: &str| {
+			format!(
+				r"{{
+					apiVersion: 'tanka.dev/v1alpha1',
+					kind: 'Environment',
+					metadata: {{ name: '{name}' }},
+					spec: {{ namespace: '{name}' }},
+					data: {{}},
+				}}"
+			)
+		};
+
+		let main = if alongside {
+			format!(
+				"{{ first: {}, second: {} }}",
+				declare("first"),
+				declare("second")
+			)
+		} else {
+			declare("only")
+		};
+
+		fs::write(root.join("env/main.jsonnet"), main).unwrap();
+	}
+
+	#[test]
+	fn only_an_environment_declared_alongside_others_has_to_be_selected() {
+		// An entrypoint that evaluates to one environment can simply be
+		// evaluated. Picking one out of several has to happen inside Jsonnet, by
+		// name, which is worth avoiding when there is nothing to pick from: an
+		// entrypoint taking top level arguments has to be called, and calling it
+		// is what evaluating it plainly does.
+		let temp = TempDir::new().unwrap();
+		inline(temp.path(), false);
+		let environments = Discover::new(test_engine(), vec![temp.path().join("env")])
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+
+		assert_eq!(environments.len(), 1);
+		assert!(environments[0].standalone);
+		assert_eq!(environments[0].selected_by(), None);
+		assert_eq!(
+			environments[0].environment.metadata.name.as_deref(),
+			Some("only"),
+			"the environment still knows its own name"
+		);
+
+		let temp = TempDir::new().unwrap();
+		inline(temp.path(), true);
+		let mut environments = Discover::new(test_engine(), vec![temp.path().join("env")])
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+		environments.sort_by(|a, b| {
+			a.environment
+				.metadata
+				.name
+				.cmp(&b.environment.metadata.name)
+		});
+
+		assert_eq!(environments.len(), 2);
+		assert!(environments.iter().all(|found| !found.standalone));
+		assert_eq!(environments[0].selected_by(), Some("first"));
+		assert_eq!(environments[1].selected_by(), Some("second"));
+	}
+
+	#[test]
+	fn a_static_environment_is_never_selected_by_name() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		fs::create_dir_all(root.join("env")).unwrap();
+		fs::write(root.join("env/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("env/spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"env"},"spec":{}}"#,
+		)
+		.unwrap();
+
+		let environments = Discover::new(test_engine(), vec![root.join("env")])
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+
+		assert_eq!(environments.len(), 1);
+		assert_eq!(environments[0].selected_by(), None);
 	}
 
 	#[test]

@@ -16,8 +16,6 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 use tabwriter::TabWriter;
 
-pub mod discover;
-
 use crate::jsonnet::jpath;
 use crate::spec::{Environment, EnvironmentData, Spec};
 

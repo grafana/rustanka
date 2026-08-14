@@ -113,7 +113,7 @@ impl Engine {
 			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
 		}
 
-		let evaluation = match environment_name(discovered) {
+		let evaluation = match discovered.selected_by() {
 			// Selecting one of several inline environments has to happen inside
 			// Jsonnet, before anything is manifested.
 			Some(name) => {
@@ -130,15 +130,6 @@ impl Engine {
 
 		Ok(evaluation.into_value())
 	}
-}
-
-/// The name to select an inline environment by, if it needs selecting.
-fn environment_name(discovered: &Discovered) -> Option<&str> {
-	if discovered.is_static {
-		return None;
-	}
-
-	discovered.environment.metadata.name.as_deref()
 }
 
 /// Find the environment an evaluated value declares, wherever it is.
