@@ -9,6 +9,7 @@ use rtk_jsonnet::jpath::JPath;
 use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 
+use crate::discover::entrypoint_snippet;
 use crate::export::{Error, LoadedEnvironment, OptionalData};
 use crate::{Discovered, Engine};
 
@@ -94,7 +95,13 @@ impl Engine {
 
 	fn evaluate(&self, discovered: &Discovered, jpath: &JPath) -> Result<EvaluationValue, Error> {
 		let options = self.jsonnet.options();
-		let mut evaluator = self.jsonnet.create_evaluator();
+
+		// Discovery evaluated this environment without knowing what it asked for,
+		// since what it asked for is what discovery was reading. Now that its
+		// spec is known, it is evaluated the way it wanted to be.
+		let mut evaluator = self
+			.jsonnet
+			.create_evaluator_for(Some(&discovered.environment.spec));
 		options.apply(&mut evaluator)?;
 		evaluator.with_import_paths(jpath.import_paths.clone())?;
 
@@ -116,8 +123,7 @@ impl Engine {
 					.unwrap_or(&jpath.entrypoint)
 					.to_string_lossy();
 				let script = SINGLE_ENVIRONMENT_EVAL_SCRIPT.replace("%s", name);
-				evaluator
-					.evaluate_snippet(format!("local main = (import '{entrypoint}');\n{script}"))?
+				evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?
 			}
 			None => evaluator.evaluate_file(&jpath.entrypoint)?,
 		};

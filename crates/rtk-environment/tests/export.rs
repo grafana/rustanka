@@ -908,3 +908,62 @@ fn exports_manifests_whose_kind_is_not_a_string() {
 	assert_eq!(exported.successful(), 1);
 	assert!(project.exported()["odd.yaml"].contains("kind: 12"));
 }
+
+#[test]
+fn passes_top_level_arguments_to_an_inline_environment() {
+	let project = Project::new();
+	project.write(
+		"environments/demo/main.jsonnet",
+		r"function(tier, replicas) {
+			apiVersion: 'tanka.dev/v1alpha1',
+			kind: 'Environment',
+			metadata: { name: 'demo' },
+			spec: { namespace: 'demo' },
+			data: {
+				config: {
+					apiVersion: 'v1',
+					kind: 'ConfigMap',
+					metadata: { name: 'settings' },
+					data: { tier: tier, replicas: std.toString(replicas.count) },
+				},
+			},
+		}",
+	);
+
+	// An entrypoint taking top level arguments is a function, so importing it is
+	// not enough — it has to be called with them. An inline environment is
+	// selected by name from inside Jsonnet, and that selection used to be handed
+	// the function itself, matching nothing and quietly exporting nothing at all.
+	let mut jsonnet = rtk_jsonnet::Options::default();
+	jsonnet
+		.top_level_arguments
+		.insert("tier".into(), "prod".into());
+	jsonnet
+		.top_level_code
+		.insert("replicas".into(), r#"{"count":3}"#.into());
+
+	let engine = Engine::new(rtk_jsonnet::Engine::new(jsonnet));
+	let exported = engine
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&options(&project),
+		)
+		.expect("the export to succeed");
+
+	assert_eq!(exported.failed(), 0);
+	assert_eq!(
+		exported.reports.first().map(|report| report.files.len()),
+		Some(1),
+		"the environment exported nothing"
+	);
+
+	let exported = project.exported();
+	let manifest = exported
+		.get("v1.ConfigMap-settings.yaml")
+		.expect("the ConfigMap");
+	assert!(manifest.contains("tier: prod"), "unexpected: {manifest}");
+	assert!(
+		manifest.contains(r#"replicas: "3""#),
+		"unexpected: {manifest}"
+	);
+}

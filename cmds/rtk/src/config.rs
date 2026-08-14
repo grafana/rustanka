@@ -128,12 +128,17 @@ impl RtkConfig {
 }
 
 /// Check if exportJsonnetImplementation indicates jrsonnet binary usage
+///
+/// A binary counts when its path *ends with* `jrsonnet`, matching both
+/// [`EvaluatorImplementation`](crate::jsonnet::evaluator::EvaluatorImplementation)
+/// and `rtk_spec`'s `JsonnetImplementation::emulates_jrsonnet`, so that every
+/// command reads a `binary:` path the same way.
 pub fn uses_jrsonnet_binary(export_impl: Option<&str>) -> bool {
 	export_impl
 		.map(|s| {
 			// Accept both the raw spec value ("binary:.../jrsonnet") and the
 			// parsed EvaluatorImplementation Display form ("jrsonnet")
-			s == "jrsonnet" || (s.starts_with("binary:") && s.contains("jrsonnet"))
+			s == "jrsonnet" || (s.starts_with("binary:") && s.ends_with("jrsonnet"))
 		})
 		.unwrap_or(false)
 }
@@ -361,5 +366,27 @@ mod tests {
 
 		let config = RtkConfig::load_from_file(&config_path).unwrap();
 		assert!(!config.disable_tanka_native_functions);
+	}
+
+	#[test]
+	fn recognizes_jrsonnet_implementations_by_the_name_of_the_binary() {
+		assert!(uses_jrsonnet_binary(Some("jrsonnet")));
+		assert!(uses_jrsonnet_binary(Some("binary:/usr/local/bin/jrsonnet")));
+		assert!(uses_jrsonnet_binary(Some("binary:/opt/bin/my-jrsonnet")));
+
+		assert!(!uses_jrsonnet_binary(None));
+		assert!(!uses_jrsonnet_binary(Some("go-jsonnet")));
+		assert!(!uses_jrsonnet_binary(Some(
+			"binary:/usr/local/bin/go-jsonnet"
+		)));
+
+		// A path that merely mentions jrsonnet is not one, so that this agrees
+		// with how EvaluatorImplementation and rtk_spec parse the same value.
+		assert!(!uses_jrsonnet_binary(Some(
+			"binary:/opt/jrsonnet/bin/go-jsonnet"
+		)));
+		assert!(!uses_jrsonnet_binary(Some(
+			"binary:/usr/local/bin/jrsonnet-0.5.1"
+		)));
 	}
 }

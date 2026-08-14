@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use ::serde::{Deserialize, Deserializer, Serializer};
-use rtk_spec::canonical::{Environment, JsonentImplementationOrConfig, Rc};
-use rtk_spec::v1alpha1::EnvironmentData;
+use rtk_spec::canonical::{EnvironmentSpec, JsonentImplementationOrConfig, Rc};
 
 mod native;
 pub mod serde;
@@ -47,6 +46,21 @@ pub trait Evaluator: Sized {
 	fn new(implementation: &Self::Implementation) -> Self;
 
 	fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, Self::Error>;
+
+	/// Configure this evaluator for the environment it is about to evaluate.
+	///
+	/// An environment may ask to be evaluated by a different Jsonnet
+	/// implementation. Rather than hand over to one, rtk evaluates the
+	/// environment itself and imitates the output the requested implementation
+	/// would have produced — which is this implementation's job to arrange, since
+	/// only it knows how its own output differs.
+	///
+	/// Anything [`Evaluator::with_rc`] configures wins, so a project's settings
+	/// override an environment's preference. The environment is taken as its
+	/// spec, which is the whole of what it configures; its metadata reaches
+	/// Jsonnet as external code instead.
+	fn with_environment(&mut self, environment: &EnvironmentSpec)
+	-> Result<&mut Self, Self::Error>;
 
 	fn with_import_paths(&mut self, import_paths: Vec<PathBuf>) -> Result<&mut Self, Self::Error>;
 
@@ -116,35 +130,39 @@ pub trait FlagsExt: __sealant::Sealed {
 		F: Flag;
 }
 
-impl<'a, D> __sealant::Sealed for Environment<'a, D> where D: EnvironmentData<'a> {}
-
-impl<'a, D> FlagsExt for Environment<'a, D>
+/// Parse the flags an implementation was configured with, if it was named as a
+/// configuration rather than on its own.
+fn parse_flags<F>(
+	implementation: Option<&JsonentImplementationOrConfig>,
+) -> Result<impl Iterator<Item = F>, <F as Flag>::Error>
 where
-	D: EnvironmentData<'a>,
+	F: Flag,
 {
+	let Some(JsonentImplementationOrConfig::JsonnetImplementationConfig(config)) = implementation
+	else {
+		return Ok(Vec::new().into_iter());
+	};
+
+	let flags = &config.flags.0;
+	let mut parsed = Vec::with_capacity(flags.len());
+
+	for (key, value) in flags {
+		let key = key.parse::<F::Key>()?;
+		let value = value.parse::<F::Value>()?;
+		parsed.push(F::new(key, value)?);
+	}
+
+	Ok(parsed.into_iter())
+}
+
+impl __sealant::Sealed for EnvironmentSpec {}
+
+impl FlagsExt for EnvironmentSpec {
 	fn flags<F>(&self) -> Result<impl Iterator<Item = F>, <F as Flag>::Error>
 	where
 		F: Flag,
 	{
-		let jsonnet_implementation_config = match self.spec.export_jsonnet_implementation.as_ref() {
-			Some(JsonentImplementationOrConfig::JsonnetImplementationConfig(
-				jsonnet_implementation_config,
-			)) => jsonnet_implementation_config,
-			_ => return Ok(vec![].into_iter()),
-		};
-
-		let flags = &jsonnet_implementation_config.flags.0;
-
-		let mut parsed = Vec::with_capacity(flags.len());
-
-		for (key, value) in flags {
-			let key = key.parse::<F::Key>()?;
-			let value = value.parse::<F::Value>()?;
-			let flag = F::new(key, value)?;
-			parsed.push(flag);
-		}
-
-		Ok(parsed.into_iter())
+		parse_flags(self.export_jsonnet_implementation.as_ref())
 	}
 }
 
@@ -155,25 +173,7 @@ impl FlagsExt for Rc {
 	where
 		F: Flag,
 	{
-		let jsonnet_implementation_config = match self.spec.jsonnet_implementation.as_ref() {
-			Some(JsonentImplementationOrConfig::JsonnetImplementationConfig(
-				jsonnet_implementation_config,
-			)) => jsonnet_implementation_config,
-			_ => return Ok(vec![].into_iter()),
-		};
-
-		let flags = &jsonnet_implementation_config.flags.0;
-
-		let mut parsed = Vec::with_capacity(flags.len());
-
-		for (key, value) in flags {
-			let key = key.parse::<F::Key>()?;
-			let value = value.parse::<F::Value>()?;
-			let flag = F::new(key, value)?;
-			parsed.push(flag);
-		}
-
-		Ok(parsed.into_iter())
+		parse_flags(self.spec.jsonnet_implementation.as_ref())
 	}
 }
 

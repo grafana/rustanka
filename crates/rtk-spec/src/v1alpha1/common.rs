@@ -143,6 +143,26 @@ pub enum JsonnetImplementation {
 	Binary(PathBuf),
 }
 
+impl JsonnetImplementation {
+	/// Whether output should match the jrsonnet binary rather than go-jsonnet.
+	///
+	/// Asking for a Jsonnet implementation rtk does not have is not an error: it
+	/// evaluates with its own instead, and formats the result the way the one
+	/// that was asked for would have. This says which of those to imitate.
+	///
+	/// A binary counts when its path *ends with* `jrsonnet`, which deliberately
+	/// reads the path as a string rather than as components — a
+	/// `.../my-jrsonnet` is taken at its word, while a `.../jrsonnet-0.5` is
+	/// not, matching how the name is parsed elsewhere.
+	pub fn emulates_jrsonnet(&self) -> bool {
+		match self {
+			JsonnetImplementation::Jrsonnet => true,
+			JsonnetImplementation::Binary(binary) => binary.to_string_lossy().ends_with("jrsonnet"),
+			JsonnetImplementation::Reference | JsonnetImplementation::GoJsonnet => false,
+		}
+	}
+}
+
 impl DeepMerge for JsonnetImplementation {
 	fn merge_from(&mut self, other: Self) {
 		*self = other;
@@ -384,4 +404,46 @@ impl DeepMerge for Versions {
 #[inline(always)]
 pub(crate) fn bool_is_false(bool: &bool) -> bool {
 	!bool
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn implementation(spec: &str) -> JsonnetImplementation {
+		spec.parse().expect("a valid implementation")
+	}
+
+	#[test]
+	fn recognises_the_implementations_whose_output_jrsonnet_matches() {
+		assert!(implementation("jrsonnet").emulates_jrsonnet());
+		assert!(implementation("binary:/usr/local/bin/jrsonnet").emulates_jrsonnet());
+
+		assert!(!implementation("go-jsonnet").emulates_jrsonnet());
+		assert!(!implementation("go").emulates_jrsonnet());
+		assert!(!implementation("reference").emulates_jrsonnet());
+		assert!(!implementation("binary:/usr/local/bin/go-jsonnet").emulates_jrsonnet());
+	}
+
+	#[test]
+	fn reads_a_binarys_path_as_a_name_rather_than_as_components() {
+		// A path is taken at its word: whatever it is called, if it is called
+		// something ending in `jrsonnet` then jrsonnet is what it is taken for.
+		assert!(implementation("binary:/opt/bin/my-jrsonnet").emulates_jrsonnet());
+
+		// Which cuts the other way for a name that merely mentions it. Naming a
+		// build of some other implementation after this one is not something to
+		// guess at, and a version suffix is not a thing tk would accept either.
+		assert!(!implementation("binary:/opt/jrsonnet/bin/go-jsonnet").emulates_jrsonnet());
+		assert!(!implementation("binary:/usr/local/bin/jrsonnet-0.5.1").emulates_jrsonnet());
+	}
+
+	#[test]
+	fn an_implementation_given_with_configuration_is_still_recognised() {
+		let config: JsonentImplementationOrConfig =
+			serde_json::from_str(r#"{ "type": "binary:/usr/local/bin/jrsonnet", "flags": {} }"#)
+				.expect("a valid implementation config");
+
+		assert!(config.implementation().emulates_jrsonnet());
+	}
 }

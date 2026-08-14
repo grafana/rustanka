@@ -22,7 +22,9 @@ use url::Url;
 
 use crate::DeepMerge;
 use crate::merge_strategies;
-use crate::v1alpha1::common::{JsonentImplementationOrConfig, Strategy, Versions};
+use crate::v1alpha1::common::{
+	JsonentImplementationOrConfig, JsonnetImplementation, Strategy, Versions,
+};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Empty;
@@ -571,6 +573,17 @@ impl EnvironmentSpec {
 		const DEFAULT_NAMESPACE: &str = "default";
 
 		self.namespace.as_deref().unwrap_or(DEFAULT_NAMESPACE)
+	}
+
+	/// Whether this environment's output should imitate the jrsonnet binary.
+	///
+	/// See [`JsonnetImplementation::emulates_jrsonnet`]. An environment that says
+	/// nothing about its implementation gets go-jsonnet's formatting, as tk does.
+	pub fn emulates_jrsonnet(&self) -> bool {
+		self.export_jsonnet_implementation
+			.as_ref()
+			.map(JsonentImplementationOrConfig::implementation)
+			.is_some_and(JsonnetImplementation::emulates_jrsonnet)
 	}
 }
 

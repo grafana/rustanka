@@ -50,6 +50,48 @@ noDataEnv(main)
 /// Directories to skip during discovery.
 const SKIP_DIRS: &[&str] = &["vendor", "node_modules", ".git", "lib"];
 
+/// A snippet that imports an entrypoint as `main`, for `script` to work on.
+///
+/// An entrypoint taking top level arguments imports as a function rather than as
+/// what it builds, so it has to be called. The arguments reach it through a
+/// wrapping function for the evaluator to apply them to, and every parameter is
+/// given a default because the evaluator passes only the arguments it was
+/// actually given.
+pub(crate) fn entrypoint_snippet(
+	options: &rtk_jsonnet::Options,
+	entrypoint: &str,
+	script: &str,
+) -> String {
+	if !options.has_top_level_args() {
+		return format!(r#"local main = import "{entrypoint}"; {script}"#);
+	}
+
+	let count = options.top_level_arguments.len() + options.top_level_code.len();
+	let mut arguments = String::with_capacity(count * 16);
+	let mut parameters = String::with_capacity(count * 24);
+
+	let names = options
+		.top_level_arguments
+		.keys()
+		.chain(options.top_level_code.keys());
+
+	for (index, name) in names.enumerate() {
+		if index != 0 {
+			arguments.push_str(", ");
+			parameters.push_str(", ");
+		}
+
+		arguments.push_str(name);
+		let _ = write!(&mut parameters, "{name} = null");
+	}
+
+	format!(
+		r#"function({parameters})
+			local main = (import "{entrypoint}")({arguments});
+			{script}"#
+	)
+}
+
 type DirectoryIter =
 	walkdir::FilterEntry<walkdir::IntoIter, for<'a> fn(&'a walkdir::DirEntry) -> bool>;
 
@@ -103,48 +145,16 @@ impl Discover {
 			.unwrap_or(&jpath.entrypoint)
 			.to_string_lossy();
 
-		let snippet = if options.has_top_level_args() {
-			let argument_count = options.top_level_arguments.len() + options.top_level_code.len();
-			let mut arguments =
-				String::with_capacity((argument_count * (4 + ", ".len())).next_power_of_two());
-			let mut parameters = String::with_capacity(
-				(argument_count * (4 + " = null, ".len())).next_power_of_two(),
-			);
-
-			for (index, name) in options.top_level_arguments.keys().enumerate() {
-				arguments.push_str(name);
-				let _ = write!(&mut parameters, "{name} = null");
-				if index + 1 != options.top_level_arguments.len() {
-					arguments.push_str(", ");
-					parameters.push_str(", ");
-				}
-			}
-			if !options.top_level_arguments.is_empty() && !options.top_level_code.is_empty() {
-				arguments.push_str(", ");
-				parameters.push_str(", ");
-			}
-			for (index, name) in options.top_level_code.keys().enumerate() {
-				arguments.push_str(name);
-				let _ = write!(&mut parameters, "{name} = null");
-				if index + 1 != options.top_level_code.len() {
-					arguments.push_str(", ");
-					parameters.push_str(", ");
-				}
-			}
-
-			format!(
-				r#"function({parameters})
-					local main = (import "{entrypoint}")({arguments});
-					{METADATA_EVAL_SCRIPT}"#
-			)
-		} else {
-			format!(r#"local main = import "{entrypoint}"; {METADATA_EVAL_SCRIPT}"#)
-		};
+		let snippet = entrypoint_snippet(options, &entrypoint, METADATA_EVAL_SCRIPT);
 
 		// Inline environments are named by the Jsonnet that declares them, but
 		// their namespace still comes from where the entrypoint lives.
 		let namespace = namespace_of(&jpath);
 
+		// Deliberately not evaluated as any environment in particular: the specs
+		// that would say how to evaluate them are what this is reading, and an
+		// entrypoint may need Tanka's native functions just to declare them. tk
+		// discovers the same way, and applies what it finds only when exporting.
 		let mut evaluator = engine.create_evaluator();
 		options.apply(&mut evaluator)?;
 		evaluator.with_import_paths(jpath.import_paths)?;

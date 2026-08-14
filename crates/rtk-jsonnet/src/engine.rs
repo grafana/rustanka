@@ -14,7 +14,7 @@ use rtk_jsonnet_jrsonnet::{
 	Implementation as JrsonnetImplementation,
 };
 use rtk_spec::DeepMerge;
-use rtk_spec::canonical::{JsonnetImplementation, Rc};
+use rtk_spec::canonical::{EnvironmentSpec, JsonnetImplementation, Rc};
 use rustc_hash::FxHashMap;
 use thiserror::Error;
 
@@ -52,9 +52,21 @@ impl Engine {
 	}
 
 	pub fn create_evaluator(&self) -> Evaluator {
+		self.create_evaluator_for(None)
+	}
+
+	/// Create an evaluator for a particular environment.
+	///
+	/// An environment may ask to be evaluated by another Jsonnet implementation,
+	/// which decides both how the result is formatted and whether Tanka's native
+	/// functions exist at all — so it has to be known before the evaluator is
+	/// configured, not applied to one afterwards. Taking it here is what makes
+	/// that impossible to get wrong.
+	pub fn create_evaluator_for(&self, environment: Option<&EnvironmentSpec>) -> Evaluator {
 		Evaluator {
 			engine: self.0.clone(),
 			options: self.0.options.clone(),
+			environment: environment.cloned(),
 			evaluator: None,
 		}
 	}
@@ -74,6 +86,7 @@ struct EngineInternals {
 pub struct Evaluator {
 	engine: Arc<EngineInternals>,
 	options: Options,
+	environment: Option<EnvironmentSpec>,
 	evaluator: Option<ImplementationEvaluator>,
 }
 
@@ -232,11 +245,28 @@ impl Evaluator {
 			return self.populate_evaluator(JsonnetImplementation::Jrsonnet);
 		};
 
-		if !self.options.rc.spec.disable_native_functions {
+		// tk drops Tanka's native functions for an environment evaluated by a
+		// jrsonnet binary, which knows nothing about them, so an environment that
+		// asks for one has to lose them here as well — it may well be written to
+		// notice their absence and fall back.
+		let native_functions = !self.options.rc.spec.disable_native_functions
+			&& !self
+				.environment
+				.as_ref()
+				.is_some_and(EnvironmentSpec::emulates_jrsonnet);
+
+		if native_functions {
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_native_functions::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_regex::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_kustomize::Plugin::new());
+		}
+
+		// Applied on every population, not once: `with_rc` populates again, and
+		// each population builds a fresh implementation evaluator that knows
+		// nothing of what the last one was told.
+		if let Some(environment) = &self.environment {
+			call_implementation_evaluator_method!(@with: evaluator, with_environment, environment);
 		}
 
 		Ok(evaluator)
@@ -771,11 +801,27 @@ pub struct Options {
 	pub ext_variables: FxHashMap<Box<str>, Box<str>>,
 	pub top_level_arguments: FxHashMap<Box<str>, Box<str>>,
 	pub top_level_code: FxHashMap<Box<str>, Box<str>>,
+
+	/// How deep evaluation may recurse before it is called a runaway.
+	///
+	/// Overrides whatever the project's configuration asks for, being the more
+	/// direct request of the two. Left unset, the configured depth applies, and
+	/// failing that a default matching tk's.
+	pub max_stack: Option<usize>,
 }
 
 impl Options {
 	pub fn apply(&self, evaluator: &mut Evaluator) -> Result<(), Error> {
-		evaluator.with_rc(self.rc.clone())?;
+		let rc = match self.max_stack {
+			Some(max_stack) => {
+				let mut rc = self.rc.clone();
+				rc.spec.max_stack_depth = Some(max_stack);
+				rc
+			}
+			None => self.rc.clone(),
+		};
+
+		evaluator.with_rc(rc)?;
 
 		for (top_level_code, value) in &self.ext_code {
 			evaluator.with_external_code(top_level_code, value)?;
@@ -833,6 +879,149 @@ mod tests {
 				"yaml": "a: 1\n",
 			})
 		);
+	}
+
+	/// An environment spec, built the way one is really read.
+	fn environment_spec(implementation: Option<&str>) -> EnvironmentSpec {
+		let spec = match implementation {
+			Some(implementation) => {
+				format!(r#"{{ "exportJsonnetImplementation": "{implementation}" }}"#)
+			}
+			None => "{}".to_owned(),
+		};
+
+		serde_json::from_str(&spec).expect("a valid environment spec")
+	}
+
+	/// Everything about an evaluation that the requested implementation decides.
+	const FORMATTING: &str = r#"{
+		floats: std.toString(0.6),
+		nativeFunctionsMissing: std.native("sha256") == null,
+		yamlDoc: std.manifestYamlDoc({ a: "b" }, false, false),
+		yamlStream: std.manifestYamlStream([]),
+	}"#;
+
+	fn formatting_of(engine: &Engine, environment: Option<&EnvironmentSpec>) -> serde_json::Value {
+		let mut evaluator = engine.create_evaluator_for(environment);
+		engine.options().apply(&mut evaluator).unwrap();
+		serde_json::to_value(evaluator.evaluate_snippet(FORMATTING).unwrap()).unwrap()
+	}
+
+	#[test]
+	fn an_environment_can_ask_to_be_formatted_like_the_jrsonnet_binary() {
+		let engine = Engine::new(Options::default());
+
+		// rtk cannot hand an environment over to the implementation it asks for,
+		// so it imitates it instead: the same output, from this evaluator. That
+		// includes dropping Tanka's native functions, which the implementation
+		// being imitated does not have — environments are written to notice.
+		assert_eq!(
+			formatting_of(
+				&engine,
+				Some(&environment_spec(Some("binary:/usr/local/bin/jrsonnet")))
+			),
+			serde_json::json!({
+				"floats": "0.6",
+				"nativeFunctionsMissing": true,
+				"yamlDoc": "a: b",
+				"yamlStream": "...\n",
+			})
+		);
+
+		// An environment that asks for nothing is formatted the way tk formats it,
+		// which is go-jsonnet's way.
+		assert_eq!(
+			formatting_of(&engine, Some(&environment_spec(None))),
+			serde_json::json!({
+				"floats": "0.59999999999999998",
+				"nativeFunctionsMissing": false,
+				"yamlDoc": "a: \"b\"",
+				"yamlStream": "---\n\n...\n",
+			})
+		);
+	}
+
+	#[test]
+	fn formatting_does_not_outlast_the_environment_that_asked_for_it() {
+		let engine = Engine::new(Options::default());
+
+		// Some of how a value is formatted belongs to the thread doing the
+		// formatting, and a thread exporting several environments does them one
+		// after another. What one environment asked for must not decide how the
+		// next one is written out.
+		let jrsonnet = environment_spec(Some("binary:/usr/local/bin/jrsonnet"));
+		assert_eq!(formatting_of(&engine, Some(&jrsonnet))["floats"], "0.6");
+
+		let plain = environment_spec(None);
+		assert_eq!(
+			formatting_of(&engine, Some(&plain))["floats"],
+			"0.59999999999999998",
+			"the previous environment's formatting leaked into this one"
+		);
+	}
+
+	#[test]
+	fn a_projects_configuration_overrides_an_environments_preference() {
+		let mut options = Options::default();
+		options.rc.spec.jsonnet_implementation = Some(
+			serde_json::from_str(
+				r#"{ "type": "jrsonnet", "flags": { "outputFormat.floats": "go-jsonnet" } }"#,
+			)
+			.expect("a valid implementation config"),
+		);
+
+		let formatting = formatting_of(
+			&Engine::new(options),
+			Some(&environment_spec(Some("binary:/usr/local/bin/jrsonnet"))),
+		);
+
+		// The project named a format outright, so that is the one used, however
+		// the environment would have been formatted otherwise.
+		assert_eq!(formatting["floats"], "0.59999999999999998");
+
+		// Only what it named, though. The rest still follows the environment.
+		assert_eq!(formatting["yamlDoc"], "a: b");
+	}
+
+	#[test]
+	fn calls_a_top_level_function_even_with_no_arguments_to_pass_it() {
+		// Whether an entrypoint has to be called is a question about the
+		// entrypoint, not about whether anything was passed to it: one that takes
+		// nothing but defaults still has to be called to get an environment out
+		// of it.
+		let evaluation = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet(r#"function(who = "world") { hello: who }"#)
+			.unwrap();
+
+		assert_eq!(
+			serde_json::to_value(evaluation).unwrap(),
+			serde_json::json!({ "hello": "world" })
+		);
+	}
+
+	#[test]
+	fn recurses_as_deeply_as_tk_allows() {
+		fn recurses(max_stack: Option<usize>) -> bool {
+			let engine = Engine::new(Options {
+				max_stack,
+				..Options::default()
+			});
+			let mut evaluator = engine.create_evaluator();
+			engine.options().apply(&mut evaluator).unwrap();
+
+			evaluator
+				.evaluate_snippet("local f(n) = if n == 0 then 0 else f(n - 1) + 1; f(300)")
+				.is_ok()
+		}
+
+		// The evaluator's own default is lower than the one tk gives an
+		// environment, and environments are written against tk's.
+		assert!(recurses(None), "the default depth is shallower than tk's");
+
+		// Asked for a depth outright, that is the depth, in either direction.
+		assert!(!recurses(Some(200)));
+		assert!(recurses(Some(500)));
 	}
 
 	#[test]

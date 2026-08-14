@@ -12,13 +12,18 @@ use jrsonnet_evaluator::function::builtin::Builtin;
 use jrsonnet_evaluator::function::{
 	CallLocation, FunctionSignature, ParamDefault, ParamName, ParamParse,
 };
+use jrsonnet_evaluator::manifest::set_use_go_style_floats;
+use jrsonnet_evaluator::stack::set_stack_depth_limit;
 use jrsonnet_evaluator::tla::TlaArg;
 use jrsonnet_evaluator::trace::PathResolver;
 use jrsonnet_evaluator::{FileImportResolver, IStr, State, Thunk, Val};
 use jrsonnet_gcmodule::Trace;
-use jrsonnet_stdlib::ContextInitializer;
+use jrsonnet_stdlib::{
+	ContextInitializer, ManifestYamlDocFormatting, ManifestYamlStreamEmptyBehavior,
+	ManifestYamlStreamFormatting, QuoteValuesBehavior,
+};
 use rtk_jsonnet_core::{EvaluatorError as _, FlagsExt, Function};
-use rtk_spec::canonical::Rc;
+use rtk_spec::canonical::{EnvironmentSpec, Rc};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 mod native;
@@ -35,6 +40,12 @@ struct Config {
 	/// Output format configuration for the bundled Jrsonnet implementation.
 	output_format: OutputFormatConfig,
 }
+
+/// The stack depth rtk allows by default.
+///
+/// jrsonnet's own default is lower; this is the limit tk uses, which is what an
+/// environment written against tk expects to have.
+const DEFAULT_MAX_STACK: usize = 500;
 
 impl Config {
 	fn merge_from_flags(&mut self, flags: impl Iterator<Item = Flag>) {
@@ -79,6 +90,19 @@ struct OutputFormatConfig {
 	std_manifest_yaml_stream: Option<OutputFormat>,
 }
 
+impl OutputFormatConfig {
+	/// Use `output_format` for anything not configured explicitly.
+	///
+	/// An environment asking for another implementation only says what it would
+	/// like by default: a flag naming a format outright, wherever it came from,
+	/// has already been recorded here and is left alone.
+	fn default_to(&mut self, output_format: OutputFormat) {
+		self.floats.get_or_insert(output_format);
+		self.std_manifest_yaml_doc.get_or_insert(output_format);
+		self.std_manifest_yaml_stream.get_or_insert(output_format);
+	}
+}
+
 #[derive(Clone, Debug, Error)]
 pub enum Error {
 	#[error("an evaluator error occurred")]
@@ -98,6 +122,7 @@ pub struct Evaluator {
 	config: Config,
 	context_initializer: ContextInitializer,
 	import_paths: Vec<PathBuf>,
+	max_stack: usize,
 	state: Option<State>,
 	top_level_arguments: FxHashMap<IStr, TlaArg>,
 }
@@ -116,6 +141,66 @@ impl Evaluator {
 	/// one, not a duplicate of it.
 	pub fn current() -> Option<StdRc<Evaluator>> {
 		Evaluator::CURRENT.with(|current| current.borrow().clone())
+	}
+
+	/// Build the state to evaluate in, applying everything configured.
+	///
+	/// Part of what an evaluation is configured with belongs to the thread that
+	/// runs it rather than to its state, so this has to run on that thread,
+	/// immediately before evaluating.
+	fn prepare(&mut self) -> State {
+		let output_format = &self.config.output_format;
+
+		self.context_initializer
+			.set_manifest_yaml_doc_formatting(ManifestYamlDocFormatting {
+				quote_values_behavior: match output_format.std_manifest_yaml_doc {
+					Some(OutputFormat::Jrsonnet) => QuoteValuesBehavior::Jrsonnet,
+					Some(OutputFormat::GoJsonnet) | None => QuoteValuesBehavior::GoJsonnet,
+				},
+			});
+
+		self.context_initializer
+			.set_manifest_yaml_stream_formatting(ManifestYamlStreamFormatting {
+				empty_behavior: match output_format.std_manifest_yaml_stream {
+					Some(OutputFormat::Jrsonnet) => ManifestYamlStreamEmptyBehavior::Jrsonnet,
+					Some(OutputFormat::GoJsonnet) | None => {
+						ManifestYamlStreamEmptyBehavior::GoJsonnet
+					}
+				},
+			});
+
+		// These two are per-thread rather than per-state, and a thread goes on to
+		// evaluate further environments. Both are therefore set on every
+		// evaluation, to whatever it wants, rather than only when it wants
+		// something unusual: leaving them alone would let one environment decide
+		// how the next one to land on the same thread is formatted.
+		set_use_go_style_floats(!matches!(
+			output_format.floats,
+			Some(OutputFormat::Jrsonnet)
+		));
+		set_stack_depth_limit(self.max_stack);
+
+		let mut builder = State::builder();
+		builder.context_initializer(self.context_initializer.clone());
+
+		if !self.import_paths.is_empty() {
+			builder.import_resolver(FileImportResolver::new(self.import_paths.clone()));
+		}
+
+		let state = builder.build();
+		self.state = Some(state.clone());
+		state
+	}
+
+	/// Apply top level arguments to what an evaluation produced.
+	///
+	/// Always attempted, never only when arguments were passed: whether to call
+	/// the result is a question about the result — an entrypoint that is a
+	/// function of nothing but defaults still has to be called — and
+	/// [`apply_tla`](jrsonnet_evaluator::apply_tla) leaves anything that is not a
+	/// function alone.
+	fn apply_top_level_arguments(&self, value: Val) -> Result<Val, EvaluatorError> {
+		jrsonnet_evaluator::apply_tla(&self.top_level_arguments, value).map_err(EvaluatorError)
 	}
 }
 
@@ -165,14 +250,35 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 			config: implementation.config.clone(),
 			context_initializer: ContextInitializer::new(PathResolver::Absolute),
 			import_paths: Vec::new(),
+			max_stack: DEFAULT_MAX_STACK,
 			state: None,
 			top_level_arguments: FxHashMap::with_hasher(FxBuildHasher),
 		}
 	}
 
 	fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, Self::Error> {
+		if let Some(max_stack) = rc.spec.max_stack_depth {
+			self.max_stack = max_stack;
+		}
+
 		self.config
 			.merge_from_flags(rc.flags().map_err(EvaluatorError::custom)?);
+		Ok(self)
+	}
+
+	fn with_environment(
+		&mut self,
+		environment: &EnvironmentSpec,
+	) -> Result<&mut Self, Self::Error> {
+		// Imitating the jrsonnet binary is the whole of what this evaluator can
+		// do about an environment naming another implementation: it cannot hand
+		// over to one, but it can format its output the same way.
+		if environment.emulates_jrsonnet() {
+			self.config.output_format.default_to(OutputFormat::Jrsonnet);
+		}
+
+		self.config
+			.merge_from_flags(environment.flags().map_err(EvaluatorError::custom)?);
 		Ok(self)
 	}
 
@@ -308,41 +414,19 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
-		let state = {
-			let mut state_builder = State::builder();
-
-			state_builder.context_initializer(self.context_initializer.clone());
-
-			if !self.import_paths.is_empty() {
-				state_builder.import_resolver(FileImportResolver::new(self.import_paths.clone()));
-			}
-
-			state_builder.build()
-		};
-		self.state = Some(state.clone());
+		let state = self.prepare();
 
 		let current_evaluator = StdRc::new(self);
 		Evaluator::CURRENT.with(move |evaluator| {
 			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
 			let _state_guard = state.enter();
 
-			let result = (|| {
-				let val = state.import(path.as_ref())?;
+			let value = state
+				.import(path.as_ref())
+				.map_err(EvaluatorError)
+				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
 
-				let val = if let Some(evaluator) = evaluator.borrow().as_ref() {
-					if evaluator.top_level_arguments.is_empty() {
-						val
-					} else {
-						jrsonnet_evaluator::apply_tla(&evaluator.top_level_arguments, val)?
-					}
-				} else {
-					val
-				};
-
-				Ok(val)
-			})();
-
-			result.map(|value| ((*current_evaluator).clone(), Value(value)))
+			Ok(((*current_evaluator).clone(), Value(value)))
 		})
 	}
 
@@ -354,41 +438,19 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 	where
 		S: AsRef<str> + fmt::Debug,
 	{
-		let state = {
-			let mut state_builder = State::builder();
-
-			state_builder.context_initializer(self.context_initializer.clone());
-
-			if !self.import_paths.is_empty() {
-				state_builder.import_resolver(FileImportResolver::new(self.import_paths.clone()));
-			}
-
-			state_builder.build()
-		};
-		self.state = Some(state.clone());
+		let state = self.prepare();
 
 		let current_evaluator = StdRc::new(self);
 		Evaluator::CURRENT.with(move |evaluator| {
 			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
 			let _state_guard = state.enter();
 
-			let result = (|| {
-				let val = state.evaluate_snippet("<anonymous>", snippet.as_ref())?;
+			let value = state
+				.evaluate_snippet("<anonymous>", snippet.as_ref())
+				.map_err(EvaluatorError)
+				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
 
-				let val = if let Some(evaluator) = evaluator.borrow().as_ref() {
-					if evaluator.top_level_arguments.is_empty() {
-						val
-					} else {
-						jrsonnet_evaluator::apply_tla(&evaluator.top_level_arguments, val)?
-					}
-				} else {
-					val
-				};
-
-				Ok(val)
-			})();
-
-			result.map(|value| ((*current_evaluator).clone(), Value(value)))
+			Ok(((*current_evaluator).clone(), Value(value)))
 		})
 	}
 }
