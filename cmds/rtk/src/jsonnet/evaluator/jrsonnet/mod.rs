@@ -94,13 +94,8 @@ impl Evaluator for JrsonnetEvaluator {
 
 			let spec = JrsonnetEvaluator::load_spec(&jpath_result)?;
 
-			let state = JrsonnetEvaluator::create_state(
-				import_resolver,
-				Some(&jpath_result.base),
-				spec.as_ref(),
-				global,
-				opts,
-			)?;
+			let state =
+				JrsonnetEvaluator::create_state(import_resolver, spec.as_ref(), global, opts)?;
 
 			let value = JrsonnetEvaluator::eval_file_inner(
 				&state,
@@ -132,7 +127,7 @@ impl Evaluator for JrsonnetEvaluator {
 		) -> Result<Evaluation> {
 			let import_resolver = FileImportResolver::new(Vec::new());
 
-			let state = JrsonnetEvaluator::create_state(import_resolver, None, None, global, opts)?;
+			let state = JrsonnetEvaluator::create_state(import_resolver, None, global, opts)?;
 
 			let value = JrsonnetEvaluator::eval_snippet_inner(&state, snippet, global)?;
 
@@ -163,7 +158,7 @@ impl Evaluator for JrsonnetEvaluator {
 		) -> Result<Evaluation> {
 			let import_resolver = FileImportResolver::new(jpath);
 
-			let state = JrsonnetEvaluator::create_state(import_resolver, None, None, global, opts)?;
+			let state = JrsonnetEvaluator::create_state(import_resolver, None, global, opts)?;
 
 			let value = JrsonnetEvaluator::eval_snippet_inner(&state, snippet, global)?;
 
@@ -189,7 +184,7 @@ impl JrsonnetEvaluator {
 		S: AsRef<str>,
 		I: ImportResolver,
 	{
-		let state = JrsonnetEvaluator::create_state(import_resolver, None, None, &self.0, opts)?;
+		let state = JrsonnetEvaluator::create_state(import_resolver, None, &self.0, opts)?;
 
 		let value = JrsonnetEvaluator::eval_snippet_inner(&state, snippet.as_ref(), &self.0)?;
 
@@ -222,7 +217,7 @@ impl JrsonnetEvaluator {
 			.map_err(|e| anyhow::anyhow!("TLA application error:\n{}", e))
 	}
 
-	/// Apply settings from .rtk-config.yaml to the context initializer
+	/// Apply the output formatting settings to the context initializer
 	fn apply_rtk_config(context_init: &ContextInitializer, config: &RtkConfig) {
 		use jrsonnet_evaluator::manifest::set_use_go_style_floats;
 		use jrsonnet_stdlib::{
@@ -265,7 +260,6 @@ impl JrsonnetEvaluator {
 	/// Set up the jrsonnet evaluator state with proper configuration
 	fn create_state(
 		import_resolver: impl ImportResolver,
-		config_base: Option<&Path>,
 		spec: Option<&Environment>,
 		global: &GlobalEvaluatorOptions,
 		opts: &EvaluatorOptions,
@@ -274,25 +268,18 @@ impl JrsonnetEvaluator {
 		// Use Absolute resolver so std.thisFile returns absolute paths (like tk does)
 		let context_init = ContextInitializer::new(PathResolver::Absolute);
 
-		// Build config: start with defaults based on spec, then merge .rtk-config.yaml if present
-		// First check opts.export_jsonnet_implementation (from inline env discovery),
+		// Formatting follows what the environment asked to be evaluated by. First
+		// check opts.export_jsonnet_implementation (from inline env discovery),
 		// then fall back to spec.json (for static environments)
 		let export_impl = opts
 			.export_jsonnet_implementation
 			.as_deref()
 			.or_else(|| spec.and_then(|e| e.spec.export_jsonnet_implementation.as_deref()));
-		let mut config = if uses_jrsonnet_binary(export_impl) {
+		let config = if uses_jrsonnet_binary(export_impl) {
 			RtkConfig::jrsonnet_defaults()
 		} else {
 			RtkConfig::default()
 		};
-
-		// Load .rtk-config.yaml if present and merge over defaults
-		if let Some(base) = config_base {
-			if let Some(file_config) = RtkConfig::load_from_directory(base)? {
-				config.merge_from(&file_config);
-			}
-		}
 
 		JrsonnetEvaluator::apply_rtk_config(&context_init, &config);
 
