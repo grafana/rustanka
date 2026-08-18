@@ -1,0 +1,35 @@
+apiVersion: example.com/v1
+kind: NumberFormatting
+metadata:
+  name: numbers
+  namespace: default
+spec:
+  belowSmallBoundary: 1e-05
+  beyondInt64: 9.223372036854776e+18
+  int64Max: 9.223372036854776e+18
+  justAboveMillion: 1.000001e+06
+  justBelowMillion: 999999
+  list:
+  - 1
+  - 1.5
+  - 1e+06
+  - 0.0001
+  - 0.30000000000000004
+  manyDigits: 1.2345678901234567
+  million: 1e+06
+  negativeFraction: -0.5
+  negativeOne: -1
+  nested:
+    exponent: 1e+21
+    value: 2.5
+  one: 1
+  oneThird: 0.3333333333333333
+  pointOnePlusPointTwo: 0.30000000000000004
+  smallBoundary: 0.0001
+  tenMillion: 1e+07
+  twoPow53: 9.007199254740992e+15
+  twoPow53Plus1: 9.007199254740992e+15
+  veryLarge: 1e+100
+  verySmall: 1e-100
+  wholeFloat: 1
+  zero: 0

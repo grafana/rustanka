@@ -748,13 +748,13 @@ fn numbers_are_formatted_the_way_tanka_formats_them() {
 		)
 		.expect("the export succeeds");
 
-	// Verified byte for byte against the implementation this replaces. Note
-	// `huge`: the value survives, where deserializing through serde's data model
-	// would have saturated it to `i64::MAX`. The rounding and the `-0.0` are the
-	// serializer's, and are what tk's output is currently compared against.
+	// Verified byte for byte against tk. Note `huge`: the value survives, where
+	// deserializing through serde's data model would have saturated it to
+	// `i64::MAX`. Its shortest round-tripping form is `1e+100`; deriving a
+	// mantissa through floating-point division used to corrupt it.
 	assert_eq!(
 		project.exported()["v1.ConfigMap-numbers.yaml"],
-		"apiVersion: v1\ndata:\n  huge: 0.9999999999999998e+100\n  negative: -0.0\n  \
+		"apiVersion: v1\ndata:\n  huge: 1e+100\n  negative: -0.0\n  \
 		 ratio: 0.1\n  whole: 3\nkind: ConfigMap\nmetadata:\n  name: numbers\n  \
 		 namespace: default\n"
 	);

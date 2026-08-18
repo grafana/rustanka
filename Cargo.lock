@@ -5131,7 +5131,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437"
+source = "git+https://github.com/grafana/serde-saphyr?branch=jj%2Ffix%2Fgo-scientific-notation#e0ad100fd50420a8e19351088dc32c5814fdeba9"
 dependencies = [
  "ahash",
  "base64 0.22.1",
