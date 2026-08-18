@@ -21,6 +21,16 @@ fn testdata(fixture: &str) -> PathBuf {
 		.join(fixture)
 }
 
+fn export_error_fixture(fixture: &str) -> PathBuf {
+	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+		.parent()
+		.unwrap()
+		.parent()
+		.unwrap()
+		.join("test_fixtures/export_error_parity")
+		.join(fixture)
+}
+
 /// What to export, and how.
 ///
 /// Built by [`fixture`], which fills in what an export needs but a test rarely
@@ -506,6 +516,26 @@ fn refuses_a_kubernetes_object_with_no_api_version() {
 		"unexpected error: {}",
 		error.report()
 	);
+}
+
+#[test]
+fn refuses_a_kubernetes_object_without_metadata() {
+	let output = Output::new();
+	let exported = output
+		.export(fixture("unused").path(export_error_fixture("metadata_missing")))
+		.expect("the export reports an environment failure");
+
+	assert_eq!(exported.failed(), 1);
+	let error = exported.reports[0].error.as_ref().unwrap().to_string();
+	assert!(
+		error.contains("metadata: missing or not an object"),
+		"unexpected error: {error}"
+	);
+	assert!(
+		error.contains("metadata.name: missing or not of string type"),
+		"unexpected error: {error}"
+	);
+	assert!(exported.reports[0].files.is_empty());
 }
 
 #[test]

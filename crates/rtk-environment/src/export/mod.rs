@@ -248,6 +248,9 @@ pub enum Error {
 	#[error("found invalid Kubernetes object (at {path}): missing attribute \"apiVersion\"")]
 	MissingApiVersion { path: String },
 
+	#[error("found invalid Kubernetes object (at {path}): {reason}")]
+	InvalidManifest { path: String, reason: String },
+
 	#[error("invalid target pattern {target:?}")]
 	InvalidTarget {
 		target: String,

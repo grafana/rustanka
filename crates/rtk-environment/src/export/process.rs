@@ -83,7 +83,9 @@ pub(crate) fn collect_manifests(
 			_ => {
 				buffer.clear();
 				value.manifest_into(buffer)?;
-				manifests.push(serde_json::from_str(buffer)?);
+				let manifest = serde_json::from_str(buffer)?;
+				validate_manifest(&manifest, path)?;
+				manifests.push(manifest);
 			}
 		}
 
@@ -102,6 +104,33 @@ pub(crate) fn collect_manifests(
 	}
 
 	Ok(())
+}
+
+fn validate_manifest(manifest: &Value, path: &str) -> Result<(), Error> {
+	let metadata = manifest.get("metadata").and_then(Value::as_object);
+	let mut problems = Vec::new();
+	if metadata.is_none() {
+		problems.push("metadata: missing or not an object");
+	}
+	if !metadata.is_some_and(|metadata| {
+		metadata.get("name").is_some_and(Value::is_string)
+			|| metadata.get("generateName").is_some_and(Value::is_string)
+	}) {
+		problems.push("metadata.name: missing or not of string type");
+	}
+
+	if problems.is_empty() {
+		Ok(())
+	} else {
+		Err(Error::InvalidManifest {
+			path: if path.is_empty() {
+				".".into()
+			} else {
+				path.into()
+			},
+			reason: problems.join("; "),
+		})
+	}
 }
 
 /// A compiled `-t/--target` expression.
