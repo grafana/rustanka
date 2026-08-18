@@ -36,6 +36,7 @@ async fn test_connect_with_api_server_impl(discovery_mode: DiscoveryMode) {
 			go_version: "go1.21.0".to_string(),
 			compiler: "gc".to_string(),
 			platform: "linux/amd64".to_string(),
+			..Default::default()
 		}
 	);
 }
@@ -75,6 +76,7 @@ async fn test_connect_with_context_names() {
 			go_version: "go1.21.0".to_string(),
 			compiler: "gc".to_string(),
 			platform: "linux/amd64".to_string(),
+			..Default::default()
 		}
 	);
 }

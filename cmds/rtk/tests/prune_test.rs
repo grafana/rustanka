@@ -39,7 +39,7 @@ async fn run_prune(
 ) -> anyhow::Result<Vec<ResourceDiff>> {
 	let mut output = Vec::new();
 	prune_environment(
-		env_dir.as_ref(),
+		env_dir,
 		Some(connection),
 		GlobalEvaluatorOptions::default(),
 		EvaluatorOptions::default(),
