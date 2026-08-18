@@ -1,10 +1,8 @@
+use crate::v1alpha1::common::{JsonentImplementationOrConfig, Versions, deserialize_api_server};
 use k8s_openapi::DeepMerge;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use url::Url;
-
-use crate::v1alpha1::common::{JsonentImplementationOrConfig, Versions};
 
 #[derive(Clone, CustomResource, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -17,8 +15,12 @@ use crate::v1alpha1::common::{JsonentImplementationOrConfig, Versions};
 )]
 #[serde(rename_all = "camelCase")]
 pub struct RcSpec {
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub api_server: Option<Url>,
+	#[serde(
+		default,
+		deserialize_with = "deserialize_api_server",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub api_server: Option<Box<str>>,
 	#[serde(skip_serializing_if = "crate::v1alpha1::common::bool_is_false")]
 	pub disable_native_functions: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]

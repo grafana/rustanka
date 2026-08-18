@@ -1,0 +1,3 @@
+{
+    "default/ConfigMap-environment-spec.golden": "main.jsonnet"
+}

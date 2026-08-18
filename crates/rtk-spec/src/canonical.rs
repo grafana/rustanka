@@ -51,7 +51,17 @@ impl DeepMergeFrom<EnvironmentSpec> for RcSpec {
 		if let Some(api_server) = other.api_server {
 			self.api_server = Some(api_server);
 		}
-		self.expect_versions.merge_from(other.expect_versions);
+		if let Some(expect_versions) = other.expect_versions {
+			let versions = self.expect_versions.get_or_insert_with(|| Versions {
+				binaries: None,
+				kubectl: None,
+				tanka: None,
+				helm: None,
+			});
+			if let Some(tanka) = expect_versions.tanka {
+				versions.tanka = Some(tanka);
+			}
+		}
 		self.jsonnet_implementation
 			.merge_from(other.export_jsonnet_implementation);
 	}

@@ -387,16 +387,48 @@ pub struct Versions {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kubectl: Option<VersionReq>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub tanka: Option<VersionReq>,
+	pub tanka: Option<Box<str>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub helm: Option<HelmVersion>,
+}
+
+/// Read an optional string the way Go's `omitempty` fields behave: an empty
+/// string is indistinguishable from an absent one when the value is serialized
+/// again.
+pub(crate) fn deserialize_non_empty_string<'de, D>(
+	deserializer: D,
+) -> Result<Option<Box<str>>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	Ok(Option::<Box<str>>::deserialize(deserializer)?.filter(|value| !value.is_empty()))
+}
+
+/// Tanka accepts API servers as strings and only supplies a default scheme. It
+/// deliberately does not otherwise parse or canonicalize them as URLs.
+pub(crate) fn deserialize_api_server<'de, D>(deserializer: D) -> Result<Option<Box<str>>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	let Some(value) = deserialize_non_empty_string(deserializer)? else {
+		return Ok(None);
+	};
+
+	let has_scheme = value.find("://").is_some_and(|position| position > 0);
+	if has_scheme {
+		Ok(Some(value))
+	} else {
+		Ok(Some(format!("https://{value}").into_boxed_str()))
+	}
 }
 
 impl DeepMerge for Versions {
 	fn merge_from(&mut self, other: Self) {
 		merge_strategies::hashmap::granular(&mut self.binaries, other.binaries, |a, b| *a = b);
 		self.kubectl.merge_from(other.kubectl);
-		self.tanka.merge_from(other.tanka);
+		if let Some(tanka) = other.tanka {
+			self.tanka = Some(tanka);
+		}
 		self.helm.merge_from(other.helm);
 	}
 }

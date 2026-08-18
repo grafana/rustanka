@@ -2,6 +2,12 @@ use std::borrow::Cow;
 use std::fmt::{self, Formatter};
 use std::marker::PhantomData;
 
+use crate::DeepMerge;
+use crate::merge_strategies;
+use crate::v1alpha1::common::{
+	JsonentImplementationOrConfig, JsonnetImplementation, deserialize_api_server,
+	deserialize_non_empty_string,
+};
 use k8s_openapi::ClusterResourceScope;
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::{
 	CustomResourceDefinition, CustomResourceDefinitionNames, CustomResourceDefinitionSpec,
@@ -18,13 +24,6 @@ use schemars::transform::AddNullable;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, MapAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use url::Url;
-
-use crate::DeepMerge;
-use crate::merge_strategies;
-use crate::v1alpha1::common::{
-	JsonentImplementationOrConfig, JsonnetImplementation, Strategy, Versions,
-};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Empty;
@@ -538,17 +537,29 @@ pub trait EnvironmentData<'a>:
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct EnvironmentSpec {
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub api_server: Option<Url>,
+	#[serde(
+		default,
+		deserialize_with = "deserialize_api_server",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub api_server: Option<Box<str>>,
 	#[serde(default)]
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub context_names: Vec<Box<str>>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub namespace: Option<Box<str>>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub diff_strategy: Option<Strategy>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub apply_strategy: Option<Strategy>,
+	#[serde(
+		default,
+		deserialize_with = "deserialize_non_empty_string",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub diff_strategy: Option<Box<str>>,
+	#[serde(
+		default,
+		deserialize_with = "deserialize_non_empty_string",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub apply_strategy: Option<Box<str>>,
 	#[serde(default)]
 	#[serde(skip_serializing_if = "crate::v1alpha1::common::bool_is_false")]
 	pub inject_labels: bool,
@@ -558,7 +569,7 @@ pub struct EnvironmentSpec {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub resource_defaults: Option<ResourceDefaults>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub expect_versions: Option<Versions>,
+	pub expect_versions: Option<ExpectVersions>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub export_jsonnet_implementation: Option<JsonentImplementationOrConfig>,
 }
@@ -599,8 +610,12 @@ impl DeepMerge for EnvironmentSpec {
 			self.namespace = Some(namespace);
 		}
 
-		self.diff_strategy.merge_from(other.diff_strategy);
-		self.apply_strategy.merge_from(other.apply_strategy);
+		if let Some(diff_strategy) = other.diff_strategy {
+			self.diff_strategy = Some(diff_strategy);
+		}
+		if let Some(apply_strategy) = other.apply_strategy {
+			self.apply_strategy = Some(apply_strategy);
+		}
 
 		self.inject_labels = self.inject_labels || other.inject_labels;
 
@@ -613,6 +628,30 @@ impl DeepMerge for EnvironmentSpec {
 		self.expect_versions.merge_from(other.expect_versions);
 		self.export_jsonnet_implementation
 			.merge_from(other.export_jsonnet_implementation);
+	}
+}
+
+/// Version constraints accepted in an environment spec.
+///
+/// Tanka stores this text while parsing and interprets it only when loading the
+/// environment. Keeping it raw also preserves constraints supported by Go's
+/// semver implementation but not Rust's, such as alternatives using `||`.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectVersions {
+	#[serde(
+		default,
+		deserialize_with = "deserialize_non_empty_string",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub tanka: Option<Box<str>>,
+}
+
+impl DeepMerge for ExpectVersions {
+	fn merge_from(&mut self, other: Self) {
+		if let Some(tanka) = other.tanka {
+			self.tanka = Some(tanka);
+		}
 	}
 }
 
@@ -633,5 +672,91 @@ impl DeepMerge for ResourceDefaults {
 			*a = b
 		});
 		merge_strategies::hashmap::granular(&mut self.labels, other.labels, |a, b| *a = b);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use serde_json::json;
+
+	use super::EnvironmentSpec;
+
+	#[test]
+	fn environment_settings_keep_tankas_compatibility_strings() {
+		let spec: EnvironmentSpec = serde_json::from_value(json!({
+			"apiServer": "cluster.example:6443",
+			"diffStrategy": "native",
+			"applyStrategy": "future-apply",
+			"expectVersions": {
+				"tanka": ">= 0.0.0 || < 0.0.0",
+				"kubectl": ">= 1.0.0"
+			}
+		}))
+		.unwrap();
+
+		assert_eq!(
+			spec.api_server.as_deref(),
+			Some("https://cluster.example:6443")
+		);
+		assert_eq!(spec.diff_strategy.as_deref(), Some("native"));
+		assert_eq!(spec.apply_strategy.as_deref(), Some("future-apply"));
+		assert_eq!(
+			spec.expect_versions.as_ref().unwrap().tanka.as_deref(),
+			Some(">= 0.0.0 || < 0.0.0")
+		);
+
+		let serialized = serde_json::to_value(spec).unwrap();
+		assert_eq!(serialized["apiServer"], "https://cluster.example:6443");
+		assert_eq!(serialized["diffStrategy"], "native");
+		assert_eq!(serialized["applyStrategy"], "future-apply");
+		assert_eq!(
+			serialized["expectVersions"],
+			json!({ "tanka": ">= 0.0.0 || < 0.0.0" })
+		);
+	}
+
+	#[test]
+	fn api_server_is_not_canonicalized_beyond_adding_a_scheme() {
+		for (input, expected) in [
+			(
+				"https://cluster.example:6443",
+				"https://cluster.example:6443",
+			),
+			("custom://cluster/path", "custom://cluster/path"),
+			("mailto:cluster", "https://mailto:cluster"),
+		] {
+			let spec: EnvironmentSpec =
+				serde_json::from_value(json!({ "apiServer": input })).unwrap();
+			assert_eq!(spec.api_server.as_deref(), Some(expected));
+		}
+	}
+
+	#[test]
+	fn empty_compatibility_strings_serialize_as_absent() {
+		let spec: EnvironmentSpec = serde_json::from_value(json!({
+			"apiServer": "",
+			"diffStrategy": "",
+			"applyStrategy": "",
+			"expectVersions": { "tanka": "" }
+		}))
+		.unwrap();
+
+		assert_eq!(
+			serde_json::to_value(spec).unwrap(),
+			json!({ "expectVersions": {} })
+		);
+	}
+
+	#[test]
+	fn compatibility_fields_still_require_their_go_json_shapes() {
+		for malformed in [
+			json!({ "apiServer": {} }),
+			json!({ "diffStrategy": 1 }),
+			json!({ "applyStrategy": false }),
+			json!({ "expectVersions": "anything" }),
+			json!({ "expectVersions": { "tanka": [] } }),
+		] {
+			assert!(serde_json::from_value::<EnvironmentSpec>(malformed).is_err());
+		}
 	}
 }

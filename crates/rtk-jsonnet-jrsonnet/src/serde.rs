@@ -1134,9 +1134,12 @@ mod tests {
             kind: "Environment",
             metadata: { name: "environments/demo", labels: { team: "platform" } },
             spec: {
-                apiServer: "https://127.0.0.1:6443",
-                namespace: "demo",
-                injectLabels: true,
+				apiServer: "127.0.0.1:6443",
+				namespace: "demo",
+				diffStrategy: "native",
+				applyStrategy: "future-apply",
+				expectVersions: { tanka: ">= 0.0.0 || < 0.0.0" },
+				injectLabels: true,
             },
             data: { never: error "data must stay lazy" },
         }"#,
@@ -1153,7 +1156,22 @@ mod tests {
 			.api_server
 			.as_ref()
 			.expect("apiServer is set");
-		assert_eq!(api_server.as_str(), "https://127.0.0.1:6443/");
+		assert_eq!(api_server.as_ref(), "https://127.0.0.1:6443");
+		assert_eq!(environment.spec.diff_strategy.as_deref(), Some("native"));
+		assert_eq!(
+			environment.spec.apply_strategy.as_deref(),
+			Some("future-apply")
+		);
+		assert_eq!(
+			environment
+				.spec
+				.expect_versions
+				.as_ref()
+				.unwrap()
+				.tanka
+				.as_deref(),
+			Some(">= 0.0.0 || < 0.0.0")
+		);
 	}
 
 	fn str_of(value: Option<Val>) -> Option<jrsonnet_evaluator::IStr> {
@@ -1267,7 +1285,7 @@ mod tests {
 			.expect("a spec object");
 		assert_eq!(
 			str_of(spec.get("apiServer".into()).unwrap()),
-			Some("https://127.0.0.1:6443/".into()),
+			Some("https://127.0.0.1:6443".into()),
 		);
 		assert_eq!(
 			str_of(spec.get("namespace".into()).unwrap()),

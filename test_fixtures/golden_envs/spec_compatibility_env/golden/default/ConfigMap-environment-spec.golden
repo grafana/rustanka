@@ -1,0 +1,11 @@
+apiVersion: v1
+data:
+  apiServer: https://cluster.example:6443
+  applyStrategy: future-apply
+  diffStrategy: native
+  expectedTanka: '>= 0.0.0 || < 0.0.0'
+  unknownVersionField: ignored
+kind: ConfigMap
+metadata:
+  name: environment-spec
+  namespace: default
