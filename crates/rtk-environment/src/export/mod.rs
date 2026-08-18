@@ -618,6 +618,7 @@ struct BulkExport<'p> {
 )]
 impl BulkExport<'_> {
 	async fn run(&mut self) -> Result<Exported, Error> {
+		self.prioritize_exact_name()?;
 		self.check_ambiguity()?;
 
 		let (sender, mut receiver) = mpsc::channel(self.parallelism() * 2);
@@ -683,6 +684,38 @@ impl BulkExport<'_> {
 
 		writer.drain(&mut written).await?;
 		self.finish(written)
+	}
+
+	/// Prefer exact environment names over substring and path matches, as tk
+	/// does. Discovery has to finish before anything is dispatched: an exact
+	/// match may appear after an otherwise valid partial match.
+	fn prioritize_exact_name(&mut self) -> Result<(), Error> {
+		let Some(name) = self.export.options.name.clone() else {
+			return Ok(());
+		};
+
+		let mut exact = Vec::new();
+		let mut partial = Vec::new();
+		while let Some(discover) = self.discover.as_mut() {
+			let Some(discovered) = writer::blocking(|| discover.next()) else {
+				self.discover = None;
+				break;
+			};
+			let discovered = discovered?;
+			if !self.matches(&discovered) {
+				continue;
+			}
+
+			if discovered.environment.metadata.name.as_deref() == Some(name.as_str()) {
+				exact.push(discovered);
+			} else {
+				partial.push(discovered);
+			}
+		}
+
+		let selected = if exact.is_empty() { partial } else { exact };
+		self.pending.extend(selected.into_iter().rev());
+		Ok(())
 	}
 
 	fn parallelism(&self) -> usize {
