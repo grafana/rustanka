@@ -22,8 +22,7 @@ const ENVIRONMENT_LABEL: &str = "tanka.dev/environment";
 /// Walks the evaluated value lazily, forcing only what it has to, and manifests
 /// each Kubernetes object it finds through the Jsonnet implementation (rather
 /// than through serde) so that numbers are formatted exactly as tk formats
-/// them. `Environment` objects are unwrapped to their `data`, and `List` objects
-/// are expanded into their items, both as Tanka does.
+/// them. `List` objects are expanded into their items, as Tanka does.
 ///
 /// `path` is the JSON path walked so far, used for error messages.
 pub(crate) fn collect_manifests(
@@ -59,13 +58,6 @@ pub(crate) fn collect_manifests(
 			.and_then(|kind| kind.as_str())
 			.as_deref()
 		{
-			// Tanka environments are not exported themselves, only their
-			// contents.
-			Some("Environment") => {
-				if let Some(data) = object.get("data", Hidden::Skip)? {
-					collect_manifests(&data, path, buffer, manifests)?;
-				}
-			}
 			// Lists are exported as their items, one file each.
 			Some("List") => {
 				let items = object

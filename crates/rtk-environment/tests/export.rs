@@ -196,7 +196,7 @@ fn leaves_cluster_wide_resources_alone() {
 }
 
 #[test]
-fn expands_lists_and_unwraps_environments() {
+fn expands_lists() {
 	let project = Project::new();
 	static_environment(
 		&project,
