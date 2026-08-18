@@ -211,7 +211,14 @@ impl Discover {
 	}
 
 	fn read_spec_json(spec_path: &Path) -> Result<Environment<'static>, Error> {
-		let content = fs::read_to_string(spec_path)?;
+		let jpath = spec_path
+			.parent()
+			.and_then(|directory| JPath::resolve(directory).ok());
+		let resolved_spec = jpath
+			.as_ref()
+			.map(|jpath| jpath.base_directory.join("spec.json"))
+			.filter(|path| path.exists());
+		let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(spec_path))?;
 		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
 		let mut environment = environment.without_data();
 
@@ -219,9 +226,7 @@ impl Discover {
 		// entrypoint as its namespace, whatever `spec.json` says. Best effort:
 		// an environment whose entrypoint cannot be resolved fails later, when
 		// it is evaluated, with a better error than discovery could give.
-		if let Some(directory) = spec_path.parent()
-			&& let Ok(jpath) = JPath::resolve(directory)
-		{
+		if let Some(jpath) = jpath {
 			crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
 		}
 

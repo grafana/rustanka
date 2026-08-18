@@ -68,6 +68,10 @@ impl FixtureConfig {
 		}
 		args
 	}
+
+	fn specific_args_for_command(&self, command: &str) -> Vec<String> {
+		self.args.get(command).cloned().unwrap_or_default()
+	}
 }
 
 fn default_workspace() -> bool {
@@ -263,6 +267,22 @@ pub fn load_fixture_command_args(
 ) -> Result<Vec<String>> {
 	let args = load_fixture_args(suite_path, fixture_path).map(|cfg| {
 		cfg.args_for_command(Some(command))
+			.into_iter()
+			.map(|arg| render_tokens(&arg, testcase, basename))
+			.collect::<Vec<_>>()
+	})?;
+	Ok(args)
+}
+
+pub fn load_fixture_specific_command_args(
+	suite_path: &std::path::Path,
+	fixture_path: &std::path::Path,
+	command: &str,
+	testcase: &str,
+	basename: &str,
+) -> Result<Vec<String>> {
+	let args = load_fixture_args(suite_path, fixture_path).map(|cfg| {
+		cfg.specific_args_for_command(command)
 			.into_iter()
 			.map(|arg| render_tokens(&arg, testcase, basename))
 			.collect::<Vec<_>>()

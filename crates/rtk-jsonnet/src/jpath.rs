@@ -85,7 +85,7 @@ impl JPath {
 		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?.into_owned();
 		let entrypoint = JPath::get_entrypoint(path)?;
 
-		if let Some(base_directory) = JPath::find_nearest_directory_with_file_bounded(
+		if let Some(base_directory) = JPath::find_outermost_directory_with_file_bounded(
 			abs_path.clone(),
 			root_directory,
 			entrypoint,
@@ -153,10 +153,10 @@ impl JPath {
 
 		for marker in JPath::ROOT_MARKERS {
 			// abs_path is cloned here in order to be used as a buffer while
-			// searching for the nearest directory.
+			// searching for the outermost directory.
 			let abs_path = abs_path.clone().into_owned();
 			if let Some(root_directory) =
-				JPath::find_nearest_directory_with_file(abs_path, marker.as_ref())
+				JPath::find_outermost_directory_with_file(abs_path, marker.as_ref())
 			{
 				if marker.starts_with("tkrc") {
 					let rc = Some(root_directory.join(marker));
@@ -172,42 +172,44 @@ impl JPath {
 		})
 	}
 
-	/// Find the nearest parent directory containing the specified file.
-	fn find_nearest_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
+	/// Find the outermost parent directory containing the specified file.
+	fn find_outermost_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
 		let mut current = path;
+		let mut outermost = None;
 		loop {
 			current.push(file);
 			if current.exists() {
 				current.pop();
-				return Some(current);
+				outermost = Some(current.clone());
+			} else {
+				current.pop();
 			}
-			// Pop the file we just pushed, then ascend to the parent.
-			current.pop();
 			if !current.pop() {
-				return None;
+				return outermost;
 			}
 		}
 	}
 
-	/// Find the nearest parent directory containing the specified file, bounded
+	/// Find the outermost parent directory containing the specified file, bounded
 	/// by a root directory.
-	fn find_nearest_directory_with_file_bounded(
+	fn find_outermost_directory_with_file_bounded(
 		path: PathBuf,
 		root: &Path,
 		file: &Path,
 	) -> Option<PathBuf> {
 		let mut current = path;
+		let mut outermost = None;
 		loop {
 			current.push(file);
 			if current.exists() {
 				current.pop();
-				return Some(current);
+				outermost = Some(current.clone());
+			} else {
+				current.pop();
 			}
-			// Pop the file we just pushed, then ascend to the parent -
-			// unless the root (checked above, inclusively) stopped the walk.
-			current.pop();
+			// Ascend unless the root (checked above, inclusively) stopped the walk.
 			if current == root || !current.pop() {
-				return None;
+				return outermost;
 			}
 		}
 	}
@@ -276,6 +278,24 @@ mod tests {
 
 		let jpath = JPath::resolve(root.to_str().unwrap()).unwrap();
 		assert_eq!(jpath.root_directory, root);
+	}
+
+	#[test]
+	fn test_resolve_uses_the_outermost_nested_project() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		let nested = root.join("environments/demo");
+
+		fs::create_dir_all(&nested).unwrap();
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(root.join("main.jsonnet"), "{}").unwrap();
+		fs::write(nested.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(nested.join("main.jsonnet"), "{}").unwrap();
+
+		let jpath = JPath::resolve(&nested).unwrap();
+		assert_eq!(jpath.root_directory, root);
+		assert_eq!(jpath.base_directory, root);
+		assert_eq!(jpath.entrypoint, root.join("main.jsonnet"));
 	}
 
 	#[test]

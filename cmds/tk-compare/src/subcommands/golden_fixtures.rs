@@ -90,6 +90,14 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			&basename,
 		)
 		.with_context(|| format!("failed to load fixture args for {}", fixture_dir.display()))?;
+		let export_paths = config::load_fixture_specific_command_args(
+			&fixtures_root,
+			&fixture_dir,
+			"export-paths",
+			&testcase,
+			&basename,
+		)
+		.with_context(|| format!("failed to load fixture paths for {}", fixture_dir.display()))?;
 		export_args.extend(["--parallel".to_string(), "1".to_string()]);
 
 		let staged = prepare_fixture_for_export(&fixture_dir, jrsonnet_path.as_deref())
@@ -102,6 +110,7 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			&tk_exec_path,
 			staged.working_dir(),
 			&generated_dir,
+			&export_paths,
 			&export_args,
 		);
 
@@ -218,13 +227,18 @@ fn run_tk_export(
 	tk_exec: &Path,
 	working_dir: &Path,
 	destination: &Path,
+	export_paths: &[String],
 	export_args: &[String],
 ) -> Result<()> {
 	let mut argv = vec![
 		"export".to_string(),
 		destination.to_string_lossy().to_string(),
-		".".to_string(),
 	];
+	if export_paths.is_empty() {
+		argv.push(".".to_string());
+	} else {
+		argv.extend(export_paths.iter().cloned());
+	}
 	argv.extend(export_args.iter().cloned());
 
 	let mut cmd = ProcessCommand::new(tk_exec);
