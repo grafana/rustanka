@@ -23,11 +23,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use kube_core::{Selector, SelectorExt};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rtk_jsonnet::EvaluationValue;
 use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::Environment;
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, trace};
 
@@ -398,47 +397,49 @@ impl Export {
 	}
 
 	/// Work out what an environment exports, without serializing any of it yet.
-	fn plan<'e>(&self, environment: &'e LoadedEnvironment) -> Result<Plan<'e>, Error> {
+	fn plan(&self, environment: &LoadedEnvironment) -> Result<Plan, Error> {
 		let Some(data) = environment.data.get() else {
 			return Ok(Plan::default());
 		};
 
 		let mut manifests = Vec::new();
-		let mut buffer = String::new();
-		process::collect_manifests(data, "", &mut buffer, &mut manifests)?;
+		process::collect_manifests(data, "", &mut manifests)?;
 
 		if !self.targets.is_empty() {
-			manifests.retain(|manifest| process::keep_target(manifest, &self.targets));
+			let mut filtered = Vec::with_capacity(manifests.len());
+			for manifest in manifests {
+				if process::keep_target(&manifest, &self.targets)? {
+					filtered.push(manifest);
+				}
+			}
+			manifests = filtered;
 		}
 
 		Ok(Plan {
-			parts: Some((
-				self.template.specialize(environment)?,
-				process::Processor::new(environment),
-			)),
+			template: Some(self.template.specialize(environment)?),
 			manifests,
 		})
 	}
 
 	/// Render and serialize one chunk of a [`Plan`].
 	///
-	/// The work is spread over the pool, so an environment with thousands of
-	/// manifests is not serialized one at a time while the writes wait.
-	fn serialize_chunk(&self, chunk: &[Value], plan: &Plan<'_>) -> Result<Vec<File>, Error> {
-		let (template, processor) = plan
-			.parts
+	/// Environments are spread over the pool; values within one environment stay
+	/// sequential because their evaluation is thread-local.
+	fn serialize_chunk(&self, chunk: &[EvaluationValue], plan: &Plan) -> Result<Vec<File>, Error> {
+		let template = plan
+			.template
 			.as_ref()
 			.expect("a plan with manifests has a template");
 
 		chunk
-			.par_iter()
+			.iter()
 			.map(|manifest| {
-				let mut manifest = manifest.clone();
-				processor.process(&mut manifest);
-
-				let rendered = template.render(&manifest)?;
-				let path =
-					template::to_relative_path(&rendered, &self.options.extension, &manifest)?;
+				let rendered = template.render_evaluated(manifest)?;
+				let path = template::to_relative_path_evaluated(
+					&rendered,
+					&self.options.extension,
+					manifest,
+				)?;
 
 				Ok(File {
 					path,
@@ -451,22 +452,21 @@ impl Export {
 
 /// The manifests an environment exports, before they are serialized.
 ///
-/// Holds nothing from the evaluation the manifests came out of, so the threads
-/// serializing them do not have to reach back into it.
+/// Holds handles into the evaluation, so it must be serialized on the thread
+/// that produced it.
 #[derive(Default)]
-struct Plan<'e> {
-	manifests: Vec<Value>,
-	/// How to name and process each manifest. Absent only when there is nothing
-	/// to export.
-	parts: Option<(SpecializedTemplate, process::Processor<'e>)>,
+struct Plan {
+	manifests: Vec<EvaluationValue>,
+	/// How to name each manifest. Absent only when there is nothing to export.
+	template: Option<SpecializedTemplate>,
 }
 
-impl Plan<'_> {
+impl Plan {
 	fn manifests(&self) -> usize {
 		self.manifests.len()
 	}
 
-	fn chunks(&self) -> impl Iterator<Item = &[Value]> {
+	fn chunks(&self) -> impl Iterator<Item = &[EvaluationValue]> {
 		self.manifests.chunks(CHUNK_SIZE)
 	}
 }
@@ -506,27 +506,56 @@ impl Engine {
 		let mut serializing = planned.elapsed();
 		let mut writing = Duration::ZERO;
 
-		let written = writer::drive(|| async {
-			let mut writer = Writer::new(options.output_dir.clone(), options.write_concurrency);
-			let mut written = Vec::new();
+		let output_dir = options.output_dir.clone();
+		let write_concurrency = options.write_concurrency;
+		let written = std::thread::scope(|scope| {
+			let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+			let writer = scope.spawn(move || {
+				writer::drive(move || async move {
+					let mut writer = Writer::new(output_dir, write_concurrency);
+					let mut written = Vec::new();
+					let mut writing = Duration::ZERO;
 
-			// Serializing a chunk blocks this thread, but the writes already
-			// queued keep going: Tokio runs them on its blocking pool.
+					while let Ok(files) = receiver.recv() {
+						let queued = Instant::now();
+						writer.write(0, files, &mut written).await?;
+						writing += queued.elapsed();
+					}
+
+					let drained = Instant::now();
+					writer.drain(&mut written).await?;
+					writing += drained.elapsed();
+					Ok::<_, Error>((written, writing))
+				})
+			});
+
+			let mut serialization_error = None;
 			for chunk in plan.chunks() {
 				let serialized = Instant::now();
-				let files = export.serialize_chunk(chunk, &plan)?;
-				serializing += serialized.elapsed();
-
-				let queued = Instant::now();
-				writer.write(0, files, &mut written).await?;
-				writing += queued.elapsed();
+				match export.serialize_chunk(chunk, &plan) {
+					Ok(files) => {
+						serializing += serialized.elapsed();
+						if sender.send(files).is_err() {
+							serialization_error = Some(Error::WorkerLost);
+							break;
+						}
+					}
+					Err(error) => {
+						serializing += serialized.elapsed();
+						serialization_error = Some(error);
+						break;
+					}
+				}
 			}
+			drop(sender);
 
-			let drained = Instant::now();
-			writer.drain(&mut written).await?;
-			writing += drained.elapsed();
-
-			Ok::<_, Error>(written)
+			let writer_result = writer.join().map_err(|_| Error::WorkerLost)?;
+			let (written, writer_duration) = writer_result?;
+			if let Some(error) = serialization_error {
+				return Err(error);
+			}
+			writing = writer_duration;
+			Ok(written)
 		})?;
 
 		collect_written(&mut report, written);

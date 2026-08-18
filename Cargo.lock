@@ -2408,6 +2408,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashlink"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32069d97bb81e38fa67eab65e3393bf804bb85969f2bc06bf13f64aef5aba248"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "heapless"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3943,6 +3952,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered-float"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4777,6 +4795,7 @@ dependencies = [
  "rtk-jsonnet-core",
  "rtk-spec",
  "rustc-hash 2.1.1",
+ "saphyr",
  "serde",
  "serde-saphyr 0.0.11",
  "serde_json",
@@ -5026,9 +5045,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "saphyr"
+version = "0.0.11"
+source = "git+https://github.com/grafana/saphyr?branch=jj%2Flive-key-ordering#0d26c036f086f61207282671c802643037cd5f0e"
+dependencies = [
+ "encoding_rs",
+ "hashlink",
+ "ordered-float 5.3.0",
+ "saphyr-parser 0.0.11",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "saphyr-parser"
 version = "0.0.6"
 source = "git+https://github.com/grafana/saphyr?branch=master#bd64ba34832792080dc7ad5f70df16e13be77a2f"
+dependencies = [
+ "arraydeque",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "saphyr-parser"
+version = "0.0.11"
+source = "git+https://github.com/grafana/saphyr?branch=jj%2Flive-key-ordering#0d26c036f086f61207282671c802643037cd5f0e"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.18",
@@ -5130,7 +5170,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=jj%2Ffix%2Fgo-scientific-notation#e0ad100fd50420a8e19351088dc32c5814fdeba9"
+source = "git+https://github.com/grafana/serde-saphyr?branch=jj%2Ffix%2Fgo-scientific-notation#5824dc9c09cfc847335631da74bbd1cfdde90032"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -5138,7 +5178,7 @@ dependencies = [
  "nohash-hasher",
  "num-traits",
  "ryu",
- "saphyr-parser",
+ "saphyr-parser 0.0.6",
  "serde",
  "serde_json",
  "smallvec 2.0.0-alpha.12",
@@ -5169,7 +5209,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
- "ordered-float",
+ "ordered-float 2.10.1",
  "serde",
 ]
 

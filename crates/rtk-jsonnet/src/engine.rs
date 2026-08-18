@@ -628,6 +628,22 @@ pub enum EvaluationObject {
 }
 
 impl EvaluationObject {
+	/// Visible field names without forcing their values.
+	pub fn field_names(&self) -> Vec<Box<str>> {
+		match self {
+			EvaluationObject::Jrsonnet { object, .. } => object.field_names(),
+		}
+	}
+
+	/// Evaluate this object's assertions without forcing its fields.
+	pub fn run_assertions(&self) -> Result<(), Error> {
+		match self {
+			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
+				.with_context(|_| object.run_assertions())
+				.map_err(Error::from),
+		}
+	}
+
 	/// Whether the object has a field by this name.
 	///
 	/// Does not force the field.
@@ -1080,6 +1096,28 @@ mod tests {
 		assert_eq!(
 			object_value,
 			"2958d416d08aa5a472d7b509036cb7eafd542add84527e66a145ea64cb4cdc75"
+		);
+	}
+
+	#[test]
+	fn lists_object_field_names_without_forcing_values() {
+		let value = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet(r#"{ broken: error "forced", item10: 10, item2: 2 }"#)
+			.unwrap()
+			.into_value();
+		let object = value.as_object().expect("an object");
+
+		assert_eq!(
+			object.field_names(),
+			["broken", "item10", "item2"].map(Box::<str>::from)
+		);
+		assert_eq!(
+			object
+				.get_or_bail("item2", Hidden::Skip)
+				.unwrap()
+				.as_number(),
+			Some(2.0)
 		);
 	}
 

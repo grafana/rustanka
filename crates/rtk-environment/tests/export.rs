@@ -206,6 +206,8 @@ fn expands_lists() {
 			list: {
 				apiVersion: 'v1',
 				kind: 'List',
+				'$rtk.dev/originalManifest':: 'user value',
+				'$rtk.dev/processedManifest':: 'user value',
 				items: [
 					{ apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'first' } },
 					{ apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'second' } },
@@ -264,7 +266,10 @@ fn exports_inline_environments_recursively() {
 				apiVersion: 'tanka.dev/v1alpha1',
 				kind: 'Environment',
 				metadata: { name: 'dev' },
-				spec: { namespace: 'dev' },
+				spec:
+					if std.objectHas(self.data.config, 'metadata')
+					then { namespace: 'dev' }
+					else { namespace: 'wrong' },
 				data: {
 					config: {
 						apiVersion: 'v1',
@@ -408,6 +413,134 @@ fn filters_resources_by_target() {
 	let files = project.exported();
 	assert!(files.contains_key("v1.ConfigMap-settings.yaml"));
 	assert!(!files.contains_key("v1.Secret-settings.yaml"));
+}
+
+#[test]
+fn target_filtering_does_not_hide_evaluation_failures() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		r"{
+			config: { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'settings' } },
+			secret: {
+				apiVersion: 'v1',
+				kind: 'Secret',
+				metadata: { name: 'broken' },
+				data: error 'forced before target filtering',
+			},
+		}",
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&Options {
+				targets: vec!["configmap/.*".to_owned()],
+				..options(&project)
+			},
+		)
+		.expect("the bulk export reports per-environment failures");
+
+	assert_eq!(exported.failed(), 1);
+	assert!(
+		exported.reports[0]
+			.error
+			.as_ref()
+			.expect("the evaluation error")
+			.to_string()
+			.contains("forced before target filtering")
+	);
+}
+
+#[test]
+fn nested_object_assertions_are_forced_before_export() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		r"{
+			config: {
+				apiVersion: 'v1',
+				kind: 'ConfigMap',
+				metadata: { name: 'broken' },
+				data: { assert false: 'nested assertion forced' },
+			},
+		}",
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&options(&project),
+		)
+		.expect("the bulk export reports per-environment failures");
+	let error = exported.reports[0]
+		.error
+		.as_ref()
+		.expect("the assertion error")
+		.to_string();
+	assert!(error.contains("nested assertion forced"), "{error}");
+}
+
+#[test]
+fn reserved_processing_key_in_a_container_is_ordinary_user_data() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		&format!(r#"{{ "$rtk.dev/processedManifest": "user value", config: {CONFIG_MAP} }}"#),
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&options(&project),
+		)
+		.expect("the export succeeds");
+
+	assert_eq!(exported.successful(), 1);
+	assert!(
+		project
+			.exported()
+			.contains_key("v1.ConfigMap-settings.yaml")
+	);
+}
+
+#[test]
+fn evaluation_failure_precedes_invalid_manifest_diagnostics() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		r"{
+			broken: {
+				apiVersion: 'v1',
+				kind: 'ConfigMap',
+				data: error 'forced before manifest validation',
+			},
+		}",
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&options(&project),
+		)
+		.expect("the bulk export reports per-environment failures");
+	let error = exported.reports[0]
+		.error
+		.as_ref()
+		.expect("the evaluation error")
+		.to_string();
+	assert!(
+		error.contains("forced before manifest validation"),
+		"{error}"
+	);
 }
 
 #[test]

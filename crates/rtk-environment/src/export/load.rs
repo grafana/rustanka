@@ -10,7 +10,7 @@ use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 
 use crate::discover::entrypoint_snippet;
-use crate::export::{Error, LoadedEnvironment, OptionalData};
+use crate::export::{Error, LoadedEnvironment, OptionalData, process};
 use crate::{Discovered, Engine};
 
 /// External variable Tanka exposes an environment's own spec through.
@@ -47,7 +47,7 @@ local singleEnv(object) =
     )
   else {};
 
-singleEnv(main)
+local selected = singleEnv(main);
 ";
 
 impl Engine {
@@ -113,20 +113,29 @@ impl Engine {
 			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
 		}
 
-		let evaluation = match discovered.selected_by() {
+		let processing = process::processing_script(&discovered.environment);
+		let (selection, root) = match discovered.selected_by() {
 			// Selecting one of several inline environments has to happen inside
 			// Jsonnet, before anything is manifested.
-			Some(name) => {
-				let entrypoint = jpath
-					.entrypoint
-					.strip_prefix(&jpath.base_directory)
-					.unwrap_or(&jpath.entrypoint)
-					.to_string_lossy();
-				let script = SINGLE_ENVIRONMENT_EVAL_SCRIPT.replace("%s", name);
-				evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?
-			}
-			None => evaluator.evaluate_file(&jpath.entrypoint)?,
+			Some(name) => (
+				SINGLE_ENVIRONMENT_EVAL_SCRIPT.replace("%s", name),
+				"selected",
+			),
+			None => (String::new(), "main"),
 		};
+		let entrypoint = jpath
+			.entrypoint
+			.strip_prefix(&jpath.base_directory)
+			.unwrap_or(&jpath.entrypoint)
+			.to_string_lossy();
+		let result = if discovered.is_static {
+			format!("processValue({root})")
+		} else {
+			format!("processEnvironments({root})")
+		};
+		let script = format!("{selection}\n{processing}\n{result}");
+		let evaluation =
+			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?;
 
 		Ok(evaluation.into_value())
 	}

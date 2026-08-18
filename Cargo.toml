@@ -59,6 +59,7 @@ serde_json = { version = "1.0.149", features = ["preserve_order"] }
 # https://github.com/dtolnay/serde-yaml/pull/225
 serde_yaml_with_quirks = "0.8.24"
 serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "jj/fix/go-scientific-notation" }
+saphyr = { git = "https://github.com/grafana/saphyr", branch = "jj/live-key-ordering" }
 
 # Error handling
 anyhow = "1.0.101"

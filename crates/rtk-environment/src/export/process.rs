@@ -4,32 +4,208 @@
 //! environment's `data`, filtered by `--target`, then have namespaces, labels
 //! and resource defaults injected before being serialized.
 
-use std::cmp::Ordering;
-
 use anyhow::Context as _;
 use rtk_jsonnet::{EvaluationArray, EvaluationValue, Hidden};
-use rtk_spec::canonical::{Environment, EnvironmentSpec};
+use rtk_spec::canonical::Environment;
 use rtk_spec::v1alpha1::EnvironmentData;
-use serde_json::{Map, Value};
+use serde::ser::{Error as _, SerializeMap as _, SerializeSeq as _};
+use serde::{Serialize, Serializer};
 
 use crate::export::Error;
 
 /// Label Tanka tags exported resources with, when `spec.injectLabels` is set.
 const ENVIRONMENT_LABEL: &str = "tanka.dev/environment";
 
+/// Hidden field attached to processed manifests so validation can inspect the
+/// value before namespace, label, and resource-default injection.
+pub(crate) const ORIGINAL_MANIFEST_FIELD: &str = "$rtk.dev/originalManifest";
+const PROCESSED_MANIFEST_FIELD: &str = "$rtk.dev/processedManifest";
+
+const CLUSTER_WIDE_KINDS: &[&str] = &[
+	"APIService",
+	"CertificateSigningRequest",
+	"ClusterRole",
+	"ClusterRoleBinding",
+	"ComponentStatus",
+	"CSIDriver",
+	"CSINode",
+	"CustomResourceDefinition",
+	"MutatingWebhookConfiguration",
+	"Namespace",
+	"Node",
+	"NodeMetrics",
+	"PersistentVolume",
+	"PodSecurityPolicy",
+	"PriorityClass",
+	"RuntimeClass",
+	"SelfSubjectAccessReview",
+	"SelfSubjectRulesReview",
+	"StorageClass",
+	"SubjectAccessReview",
+	"TokenReview",
+	"ValidatingWebhookConfiguration",
+	"VolumeAttachment",
+];
+
+/// Jsonnet helpers that apply Tanka's manifest processing without manifesting
+/// values through JSON first.
+pub(crate) fn processing_script<'a, D>(environment: &Environment<'a, D>) -> String
+where
+	D: EnvironmentData<'a>,
+{
+	let defaults = environment.spec.resource_defaults.as_ref();
+	let annotations = defaults
+		.map(|defaults| defaults.annotations.clone())
+		.unwrap_or_default();
+	let labels = defaults
+		.map(|defaults| defaults.labels.clone())
+		.unwrap_or_default();
+	let config = serde_json::json!({
+		"clusterWideKinds": CLUSTER_WIDE_KINDS,
+		"defaults": {
+			"annotations": annotations,
+			"labels": labels,
+		},
+		"environmentLabel": environment
+			.spec
+			.inject_labels
+			.then(|| environment_label(&environment.metadata)),
+		"namespace": environment.spec.namespace(),
+	});
+
+	format!(
+		r#"
+local rtkConfig = {config};
+local rtkOriginalManifest = '{ORIGINAL_MANIFEST_FIELD}';
+local rtkProcessedManifest = '{PROCESSED_MANIFEST_FIELD}';
+
+local mergedStringMap(metadata, field, defaults, overrides) =
+  local current = if std.objectHas(metadata, field) then metadata[field] else null;
+  if current != null && !std.isObject(current)
+  then current
+  else
+    local materializedCurrent =
+      if current == null
+      then {{}}
+      else {{ [key]: current[key] for key in std.objectFields(current) }};
+    defaults + materializedCurrent + overrides;
+
+local processMetadata(metadata, manifest) =
+  if metadata != null && !std.isObject(metadata)
+  then metadata
+  else
+    local normalizedMetadata =
+      if metadata == null
+      then {{}}
+      else {{ [field]: metadata[field] for field in std.objectFields(metadata) }};
+    local annotations = mergedStringMap(normalizedMetadata, 'annotations', rtkConfig.defaults.annotations, {{}});
+    local environmentLabels =
+      if rtkConfig.environmentLabel == null
+      then {{}}
+      else {{ '{ENVIRONMENT_LABEL}': rtkConfig.environmentLabel }};
+    local labels = mergedStringMap(normalizedMetadata, 'labels', rtkConfig.defaults.labels, environmentLabels);
+    local namespaceAnnotations =
+      if std.objectHas(normalizedMetadata, 'annotations')
+         && std.isObject(normalizedMetadata.annotations)
+      then normalizedMetadata.annotations
+      else {{}};
+    local namespacedOverride =
+      if std.objectHas(namespaceAnnotations, 'tanka.dev/namespaced')
+         && std.isString(namespaceAnnotations['tanka.dev/namespaced'])
+      then namespaceAnnotations['tanka.dev/namespaced'] == 'true'
+      else null;
+    local kind = if std.isString(manifest.kind) then manifest.kind else '';
+    local namespaced =
+      if namespacedOverride != null
+      then namespacedOverride
+      else !std.member(rtkConfig.clusterWideKinds, kind);
+    local hasNamespace =
+      std.objectHas(normalizedMetadata, 'namespace')
+      && std.isString(normalizedMetadata.namespace)
+      && normalizedMetadata.namespace != '';
+    local withValues = normalizedMetadata
+      + {{ annotations: annotations, labels: labels }}
+      + if namespaced && rtkConfig.namespace != '' && !hasNamespace
+        then {{ namespace: rtkConfig.namespace }}
+        else {{}};
+    {{
+      [field]: withValues[field]
+      for field in std.objectFields(withValues)
+      if !(
+        (field == 'annotations' || field == 'labels')
+        && (
+          withValues[field] == null
+          || (std.isObject(withValues[field]) && std.length(withValues[field]) == 0)
+        )
+      )
+    }};
+
+local processManifest(manifest) =
+  local materializedManifest = {{
+    [field]: manifest[field]
+    for field in std.objectFields(manifest)
+  }};
+  {{
+    [rtkOriginalManifest]:: manifest,
+    [rtkProcessedManifest]:: materializedManifest {{
+      metadata: processMetadata(
+        if std.objectHas(manifest, 'metadata') then manifest.metadata else null,
+        manifest
+      ),
+    }},
+  }};
+
+local processValue(value) =
+  if std.isObject(value)
+  then
+    if std.objectHas(value, 'apiVersion') && std.objectHas(value, 'kind')
+    then
+      if std.isString(value.kind) && value.kind == 'List'
+      then
+        if std.objectHas(value, 'items') && std.isArray(value.items)
+        then value {{ items: std.map(processValue, value.items) }}
+        else value
+      else processManifest(value)
+    else std.mapWithKey(function(field, child) processValue(child), value)
+  else if std.isArray(value)
+  then std.map(processValue, value)
+  else value;
+
+local processEnvironments(value) =
+  if std.isObject(value)
+  then
+    if std.objectHas(value, 'apiVersion')
+       && std.objectHas(value, 'kind')
+       && std.isString(value.kind)
+       && value.kind == 'Environment'
+    then
+      if std.objectHas(value, 'data')
+      then
+        local materializedEnvironment = {{
+          [field]: value[field]
+          for field in std.objectFields(value)
+        }};
+        materializedEnvironment {{ data: processValue(value.data) }}
+      else value
+    else std.mapWithKey(function(field, child) processEnvironments(child), value)
+  else if std.isArray(value)
+  then std.map(processEnvironments, value)
+  else value;
+"#
+	)
+}
+
 /// Collect the Kubernetes manifests below `data`.
 ///
-/// Walks the evaluated value lazily, forcing only what it has to, and manifests
-/// each Kubernetes object it finds through the Jsonnet implementation (rather
-/// than through serde) so that numbers are formatted exactly as tk formats
-/// them. `List` objects are expanded into their items, as Tanka does.
+/// Walks containers lazily, then forces each Kubernetes object before target
+/// filtering to preserve Tanka's evaluation behavior. `List` objects are
+/// expanded into their items, as Tanka does.
 ///
 /// `path` is the JSON path walked so far, used for error messages.
 pub(crate) fn collect_manifests(
 	value: &EvaluationValue,
 	path: &str,
-	buffer: &mut String,
-	manifests: &mut Vec<Value>,
+	manifests: &mut Vec<EvaluationValue>,
 ) -> Result<(), Error> {
 	let Some(object) = value.as_object() else {
 		// Arrays are walked element by element; anything else cannot hold a
@@ -39,10 +215,23 @@ pub(crate) fn collect_manifests(
 		};
 		for (index, element) in array.into_values().enumerate() {
 			let element = element.map_err(Error::from)?;
-			collect_manifests(&element, &format!("{path}[{index}]"), buffer, manifests)?;
+			collect_manifests(&element, &format!("{path}[{index}]"), manifests)?;
 		}
 		return Ok(());
 	};
+	let processed = object.get(PROCESSED_MANIFEST_FIELD, Hidden::Include)?;
+	let original = object.get(ORIGINAL_MANIFEST_FIELD, Hidden::Include)?;
+	if !object.has(PROCESSED_MANIFEST_FIELD, Hidden::Skip)?
+		&& !object.has(ORIGINAL_MANIFEST_FIELD, Hidden::Skip)?
+		&& object.field_names().is_empty()
+		&& let (Some(processed), Some(original)) = (processed, original)
+	{
+		force_manifest(&original)?;
+		validate_manifest(&original, path)?;
+		force_manifest(&processed)?;
+		manifests.push(processed);
+		return Ok(());
+	}
 
 	// Presence is asked about rather than read, so that an object which is just a
 	// container does not have fields forced out of it. Hidden fields are skipped
@@ -69,15 +258,13 @@ pub(crate) fn collect_manifests(
 					.enumerate()
 				{
 					let item = item.map_err(Error::from)?;
-					collect_manifests(&item, &format!("{path}.items[{index}]"), buffer, manifests)?;
+					collect_manifests(&item, &format!("{path}.items[{index}]"), manifests)?;
 				}
 			}
 			_ => {
-				buffer.clear();
-				value.manifest_into(buffer)?;
-				let manifest = serde_json::from_str(buffer)?;
-				validate_manifest(&manifest, path)?;
-				manifests.push(manifest);
+				force_manifest(value)?;
+				validate_manifest(value, path)?;
+				manifests.push(value.clone());
 			}
 		}
 
@@ -92,22 +279,62 @@ pub(crate) fn collect_manifests(
 
 	for (field, value) in object.into_fields() {
 		let value = value.map_err(Error::from)?;
-		collect_manifests(&value, &format!("{path}.{field}"), buffer, manifests)?;
+		collect_manifests(&value, &format!("{path}.{field}"), manifests)?;
 	}
 
 	Ok(())
 }
 
-fn validate_manifest(manifest: &Value, path: &str) -> Result<(), Error> {
-	let metadata = manifest.get("metadata").and_then(Value::as_object);
+fn force_manifest(value: &EvaluationValue) -> Result<(), Error> {
+	if let Some(array) = value.as_array() {
+		for value in array.into_values() {
+			force_manifest(&value?)?;
+		}
+		return Ok(());
+	}
+	if let Some(object) = value.as_object() {
+		object.run_assertions()?;
+		for field in object.field_names() {
+			force_manifest(&object.get_or_bail(&field, Hidden::Skip)?)?;
+		}
+		return Ok(());
+	}
+	if value.is_null()
+		|| value.as_bool().is_some()
+		|| value.as_number().is_some()
+		|| value.as_str().is_some()
+	{
+		return Ok(());
+	}
+
+	// Produce the evaluator's normal function diagnostic.
+	value.manifest()?;
+	unreachable!("every Jsonnet value kind handled")
+}
+
+fn validate_manifest(manifest: &EvaluationValue, path: &str) -> Result<(), Error> {
+	let metadata = match manifest.as_object() {
+		Some(manifest) => manifest
+			.get("metadata", Hidden::Skip)?
+			.and_then(|metadata| metadata.as_object()),
+		None => None,
+	};
 	let mut problems = Vec::new();
 	if metadata.is_none() {
 		problems.push("metadata: missing or not an object");
 	}
-	if !metadata.is_some_and(|metadata| {
-		metadata.get("name").is_some_and(Value::is_string)
-			|| metadata.get("generateName").is_some_and(Value::is_string)
-	}) {
+	let has_name = match metadata {
+		Some(metadata) => {
+			metadata
+				.get("name", Hidden::Skip)?
+				.is_some_and(|name| name.as_str().is_some())
+				|| metadata
+					.get("generateName", Hidden::Skip)?
+					.is_some_and(|name| name.as_str().is_some())
+		}
+		None => false,
+	};
+	if !has_name {
 		problems.push("metadata.name: missing or not of string type");
 	}
 
@@ -169,12 +396,15 @@ impl TargetMatcher {
 /// no negative matcher does. A negative matcher always satisfies the "matches at
 /// least one" gate (Tanka's `NegMatcher.MatchString` is unconditionally true), so
 /// a query of only `!…` patterns keeps everything but the exclusions.
-pub(crate) fn keep_target(manifest: &Value, matchers: &[TargetMatcher]) -> bool {
+pub(crate) fn keep_target(
+	manifest: &EvaluationValue,
+	matchers: &[TargetMatcher],
+) -> Result<bool, Error> {
 	if matchers.is_empty() {
-		return true;
+		return Ok(true);
 	}
 
-	let kind_name = kind_name(manifest);
+	let kind_name = kind_name(manifest)?;
 	let matched = matchers
 		.iter()
 		.any(|matcher| matcher.negate || matcher.regex.is_match(&kind_name));
@@ -182,154 +412,52 @@ pub(crate) fn keep_target(manifest: &Value, matchers: &[TargetMatcher]) -> bool 
 		.iter()
 		.any(|matcher| matcher.negate && matcher.regex.is_match(&kind_name));
 
-	matched && !excluded
+	Ok(matched && !excluded)
 }
 
 /// Identify a manifest in a diagnostic, without dumping the whole thing.
-pub(crate) fn describe(manifest: &Value) -> String {
-	let kind_name = kind_name(manifest);
+pub(crate) fn describe(manifest: &EvaluationValue) -> Result<String, Error> {
+	let kind_name = kind_name(manifest)?;
 	if kind_name == "/" {
 		// Nothing identifying at all: a truncated dump beats saying nothing.
-		let mut dumped = manifest.to_string();
+		let mut dumped = manifest.manifest()?;
 		dumped.truncate(200);
-		return dumped;
+		return Ok(dumped);
 	}
 
-	match manifest.get("apiVersion").and_then(Value::as_str) {
+	let api_version = match manifest.as_object() {
+		Some(manifest) => manifest
+			.get("apiVersion", Hidden::Skip)?
+			.and_then(|api_version| api_version.as_str()),
+		None => None,
+	};
+	Ok(match api_version {
 		Some(api_version) => format!("{api_version} {kind_name}"),
 		None => kind_name,
-	}
+	})
 }
 
 /// `kind/name` for matcher input. Missing fields become empty strings, matching
 /// Tanka's behavior on unidentified manifests.
-fn kind_name(manifest: &Value) -> String {
-	let kind = manifest.get("kind").and_then(Value::as_str).unwrap_or("");
-	let name = manifest
-		.pointer("/metadata/name")
-		.and_then(Value::as_str)
-		.unwrap_or("");
-	format!("{kind}/{name}")
-}
-
-/// Applies everything Tanka applies to an environment's manifests on their way
-/// out.
-///
-/// Built once per environment: it borrows the spec and computes the environment
-/// label up front, rather than hashing it again for every manifest. Holds nothing
-/// from the evaluation, so it can be shared with the threads doing the
-/// serializing.
-#[derive(Debug)]
-pub(crate) struct Processor<'e> {
-	spec: &'e EnvironmentSpec,
-	/// The `tanka.dev/environment` label, when `spec.injectLabels` asks for one.
-	label: Option<String>,
-}
-
-impl<'e> Processor<'e> {
-	pub(crate) fn new<'a, D>(environment: &'e Environment<'a, D>) -> Processor<'e>
-	where
-		D: EnvironmentData<'a>,
-	{
-		Processor {
-			spec: &environment.spec,
-			label: environment
-				.spec
-				.inject_labels
-				.then(|| environment_label(&environment.metadata)),
-		}
-	}
-
-	/// Apply everything Tanka applies to a manifest on its way out.
-	pub(crate) fn process(&self, manifest: &mut Value) {
-		inject_namespace(manifest, self.spec);
-		if let Some(label) = self.label.as_deref() {
-			inject_environment_label(manifest, label);
-		}
-		inject_resource_defaults(manifest, self.spec);
-		strip_empty_metadata(manifest);
-	}
-}
-
-/// Kinds that are not namespaced, from Tanka's `pkg/process/namespace.go`.
-pub(crate) fn is_cluster_wide(kind: &str) -> bool {
-	matches!(
-		kind,
-		"APIService"
-			| "CertificateSigningRequest"
-			| "ClusterRole"
-			| "ClusterRoleBinding"
-			| "ComponentStatus"
-			| "CSIDriver"
-			| "CSINode"
-			| "CustomResourceDefinition"
-			| "MutatingWebhookConfiguration"
-			| "Namespace"
-			| "Node" | "NodeMetrics"
-			| "PersistentVolume"
-			| "PodSecurityPolicy"
-			| "PriorityClass"
-			| "RuntimeClass"
-			| "SelfSubjectAccessReview"
-			| "SelfSubjectRulesReview"
-			| "StorageClass"
-			| "SubjectAccessReview"
-			| "TokenReview"
-			| "ValidatingWebhookConfiguration"
-			| "VolumeAttachment"
-	)
-}
-
-/// Whether a manifest should be given the environment's namespace, honoring the
-/// `tanka.dev/namespaced` annotation override.
-pub(crate) fn is_namespaced(manifest: &Value) -> bool {
-	let kind = manifest.get("kind").and_then(Value::as_str).unwrap_or("");
-
-	// `tanka.dev/namespaced`, escaped as a JSON pointer token.
-	manifest
-		.pointer("/metadata/annotations/tanka.dev~1namespaced")
-		.and_then(Value::as_str)
-		.map_or_else(|| !is_cluster_wide(kind), |namespaced| namespaced == "true")
-}
-
-/// Set `metadata.namespace` from the environment on namespaced resources that do
-/// not have one. Mirrors Tanka's `pkg/process/namespace.go`.
-fn inject_namespace(manifest: &mut Value, spec: &EnvironmentSpec) {
-	if !is_namespaced(manifest) {
-		return;
-	}
-
-	let namespace = spec.namespace();
-	if namespace.is_empty() {
-		return;
-	}
-
-	let Some(metadata) = metadata_mut(manifest) else {
-		return;
+fn kind_name(manifest: &EvaluationValue) -> Result<String, Error> {
+	let Some(manifest) = manifest.as_object() else {
+		return Ok("/".into());
 	};
-
-	let has_namespace = metadata
-		.get("namespace")
-		.and_then(Value::as_str)
-		.is_some_and(|namespace| !namespace.is_empty());
-	if !has_namespace {
-		metadata.insert("namespace".to_owned(), Value::String(namespace.to_owned()));
-	}
-}
-
-/// Tag the manifest with `tanka.dev/environment`, mirroring Tanka's
-/// `pkg/process/process.go`.
-fn inject_environment_label(manifest: &mut Value, label: &str) {
-	let Some(metadata) = metadata_mut(manifest) else {
-		return;
+	let kind = manifest
+		.get("kind", Hidden::Skip)?
+		.and_then(|kind| kind.as_str())
+		.map_or_else(String::new, |kind| kind.to_string());
+	let name = match manifest.get("metadata", Hidden::Skip)? {
+		Some(metadata) => match metadata.as_object() {
+			Some(metadata) => metadata
+				.get("name", Hidden::Skip)?
+				.and_then(|name| name.as_str())
+				.map_or_else(String::new, |name| name.to_string()),
+			None => String::new(),
+		},
+		None => String::new(),
 	};
-	let Some(labels) = entry_object_mut(metadata, "labels") else {
-		return;
-	};
-	labels.insert(
-		ENVIRONMENT_LABEL.to_owned(),
-		Value::String(label.to_owned()),
-	);
+	Ok(format!("{kind}/{name}"))
 }
 
 /// The `tanka.dev/environment` label value: Tanka's `NameLabel()`, the first 48
@@ -358,171 +486,72 @@ fn environment_label(
 	label
 }
 
-/// Apply `spec.resourceDefaults`, without overwriting anything the manifest
-/// already sets.
-fn inject_resource_defaults(manifest: &mut Value, spec: &EnvironmentSpec) {
-	let Some(defaults) = spec.resource_defaults.as_ref() else {
-		return;
-	};
-	if defaults.annotations.is_empty() && defaults.labels.is_empty() {
-		return;
-	}
+struct ExportValue<'a>(&'a EvaluationValue);
 
-	let Some(metadata) = metadata_mut(manifest) else {
-		return;
-	};
-
-	for (field, values) in [
-		("annotations", &defaults.annotations),
-		("labels", &defaults.labels),
-	] {
-		if values.is_empty() {
-			continue;
+impl Serialize for ExportValue<'_> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let value = self.0;
+		if value.is_null() {
+			return serializer.serialize_none();
 		}
-		let Some(target) = entry_object_mut(metadata, field) else {
-			continue;
-		};
-		for (key, value) in values {
-			if !target.contains_key(&**key) {
-				target.insert(key.to_string(), Value::String(value.to_string()));
+		if let Some(boolean) = value.as_bool() {
+			return serializer.serialize_bool(boolean);
+		}
+		if let Some(number) = value.as_number() {
+			// Jsonnet numbers are float64s, but canonical JSON spells whole values
+			// as integers when they fit. Preserve that distinction so serde-saphyr
+			// applies the same go-yaml formatting as the old JSON round-trip.
+			if number == 0.0 && number.is_sign_negative() {
+				return serde_saphyr::RawScalar("-0.0").serialize(serializer);
 			}
-		}
-	}
-}
-
-/// Drop `metadata.annotations`/`metadata.labels` when they are null or empty, as
-/// Kubernetes and Tanka omit them from output.
-fn strip_empty_metadata(manifest: &mut Value) {
-	let Some(Value::Object(metadata)) = manifest.get_mut("metadata") else {
-		return;
-	};
-
-	for field in ["annotations", "labels"] {
-		let empty = match metadata.get(field) {
-			Some(Value::Null) => true,
-			Some(Value::Object(object)) => object.is_empty(),
-			_ => false,
-		};
-		if empty {
-			metadata.remove(field);
-		}
-	}
-}
-
-/// `manifest.metadata`, inserting an empty object if it is missing, as long as
-/// the manifest is an object and `metadata` is not something else entirely.
-fn metadata_mut(manifest: &mut Value) -> Option<&mut Map<String, Value>> {
-	let manifest = manifest.as_object_mut()?;
-	entry_object_mut(manifest, "metadata")
-}
-
-/// `object[field]` as a map, inserting an empty one if the field is missing or
-/// null. Returns `None` if the field holds something that is not a map.
-fn entry_object_mut<'m>(
-	object: &'m mut Map<String, Value>,
-	field: &str,
-) -> Option<&'m mut Map<String, Value>> {
-	let entry = object
-		.entry(field)
-		.or_insert_with(|| Value::Object(Map::new()));
-	if entry.is_null() {
-		*entry = Value::Object(Map::new());
-	}
-	entry.as_object_mut()
-}
-
-/// Sort every object's keys the way go-yaml v3 does, so serialization output
-/// matches tk's.
-pub(crate) fn sort_keys(value: Value) -> Value {
-	match value {
-		Value::Object(object) => {
-			let mut entries: Vec<(String, Value)> = object.into_iter().collect();
-			entries.sort_by(|(left, _), (right, _)| compare_keys(left, right));
-			Value::Object(
-				entries
-					.into_iter()
-					.map(|(key, value)| (key, sort_keys(value)))
-					.collect(),
-			)
-		}
-		Value::Array(array) => Value::Array(array.into_iter().map(sort_keys).collect()),
-		other => other,
-	}
-}
-
-/// go-yaml v3's key comparison (`sorter.go`): a natural sort where digit runs
-/// compare numerically, letters sort before non-letters directly after digits,
-/// and non-letters sort first otherwise.
-fn compare_keys(left: &str, right: &str) -> Ordering {
-	let left: Vec<char> = left.chars().collect();
-	let right: Vec<char> = right.chars().collect();
-	let mut digits = false;
-
-	for index in 0..left.len().min(right.len()) {
-		if left[index] == right[index] {
-			digits = left[index].is_ascii_digit();
-			continue;
-		}
-
-		let left_alphabetic = left[index].is_alphabetic();
-		let right_alphabetic = right[index].is_alphabetic();
-
-		if left_alphabetic && right_alphabetic {
-			return left[index].cmp(&right[index]);
-		}
-
-		if left_alphabetic || right_alphabetic {
-			return if digits == left_alphabetic {
-				Ordering::Less
-			} else {
-				Ordering::Greater
-			};
-		}
-
-		// Both are non-letters: compare digit runs numerically, treating a
-		// leading zero as significant only when no non-zero digit precedes it.
-		let mut left_number: i64 = 0;
-		let mut right_number: i64 = 0;
-
-		if left[index] == '0' || right[index] == '0' {
-			let mut preceding = index;
-			while preceding > 0 && left[preceding - 1].is_ascii_digit() {
-				preceding -= 1;
-				if left[preceding] != '0' {
-					left_number = 1;
-					right_number = 1;
-					break;
-				}
+			if !number.is_sign_negative()
+				&& number.fract() == 0.0
+				&& number < 18_446_744_073_709_551_616.0
+			{
+				return serializer.serialize_u64(number as u64);
 			}
+			if number.fract() == 0.0
+				&& number >= -9_223_372_036_854_775_808.0
+				&& number < 9_223_372_036_854_775_808.0
+			{
+				return serializer.serialize_i64(number as i64);
+			}
+			return serializer.serialize_f64(number);
+		}
+		if let Some(string) = value.as_str() {
+			return serializer.serialize_str(&string);
+		}
+		if let Some(array) = value.as_array() {
+			let mut sequence = serializer.serialize_seq(None)?;
+			for value in array.into_values() {
+				let value = value.map_err(S::Error::custom)?;
+				sequence.serialize_element(&ExportValue(&value))?;
+			}
+			return sequence.end();
+		}
+		if let Some(object) = value.as_object() {
+			let mut fields = object.field_names();
+			fields.sort_by(|left, right| saphyr::compare_string_keys(left, right));
+			let mut map = serializer.serialize_map(Some(fields.len()))?;
+			for field in fields {
+				let value = object
+					.get_or_bail(&field, Hidden::Skip)
+					.map_err(S::Error::custom)?;
+				map.serialize_entry(&field, &ExportValue(&value))?;
+			}
+			return map.end();
 		}
 
-		let mut left_end = index;
-		while left_end < left.len() && left[left_end].is_ascii_digit() {
-			left_number = left_number * 10 + i64::from(left[left_end] as u32 - '0' as u32);
-			left_end += 1;
-		}
-
-		let mut right_end = index;
-		while right_end < right.len() && right[right_end].is_ascii_digit() {
-			right_number = right_number * 10 + i64::from(right[right_end] as u32 - '0' as u32);
-			right_end += 1;
-		}
-
-		if left_number != right_number {
-			return left_number.cmp(&right_number);
-		}
-		if left_end != right_end {
-			return left_end.cmp(&right_end);
-		}
-		return left[index].cmp(&right[index]);
+		Err(S::Error::custom("tried to manifest function"))
 	}
-
-	left.len().cmp(&right.len())
 }
 
 /// Serialize a manifest as tk does: go-yaml v2 formatting, keys sorted like
 /// go-yaml v3 sorts them.
-pub(crate) fn serialize(manifest: Value) -> Result<String, Error> {
+pub(crate) fn serialize(manifest: &EvaluationValue) -> Result<String, Error> {
 	let options = serde_saphyr::SerializerOptions {
 		indent_step: 2,
 		indent_array: Some(0),
@@ -541,7 +570,7 @@ pub(crate) fn serialize(manifest: Value) -> Result<String, Error> {
 	};
 
 	let mut serialized = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut serialized, &sort_keys(manifest), options)
+	serde_saphyr::to_fmt_writer_with_options(&mut serialized, &ExportValue(manifest), options)
 		.context("serializing manifest")
 		.map_err(Error::Serialize)?;
 	Ok(serialized)
@@ -550,7 +579,8 @@ pub(crate) fn serialize(manifest: Value) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
 	use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-	use rtk_spec::canonical::{Environment, ResourceDefaults};
+	use rtk_spec::canonical::{Environment, EnvironmentSpec, ResourceDefaults};
+	use serde_json::Value;
 	use serde_json::json;
 
 	use super::*;
@@ -570,9 +600,30 @@ mod tests {
 			.expect("a valid environment")
 	}
 
-	fn processed(mut manifest: Value, environment: &Environment<'static>) -> Value {
-		Processor::new(environment).process(&mut manifest);
-		manifest
+	fn evaluated(value: &Value) -> EvaluationValue {
+		rtk_jsonnet::Engine::new(Default::default())
+			.create_evaluator()
+			.evaluate_snippet(value.to_string())
+			.expect("valid Jsonnet")
+			.into_value()
+	}
+
+	fn processed(manifest: Value, environment: &Environment<'static>) -> Value {
+		let script = format!(
+			"local main = {manifest};\n{}\nprocessValue(main)",
+			processing_script(environment)
+		);
+		let value = rtk_jsonnet::Engine::new(Default::default())
+			.create_evaluator()
+			.evaluate_snippet(script)
+			.expect("valid processing Jsonnet")
+			.into_value();
+		let processed = value
+			.as_object()
+			.expect("a processing wrapper")
+			.get_or_bail(PROCESSED_MANIFEST_FIELD, Hidden::Include)
+			.expect("the processed manifest");
+		serde_json::from_str(&processed.manifest().expect("manifestable")).expect("valid JSON")
 	}
 
 	#[test]
@@ -685,7 +736,12 @@ mod tests {
 	fn injects_resource_defaults_without_overwriting() {
 		let environment = environment(|spec| {
 			spec.resource_defaults = Some(ResourceDefaults {
-				annotations: std::iter::once(("owner".into(), "platform".into())).collect(),
+				annotations: [
+					("owner".into(), "platform".into()),
+					("tanka.dev/namespaced".into(), "false".into()),
+				]
+				.into_iter()
+				.collect(),
 				labels: [
 					("managed-by".into(), "rtk".into()),
 					("tier".into(), "default".into()),
@@ -704,11 +760,58 @@ mod tests {
 			&environment,
 		);
 		assert_eq!(manifest["metadata"]["annotations"]["owner"], "platform");
+		assert_eq!(
+			manifest["metadata"]["namespace"], "default",
+			"default annotations are applied after namespace selection"
+		);
 		assert_eq!(manifest["metadata"]["labels"]["managed-by"], "rtk");
 		assert_eq!(
 			manifest["metadata"]["labels"]["tier"], "mine",
 			"a label the manifest sets itself should survive"
 		);
+	}
+
+	#[test]
+	fn processing_does_not_hide_reserved_user_fields() {
+		let mut input = json!({
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": { "name": "a" },
+		});
+		input[ORIGINAL_MANIFEST_FIELD] = json!("original user value");
+		input[PROCESSED_MANIFEST_FIELD] = json!("processed user value");
+		let manifest = processed(input, &environment(|_| {}));
+
+		assert_eq!(manifest[ORIGINAL_MANIFEST_FIELD], "original user value");
+		assert_eq!(manifest[PROCESSED_MANIFEST_FIELD], "processed user value");
+	}
+
+	#[test]
+	fn processing_preserves_original_self_semantics() {
+		let script = format!(
+			r#"
+local main = {{
+  apiVersion: 'v1',
+  kind: 'ConfigMap',
+  metadata: {{ name: 'a' }},
+  sawInjectedNamespace:
+    if std.objectHas(self.metadata, 'namespace') then true else false,
+}};
+{}
+processValue(main)[rtkProcessedManifest]
+"#,
+			processing_script(&environment(|_| {}))
+		);
+		let value = rtk_jsonnet::Engine::new(Default::default())
+			.create_evaluator()
+			.evaluate_snippet(script)
+			.expect("valid processing Jsonnet")
+			.into_value();
+		let manifest: Value =
+			serde_json::from_str(&value.manifest().expect("manifestable")).expect("valid JSON");
+
+		assert_eq!(manifest["sawInjectedNamespace"], false);
+		assert_eq!(manifest["metadata"]["namespace"], "default");
 	}
 
 	#[test]
@@ -731,9 +834,10 @@ mod tests {
 
 		let keep = |patterns: &[&str]| {
 			keep_target(
-				&manifest,
+				&evaluated(&manifest),
 				&TargetMatcher::compile(patterns).expect("valid patterns"),
 			)
+			.expect("target fields are valid")
 		};
 
 		assert!(keep(&[]));
@@ -752,38 +856,28 @@ mod tests {
 
 	#[test]
 	fn sorts_keys_like_go_yaml_does() {
-		let sorted = sort_keys(json!({
+		let value = evaluated(&json!({
 			"b": 1, "a": 2, "a10": 3, "a2": 4, "_x": 5, "A": 6,
 			"nested": { "z": 1, "y": 2 },
 		}));
-		let keys: Vec<&str> = sorted
-			.as_object()
-			.expect("an object")
-			.keys()
-			.map(String::as_str)
-			.collect();
-		// Numbers compare numerically, so a2 precedes a10.
-		assert_eq!(keys, vec!["_x", "A", "a", "a2", "a10", "b", "nested"]);
-		let nested: Vec<&str> = sorted["nested"]
-			.as_object()
-			.expect("an object")
-			.keys()
-			.map(String::as_str)
-			.collect();
-		assert_eq!(nested, vec!["y", "z"]);
+		assert_eq!(
+			serialize(&value).expect("serializable"),
+			"_x: 5\nA: 6\na: 2\na2: 4\na10: 3\nb: 1\nnested:\n  \"y\": 2\n  z: 1\n"
+		);
 	}
 
 	#[test]
 	fn describes_manifests_for_diagnostics() {
 		assert_eq!(
-			describe(
+			describe(&evaluated(
 				&json!({ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "a" } })
-			),
+			))
+			.unwrap(),
 			"v1 ConfigMap/a"
 		);
 		assert_eq!(
-			describe(&json!({ "unidentified": true })),
-			r#"{"unidentified":true}"#
+			describe(&evaluated(&json!({ "unidentified": true }))).unwrap(),
+			"{\n    \"unidentified\": true\n}"
 		);
 	}
 }

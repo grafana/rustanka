@@ -180,6 +180,20 @@ impl From<Array> for Value {
 pub struct Object(pub(crate) ObjValue);
 
 impl Object {
+	/// Visible field names without forcing their values.
+	pub fn field_names(&self) -> Vec<Box<str>> {
+		self.0
+			.fields()
+			.into_iter()
+			.map(|field| field.as_str().into())
+			.collect()
+	}
+
+	/// Evaluate this object's assertions without forcing its fields.
+	pub fn run_assertions(&self) -> Result<(), EvaluatorError> {
+		self.0.run_assertions().map_err(EvaluatorError::from)
+	}
+
 	pub fn into_values(self) -> ObjectValues {
 		ObjectValues {
 			fields: self.0.fields().into_iter(),
