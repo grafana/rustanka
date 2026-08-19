@@ -223,7 +223,7 @@ pub(crate) fn collect_manifests(
 	let original = object.get(ORIGINAL_MANIFEST_FIELD, Hidden::Include)?;
 	if !object.has(PROCESSED_MANIFEST_FIELD, Hidden::Skip)?
 		&& !object.has(ORIGINAL_MANIFEST_FIELD, Hidden::Skip)?
-		&& object.field_names().is_empty()
+		&& object.field_names(Hidden::Skip).is_empty()
 		&& let (Some(processed), Some(original)) = (processed, original)
 	{
 		force_manifest(&original)?;
@@ -294,7 +294,7 @@ fn force_manifest(value: &EvaluationValue) -> Result<(), Error> {
 	}
 	if let Some(object) = value.as_object() {
 		object.run_assertions()?;
-		for field in object.field_names() {
+		for field in object.field_names(Hidden::Skip) {
 			force_manifest(&object.get_or_bail(&field, Hidden::Skip)?)?;
 		}
 		return Ok(());
@@ -533,14 +533,14 @@ impl Serialize for ExportValue<'_> {
 			return sequence.end();
 		}
 		if let Some(object) = value.as_object() {
-			let mut fields = object.field_names();
+			let mut fields = object.field_names(Hidden::Skip);
 			fields.sort_by(|left, right| saphyr::compare_string_keys(left, right));
 			let mut map = serializer.serialize_map(Some(fields.len()))?;
 			for field in fields {
 				let value = object
 					.get_or_bail(&field, Hidden::Skip)
 					.map_err(S::Error::custom)?;
-				map.serialize_entry(&field, &ExportValue(&value))?;
+				map.serialize_entry(&*field, &ExportValue(&value))?;
 			}
 			return map.end();
 		}
@@ -613,11 +613,11 @@ pub(crate) fn materialize(manifest: &EvaluationValue) -> Result<serde_json::Valu
 		return Ok(serde_json::Value::Array(values));
 	}
 	if let Some(object) = manifest.as_object() {
-		let fields = object.field_names();
+		let fields = object.field_names(Hidden::Skip);
 		let mut values = serde_json::Map::with_capacity(fields.len());
 		for field in fields {
 			let value = object.get_or_bail(&field, Hidden::Skip)?;
-			values.insert(field.into(), materialize(&value)?);
+			values.insert(field.to_string(), materialize(&value)?);
 		}
 		return Ok(serde_json::Value::Object(values));
 	}

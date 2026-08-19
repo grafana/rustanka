@@ -180,13 +180,12 @@ impl From<Array> for Value {
 pub struct Object(pub(crate) ObjValue);
 
 impl Object {
-	/// Visible field names without forcing their values.
-	pub fn field_names(&self) -> Vec<Box<str>> {
-		self.0
-			.fields()
-			.into_iter()
-			.map(|field| field.as_str().into())
-			.collect()
+	/// This object's field names, without forcing their values.
+	///
+	/// Interned, so naming a field again to read it costs a pointer comparison
+	/// rather than hashing the name afresh.
+	pub fn field_names(&self, hidden: Hidden) -> Vec<Str> {
+		self.0.fields_ex(hidden.included())
 	}
 
 	/// Evaluate this object's assertions without forcing its fields.

@@ -197,9 +197,9 @@ fn evaluation_template_context(
 	if let Some(metadata) = manifest.get("metadata", Hidden::Skip)?
 		&& let Some(metadata) = metadata.as_object()
 	{
-		for field in metadata.field_names() {
+		for field in metadata.field_names(Hidden::Skip) {
 			let value = metadata.get_or_bail(&field, Hidden::Skip)?;
-			mapped.insert(field.into(), evaluation_to_template(&value)?);
+			mapped.insert(field.to_string(), evaluation_to_template(&value)?);
 		}
 	}
 	mapped
@@ -239,9 +239,9 @@ fn evaluation_to_template(value: &EvaluationValue) -> Result<TemplateValue, Erro
 	}
 	if let Some(object) = value.as_object() {
 		let mut mapped = HashMap::new();
-		for field in object.field_names() {
+		for field in object.field_names(Hidden::Skip) {
 			let value = object.get_or_bail(&field, Hidden::Skip)?;
-			mapped.insert(field.into(), evaluation_to_template(&value)?);
+			mapped.insert(field.to_string(), evaluation_to_template(&value)?);
 		}
 		return Ok(TemplateValue::Map(mapped));
 	}

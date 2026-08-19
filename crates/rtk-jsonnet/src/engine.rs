@@ -663,10 +663,14 @@ pub enum EvaluationObject {
 }
 
 impl EvaluationObject {
-	/// Visible field names without forcing their values.
-	pub fn field_names(&self) -> Vec<Box<str>> {
+	/// This object's field names, without forcing their values.
+	pub fn field_names(&self, hidden: Hidden) -> Vec<EvaluationStr> {
 		match self {
-			EvaluationObject::Jrsonnet { object, .. } => object.field_names(),
+			EvaluationObject::Jrsonnet { object, .. } => object
+				.field_names(hidden)
+				.into_iter()
+				.map(EvaluationStr::Jrsonnet)
+				.collect(),
 		}
 	}
 
@@ -1152,14 +1156,23 @@ mod tests {
 	fn lists_object_field_names_without_forcing_values() {
 		let value = Engine::new(Options::default())
 			.create_evaluator()
-			.evaluate_snippet(r#"{ broken: error "forced", item10: 10, item2: 2 }"#)
+			.evaluate_snippet(r#"{ broken: error "forced", item10: 10, item2: 2, tucked:: 3 }"#)
 			.unwrap()
 			.into_value();
 		let object = value.as_object().expect("an object");
 
+		let names = |hidden| {
+			object
+				.field_names(hidden)
+				.iter()
+				.map(ToString::to_string)
+				.collect::<Vec<String>>()
+		};
+
+		assert_eq!(names(Hidden::Skip), ["broken", "item10", "item2"]);
 		assert_eq!(
-			object.field_names(),
-			["broken", "item10", "item2"].map(Box::<str>::from)
+			names(Hidden::Include),
+			["broken", "item10", "item2", "tucked"]
 		);
 		assert_eq!(
 			object

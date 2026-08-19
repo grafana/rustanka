@@ -4,7 +4,7 @@ use jrsonnet_evaluator::error::ErrorKind;
 use jrsonnet_evaluator::typed::ValType;
 use jrsonnet_evaluator::val::ArrValue;
 use jrsonnet_evaluator::{Error, IBytes, IStr, ObjValue, ObjValueBuilder, Thunk, Val};
-use serde::de::value::StringDeserializer;
+use serde::de::value::{BorrowedStrDeserializer, StringDeserializer};
 use serde::de::{
 	self, DeserializeSeed, EnumAccess, MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
 };
@@ -212,9 +212,33 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		visitor.visit_unit()
 	}
 
+	/// Offers the visitor only the fields the struct declared, rather than every
+	/// field the object has.
+	///
+	/// Asking for each declared name is cheaper than enumerating the object,
+	/// which builds a map of every field of every layer it inherits from and
+	/// sorts it. It also means a field the struct does not want is never forced.
+	fn deserialize_struct<V>(
+		self,
+		_: &'static str,
+		fields: &'static [&'static str],
+		visitor: V,
+	) -> Result<V::Value, Self::Error>
+	where
+		V: Visitor<'de>,
+	{
+		match self.0.0 {
+			Val::Obj(object) => visitor.visit_map(StructDeserializer::new(object, fields)),
+			// A struct does not have to come from an object: serde builds one
+			// from a sequence as happily, and everything else still has to
+			// report the type it actually is.
+			value => ValueDeserializer(Value(value)).deserialize_any(visitor),
+		}
+	}
+
 	forward_to_deserialize_any! {
 		bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-		bytes byte_buf unit unit_struct seq tuple tuple_struct map struct
+		bytes byte_buf unit unit_struct seq tuple tuple_struct map
 		identifier
 	}
 }
@@ -299,6 +323,68 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 
 	fn size_hint(&self) -> Option<usize> {
 		Some(self.fields.len())
+	}
+}
+
+/// Reads a struct's declared fields out of an object, in the order the struct
+/// declared them, skipping the ones it does not have.
+struct StructDeserializer {
+	object: ObjValue,
+	fields: std::slice::Iter<'static, &'static str>,
+	field: Option<IStr>,
+}
+
+impl StructDeserializer {
+	fn new(object: ObjValue, fields: &'static [&'static str]) -> Self {
+		StructDeserializer {
+			object,
+			fields: fields.iter(),
+			field: None,
+		}
+	}
+}
+
+impl<'de> MapAccess<'de> for StructDeserializer {
+	type Error = EvaluatorError;
+
+	fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+	where
+		K: DeserializeSeed<'de>,
+	{
+		for field in self.fields.by_ref() {
+			// Asked about rather than read, so that the value is only forced once
+			// the visitor asks for it — and never, if it turns out not to want it.
+			// jrsonnet's own lookup reaches hidden fields, which are not fields
+			// the struct asked for, so visibility has to be checked separately.
+			let key: IStr = (*field).into();
+			if !self.object.has_field(key.clone()) {
+				continue;
+			}
+
+			self.field = Some(key);
+			// Borrowed from the field list, so a derived field identifier can
+			// match it without allocating.
+			return seed
+				.deserialize(BorrowedStrDeserializer::<Self::Error>::new(field))
+				.map(Some);
+		}
+
+		Ok(None)
+	}
+
+	fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+	where
+		V: DeserializeSeed<'de>,
+	{
+		let field = self
+			.field
+			.take()
+			.expect("next_value_seed is only called after next_key_seed");
+		let value = self
+			.object
+			.get(field)?
+			.expect("the field was there when it was asked about");
+		seed.deserialize(ValueDeserializer(Value(value)))
 	}
 }
 
@@ -897,7 +983,7 @@ mod tests {
             tags: ["a", "b"],
             nested: { value: 4 },
             mapping: { one: 1, two: 2 },
-            ignored: { err: error "never evaluated" },
+            ignored: error "never evaluated",
         }"#,
 		)
 		.unwrap();
@@ -910,14 +996,99 @@ mod tests {
 		struct Sparse {
 			kept: bool,
 		}
+		// Undeclared, and so never asked for: forcing it would fail outright,
+		// rather than only once something looked inside it.
 		let sparse: Sparse = from_val(
 			r#"{
             kept: true,
-            expensive: [error "boom"],
+            expensive: error "boom",
         }"#,
 		)
 		.unwrap();
 		assert_eq!(sparse, Sparse { kept: true });
+	}
+
+	#[test]
+	fn a_declared_field_the_object_lacks_is_absent_rather_than_null() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Sparse {
+			kept: bool,
+			absent: Option<bool>,
+		}
+		let sparse: Sparse = from_val(r"{ kept: true }").unwrap();
+		assert_eq!(
+			sparse,
+			Sparse {
+				kept: true,
+				absent: None
+			}
+		);
+	}
+
+	#[test]
+	fn a_required_field_the_object_lacks_is_still_an_error() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Required {
+			needed: bool,
+		}
+		let error = from_val::<Required>(r"{ other: true }").expect_err("the field is missing");
+		assert!(
+			error.to_string().contains("missing field `needed`"),
+			"unexpected error: {error}"
+		);
+	}
+
+	#[test]
+	fn a_hidden_field_is_not_offered_to_a_struct_that_declares_it() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Tucked {
+			visible: i64,
+			hidden: Option<i64>,
+		}
+		// Naming a hidden field in Jsonnet reads it, but manifesting never does,
+		// and neither does deserializing.
+		let tucked: Tucked = from_val(r"{ visible: 1, hidden:: 2 }").unwrap();
+		assert_eq!(
+			tucked,
+			Tucked {
+				visible: 1,
+				hidden: None
+			}
+		);
+	}
+
+	#[test]
+	fn a_struct_still_reads_every_field_it_declares() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Both {
+			first: i64,
+			second: i64,
+		}
+		// Declared fields are read whatever else the object carries, and whatever
+		// order they come in.
+		let both: Both = from_val(r"{ second: 2, extra: 3, first: 1, other: 4 }").unwrap();
+		assert_eq!(
+			both,
+			Both {
+				first: 1,
+				second: 2
+			}
+		);
+	}
+
+	#[test]
+	fn a_struct_can_still_come_from_something_that_is_not_an_object() {
+		#[derive(Debug, Deserialize, PartialEq)]
+		struct Pair(u8, u8);
+
+		let pair: Pair = from_val("[1, 2]").unwrap();
+		assert_eq!(pair, Pair(1, 2));
+
+		let error = from_val::<Fixture>("42").expect_err("a number is not a struct");
+		assert!(
+			error.to_string().contains("expected"),
+			"unexpected error: {error}"
+		);
 	}
 
 	#[test]
@@ -1141,7 +1312,9 @@ mod tests {
 				expectVersions: { tanka: ">= 0.0.0 || < 0.0.0" },
 				injectLabels: true,
             },
-            data: { never: error "data must stay lazy" },
+            // An `Environment` with no data declares only four fields, so this is
+            // never asked for — which is what discovery relies on.
+            data: error "data must stay lazy",
         }"#,
 		)
 		.unwrap();
