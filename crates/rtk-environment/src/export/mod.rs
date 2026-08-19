@@ -7,14 +7,14 @@
 //! # How the work is spread out
 //!
 //! Evaluated Jsonnet values are `Rc`-based, so they never leave the thread that
-//! produced them. Each environment is therefore evaluated, walked and serialized
-//! on one worker thread, which sends the finished text of its manifests to the
-//! thread driving the export. That thread interleaves three things: pulling the
-//! next environment out of discovery (which evaluates Jsonnet too, so it also has
-//! to stay put), handing environments to workers, and writing what comes back.
+//! produced them. Each environment is therefore evaluated, walked, serialized and
+//! written all on the one worker thread that picked it up, and environments run
+//! in parallel across a [`rayon`] pool fed straight from discovery.
 //!
-//! Everything that crosses a thread boundary is a `String` or a `PathBuf`, and
-//! everything shared is immutable and behind an [`Arc`], apart from the abort
+//! Nothing evaluated crosses a thread boundary: an environment arrives as owned
+//! metadata, and leaves as a [`Report`] of what it wrote. Errors are rendered
+//! where they happen, because Jsonnet's stack traces are `Rc`-based too.
+//! Everything shared is immutable and behind an [`Arc`], apart from the abort
 //! flag.
 
 use std::path::{Path, PathBuf};
@@ -23,16 +23,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use kube_core::{Selector, SelectorExt};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use rtk_jsonnet::EvaluationValue;
 use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::{Environment, EnvironmentSpec};
 use rustc_hash::{FxHashMap, FxHashSet};
-use tokio::sync::mpsc;
 use tracing::{debug, trace};
 
 use crate::export::manifest::Manifest;
 use crate::export::template::{FilenameTemplate, SpecializedTemplate};
-use crate::export::writer::{File, Writer, Written};
+use crate::export::writer::{Directories, File, Written, write_files};
 use crate::{Discover, Discovered, Engine};
 
 mod data;
@@ -154,8 +154,6 @@ pub struct Options {
 	pub timing: bool,
 	/// How many environments to evaluate at once. Bulk exports only.
 	pub parallelism: usize,
-	/// How many files to write at once.
-	pub write_concurrency: usize,
 	/// Export only environments whose name or path contains this. Bulk exports
 	/// only.
 	pub name: Option<String>,
@@ -179,7 +177,6 @@ impl Default for Options {
 			skip_manifest: false,
 			timing: false,
 			parallelism: 8,
-			write_concurrency: 16,
 			name: None,
 			selector: None,
 			recursive: false,
@@ -194,7 +191,7 @@ pub struct TimingData {
 	pub evaluate: Duration,
 	/// Walking, processing and serializing manifests, on a worker thread.
 	pub serialize: Duration,
-	/// Writing files, on the driving thread.
+	/// Writing files, on the same worker thread.
 	pub write: Duration,
 	/// How many manifests the environment exported.
 	pub manifests: usize,
@@ -374,9 +371,6 @@ pub enum Error {
 	#[error("could not read the export index")]
 	Index(#[from] serde_json::Error),
 
-	#[error("a worker stopped before finishing")]
-	WorkerLost,
-
 	#[error("skipped after an earlier fatal error")]
 	Skipped,
 }
@@ -546,17 +540,6 @@ impl Plan {
 	}
 }
 
-/// What a worker sends back to the thread driving the export.
-enum Message {
-	/// Some of an environment's manifests, serialized and ready to write.
-	Chunk { index: usize, files: Vec<File> },
-	/// An environment is done, successfully or not.
-	Finished {
-		index: usize,
-		outcome: Result<Option<TimingData>, Error>,
-	},
-}
-
 impl Engine {
 	/// Return the processed, validated manifests from an evaluated environment.
 	///
@@ -593,58 +576,18 @@ impl Engine {
 		let plan = export.plan(environment)?;
 		let mut serializing = planned.elapsed();
 		let mut writing = Duration::ZERO;
+		let mut directories = Directories::default();
+		let mut written = Vec::new();
 
-		let output_dir = options.output_dir.clone();
-		let write_concurrency = options.write_concurrency;
-		let written = std::thread::scope(|scope| {
-			let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-			let writer = scope.spawn(move || {
-				writer::drive(move || async move {
-					let mut writer = Writer::new(output_dir, write_concurrency);
-					let mut written = Vec::new();
-					let mut writing = Duration::ZERO;
+		for chunk in plan.chunks() {
+			let serialized = Instant::now();
+			let files = export.serialize_chunk(chunk, &plan)?;
+			serializing += serialized.elapsed();
 
-					while let Ok(files) = receiver.recv() {
-						let queued = Instant::now();
-						writer.write(0, files, &mut written).await?;
-						writing += queued.elapsed();
-					}
-
-					let drained = Instant::now();
-					writer.drain(&mut written).await?;
-					writing += drained.elapsed();
-					Ok::<_, Error>((written, writing))
-				})
-			});
-
-			let mut serialization_error = None;
-			for chunk in plan.chunks() {
-				let serialized = Instant::now();
-				match export.serialize_chunk(chunk, &plan) {
-					Ok(files) => {
-						serializing += serialized.elapsed();
-						if sender.send(files).is_err() {
-							serialization_error = Some(Error::WorkerLost);
-							break;
-						}
-					}
-					Err(error) => {
-						serializing += serialized.elapsed();
-						serialization_error = Some(error);
-						break;
-					}
-				}
-			}
-			drop(sender);
-
-			let writer_result = writer.join().map_err(|_| Error::WorkerLost)?;
-			let (written, writer_duration) = writer_result?;
-			if let Some(error) = serialization_error {
-				return Err(error);
-			}
-			writing = writer_duration;
-			Ok(written)
-		})?;
+			let queued = Instant::now();
+			written.extend(write_files(&options.output_dir, files, &mut directories)?);
+			writing += queued.elapsed();
+		}
 
 		collect_written(&mut report, written);
 		if let Some(timing) = timing.as_mut() {
@@ -666,11 +609,32 @@ impl Engine {
 	/// Discover environments under `paths` and export all of them.
 	pub fn export_bulk(&self, paths: Vec<PathBuf>, options: &Options) -> Result<Exported, Error> {
 		let export = Export::new(options)?;
-		let selector = options
-			.selector
-			.as_deref()
-			.map(selector::parse)
-			.transpose()?;
+		let matching = Matching {
+			discover: self.discover(paths),
+			name: options.name.clone(),
+			selector: options
+				.selector
+				.as_deref()
+				.map(selector::parse)
+				.transpose()?,
+		};
+
+		let mut environments = select(matching, options)?.peekable();
+
+		// Now that there is an environment to export, somewhere to put it. Left
+		// until here so that finding none leaves the filesystem alone, and so that
+		// an ambiguous set is refused before anything is created.
+		match environments.peek() {
+			// A discovery error is the export's error, not an environment's.
+			Some(Err(_)) => {
+				return Err(environments
+					.next()
+					.expect("just peeked")
+					.expect_err("just peeked an error"));
+			}
+			Some(Ok(_)) => prepare_output_dir(&export)?,
+			None => {}
+		}
 
 		let pool = rayon::ThreadPoolBuilder::new()
 			.num_threads(options.parallelism.max(1))
@@ -679,25 +643,32 @@ impl Engine {
 			.build()
 			.expect("a rayon pool can be built");
 
+		// Discovery is pulled from the pool rather than up front, so that
+		// evaluating one environment overlaps with discovering the next.
 		let engine = self.clone();
-		let exported = writer::drive(|| async {
-			// Discovery is built here rather than by the caller: it evaluates
-			// Jsonnet, so it has to live on whichever thread ends up driving the
-			// export.
-			let mut driver = BulkExport {
-				discover: Some(engine.discover(paths)),
-				export: Arc::clone(&export),
-				engine,
-				pool: &pool,
-				selector,
-				pending: Vec::new(),
-				dispatched: 0,
-				outstanding: FxHashSet::default(),
-				reports: Vec::new(),
-				prepared: false,
-			};
-			driver.run().await
+		let mut reports = pool.install(|| {
+			environments
+				.enumerate()
+				.par_bridge()
+				.map(|(index, discovered)| {
+					Ok((index, export_environment(&engine, &export, &discovered?)))
+				})
+				.collect::<Result<Vec<_>, Error>>()
 		})?;
+
+		// Environments finish in whatever order the pool gets to them, which
+		// should not show up in the result.
+		reports.sort_by_key(|(index, _)| *index);
+		let exported = Exported {
+			reports: reports.into_iter().map(|(_, report)| report).collect(),
+		};
+
+		if exported.reports.is_empty() && (options.name.is_some() || options.selector.is_some()) {
+			return Err(Error::NothingMatched {
+				name: options.name.clone(),
+				selector: options.selector.clone(),
+			});
+		}
 
 		// An export that found nothing to do leaves no trace of having run, as tk
 		// does not: no output directory, and no index claiming it is empty.
@@ -707,6 +678,99 @@ impl Engine {
 
 		Ok(exported)
 	}
+}
+
+/// Discovery, filtered by `--name` and `--selector`.
+struct Matching {
+	discover: Discover,
+	name: Option<String>,
+	selector: Option<Selector>,
+}
+
+impl Matching {
+	fn matches(&self, discovered: &Discovered) -> bool {
+		if let Some(name) = self.name.as_deref() {
+			let matches_name = discovered
+				.environment
+				.metadata
+				.name
+				.as_deref()
+				.is_some_and(|environment| environment.contains(name))
+				|| discovered.path.to_string_lossy().contains(name);
+			if !matches_name {
+				return false;
+			}
+		}
+
+		if let Some(selector) = self.selector.as_ref() {
+			let labels = discovered.environment.metadata.labels.as_ref();
+			if !selector.matches(labels.unwrap_or(&NO_LABELS)) {
+				return false;
+			}
+		}
+
+		true
+	}
+}
+
+impl Iterator for Matching {
+	type Item = Result<Discovered, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			match self.discover.next()? {
+				Ok(discovered) if self.matches(&discovered) => return Some(Ok(discovered)),
+				Ok(_) => {}
+				Err(error) => return Some(Err(error.into())),
+			}
+		}
+	}
+}
+
+/// Which environments an export will export.
+///
+/// A recursive export streams, so that evaluating one environment overlaps with
+/// discovering the next. The other modes have to look at every environment
+/// before dispatching any of them: `--name` prefers an exact match that may turn
+/// up last, and an export given neither `--name` nor `--recursive` has to refuse
+/// an ambiguous set outright.
+fn select(
+	mut matching: Matching,
+	options: &Options,
+) -> Result<Box<dyn Iterator<Item = Result<Discovered, Error>> + Send>, Error> {
+	if let Some(name) = options.name.clone() {
+		let (exact, partial): (Vec<_>, Vec<_>) = matching
+			.collect::<Result<Vec<_>, _>>()?
+			.into_iter()
+			.partition(|discovered| {
+				discovered.environment.metadata.name.as_deref() == Some(name.as_str())
+			});
+
+		let selected = if exact.is_empty() { partial } else { exact };
+		return Ok(Box::new(selected.into_iter().map(Ok)));
+	}
+
+	if options.recursive {
+		return Ok(Box::new(matching));
+	}
+
+	let Some(first) = matching.next().transpose()? else {
+		return Ok(Box::new(std::iter::empty()));
+	};
+	let Some(second) = matching.next().transpose()? else {
+		return Ok(Box::new(std::iter::once(Ok(first))));
+	};
+
+	let mut count = 2;
+	while matching.next().transpose()?.is_some() {
+		count += 1;
+	}
+
+	Err(Error::Ambiguous {
+		count,
+		first: first.path.as_ref().clone(),
+		second: second.path.as_ref().clone(),
+	})
 }
 
 fn manifests(
@@ -742,333 +806,39 @@ pub fn materialize_manifest(manifest: &EvaluationValue) -> Result<serde_json::Va
 	process::materialize(manifest)
 }
 
-/// The driver of a bulk export: discovers, dispatches and writes, in that order
-/// of preference, on one thread.
-struct BulkExport<'p> {
-	export: Arc<Export>,
-	engine: Engine,
-	pool: &'p rayon::ThreadPool,
-	/// Discovery evaluates Jsonnet, so it stays on this thread, in between
-	/// writes.
-	discover: Option<Discover>,
-	selector: Option<Selector>,
-	/// Environments pulled from discovery but not dispatched yet, because the
-	/// ambiguity check had to look ahead.
-	pending: Vec<Discovered>,
-	dispatched: usize,
-	/// Environments handed to a worker that have not reported back yet.
-	outstanding: FxHashSet<usize>,
-	reports: Vec<Report>,
-	/// Whether the output directory has been made yet. Deferred until there is
-	/// something to put in it.
-	prepared: bool,
-}
+/// Evaluate, serialize and write one environment, all on the thread that picked
+/// it up.
+///
+/// An environment that fails reports its failure rather than returning it: one
+/// broken environment does not stop the others, and what it did manage to write
+/// is still worth reporting.
+fn export_environment(engine: &Engine, export: &Export, discovered: &Discovered) -> Report {
+	let mut report = Report::new(
+		Arc::clone(&discovered.path),
+		identify(discovered.path.as_path()),
+	);
 
-#[expect(
-	clippy::future_not_send,
-	reason = "the driver owns discovery, which holds evaluated Jsonnet values: \
-	          the whole point is that it stays on one thread"
-)]
-impl BulkExport<'_> {
-	async fn run(&mut self) -> Result<Exported, Error> {
-		self.prioritize_exact_name()?;
-		self.check_ambiguity()?;
-
-		let (sender, mut receiver) = mpsc::channel(self.parallelism() * 2);
-		let mut sender = Some(sender);
-		let mut writer = Writer::new(
-			self.export.options.output_dir.clone(),
-			self.export.options.write_concurrency,
-		);
-		let mut written = Vec::new();
-
-		loop {
-			// Finished writes first, so the writer has room for more.
-			while let Some(harvested) = writer.try_harvest() {
-				written.push(harvested?);
-			}
-
-			// Then whatever the workers have already produced.
-			while let Ok(message) = receiver.try_recv() {
-				self.receive(message, &mut writer, &mut written).await?;
-			}
-
-			// Then, if there is room, one more environment. This is the blocking
-			// step: discovery evaluates the Jsonnet that declares inline
-			// environments.
-			if sender.is_some() && self.has_room(&writer) {
-				let dispatched = {
-					let sender = sender.as_ref().expect("just checked");
-					self.dispatch(sender)?
-				};
-				if dispatched {
-					continue;
-				}
-				// Discovery is done. Dropping our sender lets the channel close
-				// once the last worker drops its clone.
-				sender = None;
-				continue;
-			}
-
-			if sender.is_none() && self.outstanding.is_empty() && writer.is_idle() {
-				break;
-			}
-
-			// Nothing left to do but wait for a worker or a write.
-			tokio::select! {
-				biased;
-				message = receiver.recv(), if !self.outstanding.is_empty() => {
-					if let Some(message) = message {
-						self.receive(message, &mut writer, &mut written).await?;
-					} else {
-						// Every sender is gone with environments still
-						// outstanding, which means a worker died mid-flight.
-						// Whatever the others exported is still worth reporting.
-						self.abandon();
-					}
-				}
-				harvested = writer.harvest(), if !writer.is_idle() => {
-					if let Some(harvested) = harvested? {
-						written.push(harvested);
-					}
-				}
-			}
-		}
-
-		writer.drain(&mut written).await?;
-		self.finish(written)
-	}
-
-	/// Prefer exact environment names over substring and path matches, as tk
-	/// does. Discovery has to finish before anything is dispatched: an exact
-	/// match may appear after an otherwise valid partial match.
-	fn prioritize_exact_name(&mut self) -> Result<(), Error> {
-		let Some(name) = self.export.options.name.clone() else {
-			return Ok(());
-		};
-
-		let mut exact = Vec::new();
-		let mut partial = Vec::new();
-		while let Some(discover) = self.discover.as_mut() {
-			let Some(discovered) = writer::blocking(|| discover.next()) else {
-				self.discover = None;
-				break;
-			};
-			let discovered = discovered?;
-			if !self.matches(&discovered) {
-				continue;
-			}
-
-			if discovered.environment.metadata.name.as_deref() == Some(name.as_str()) {
-				exact.push(discovered);
-			} else {
-				partial.push(discovered);
-			}
-		}
-
-		let selected = if exact.is_empty() { partial } else { exact };
-		self.pending.extend(selected.into_iter().rev());
-		Ok(())
-	}
-
-	fn parallelism(&self) -> usize {
-		self.export.options.parallelism.max(1)
-	}
-
-	/// Whether another environment can be started without running too far ahead
-	/// of the writes.
-	fn has_room(&self, writer: &Writer) -> bool {
-		self.outstanding.len() < self.parallelism() * 2 && !writer.is_saturated()
-	}
-
-	/// Refuse an ambiguous export, as tk does, before dispatching any work.
-	fn check_ambiguity(&mut self) -> Result<(), Error> {
-		if self.export.options.recursive || self.export.options.name.is_some() {
-			return Ok(());
-		}
-
-		let Some(first) = self.next_environment()? else {
-			return Ok(());
-		};
-		let Some(second) = self.next_environment()? else {
-			self.pending.push(first);
-			return Ok(());
-		};
-
-		let mut count = 2;
-		while self.next_environment()?.is_some() {
-			count += 1;
-		}
-
-		Err(Error::Ambiguous {
-			count,
-			first: first.path.as_ref().clone(),
-			second: second.path.as_ref().clone(),
-		})
-	}
-
-	/// Hand the next environment to the pool. Returns whether there was one.
-	fn dispatch(&mut self, sender: &mpsc::Sender<Message>) -> Result<bool, Error> {
-		let Some(discovered) = self.next_environment()? else {
-			return Ok(false);
-		};
-
-		// Now that there is an environment to export, somewhere to put it. Left
-		// until here so that finding none leaves the filesystem alone, and so that
-		// an ambiguous set is refused before anything is created.
-		if !self.prepared {
-			prepare_output_dir(&self.export)?;
-			self.prepared = true;
-		}
-
-		let index = self.dispatched;
-		self.dispatched += 1;
-		self.outstanding.insert(index);
-		self.reports.push(Report::new(
-			Arc::clone(&discovered.path),
-			identify(discovered.path.as_path()),
-		));
-
-		let export = Arc::clone(&self.export);
-		let engine = self.engine.clone();
-		let sender = sender.clone();
-		self.pool.spawn(move || {
-			let outcome = export_environment(&engine, &export, &discovered, index, &sender);
-			if let Err(error) = outcome.as_ref()
-				&& error.fatal()
-			{
+	match run_environment(engine, export, discovered, &mut report) {
+		Ok(timing) => report.timing = timing,
+		Err(error) => {
+			if error.fatal() {
 				export.abort();
 			}
-			// A receiver that is gone means the driver has already given up.
-			drop(sender.blocking_send(Message::Finished { index, outcome }));
-		});
-
-		Ok(true)
-	}
-
-	/// The next environment matching `--name` and `--selector`.
-	fn next_environment(&mut self) -> Result<Option<Discovered>, Error> {
-		if let Some(discovered) = self.pending.pop() {
-			return Ok(Some(discovered));
-		}
-
-		loop {
-			let Some(discover) = self.discover.as_mut() else {
-				return Ok(None);
-			};
-
-			// Discovery evaluates Jsonnet for inline environments, which can take
-			// a while; file writes carry on regardless, since Tokio runs them on
-			// its blocking pool.
-			let Some(discovered) = writer::blocking(|| discover.next()) else {
-				self.discover = None;
-				return Ok(None);
-			};
-
-			let discovered = discovered?;
-			if self.matches(&discovered) {
-				return Ok(Some(discovered));
-			}
+			report.error = Some(Arc::new(error));
 		}
 	}
 
-	fn matches(&self, discovered: &Discovered) -> bool {
-		if let Some(name) = self.export.options.name.as_deref() {
-			let matches_name = discovered
-				.environment
-				.metadata
-				.name
-				.as_deref()
-				.is_some_and(|environment| environment.contains(name))
-				|| discovered.path.to_string_lossy().contains(name);
-			if !matches_name {
-				return false;
-			}
-		}
-
-		if let Some(selector) = self.selector.as_ref() {
-			let labels = discovered.environment.metadata.labels.as_ref();
-			if !selector.matches(labels.unwrap_or(&NO_LABELS)) {
-				return false;
-			}
-		}
-
-		true
-	}
-
-	/// Take one message from a worker, writing whatever came with it.
-	async fn receive(
-		&mut self,
-		message: Message,
-		writer: &mut Writer,
-		written: &mut Vec<Written>,
-	) -> Result<(), Error> {
-		match message {
-			Message::Chunk { index, files } => writer.write(index, files, written).await,
-			Message::Finished { index, outcome } => {
-				self.outstanding.remove(&index);
-				let report = &mut self.reports[index];
-				match outcome {
-					Ok(timing) => report.timing = timing,
-					Err(error) => {
-						let fatal = error.fatal();
-						report.error = Some(Arc::new(error));
-						if fatal {
-							self.export.abort();
-						}
-					}
-				}
-				Ok(())
-			}
-		}
-	}
-
-	/// Give up on environments whose worker disappeared.
-	fn abandon(&mut self) {
-		for index in self.outstanding.drain() {
-			self.reports[index].error = Some(Arc::new(Error::WorkerLost));
-		}
-	}
-
-	/// Turn the driver's state into the export's result.
-	fn finish(&mut self, written: Vec<Written>) -> Result<Exported, Error> {
-		let mut reports: Vec<Report> = self.reports.drain(..).collect();
-
-		for written in written {
-			let report = &mut reports[written.index];
-			if written.unchanged {
-				report.unchanged += 1;
-			}
-			report.files.push(written.path);
-		}
-
-		// Writes finish in whatever order the filesystem gets to them, which
-		// should not show up in the result.
-		for report in &mut reports {
-			report.files.sort();
-		}
-
-		if reports.is_empty()
-			&& (self.export.options.name.is_some() || self.export.options.selector.is_some())
-		{
-			return Err(Error::NothingMatched {
-				name: self.export.options.name.clone(),
-				selector: self.export.options.selector.clone(),
-			});
-		}
-
-		Ok(Exported { reports })
-	}
+	// Files land in whatever order they were serialized, which should not show up
+	// in the result.
+	report.files.sort();
+	report
 }
 
-/// Evaluate and export one environment, sending its manifests to the driver as
-/// they are serialized.
-fn export_environment(
+fn run_environment(
 	engine: &Engine,
 	export: &Export,
 	discovered: &Discovered,
-	index: usize,
-	sender: &mpsc::Sender<Message>,
+	report: &mut Report,
 ) -> Result<Option<TimingData>, Error> {
 	if export.aborted() {
 		return Err(Error::Skipped);
@@ -1083,17 +853,29 @@ fn export_environment(
 		timing.evaluate = evaluate_started.elapsed();
 	}
 
-	let serialize_started = Instant::now();
+	let planned = Instant::now();
 	let plan = export.plan(&environment)?;
+	let mut serializing = planned.elapsed();
+	let mut writing = Duration::ZERO;
+	let mut directories = Directories::default();
+
+	// Written as they are serialized, and recorded as they are written, so that an
+	// environment that fails part way through still reports what it put on disk.
 	for chunk in plan.chunks() {
+		let serialized = Instant::now();
 		let files = export.serialize_chunk(chunk, &plan)?;
-		sender
-			.blocking_send(Message::Chunk { index, files })
-			.map_err(|_| Error::WorkerLost)?;
+		serializing += serialized.elapsed();
+
+		let queued = Instant::now();
+		let written = write_files(&export.options.output_dir, files, &mut directories)?;
+		writing += queued.elapsed();
+		collect_written(report, written);
 	}
+
 	let manifests = plan.manifests();
 	if let Some(timing) = timing.as_mut() {
-		timing.serialize = serialize_started.elapsed();
+		timing.serialize = serializing;
+		timing.write = writing;
 		timing.manifests = manifests;
 	}
 
@@ -1126,7 +908,6 @@ fn collect_written(report: &mut Report, written: Vec<Written>) {
 		}
 		report.files.push(written.path);
 	}
-	report.files.sort();
 }
 
 /// Check what the export wrote against what was there before, then update the

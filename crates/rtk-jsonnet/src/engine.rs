@@ -252,30 +252,35 @@ impl Evaluator {
 		&mut self,
 		implementation: JsonnetImplementation,
 	) -> Result<&mut ImplementationEvaluator, Error> {
-		let mut implementations = self
-			.engine
-			.implementations
-			.write()
-			.expect("implementations should not be poisoned");
+		// Creating an evaluator only reads the shared implementation; only the
+		// first one has to initialize it. Taking the write lock unconditionally
+		// would serialize every environment's evaluator construction — the whole
+		// standard library included — across the pool exporting them.
+		let mut created = {
+			let implementations = self
+				.engine
+				.implementations
+				.read()
+				.expect("implementations should not be poisoned");
+			implementations.create_evaluator(&implementation)
+		};
 
-		implementations.maybe_init_implementation(implementation.clone())?;
+		if created.is_none() {
+			let mut implementations = self
+				.engine
+				.implementations
+				.write()
+				.expect("implementations should not be poisoned");
+			implementations.maybe_init_implementation(implementation.clone())?;
+			created = implementations.create_evaluator(&implementation);
+		}
 
 		// TODO: Fix for multiple implementations.
-		let evaluator = if let (
-			JsonnetImplementation::Jrsonnet,
-			Implementations {
-				jrsonnet: Some(jrsonnet),
-				..
-			},
-		) = (implementation, &*implementations)
-		{
-			self.evaluator.insert(ImplementationEvaluator::Jrsonnet(
-				jrsonnet.create_evaluator(),
-			))
-		} else {
-			drop(implementations);
+		let Some(created) = created else {
+			// Not an implementation rtk has of its own, as the warning said.
 			return self.populate_evaluator(JsonnetImplementation::Jrsonnet);
 		};
+		let evaluator = self.evaluator.insert(created);
 
 		// tk drops Tanka's native functions for an environment evaluated by a
 		// jrsonnet binary, which knows nothing about them, so an environment that
@@ -806,6 +811,20 @@ struct Implementations {
 }
 
 impl Implementations {
+	/// Create an evaluator for `implementation`, if that is one rtk implements
+	/// and has already initialized.
+	fn create_evaluator(
+		&self,
+		implementation: &JsonnetImplementation,
+	) -> Option<ImplementationEvaluator> {
+		match (implementation, &self.jrsonnet) {
+			(JsonnetImplementation::Jrsonnet, Some(jrsonnet)) => Some(
+				ImplementationEvaluator::Jrsonnet(jrsonnet.create_evaluator()),
+			),
+			_ => None,
+		}
+	}
+
 	pub fn maybe_init_implementation(
 		&mut self,
 		implementation: JsonnetImplementation,

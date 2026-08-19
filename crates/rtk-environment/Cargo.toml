@@ -24,7 +24,6 @@ saphyr.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 
@@ -33,6 +32,8 @@ criterion = "0.7"
 serde_json.workspace = true
 stats_alloc = "0.1.10"
 tempfile.workspace = true
+# Exporting needs no runtime of its own; the tests check that it works inside one.
+tokio.workspace = true
 
 [features]
 # Exposes the filename machinery for the benchmarks to measure.

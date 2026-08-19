@@ -1,12 +1,12 @@
+use std::collections::VecDeque;
 use std::env;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use either::{Either, Left, Right};
 use rtk_jsonnet::jpath::JPath;
-use rtk_jsonnet::{Engine, EvaluationArrayValues, EvaluationObjectValues, EvaluationValue, Hidden};
+use rtk_jsonnet::{Engine, EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use tracing::Level;
@@ -127,11 +127,22 @@ impl Discovered {
 	}
 }
 
+const fn assert_send<T: Send>() {}
+const _: () = {
+	// Discovery is pulled from several threads at once, so that environments can
+	// be exported in parallel. Holding an evaluated value anywhere in here would
+	// make that impossible: see `Discover::inline_environments`.
+	assert_send::<Discover>();
+	assert_send::<Discovered>();
+};
+
 pub struct Discover {
 	engine: Engine,
 	paths: <Vec<PathBuf> as IntoIterator>::IntoIter,
 	directory: Option<DirectoryIter>,
-	inline_environments: Option<DiscoverInlineEnvs>,
+	/// Environments found in an entrypoint that declares several, waiting to
+	/// be handed out one at a time.
+	found: VecDeque<Discovered>,
 	seen_dirs: FxHashSet<Arc<PathBuf>>,
 	current_dir: Option<PathBuf>,
 	span: tracing::Span,
@@ -144,18 +155,16 @@ impl Discover {
 			engine,
 			paths: paths.into_iter(),
 			directory: None,
-			inline_environments: None,
+			found: VecDeque::new(),
 			seen_dirs: FxHashSet::with_capacity_and_hasher(paths_len, FxBuildHasher),
 			current_dir: None,
 			span: tracing::span!(Level::TRACE, "discover"),
 		}
 	}
 
+	/// Every environment declared anywhere in a directory's entrypoint.
 	#[tracing::instrument(skip(engine))]
-	fn inline_environments(
-		engine: &Engine,
-		path: Arc<PathBuf>,
-	) -> Result<Option<Either<Discovered, DiscoverInlineEnvs>>, Error> {
+	fn inline_environments(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
 		let main_path = path.join("main.jsonnet");
 		let options = engine.options();
 
@@ -181,15 +190,29 @@ impl Discover {
 		evaluator.with_import_paths(jpath.import_paths)?;
 		let evaluation = evaluator.evaluate_snippet(snippet)?;
 
-		match DiscoverInlineEnvs::discover_inline_env(path, namespace, evaluation.into_value())? {
-			// The entrypoint evaluated to one environment and nothing else, so
-			// there is nothing to pick it out from.
-			Some(Left(mut discovered)) => {
+		// Collected in one go, rather than yielded from an iterator that borrows
+		// the evaluation: evaluated values are `Rc`-based, so holding one between
+		// calls would pin discovery — and everything reading it — to this thread.
+		// What comes out is owned, which is what lets environments be discovered
+		// on one thread and exported on another, several at a time. The metadata
+		// script has already pruned every environment's data, so this is small.
+		let mut found = Vec::new();
+		let standalone = collect_inline_envs(
+			&path,
+			namespace.as_deref(),
+			evaluation.into_value(),
+			&mut found,
+		)?;
+
+		// The entrypoint evaluated to one environment and nothing else, so there
+		// is nothing to pick it out from.
+		if standalone {
+			for discovered in &mut found {
 				discovered.standalone = true;
-				Ok(Some(Left(discovered)))
 			}
-			other => Ok(other),
 		}
+
+		Ok(found)
 	}
 
 	#[tracing::instrument]
@@ -252,14 +275,9 @@ impl Discover {
 		}
 		path_buf.pop();
 
-		match Self::inline_environments(&self.engine, path)? {
-			Some(Left(discovered)) => Ok(Some(discovered)),
-			Some(Right(discovered)) => {
-				self.inline_environments = Some(discovered);
-				Ok(None)
-			}
-			None => Ok(None),
-		}
+		self.found
+			.extend(Self::inline_environments(&self.engine, path)?);
+		Ok(None)
 	}
 }
 
@@ -271,12 +289,8 @@ impl Iterator for Discover {
 			let span = self.span.clone();
 			let _guard = span.enter();
 
-			if let Some(inline) = &mut self.inline_environments {
-				if let Some(discovered) = inline.next() {
-					return Some(discovered);
-				}
-				self.inline_environments = None;
-				continue;
+			if let Some(discovered) = self.found.pop_front() {
+				return Some(Ok(discovered));
 			}
 
 			if let Some(directory) = &mut self.directory {
@@ -345,114 +359,51 @@ impl Iterator for Discover {
 	}
 }
 
-enum DiscoverInlineEnvs {
-	Array {
-		path: Arc<PathBuf>,
-		namespace: Option<Arc<str>>,
-		iter: EvaluationArrayValues,
-		recursion: Option<Box<DiscoverInlineEnvs>>,
-	},
-	Object {
-		path: Arc<PathBuf>,
-		namespace: Option<Arc<str>>,
-		iter: EvaluationObjectValues,
-		recursion: Option<Box<DiscoverInlineEnvs>>,
-	},
-}
-
-impl DiscoverInlineEnvs {
-	fn discover_inline_env(
-		path: Arc<PathBuf>,
-		namespace: Option<Arc<str>>,
-		value: EvaluationValue,
-	) -> Result<Option<Either<Discovered, Self>>, Error> {
-		let deserializable = value.clone();
-		match value.into_object() {
-			Ok(object) => {
-				// The metadata script leaves nothing but environments behind, but
-				// checking the kind is cheap and keeps a stray object from being
-				// deserialized as one.
-				if object.has("apiVersion", Hidden::Skip)?
-					&& object
-						.get("kind", Hidden::Skip)?
-						.and_then(|kind| kind.as_str())
-						.as_deref() == Some("Environment")
-				{
-					let environment: Environment<'static> = deserializable.deserialize()?;
-					return Ok(Some(Left(Discovered::from_environment(
-						path,
-						namespace.as_deref(),
-						environment,
-					))));
-				}
-				Ok(Some(Right(Self::Object {
-					path,
+/// Collect every environment declared anywhere in `value`, depth first.
+///
+/// Returns whether `value` was itself an environment, rather than something with
+/// environments somewhere inside it.
+fn collect_inline_envs(
+	path: &Arc<PathBuf>,
+	namespace: Option<&str>,
+	value: EvaluationValue,
+	found: &mut Vec<Discovered>,
+) -> Result<bool, Error> {
+	let deserializable = value.clone();
+	match value.into_object() {
+		Ok(object) => {
+			// The metadata script leaves nothing but environments behind, but
+			// checking the kind is cheap and keeps a stray object from being
+			// deserialized as one.
+			if object.has("apiVersion", Hidden::Skip)?
+				&& object
+					.get("kind", Hidden::Skip)?
+					.and_then(|kind| kind.as_str())
+					.as_deref() == Some("Environment")
+			{
+				let environment: Environment<'static> = deserializable.deserialize()?;
+				found.push(Discovered::from_environment(
+					Arc::clone(path),
 					namespace,
-					iter: object.into_values(),
-					recursion: None,
-				})))
+					environment,
+				));
+				return Ok(true);
 			}
-			Err(value) => match value.into_array() {
-				Ok(array) => Ok(Some(Right(Self::Array {
-					path,
-					namespace,
-					iter: array.into_values(),
-					recursion: None,
-				}))),
-				Err(_) => Ok(None),
-			},
+
+			for value in object.into_values() {
+				collect_inline_envs(path, namespace, value?, found)?;
+			}
 		}
-	}
-
-	fn recursion(&mut self) -> &mut Option<Box<Self>> {
-		match self {
-			Self::Array { recursion, .. } | Self::Object { recursion, .. } => recursion,
-		}
-	}
-}
-
-impl Iterator for DiscoverInlineEnvs {
-	type Item = Result<Discovered, Error>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		if let Some(result) = self.recursion().as_mut().and_then(Iterator::next) {
-			return Some(result);
-		}
-		*self.recursion() = None;
-
-		loop {
-			let (path, namespace, value) = match self {
-				Self::Array {
-					path,
-					namespace,
-					iter,
-					..
-				} => (path.clone(), namespace.clone(), iter.next()?),
-				Self::Object {
-					path,
-					namespace,
-					iter,
-					..
-				} => (path.clone(), namespace.clone(), iter.next()?),
-			};
-			let value = match value {
-				Ok(value) => value,
-				Err(error) => return Some(Err(error.into())),
-			};
-			match Self::discover_inline_env(path, namespace, value) {
-				Ok(Some(Left(discovered))) => return Some(Ok(discovered)),
-				Ok(Some(Right(recursion))) => {
-					*self.recursion() = Some(Box::new(recursion));
-					if let Some(result) = self.recursion().as_mut().and_then(Iterator::next) {
-						return Some(result);
-					}
-					*self.recursion() = None;
+		Err(value) => {
+			if let Ok(array) = value.into_array() {
+				for value in array.into_values() {
+					collect_inline_envs(path, namespace, value?, found)?;
 				}
-				Ok(None) => {}
-				Err(error) => return Some(Err(error)),
 			}
 		}
 	}
+
+	Ok(false)
 }
 
 impl Discovered {

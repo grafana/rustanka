@@ -830,7 +830,6 @@ fn exports_many_environments_while_streaming_discovery() {
 				recursive: true,
 				format: "{{env.spec.namespace}}/{{.kind}}-{{.metadata.name}}".to_owned(),
 				parallelism: 4,
-				write_concurrency: 8,
 				timing: true,
 				..options(&project)
 			},
