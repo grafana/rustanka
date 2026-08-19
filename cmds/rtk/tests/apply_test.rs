@@ -12,6 +12,7 @@ use rtk::commands::{
 	apply::{apply_environment, ApplyOpts, AutoApprove},
 	diff::ColorMode,
 };
+use rtk_spec::canonical::EnvironmentSpec;
 
 /// Run an apply test.
 ///
@@ -115,10 +116,8 @@ async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
 		.start()
 		.await;
 
-	let spec = rtk::spec::Spec {
-		context_names: Some(vec!["mock-context".to_string()]),
-		..rtk::spec::Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["mock-context".into()];
 	let connection =
 		rtk::k8s::client::ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
@@ -134,8 +133,7 @@ async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
 	let err = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)

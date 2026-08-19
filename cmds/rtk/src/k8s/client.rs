@@ -221,7 +221,7 @@ mod tests {
 	use super::*;
 
 	#[tokio::test]
-	async fn test_connect_no_cluster_specified_errors() {
+	async fn connect_no_cluster_specified_errors() {
 		let spec = EnvironmentSpec::default();
 		let kubeconfig = Kubeconfig::default();
 
