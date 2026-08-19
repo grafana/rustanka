@@ -2,14 +2,14 @@
 //!
 //! Discovery deliberately throws an environment's `data` away, so that listing
 //! environments does not manifest them. Exporting needs it, so this evaluates the
-//! environment again — this time keeping the manifests, captured rather than
-//! walked.
+//! environment again — this time materializing what it evaluates to, so that
+//! everything downstream works on owned JSON that can cross threads.
 
 use std::path::Path;
 
 use rtk_jsonnet::jpath::JPath;
-use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
+use serde::Deserialize as _;
 
 use crate::discover::entrypoint_snippet;
 use crate::export::{Error, LoadedEnvironment, OptionalData, process};
@@ -54,9 +54,6 @@ local selected = singleEnv(main);
 
 impl Engine {
 	/// Evaluate a discovered environment, keeping its manifests.
-	///
-	/// The manifests are captured, not walked: nothing beneath them is forced
-	/// until they are exported.
 	pub fn load(&self, discovered: &Discovered) -> Result<LoadedEnvironment, Error> {
 		let entrypoint = discovered.path.join(JPath::DEFAULT_ENTRYPOINT);
 		let jpath = JPath::resolve(&entrypoint)?;
@@ -77,7 +74,7 @@ impl Engine {
 
 		// An inline environment declares itself somewhere inside the evaluated
 		// value, wherever the Jsonnet put it.
-		let Some(mut environment) = find_environment(&evaluation)? else {
+		let Some(mut environment) = find_environment(evaluation)? else {
 			return Environment::new()
 				.with_metadata(discovered.environment.metadata.clone())
 				.with_spec(discovered.environment.spec.clone())
@@ -172,23 +169,19 @@ impl Engine {
 		options.apply(&mut evaluator)?;
 		evaluator.with_import_paths(jpath.import_paths.clone())?;
 
-		let environment = Environment::new()
-			.with_spec(rtk_spec::canonical::EnvironmentSpec::default())
-			.build()
-			.map_err(|source| Error::Spec { source })?;
-		let processing = process::processing_script(&environment, false);
 		let entrypoint = jpath
 			.entrypoint
 			.strip_prefix(&jpath.base_directory)
 			.unwrap_or(&jpath.entrypoint)
 			.to_string_lossy();
-		let script = format!("{processing}\nprocessValue(main)");
 		let evaluation =
-			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?;
-		LoadedEnvironment::bare(evaluation.into_value())
+			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, "main"))?;
+
+		let data = process::materialize(&evaluation.into_value())?;
+		LoadedEnvironment::bare(data)
 	}
 
-	fn evaluate(&self, discovered: &Discovered, jpath: &JPath) -> Result<EvaluationValue, Error> {
+	fn evaluate(&self, discovered: &Discovered, jpath: &JPath) -> Result<serde_json::Value, Error> {
 		let options = self.jsonnet.options();
 
 		// Discovery evaluated this environment without knowing what it asked for,
@@ -208,10 +201,10 @@ impl Engine {
 			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
 		}
 
-		let processing = process::processing_script(&discovered.environment, true);
 		let (selection, root) = match discovered.selected_by() {
 			// Selecting one of several inline environments has to happen inside
-			// Jsonnet, before anything is manifested.
+			// Jsonnet, before anything is manifested: the environments that were
+			// not asked for should not be evaluated at all.
 			Some(name) => (
 				SINGLE_ENVIRONMENT_EVAL_SCRIPT.replace("%s", name),
 				"selected",
@@ -223,48 +216,44 @@ impl Engine {
 			.strip_prefix(&jpath.base_directory)
 			.unwrap_or(&jpath.entrypoint)
 			.to_string_lossy();
-		let result = if discovered.is_static {
-			format!("processValue({root})")
-		} else {
-			format!("processEnvironments({root})")
-		};
-		let script = format!("{selection}\n{processing}\n{result}");
+		let script = format!("{selection}\n{root}");
 		let evaluation =
 			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?;
 
-		Ok(evaluation.into_value())
+		process::materialize(&evaluation.into_value())
 	}
 }
 
-/// Find the environment an evaluated value declares, wherever it is.
-fn find_environment(value: &EvaluationValue) -> Result<Option<LoadedEnvironment>, Error> {
-	let Some(object) = value.as_object() else {
-		let Some(array) = value.as_array() else {
-			return Ok(None);
-		};
-		for element in array.into_values() {
-			if let Some(environment) = find_environment(&element?)? {
-				return Ok(Some(environment));
+/// Find the environment an evaluated document declares, wherever it is.
+///
+/// Takes the environment out of the document rather than copying it: an
+/// environment's `data` is the bulk of what was evaluated.
+fn find_environment(value: serde_json::Value) -> Result<Option<LoadedEnvironment>, Error> {
+	match value {
+		serde_json::Value::Array(values) => {
+			for value in values {
+				if let Some(environment) = find_environment(value)? {
+					return Ok(Some(environment));
+				}
 			}
 		}
-		return Ok(None);
-	};
+		serde_json::Value::Object(object) => {
+			if object.contains_key("apiVersion") && object.contains_key("kind") {
+				if object.get("kind").and_then(serde_json::Value::as_str) != Some("Environment") {
+					return Ok(None);
+				}
+				let environment = Environment::deserialize(serde_json::Value::Object(object))
+					.map_err(|source| Error::Environment { source })?;
+				return Ok(Some(LoadedEnvironment::configured(environment)));
+			}
 
-	if object.has("apiVersion", Hidden::Skip)? && object.has("kind", Hidden::Skip)? {
-		let kind = object
-			.get("kind", Hidden::Skip)?
-			.and_then(|kind| kind.as_str());
-		if kind.as_deref() != Some("Environment") {
-			return Ok(None);
+			for (_, value) in object {
+				if let Some(environment) = find_environment(value)? {
+					return Ok(Some(environment));
+				}
+			}
 		}
-		let environment = value.clone().deserialize()?;
-		return Ok(Some(LoadedEnvironment::configured(environment)));
-	}
-
-	for value in object.into_values() {
-		if let Some(environment) = find_environment(&value?)? {
-			return Ok(Some(environment));
-		}
+		_ => {}
 	}
 
 	Ok(None)

@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
-use rtk_environments::export::{materialize_manifest, Error as EnvironmentError};
+use rtk_environments::export::Error as EnvironmentError;
 use rtk_spec::canonical::EnvironmentSpec;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -69,13 +69,8 @@ pub fn evaluate_manifests(
 ) -> Result<EvaluatedManifests> {
 	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet));
 	let environment = engine.load_single(path, name).map_err(environment_error)?;
-	let values = engine
+	let manifests = engine
 		.manifests(&environment, targets)
-		.map_err(environment_error)?;
-	let manifests = values
-		.iter()
-		.map(materialize_manifest)
-		.collect::<Result<Vec<_>, _>>()
 		.map_err(environment_error)?;
 	Ok(EvaluatedManifests {
 		spec: environment.spec().cloned(),

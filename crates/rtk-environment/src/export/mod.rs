@@ -24,7 +24,6 @@ use std::time::{Duration, Instant};
 
 use kube_core::{Selector, SelectorExt};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use rtk_jsonnet::EvaluationValue;
 use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::{Environment, EnvironmentSpec};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -93,7 +92,7 @@ impl LoadedEnvironment {
 		}
 	}
 
-	fn bare(data: EvaluationValue) -> Result<LoadedEnvironment, Error> {
+	fn bare(data: serde_json::Value) -> Result<LoadedEnvironment, Error> {
 		let environment = Environment::new()
 			.with_spec(EnvironmentSpec::default())
 			.with_data(OptionalData::new(data))
@@ -116,7 +115,7 @@ impl LoadedEnvironment {
 	}
 
 	/// The evaluated root value, if it was not `null`.
-	pub fn data(&self) -> Option<&EvaluationValue> {
+	pub fn data(&self) -> Option<&serde_json::Value> {
 		self.environment.data.get()
 	}
 
@@ -371,6 +370,12 @@ pub enum Error {
 	#[error("could not read the export index")]
 	Index(#[from] serde_json::Error),
 
+	#[error("could not read the environment the Jsonnet declares")]
+	Environment {
+		#[source]
+		source: serde_json::Error,
+	},
+
 	#[error("skipped after an earlier fatal error")]
 	Skipped,
 }
@@ -491,10 +496,11 @@ impl Export {
 	}
 
 	/// Render and serialize one chunk of a [`Plan`].
-	///
-	/// Environments are spread over the pool; values within one environment stay
-	/// sequential because their evaluation is thread-local.
-	fn serialize_chunk(&self, chunk: &[EvaluationValue], plan: &Plan) -> Result<Vec<File>, Error> {
+	fn serialize_chunk(
+		&self,
+		chunk: &[serde_json::Value],
+		plan: &Plan,
+	) -> Result<Vec<File>, Error> {
 		let template = plan
 			.template
 			.as_ref()
@@ -503,12 +509,9 @@ impl Export {
 		chunk
 			.iter()
 			.map(|manifest| {
-				let rendered = template.render_evaluated(manifest)?;
-				let path = template::to_relative_path_evaluated(
-					&rendered,
-					&self.options.extension,
-					manifest,
-				)?;
+				let rendered = template.render(manifest)?;
+				let path =
+					template::to_relative_path(&rendered, &self.options.extension, manifest)?;
 
 				Ok(File {
 					path,
@@ -520,12 +523,9 @@ impl Export {
 }
 
 /// The manifests an environment exports, before they are serialized.
-///
-/// Holds handles into the evaluation, so it must be serialized on the thread
-/// that produced it.
 #[derive(Default)]
 struct Plan {
-	manifests: Vec<EvaluationValue>,
+	manifests: Vec<serde_json::Value>,
 	/// How to name each manifest. Absent only when there is nothing to export.
 	template: Option<SpecializedTemplate>,
 }
@@ -535,7 +535,7 @@ impl Plan {
 		self.manifests.len()
 	}
 
-	fn chunks(&self) -> impl Iterator<Item = &[EvaluationValue]> {
+	fn chunks(&self) -> impl Iterator<Item = &[serde_json::Value]> {
 		self.manifests.chunks(CHUNK_SIZE)
 	}
 }
@@ -549,7 +549,7 @@ impl Engine {
 		&self,
 		environment: &LoadedEnvironment,
 		targets: &[String],
-	) -> Result<Vec<EvaluationValue>, Error> {
+	) -> Result<Vec<serde_json::Value>, Error> {
 		let targets = process::TargetMatcher::compile(targets)?;
 		manifests(environment, &targets)
 	}
@@ -776,34 +776,33 @@ fn select(
 fn manifests(
 	environment: &LoadedEnvironment,
 	targets: &[process::TargetMatcher],
-) -> Result<Vec<EvaluationValue>, Error> {
+) -> Result<Vec<serde_json::Value>, Error> {
 	let Some(data) = environment.data() else {
 		return Ok(Vec::new());
 	};
 
 	let mut manifests = Vec::new();
-	process::collect_manifests(data, "", &mut manifests)?;
-	if targets.is_empty() {
-		return Ok(manifests);
+	process::collect_manifests(data.clone(), "", &mut manifests)?;
+	if !targets.is_empty() {
+		manifests.retain(|manifest| process::keep_target(manifest, targets));
 	}
 
-	let mut filtered = Vec::with_capacity(manifests.len());
-	for manifest in manifests {
-		if process::keep_target(&manifest, targets)? {
-			filtered.push(manifest);
-		}
+	// Namespaces, labels and resource defaults are what the spec says this
+	// environment's resources are, so everything that reads manifests — exporting,
+	// diffing, applying — wants them injected. A bare Jsonnet entrypoint has no
+	// spec, and so gets no namespace.
+	let processing =
+		process::Processing::new(environment.inner(), environment.environment().is_some());
+	for manifest in &mut manifests {
+		processing.apply(manifest);
 	}
-	Ok(filtered)
+
+	Ok(manifests)
 }
 
 /// Serialize one processed manifest using Tanka's YAML formatting.
-pub fn serialize_manifest(manifest: &EvaluationValue) -> Result<String, Error> {
+pub fn serialize_manifest(manifest: &serde_json::Value) -> Result<String, Error> {
 	process::serialize(manifest)
-}
-
-/// Materialize one processed manifest as an owned JSON value.
-pub fn materialize_manifest(manifest: &EvaluationValue) -> Result<serde_json::Value, Error> {
-	process::materialize(manifest)
 }
 
 /// Evaluate, serialize and write one environment, all on the thread that picked
@@ -857,10 +856,10 @@ fn run_environment(
 	let plan = export.plan(&environment)?;
 	let mut serializing = planned.elapsed();
 	let mut writing = Duration::ZERO;
-	let mut directories = Directories::default();
 
 	// Written as they are serialized, and recorded as they are written, so that an
 	// environment that fails part way through still reports what it put on disk.
+	let mut directories = Directories::default();
 	for chunk in plan.chunks() {
 		let serialized = Instant::now();
 		let files = export.serialize_chunk(chunk, &plan)?;

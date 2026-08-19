@@ -1,24 +1,17 @@
-use rtk_jsonnet::{EvaluationValue, RawEvaluationValue};
 use rtk_spec::DeepMerge;
 use rtk_spec::v1alpha1::EnvironmentData;
-use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// The manifests of an environment, as evaluated but not yet walked.
+/// The manifests of an environment, as materialized JSON.
 ///
 /// Optional because an environment can legitimately evaluate to `null`, and
 /// because a static environment's spec is read from `spec.json` before anything
 /// is evaluated, so it starts out with none.
-///
-/// Deserializing this captures the manifests without walking them: nothing
-/// beneath them is forced until they are exported. The captured value carries the
-/// evaluation context it needs, so an environment can be handed around (and
-/// exported) without keeping the evaluation itself alive separately.
 #[derive(Clone, Debug, Default)]
-pub struct OptionalData(Option<EvaluationValue>);
+pub struct OptionalData(Option<serde_json::Value>);
 
 impl OptionalData {
-	pub fn new(value: EvaluationValue) -> OptionalData {
+	pub fn new(value: serde_json::Value) -> OptionalData {
 		OptionalData(Some(value))
 	}
 
@@ -27,17 +20,17 @@ impl OptionalData {
 	}
 
 	/// The manifests, if the environment has any.
-	pub fn get(&self) -> Option<&EvaluationValue> {
+	pub fn get(&self) -> Option<&serde_json::Value> {
 		self.0.as_ref()
 	}
 
-	pub fn into_inner(self) -> Option<EvaluationValue> {
+	pub fn into_inner(self) -> Option<serde_json::Value> {
 		self.0
 	}
 }
 
-impl From<EvaluationValue> for OptionalData {
-	fn from(value: EvaluationValue) -> Self {
+impl From<serde_json::Value> for OptionalData {
+	fn from(value: serde_json::Value) -> Self {
 		OptionalData::new(value)
 	}
 }
@@ -62,21 +55,15 @@ impl<'de> Deserialize<'de> for OptionalData {
 	where
 		D: Deserializer<'de>,
 	{
-		// `Option`'s implementation asks for `deserialize_option`, which the
-		// Jsonnet deserializer answers by visiting `some` for everything but
-		// `null` — exactly the distinction wanted here.
-		let Some(raw) = Option::<RawEvaluationValue>::deserialize(deserializer)? else {
-			return Ok(OptionalData::none());
-		};
-
-		EvaluationValue::current(raw)
-			.map(OptionalData::new)
-			.ok_or_else(|| {
-				D::Error::custom(
-					"an environment's data can only be deserialized while its evaluation's \
-					 context is in effect",
-				)
-			})
+		// `Option`'s implementation asks for `deserialize_option`, which answers
+		// by visiting `some` for everything but `null` — exactly the distinction
+		// wanted here, since an environment may evaluate to `null`.
+		Ok(
+			match Option::<serde_json::Value>::deserialize(deserializer)? {
+				Some(serde_json::Value::Null) | None => OptionalData::none(),
+				Some(value) => OptionalData::new(value),
+			},
+		)
 	}
 }
 
@@ -86,9 +73,6 @@ impl Serialize for OptionalData {
 		S: Serializer,
 	{
 		match self.0.as_ref() {
-			// Serializing manifests happens through
-			// [`EvaluationValue::manifest_into`] on the export path; this exists
-			// for the sake of round-tripping an environment as a document.
 			Some(value) => value.serialize(serializer),
 			None => serializer.serialize_none(),
 		}

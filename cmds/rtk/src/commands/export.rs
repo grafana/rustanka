@@ -207,7 +207,6 @@ fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, Options, rtk_jso
 		name,
 		selector,
 		recursive,
-		..Options::default()
 	};
 
 	Ok((paths, options, jsonnet.into_options()))

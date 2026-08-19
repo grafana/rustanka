@@ -3,6 +3,7 @@
 //! An environment is evaluated, serialized and written all on the one worker
 //! thread that picked it up, so writing needs no coordination with any other
 //! thread: environments run in parallel, and each writes only its own files.
+//!
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -108,12 +109,7 @@ fn write(file: File, path: PathBuf) -> Result<Written, Error> {
 				source,
 			})?;
 		}
-		Err(source) => {
-			return Err(Error::Write {
-				path: path.clone(),
-				source,
-			});
-		}
+		Err(source) => return Err(Error::Write { path, source }),
 	}
 
 	Ok(Written {

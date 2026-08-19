@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use rtk_environments::export::{serialize_manifest, Error as EnvironmentError};
 use rtk_environments::Engine;
-use rtk_jsonnet::{EvaluationValue, Options as JsonnetOptions};
+use rtk_jsonnet::Options as JsonnetOptions;
 use tracing::instrument;
 
 #[derive(Args)]
@@ -96,8 +96,8 @@ fn environment_error(error: EnvironmentError) -> anyhow::Error {
 	anyhow::anyhow!(error.report())
 }
 
-/// Convert evaluated manifests directly to a YAML stream.
-fn manifests_to_yaml(manifests: Vec<EvaluationValue>) -> Result<String> {
+/// Convert processed manifests into a YAML stream.
+fn manifests_to_yaml(manifests: Vec<serde_json::Value>) -> Result<String> {
 	let mut output = String::new();
 	for (i, manifest) in manifests.iter().enumerate() {
 		if i > 0 {

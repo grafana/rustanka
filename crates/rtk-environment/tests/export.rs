@@ -150,11 +150,7 @@ fn loads_processed_manifests_without_exporting() {
 
 	assert!(loaded.spec().is_some());
 	assert_eq!(manifests.len(), 1);
-	assert_eq!(
-		rtk_environments::export::materialize_manifest(&manifests[0])
-			.expect("the manifest materializes")["metadata"]["namespace"],
-		"demo"
-	);
+	assert_eq!(manifests[0]["metadata"]["namespace"], "demo");
 	assert_eq!(
 		rtk_environments::export::serialize_manifest(&manifests[0])
 			.expect("the manifest serializes"),
@@ -178,8 +174,7 @@ fn loads_a_bare_jsonnet_entrypoint() {
 	assert!(loaded.spec().is_none());
 	assert_eq!(manifests.len(), 1);
 	assert_eq!(
-		rtk_environments::export::materialize_manifest(&manifests[0])
-			.expect("the manifest materializes")["metadata"],
+		manifests[0]["metadata"],
 		serde_json::json!({"name": "settings"})
 	);
 }

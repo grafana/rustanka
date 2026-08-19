@@ -11,7 +11,6 @@ use std::collections::HashMap;
 
 use gtmpl::{Context, FuncError, Template, Value as TemplateValue};
 use regex::Regex;
-use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 use rtk_spec::v1alpha1::EnvironmentData;
 use serde_json::Value;
@@ -151,11 +150,6 @@ impl SpecializedTemplate {
 	}
 
 	/// Render an evaluated manifest without manifesting it through JSON.
-	pub(crate) fn render_evaluated(&self, manifest: &EvaluationValue) -> Result<String, Error> {
-		let context = Context::from(TemplateValue::Map(evaluation_template_context(manifest)?));
-		self.render_context(context)
-	}
-
 	fn render_context(&self, context: Context) -> Result<String, Error> {
 		let rendered = self
 			.template
@@ -178,81 +172,6 @@ impl SpecializedTemplate {
 	}
 }
 
-fn evaluation_template_context(
-	manifest: &EvaluationValue,
-) -> Result<HashMap<String, TemplateValue>, Error> {
-	let mut context = HashMap::with_capacity(3);
-	let Some(manifest) = manifest.as_object() else {
-		context.insert("metadata".into(), TemplateValue::Map(HashMap::new()));
-		return Ok(context);
-	};
-
-	for field in ["kind", "apiVersion"] {
-		if let Some(value) = manifest.get(field, Hidden::Skip)? {
-			context.insert(field.to_owned(), evaluation_to_template(&value)?);
-		}
-	}
-
-	let mut mapped = HashMap::new();
-	if let Some(metadata) = manifest.get("metadata", Hidden::Skip)?
-		&& let Some(metadata) = metadata.as_object()
-	{
-		for field in metadata.field_names(Hidden::Skip) {
-			let value = metadata.get_or_bail(&field, Hidden::Skip)?;
-			mapped.insert(field.to_string(), evaluation_to_template(&value)?);
-		}
-	}
-	mapped
-		.entry("labels".to_owned())
-		.or_insert_with(|| TemplateValue::Map(HashMap::new()));
-	context.insert("metadata".to_owned(), TemplateValue::Map(mapped));
-
-	Ok(context)
-}
-
-fn evaluation_to_template(value: &EvaluationValue) -> Result<TemplateValue, Error> {
-	if value.is_null() {
-		return Ok(TemplateValue::Nil);
-	}
-	if let Some(boolean) = value.as_bool() {
-		return Ok(TemplateValue::Bool(boolean));
-	}
-	if let Some(number) = value.as_number() {
-		if !(number == 0.0 && number.is_sign_negative())
-			&& number.fract() == 0.0
-			&& number >= -9_223_372_036_854_775_808.0
-			&& number < 9_223_372_036_854_775_808.0
-		{
-			return Ok(TemplateValue::Number((number as i64).into()));
-		}
-		return Ok(TemplateValue::Number(number.into()));
-	}
-	if let Some(string) = value.as_str() {
-		return Ok(TemplateValue::String(string.to_string()));
-	}
-	if let Some(array) = value.as_array() {
-		let mut mapped = Vec::new();
-		for value in array.into_values() {
-			mapped.push(evaluation_to_template(&value?)?);
-		}
-		return Ok(TemplateValue::Array(mapped));
-	}
-	if let Some(object) = value.as_object() {
-		let mut mapped = HashMap::new();
-		for field in object.field_names(Hidden::Skip) {
-			let value = object.get_or_bail(&field, Hidden::Skip)?;
-			mapped.insert(field.to_string(), evaluation_to_template(&value)?);
-		}
-		return Ok(TemplateValue::Map(mapped));
-	}
-
-	// Produce the evaluator's normal function diagnostic.
-	value.manifest()?;
-	unreachable!("every Jsonnet value kind handled")
-}
-
-/// Only the fields templates can reach: walking the whole manifest would be
-/// wasted work on the hot path.
 fn template_context(manifest: &Value) -> HashMap<String, TemplateValue> {
 	let mut context = HashMap::with_capacity(3);
 
@@ -359,7 +278,6 @@ fn replace_outside_actions(template: &str, old: &str, new: &str) -> String {
 ///
 /// Each segment is sanitized separately, so a rendered value can never escape
 /// the output directory.
-#[cfg(test)]
 pub(crate) fn to_relative_path(
 	rendered: &str,
 	extension: &str,
@@ -375,55 +293,7 @@ pub(crate) fn to_relative_path(
 
 	let Some((file, directories)) = segments.split_last() else {
 		return Err(Error::EmptyFilename {
-			manifest: describe_json(manifest),
-		});
-	};
-
-	let mut path = std::path::PathBuf::new();
-	for directory in directories {
-		path.push(directory.as_ref());
-	}
-	path.push(format!("{file}.{extension}"));
-
-	Ok(path)
-}
-
-#[cfg(test)]
-fn describe_json(manifest: &Value) -> String {
-	let kind = manifest.get("kind").and_then(Value::as_str).unwrap_or("");
-	let name = manifest
-		.pointer("/metadata/name")
-		.and_then(Value::as_str)
-		.unwrap_or("");
-	let kind_name = format!("{kind}/{name}");
-	if kind_name == "/" {
-		let mut dumped = manifest.to_string();
-		dumped.truncate(200);
-		return dumped;
-	}
-
-	match manifest.get("apiVersion").and_then(Value::as_str) {
-		Some(api_version) => format!("{api_version} {kind_name}"),
-		None => kind_name,
-	}
-}
-
-pub(crate) fn to_relative_path_evaluated(
-	rendered: &str,
-	extension: &str,
-	manifest: &EvaluationValue,
-) -> Result<std::path::PathBuf, Error> {
-	let segments: Vec<Cow<'_, str>> = rendered
-		.split('/')
-		.map(str::trim)
-		.filter(|segment| !segment.is_empty())
-		.map(sanitize)
-		.filter(|segment| !segment.is_empty())
-		.collect();
-
-	let Some((file, directories)) = segments.split_last() else {
-		return Err(Error::EmptyFilename {
-			manifest: process::describe(manifest)?,
+			manifest: process::describe(manifest),
 		});
 	};
 
@@ -510,24 +380,6 @@ mod tests {
 			.expect("the template renders")
 	}
 
-	fn render_evaluated(format: &str, manifest: &Value) -> String {
-		let evaluated = rtk_jsonnet::Engine::new(Default::default())
-			.create_evaluator()
-			.evaluate_snippet(manifest.to_string())
-			.expect("valid Jsonnet")
-			.into_value();
-		FilenameTemplate::new(format)
-			.expect("a valid template")
-			.specialize(&environment(
-				"demo",
-				"environments/demo",
-				&[("tier", "test")],
-			))
-			.expect("the template specializes")
-			.render_evaluated(&evaluated)
-			.expect("the template renders")
-	}
-
 	fn config_map() -> Value {
 		json!({
 			"apiVersion": "v1",
@@ -611,7 +463,7 @@ mod tests {
 	}
 
 	#[test]
-	fn evaluated_integer_metadata_keeps_template_integer_semantics() {
+	fn integer_metadata_keeps_template_integer_semantics() {
 		let manifest = json!({
 			"apiVersion": "v1",
 			"kind": "ConfigMap",
@@ -620,7 +472,6 @@ mod tests {
 		let format = "{{if eq .metadata.generation 3}}three{{else}}other{{end}}";
 
 		assert_eq!(render(format, &manifest), "three");
-		assert_eq!(render_evaluated(format, &manifest), "three");
 	}
 
 	#[test]
