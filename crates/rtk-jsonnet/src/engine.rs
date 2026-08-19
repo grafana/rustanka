@@ -92,6 +92,20 @@ pub struct Evaluator {
 	evaluator: Option<ImplementationEvaluator>,
 }
 
+/// A configured jrsonnet context for integrations with a custom `State`.
+#[derive(Clone)]
+pub struct JrsonnetContext(rtk_jsonnet_jrsonnet::Evaluator);
+
+impl JrsonnetContext {
+	pub fn context_initializer(&self) -> rtk_jsonnet_jrsonnet::ContextInitializer {
+		self.0.context_initializer()
+	}
+
+	pub fn with_current<T>(&self, callback: impl FnOnce() -> T) -> T {
+		self.0.with_current(callback)
+	}
+}
+
 macro_rules! call_implementation_evaluator_method {
     ($self:ident, $method:ident, $($argument:expr),* $(,)?) => {
         match &mut $self.evaluator {
@@ -122,6 +136,22 @@ macro_rules! call_implementation_evaluator_method {
 }
 
 impl Evaluator {
+	/// Build a jrsonnet context initializer with this evaluator's native plugins.
+	///
+	/// This is for integrations that need a custom jrsonnet import resolver while
+	/// retaining the same native functions as the main engine.
+	pub fn jrsonnet_context(mut self) -> Result<JrsonnetContext, Error> {
+		let options = self.options.clone();
+		options.apply(&mut self)?;
+		if self.evaluator.is_none() {
+			let implementation = self.selected_implementation();
+			self.populate_evaluator(implementation)?;
+		}
+		match self.evaluator.expect("evaluator was populated") {
+			ImplementationEvaluator::Jrsonnet(evaluator) => Ok(JrsonnetContext(evaluator)),
+		}
+	}
+
 	pub fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, Error> {
 		self.options.rc.spec.merge_from(rc.spec);
 		let implementation = self

@@ -49,7 +49,7 @@ const CLUSTER_WIDE_KINDS: &[&str] = &[
 
 /// Jsonnet helpers that apply Tanka's manifest processing without manifesting
 /// values through JSON first.
-pub(crate) fn processing_script<'a, D>(environment: &Environment<'a, D>) -> String
+pub(crate) fn processing_script<'a, D>(environment: &Environment<'a, D>, configured: bool) -> String
 where
 	D: EnvironmentData<'a>,
 {
@@ -70,7 +70,7 @@ where
 			.spec
 			.inject_labels
 			.then(|| environment_label(&environment.metadata)),
-		"namespace": environment.spec.namespace(),
+		"namespace": if configured { environment.spec.namespace() } else { "" },
 	});
 
 	format!(
@@ -462,7 +462,7 @@ fn kind_name(manifest: &EvaluationValue) -> Result<String, Error> {
 
 /// The `tanka.dev/environment` label value: Tanka's `NameLabel()`, the first 48
 /// characters of the SHA256 of `<name>:<namespace>`.
-fn environment_label(
+pub(crate) fn environment_label(
 	metadata: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
 ) -> String {
 	use std::fmt::Write as _;
@@ -576,6 +576,56 @@ pub(crate) fn serialize(manifest: &EvaluationValue) -> Result<String, Error> {
 	Ok(serialized)
 }
 
+/// Materialize a final processed manifest for consumers that need an owned,
+/// thread-safe JSON value.
+pub(crate) fn materialize(manifest: &EvaluationValue) -> Result<serde_json::Value, Error> {
+	if manifest.is_null() {
+		return Ok(serde_json::Value::Null);
+	}
+	if let Some(boolean) = manifest.as_bool() {
+		return Ok(boolean.into());
+	}
+	if let Some(number) = manifest.as_number() {
+		let number = if !number.is_sign_negative()
+			&& number.fract() == 0.0
+			&& number < 18_446_744_073_709_551_616.0
+		{
+			serde_json::Number::from(number as u64)
+		} else if number.fract() == 0.0
+			&& number >= -9_223_372_036_854_775_808.0
+			&& number < 9_223_372_036_854_775_808.0
+		{
+			serde_json::Number::from(number as i64)
+		} else {
+			serde_json::Number::from_f64(number)
+				.ok_or_else(|| Error::Serialize(anyhow::anyhow!("non-finite Jsonnet number")))?
+		};
+		return Ok(serde_json::Value::Number(number));
+	}
+	if let Some(string) = manifest.as_str() {
+		return Ok(serde_json::Value::String(string.to_string()));
+	}
+	if let Some(array) = manifest.as_array() {
+		let mut values = Vec::new();
+		for value in array.into_values() {
+			values.push(materialize(&value?)?);
+		}
+		return Ok(serde_json::Value::Array(values));
+	}
+	if let Some(object) = manifest.as_object() {
+		let fields = object.field_names();
+		let mut values = serde_json::Map::with_capacity(fields.len());
+		for field in fields {
+			let value = object.get_or_bail(&field, Hidden::Skip)?;
+			values.insert(field.into(), materialize(&value)?);
+		}
+		return Ok(serde_json::Value::Object(values));
+	}
+
+	manifest.manifest()?;
+	unreachable!("every Jsonnet value kind handled")
+}
+
 #[cfg(test)]
 mod tests {
 	use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -611,7 +661,7 @@ mod tests {
 	fn processed(manifest: Value, environment: &Environment<'static>) -> Value {
 		let script = format!(
 			"local main = {manifest};\n{}\nprocessValue(main)",
-			processing_script(environment)
+			processing_script(environment, true)
 		);
 		let value = rtk_jsonnet::Engine::new(Default::default())
 			.create_evaluator()
@@ -800,7 +850,7 @@ local main = {{
 {}
 processValue(main)[rtkProcessedManifest]
 "#,
-			processing_script(&environment(|_| {}))
+			processing_script(&environment(|_| {}), true)
 		);
 		let value = rtk_jsonnet::Engine::new(Default::default())
 			.create_evaluator()

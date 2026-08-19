@@ -13,23 +13,21 @@ use clap::Args;
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, get_or_create_connection, prompt_confirmation, setup_diff_engine,
-	validate_dry_run, DiffEngineConfig,
+	create_tokio_runtime, evaluate_manifests, get_or_create_connection, prompt_confirmation,
+	setup_diff_engine, validate_dry_run, DiffEngineConfig,
 };
 use super::diff::ColorMode;
 
 // Re-export AutoApprove for backwards compatibility
 pub use super::common::AutoApprove;
 use crate::{
-	environments::{extract_manifests, process_manifests},
-	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
+	k8s::diff::DiffStrategy,
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
 		diff::{DiffStatus, ResourceDiff},
 		output::DiffOutput,
 	},
-	spec::DiffStrategy,
 };
 
 #[derive(Args)]
@@ -103,20 +101,15 @@ pub struct PruneOpts {
 pub async fn prune_environment<W: Write>(
 	path: &Path,
 	connection: Option<ClusterConnection>,
-	global_opts: GlobalEvaluatorOptions,
-	eval_opts: EvaluatorOptions,
+	jsonnet: rtk_jsonnet::Options,
 	opts: PruneOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
-	let env_spec = env_data.spec;
-
-	// Get the spec for cluster connection and strategy selection
-	let spec = env_spec.as_ref().map(|e| &e.spec);
+	let evaluated = evaluate_manifests(path, jsonnet, opts.name.as_deref(), &opts.target)?;
+	let spec = evaluated.spec.as_ref();
 
 	// Prune requires injectLabels to be enabled
-	let inject_labels = spec.and_then(|s| s.inject_labels).unwrap_or(false);
+	let inject_labels = spec.is_some_and(|spec| spec.inject_labels);
 	if !inject_labels {
 		anyhow::bail!(
 			"spec.injectLabels is set to false in your spec.json. Tanka needs to add \
@@ -125,11 +118,8 @@ pub async fn prune_environment<W: Write>(
 		);
 	}
 
-	// Extract manifests from environment data
-	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
+	let manifests = evaluated.manifests;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests");
-
-	process_manifests(&mut manifests, &env_spec);
 
 	let connection = get_or_create_connection(connection, spec).await?;
 
@@ -147,14 +137,15 @@ pub async fn prune_environment<W: Write>(
 	let default_namespace = setup.default_namespace;
 
 	// Get environment label for prune detection
-	let env_label = env_spec
-		.as_ref()
-		.map(crate::spec::generate_environment_label);
-
 	// Compute diffs with prune
 	tracing::debug!("computing differences with prune detection");
 	let diffs = diff_engine
-		.diff_all(&manifests, true, env_label.as_deref(), true)
+		.diff_all(
+			&manifests,
+			true,
+			evaluated.environment_label.as_deref(),
+			true,
+		)
 		.await
 		.context("computing diffs")?;
 
@@ -254,8 +245,7 @@ pub async fn prune_environment<W: Write>(
 /// Async implementation of the prune command.
 #[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
-	let global_opts = args.jsonnet.into_global_evaluator_options();
-	let eval_opts = EvaluatorOptions::default();
+	let jsonnet = args.jsonnet.into_options();
 	let opts = PruneOpts {
 		diff_strategy: args.diff_strategy,
 		auto_approve: args.auto_approve.unwrap_or_default(),
@@ -266,6 +256,6 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		name: args.name,
 	};
 
-	prune_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
+	prune_environment(&args.path, None, jsonnet, opts, writer).await?;
 	Ok(())
 }

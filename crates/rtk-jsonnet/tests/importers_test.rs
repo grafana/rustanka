@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use rtk_jsonnet::importers::{ImporterIndex, TargetFile};
 
@@ -34,6 +34,28 @@ fn sorted(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
 #[test]
 fn test_no_files() {
 	assert_eq!(find_importers(&[]), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn indexes_files_in_directories_that_also_have_subdirectories() {
+	let root = tempfile::tempdir().unwrap();
+	fs::write(root.path().join("jsonnetfile.json"), "{}").unwrap();
+	fs::write(root.path().join("common.libsonnet"), "{}").unwrap();
+	fs::create_dir_all(root.path().join("environment/nested")).unwrap();
+	fs::write(
+		root.path().join("environment/main.jsonnet"),
+		"import '../common.libsonnet'",
+	)
+	.unwrap();
+
+	let index = ImporterIndex::build(root.path()).unwrap();
+	let importers = index
+		.find_importers(&[TargetFile::Existing(root.path().join("common.libsonnet"))])
+		.unwrap();
+	assert_eq!(
+		importers,
+		vec![root.path().join("environment/main.jsonnet")]
+	);
 }
 
 #[test]

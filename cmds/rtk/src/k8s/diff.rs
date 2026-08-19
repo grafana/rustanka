@@ -5,12 +5,14 @@
 
 use std::{collections::HashSet, fmt, sync::Arc};
 
+use clap::ValueEnum;
 use k8s::strategicpatch::CombinedSchemaLookup;
 use kube::{
 	api::{Api, DynamicObject, ListParams, Patch, PatchParams, PostParams},
 	core::GroupVersionKind,
 	Client,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::instrument;
@@ -22,7 +24,65 @@ use super::{
 	redacted_object::{RedactedObject, UnredactedObject},
 	ResourceScope,
 };
-use crate::spec::DiffStrategy;
+use rtk_spec::canonical::EnvironmentSpec;
+
+/// Strategy used to compare local manifests with cluster state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffStrategy {
+	#[default]
+	Native,
+	Server,
+	Validate,
+	Subset,
+}
+
+impl fmt::Display for DiffStrategy {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			DiffStrategy::Native => write!(f, "native"),
+			DiffStrategy::Server => write!(f, "server"),
+			DiffStrategy::Validate => write!(f, "validate"),
+			DiffStrategy::Subset => write!(f, "subset"),
+		}
+	}
+}
+
+impl DiffStrategy {
+	pub fn from_spec(
+		spec: &EnvironmentSpec,
+		server_version: &k8s_openapi::apimachinery::pkg::version::Info,
+	) -> Self {
+		if let Some(strategy) = spec.diff_strategy.as_deref() {
+			match strategy {
+				"native" => return DiffStrategy::Native,
+				"server" => return DiffStrategy::Server,
+				"validate" => return DiffStrategy::Validate,
+				"subset" => return DiffStrategy::Subset,
+				_ => tracing::warn!(
+					"Unknown diffStrategy '{}', using automatic selection",
+					strategy
+				),
+			}
+		}
+
+		if spec.apply_strategy.as_deref() == Some("server") {
+			return DiffStrategy::Server;
+		}
+
+		let major: u32 = server_version.major.parse().unwrap_or(1);
+		let minor: u32 = server_version
+			.minor
+			.trim_end_matches('+')
+			.parse()
+			.unwrap_or(0);
+		if major >= 1 && minor >= 13 {
+			DiffStrategy::Native
+		} else {
+			DiffStrategy::Subset
+		}
+	}
+}
 
 /// Errors that can occur during diff operations.
 #[derive(Debug, Error)]

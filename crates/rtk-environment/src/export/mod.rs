@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use kube_core::{Selector, SelectorExt};
 use rtk_jsonnet::EvaluationValue;
 use rtk_jsonnet::jpath::JPath;
-use rtk_spec::canonical::Environment;
+use rtk_spec::canonical::{Environment, EnvironmentSpec};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::mpsc;
 use tracing::{debug, trace};
@@ -47,6 +47,23 @@ pub use crate::export::data::OptionalData;
 pub use crate::export::manifest::{InvalidMergeStrategy, MergeStrategy};
 pub use crate::export::template::DEFAULT_FORMAT;
 
+/// A Kubernetes label selector used to filter discovered environments.
+pub struct LabelSelector(Selector);
+
+impl LabelSelector {
+	pub fn parse(input: &str) -> Result<LabelSelector, Error> {
+		selector::parse(input).map(LabelSelector)
+	}
+
+	pub fn matches<'a, D>(&self, environment: &Environment<'a, D>) -> bool
+	where
+		D: rtk_spec::v1alpha1::EnvironmentData<'a>,
+	{
+		self.0
+			.matches(environment.metadata.labels.as_ref().unwrap_or(&NO_LABELS))
+	}
+}
+
 /// How many serialized manifests a worker sends at a time.
 ///
 /// Environments can hold thousands of manifests, and this is what keeps a whole
@@ -58,7 +75,61 @@ static NO_LABELS: std::sync::LazyLock<std::collections::BTreeMap<String, String>
 	std::sync::LazyLock::new(std::collections::BTreeMap::new);
 
 /// An environment with its evaluated manifests attached.
-pub type LoadedEnvironment = Environment<'static, OptionalData>;
+///
+/// Bare Jsonnet entrypoints have no Tanka environment configuration. They still
+/// use the same evaluated-data representation, but [`LoadedEnvironment::environment`]
+/// returns `None` so consumers do not apply settings that were never configured.
+#[derive(Clone, Debug)]
+pub struct LoadedEnvironment {
+	environment: Environment<'static, OptionalData>,
+	configured: bool,
+}
+
+impl LoadedEnvironment {
+	fn configured(environment: Environment<'static, OptionalData>) -> LoadedEnvironment {
+		LoadedEnvironment {
+			environment,
+			configured: true,
+		}
+	}
+
+	fn bare(data: EvaluationValue) -> Result<LoadedEnvironment, Error> {
+		let environment = Environment::new()
+			.with_spec(EnvironmentSpec::default())
+			.with_data(OptionalData::new(data))
+			.build()
+			.map_err(|source| Error::Spec { source })?;
+		Ok(LoadedEnvironment {
+			environment,
+			configured: false,
+		})
+	}
+
+	/// The configured environment, or `None` for a bare Jsonnet entrypoint.
+	pub fn environment(&self) -> Option<&Environment<'static, OptionalData>> {
+		self.configured.then_some(&self.environment)
+	}
+
+	/// The configured environment spec, or `None` for a bare entrypoint.
+	pub fn spec(&self) -> Option<&EnvironmentSpec> {
+		self.environment().map(|environment| &environment.spec)
+	}
+
+	/// The evaluated root value, if it was not `null`.
+	pub fn data(&self) -> Option<&EvaluationValue> {
+		self.environment.data.get()
+	}
+
+	/// Tanka's stable label for this configured environment.
+	pub fn environment_label(&self) -> Option<String> {
+		self.environment()
+			.map(|environment| process::environment_label(&environment.metadata))
+	}
+
+	fn inner(&self) -> &Environment<'static, OptionalData> {
+		&self.environment
+	}
+}
 
 /// Options for both kinds of export.
 #[derive(Clone, Debug)]
@@ -217,6 +288,23 @@ pub enum Error {
 	NothingMatched {
 		name: Option<String>,
 		selector: Option<String>,
+	},
+
+	#[error("no environment found matching name '{name}'. Available environments: {available}")]
+	NoEnvironmentNamed { name: String, available: String },
+
+	#[error(
+		"found multiple Environments in {path:?}. Use `--name` to select a single one: \n - {names}"
+	)]
+	MultipleEnvironments { path: String, names: String },
+
+	#[error(
+		"found multiple Environments in {path:?} matching {name:?}. Provide a more specific name that matches a single one: \n - {names}"
+	)]
+	MultipleEnvironmentsNamed {
+		path: String,
+		name: String,
+		names: String,
 	},
 
 	#[error(
@@ -398,25 +486,12 @@ impl Export {
 
 	/// Work out what an environment exports, without serializing any of it yet.
 	fn plan(&self, environment: &LoadedEnvironment) -> Result<Plan, Error> {
-		let Some(data) = environment.data.get() else {
-			return Ok(Plan::default());
-		};
-
-		let mut manifests = Vec::new();
-		process::collect_manifests(data, "", &mut manifests)?;
-
-		if !self.targets.is_empty() {
-			let mut filtered = Vec::with_capacity(manifests.len());
-			for manifest in manifests {
-				if process::keep_target(&manifest, &self.targets)? {
-					filtered.push(manifest);
-				}
-			}
-			manifests = filtered;
-		}
+		let manifests = manifests(environment, &self.targets)?;
 
 		Ok(Plan {
-			template: Some(self.template.specialize(environment)?),
+			template: (!manifests.is_empty())
+				.then(|| self.template.specialize(environment.inner()))
+				.transpose()?,
 			manifests,
 		})
 	}
@@ -483,6 +558,19 @@ enum Message {
 }
 
 impl Engine {
+	/// Return the processed, validated manifests from an evaluated environment.
+	///
+	/// This does not compile filename templates, serialize YAML, write files, or
+	/// update an export index.
+	pub fn manifests(
+		&self,
+		environment: &LoadedEnvironment,
+		targets: &[String],
+	) -> Result<Vec<EvaluationValue>, Error> {
+		let targets = process::TargetMatcher::compile(targets)?;
+		manifests(environment, &targets)
+	}
+
 	/// Export one environment that has already been evaluated.
 	///
 	/// `source` is where the environment came from — its directory, or its
@@ -619,6 +707,39 @@ impl Engine {
 
 		Ok(exported)
 	}
+}
+
+fn manifests(
+	environment: &LoadedEnvironment,
+	targets: &[process::TargetMatcher],
+) -> Result<Vec<EvaluationValue>, Error> {
+	let Some(data) = environment.data() else {
+		return Ok(Vec::new());
+	};
+
+	let mut manifests = Vec::new();
+	process::collect_manifests(data, "", &mut manifests)?;
+	if targets.is_empty() {
+		return Ok(manifests);
+	}
+
+	let mut filtered = Vec::with_capacity(manifests.len());
+	for manifest in manifests {
+		if process::keep_target(&manifest, targets)? {
+			filtered.push(manifest);
+		}
+	}
+	Ok(filtered)
+}
+
+/// Serialize one processed manifest using Tanka's YAML formatting.
+pub fn serialize_manifest(manifest: &EvaluationValue) -> Result<String, Error> {
+	process::serialize(manifest)
+}
+
+/// Materialize one processed manifest as an owned JSON value.
+pub fn materialize_manifest(manifest: &EvaluationValue) -> Result<serde_json::Value, Error> {
+	process::materialize(manifest)
 }
 
 /// The driver of a bulk export: discovers, dispatches and writes, in that order

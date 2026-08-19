@@ -1,11 +1,13 @@
 //! Env list subcommand handler.
 
-use std::io::Write;
+use std::{io::Write, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
+use rtk_environments::export::LabelSelector;
+use tabwriter::TabWriter;
 
-use crate::{commands::common::UnimplementedArgs, environments};
+use crate::commands::common::{JsonnetArgs, UnimplementedArgs};
 
 #[derive(Args)]
 pub struct ListArgs {
@@ -50,14 +52,104 @@ pub struct ListArgs {
 }
 
 /// Run the env list subcommand.
-pub fn run<W: Write>(args: ListArgs, writer: W) -> Result<()> {
+pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
 	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
+	let search_path = args
+		.path
+		.as_deref()
+		.map(PathBuf::from)
+		.unwrap_or(std::env::current_dir()?);
+	let options = jsonnet_options(&args)?;
+	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(options));
+	let mut environments = engine
+		.discover(vec![search_path.clone()])
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(|error| anyhow::anyhow!("finding environments: {error}"))?;
 
-	environments::list_envs_to_writer(
-		args.path.as_deref().map(std::path::Path::new),
-		args.json,
-		writer,
-	)
+	if let Some(selector) = args.selector.as_deref() {
+		let selector =
+			LabelSelector::parse(selector).map_err(|error| anyhow::anyhow!(error.report()))?;
+		environments.retain(|environment| selector.matches(&environment.environment));
+	}
+	environments.sort_by(|left, right| {
+		left.environment
+			.metadata
+			.name
+			.cmp(&right.environment.metadata.name)
+	});
+
+	if args.names {
+		for environment in environments {
+			if let Some(name) = environment.environment.metadata.name.as_deref() {
+				writeln!(writer, "{name}")?;
+			}
+		}
+		return Ok(());
+	}
+	if args.json {
+		let values = environments
+			.iter()
+			.map(|environment| environment_json(&environment.environment))
+			.collect::<Result<Vec<_>>>()?;
+		writeln!(writer, "{}", serde_json::to_string(&values)?)?;
+		return Ok(());
+	}
+
+	let mut table = TabWriter::new(writer).padding(4);
+	writeln!(table, "NAME\tNAMESPACE\tSERVER")?;
+	if environments.is_empty() {
+		writeln!(table, "No environments found in {}", search_path.display())?;
+	} else {
+		for discovered in environments {
+			let environment = discovered.environment;
+			writeln!(
+				table,
+				"{}\t{}\t{}",
+				environment.metadata.name.as_deref().unwrap_or("unnamed"),
+				environment.spec.namespace(),
+				environment.spec.api_server.as_deref().unwrap_or("-")
+			)?;
+		}
+	}
+	table.flush()?;
+	Ok(())
+}
+
+fn jsonnet_options(args: &ListArgs) -> Result<rtk_jsonnet::Options> {
+	fn values(values: &[String]) -> Result<rustc_hash::FxHashMap<Box<str>, Box<str>>> {
+		values
+			.iter()
+			.map(|value| JsonnetArgs::parse_key_value(value).map_err(anyhow::Error::msg))
+			.collect()
+	}
+
+	Ok(rtk_jsonnet::Options {
+		ext_code: values(&args.ext_code)?,
+		ext_variables: values(&args.ext_str)?,
+		top_level_code: values(&args.tla_code)?,
+		top_level_arguments: values(&args.tla_str)?,
+		max_stack: Some(
+			args.max_stack
+				.try_into()
+				.context("max stack must be positive")?,
+		),
+		..rtk_jsonnet::Options::default()
+	})
+}
+
+fn environment_json(
+	environment: &rtk_spec::canonical::Environment<'static>,
+) -> Result<serde_json::Value> {
+	let mut value = serde_json::to_value(environment)?;
+	let spec = value
+		.get_mut("spec")
+		.and_then(serde_json::Value::as_object_mut)
+		.context("environment spec did not serialize as an object")?;
+	spec.entry("resourceDefaults")
+		.or_insert_with(|| serde_json::json!({}));
+	spec.entry("expectVersions")
+		.or_insert_with(|| serde_json::json!({}));
+	Ok(value)
 }
 
 #[cfg(test)]

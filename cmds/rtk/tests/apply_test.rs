@@ -8,12 +8,9 @@
 mod test_utils;
 
 use k8s_mock::DiscoveryMode;
-use rtk::{
-	commands::{
-		apply::{apply_environment, ApplyOpts, AutoApprove},
-		diff::ColorMode,
-	},
-	jsonnet::evaluator::{EvaluatorOptions, GlobalEvaluatorOptions},
+use rtk::commands::{
+	apply::{apply_environment, ApplyOpts, AutoApprove},
+	diff::ColorMode,
 };
 
 /// Run an apply test.
@@ -50,8 +47,7 @@ async fn run_apply_test(test_dir: &std::path::Path, discovery_mode: DiscoveryMod
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection.clone()),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -71,8 +67,7 @@ async fn run_apply_test(test_dir: &std::path::Path, discovery_mode: DiscoveryMod
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -182,8 +177,7 @@ async fn run_apply_no_changes_test(test_dir: &std::path::Path, discovery_mode: D
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)

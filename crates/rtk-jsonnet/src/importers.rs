@@ -303,27 +303,22 @@ impl ImporterIndex {
 	/// be re-expressed through the symlinks that reach them without walking
 	/// the tree per file.
 	fn symlink_map(&self) -> HashMap<PathBuf, Vec<PathBuf>> {
-		let links: Vec<(PathBuf, PathBuf)> = Self::collect_directories(&self.root, 2)
-			.par_iter()
-			.flat_map_iter(|dir| {
-				walkdir::WalkDir::new(dir)
-					.follow_links(false)
-					.into_iter()
-					.filter_map(|entry| {
-						let entry = entry.ok()?;
-						let path = entry.path();
-						if !path.is_symlink() {
-							return None;
-						}
-						let target = fs::read_link(path).ok()?;
-						let target = if target.is_absolute() {
-							target
-						} else {
-							path.parent_or_root().join(target)
-						};
-						Some((fs::canonicalize(target).ok()?, entry.into_path()))
-					})
-					.collect::<Vec<_>>()
+		let links: Vec<(PathBuf, PathBuf)> = walkdir::WalkDir::new(&self.root)
+			.follow_links(false)
+			.into_iter()
+			.filter_map(|entry| {
+				let entry = entry.ok()?;
+				let path = entry.path();
+				if !path.is_symlink() {
+					return None;
+				}
+				let target = fs::read_link(path).ok()?;
+				let target = if target.is_absolute() {
+					target
+				} else {
+					path.parent_or_root().join(target)
+				};
+				Some((fs::canonicalize(target).ok()?, entry.into_path()))
 			})
 			.collect();
 
@@ -336,41 +331,12 @@ impl ImporterIndex {
 
 	/// Find all jsonnet/libsonnet files under a directory, in parallel.
 	fn find_jsonnet_files(dir: &Path) -> Vec<PathBuf> {
-		Self::collect_directories(dir, 2)
-			.par_iter()
-			.flat_map_iter(|dir| {
-				walkdir::WalkDir::new(dir)
-					.into_iter()
-					.filter_map(Result::ok)
-					.filter(|entry| entry.path().is_file() && entry.path().is_jsonnet_file())
-					.map(walkdir::DirEntry::into_path)
-			})
+		walkdir::WalkDir::new(dir)
+			.into_iter()
+			.filter_map(Result::ok)
+			.filter(|entry| entry.path().is_file() && entry.path().is_jsonnet_file())
+			.map(walkdir::DirEntry::into_path)
 			.collect()
-	}
-
-	/// Recursively split a directory a few levels deep, so parallel walks
-	/// stay balanced even when the tree is lopsided.
-	fn collect_directories(path: &Path, max_depth: usize) -> Vec<PathBuf> {
-		if max_depth == 0 {
-			return vec![path.to_owned()];
-		}
-		let Ok(entries) = fs::read_dir(path) else {
-			return vec![path.to_owned()];
-		};
-
-		let mut directories = Vec::new();
-		for entry in entries.flatten() {
-			let entry_path = entry.path();
-			if entry_path.is_dir() {
-				directories.extend(Self::collect_directories(&entry_path, max_depth - 1));
-			}
-		}
-
-		// A directory with no subdirectories is itself a unit of work.
-		if directories.is_empty() {
-			directories.push(path.to_owned());
-		}
-		directories
 	}
 
 	/// Walk up from a directory (including not-yet-created ones) to the
@@ -387,6 +353,40 @@ impl ImporterIndex {
 			current = current.parent()?;
 		}
 	}
+}
+
+/// Find importers using the string-oriented CLI representation.
+pub fn find_importers(root: &str, files: Vec<String>) -> Result<Vec<String>, Error> {
+	let index = ImporterIndex::build(root)?;
+	let targets = files
+		.iter()
+		.map(|file| file.parse().expect("TargetFile parsing is infallible"))
+		.collect::<Vec<_>>();
+	index.find_importers(&targets).map(|paths| {
+		paths
+			.into_iter()
+			.map(|path| path.to_string_lossy().into_owned())
+			.collect()
+	})
+}
+
+/// Find importers for several files while sharing one scanned index.
+pub fn find_importers_batch(
+	root: &str,
+	files: Vec<String>,
+) -> Result<HashMap<String, Vec<String>>, Error> {
+	let index = ImporterIndex::build(root)?;
+	let mut found = HashMap::with_capacity(files.len());
+	for file in files {
+		let target = file.parse().expect("TargetFile parsing is infallible");
+		let importers = index
+			.find_importers(&[target])?
+			.into_iter()
+			.map(|path| path.to_string_lossy().into_owned())
+			.collect();
+		found.insert(file, importers);
+	}
+	Ok(found)
 }
 
 /// Scanned contents of a single jsonnet file.

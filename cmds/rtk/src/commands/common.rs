@@ -3,20 +3,90 @@
 use std::{
 	fmt,
 	io::{self, ErrorKind, Write},
-	path::PathBuf,
+	path::{Path, PathBuf},
+	str::FromStr,
 };
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
+use rtk_environments::export::{materialize_manifest, Error as EnvironmentError};
+use rtk_spec::canonical::EnvironmentSpec;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::jsonnet::evaluator::{EvaluatorImplementation, GlobalEvaluatorOptions};
-
-use crate::{
-	k8s::{client::ClusterConnection, diff::DiffEngine},
-	spec::{DiffStrategy, Spec},
+use crate::k8s::{
+	client::ClusterConnection,
+	diff::{DiffEngine, DiffStrategy},
 };
+
+#[derive(Clone, Debug, Default)]
+pub enum EvaluatorImplementation {
+	#[default]
+	Jrsonnet,
+	Binary(String),
+}
+
+impl fmt::Display for EvaluatorImplementation {
+	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			EvaluatorImplementation::Jrsonnet => formatter.write_str("jrsonnet"),
+			EvaluatorImplementation::Binary(path) => write!(formatter, "binary:{path}"),
+		}
+	}
+}
+
+impl FromStr for EvaluatorImplementation {
+	type Err = anyhow::Error;
+
+	fn from_str(value: &str) -> Result<Self, Self::Err> {
+		match value {
+			"jrsonnet" => Ok(Self::Jrsonnet),
+			value if value.starts_with("binary:") && value.ends_with("jrsonnet") => {
+				tracing::warn!("Treating {value} as the local jrsonnet implementation");
+				Ok(Self::Jrsonnet)
+			}
+			value if value.starts_with("binary:") => {
+				Ok(Self::Binary(value["binary:".len()..].to_owned()))
+			}
+			_ => anyhow::bail!("invalid value '{value}': expected 'jrsonnet' or 'binary:<path>'"),
+		}
+	}
+}
+
+pub struct EvaluatedManifests {
+	pub spec: Option<EnvironmentSpec>,
+	pub environment_label: Option<String>,
+	pub manifests: Vec<serde_json::Value>,
+}
+
+/// Evaluate and fully process manifests before they cross into async Kubernetes
+/// work. Evaluated Jsonnet values are dropped in this function.
+pub fn evaluate_manifests(
+	path: &Path,
+	jsonnet: rtk_jsonnet::Options,
+	name: Option<&str>,
+	targets: &[String],
+) -> Result<EvaluatedManifests> {
+	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet));
+	let environment = engine.load_single(path, name).map_err(environment_error)?;
+	let values = engine
+		.manifests(&environment, targets)
+		.map_err(environment_error)?;
+	let manifests = values
+		.iter()
+		.map(materialize_manifest)
+		.collect::<Result<Vec<_>, _>>()
+		.map_err(environment_error)?;
+	Ok(EvaluatedManifests {
+		spec: environment.spec().cloned(),
+		environment_label: environment.environment_label(),
+		manifests,
+	})
+}
+
+fn environment_error(error: EnvironmentError) -> anyhow::Error {
+	anyhow::anyhow!(error.report())
+}
 
 /// Common Jsonnet evaluator arguments shared across commands.
 #[derive(Args)]
@@ -49,24 +119,17 @@ pub struct JsonnetArgs {
 impl JsonnetArgs {
 	/// The options for the Jsonnet engine the exporter evaluates with.
 	pub fn into_options(self) -> rtk_jsonnet::Options {
-		rtk_jsonnet::Options {
-			ext_code: self.ext_code.into_iter().collect(),
-			ext_variables: self.ext_str.into_iter().collect(),
-			top_level_arguments: self.tla_str.into_iter().collect(),
-			top_level_code: self.tla_code.into_iter().collect(),
-			max_stack: Some(self.max_stack),
-			..rtk_jsonnet::Options::default()
-		}
+		self.options()
 	}
 
-	pub fn into_global_evaluator_options(self) -> GlobalEvaluatorOptions {
-		GlobalEvaluatorOptions {
-			ext_str: self.ext_str.into_iter().collect(),
-			ext_code: self.ext_code.into_iter().collect(),
-			tla_str: self.tla_str.into_iter().collect(),
-			tla_code: self.tla_code.into_iter().collect(),
-			max_stack: self.max_stack,
-			implementation: self.implementation,
+	pub fn options(&self) -> rtk_jsonnet::Options {
+		rtk_jsonnet::Options {
+			ext_code: self.ext_code.iter().cloned().collect(),
+			ext_variables: self.ext_str.iter().cloned().collect(),
+			top_level_arguments: self.tla_str.iter().cloned().collect(),
+			top_level_code: self.tla_code.iter().cloned().collect(),
+			max_stack: Some(self.max_stack),
+			..rtk_jsonnet::Options::default()
 		}
 	}
 }
@@ -215,7 +278,7 @@ impl fmt::Display for AutoApprove {
 /// a new connection from the spec.
 pub async fn get_or_create_connection(
 	connection: Option<ClusterConnection>,
-	spec: Option<&Spec>,
+	spec: Option<&EnvironmentSpec>,
 ) -> Result<ClusterConnection> {
 	match connection {
 		Some(conn) => Ok(conn),
@@ -263,7 +326,7 @@ pub struct DiffEngineConfig<'a> {
 	/// Connection to the Kubernetes cluster.
 	pub connection: &'a ClusterConnection,
 	/// Optional spec for strategy selection.
-	pub spec: Option<&'a Spec>,
+	pub spec: Option<&'a EnvironmentSpec>,
 	/// Manifests to diff against.
 	pub manifests: &'a [serde_json::Value],
 	/// Whether to enable prune detection.
@@ -302,7 +365,7 @@ pub async fn setup_diff_engine(config: DiffEngineConfig<'_>) -> Result<DiffEngin
 	// Get default namespace from spec or connection
 	let default_namespace = config
 		.spec
-		.map(|s| s.namespace.clone())
+		.map(|s| s.namespace().to_owned())
 		.unwrap_or_else(|| config.connection.default_namespace().to_string());
 
 	// Create diff engine

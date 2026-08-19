@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use rtk::{commands, environments};
+use rtk::commands;
 use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
@@ -256,8 +256,22 @@ fn run_golden_test(env_path: &Path) {
 /// the contents of `golden_path`.
 fn run_env_list_golden_test(env_path: &Path, golden_path: &Path) {
 	let mut output = Vec::new();
-	environments::list_envs_to_writer(Some(env_path), true, &mut output)
-		.unwrap_or_else(|e| panic!("rtk env list failed for {}: {}", env_path.display(), e));
+	commands::env::list::run(
+		commands::env::list::ListArgs {
+			path: Some(env_path.to_string_lossy().into_owned()),
+			ext_code: Vec::new(),
+			ext_str: Vec::new(),
+			json: true,
+			jsonnet_implementation: "go".to_owned(),
+			max_stack: 500,
+			names: false,
+			selector: None,
+			tla_code: Vec::new(),
+			tla_str: Vec::new(),
+		},
+		&mut output,
+	)
+	.unwrap_or_else(|e| panic!("rtk env list failed for {}: {}", env_path.display(), e));
 
 	let actual: serde_json::Value = serde_json::from_slice(&output).unwrap_or_else(|e| {
 		panic!(

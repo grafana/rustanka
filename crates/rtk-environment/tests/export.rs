@@ -132,6 +132,59 @@ fn exports_a_static_environment() {
 }
 
 #[test]
+fn loads_processed_manifests_without_exporting() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+		&format!("{{ config: {CONFIG_MAP} }}"),
+	);
+	let engine = engine();
+	let loaded = engine
+		.load_single(&project.path().join("environments/demo"), None)
+		.expect("the environment loads");
+	let manifests = engine
+		.manifests(&loaded, &[])
+		.expect("the manifests process");
+
+	assert!(loaded.spec().is_some());
+	assert_eq!(manifests.len(), 1);
+	assert_eq!(
+		rtk_environments::export::materialize_manifest(&manifests[0])
+			.expect("the manifest materializes")["metadata"]["namespace"],
+		"demo"
+	);
+	assert_eq!(
+		rtk_environments::export::serialize_manifest(&manifests[0])
+			.expect("the manifest serializes"),
+		"apiVersion: v1\ndata:\n  key: value\nkind: ConfigMap\nmetadata:\n  name: settings\n  namespace: demo\n"
+	);
+	assert!(!project.output().exists());
+}
+
+#[test]
+fn loads_a_bare_jsonnet_entrypoint() {
+	let project = Project::new();
+	project.write("bare/main.jsonnet", &format!("{{ config: {CONFIG_MAP} }}"));
+	let engine = engine();
+	let loaded = engine
+		.load_single(&project.path().join("bare/main.jsonnet"), None)
+		.expect("the entrypoint loads");
+	let manifests = engine
+		.manifests(&loaded, &["ConfigMap/settings".to_owned()])
+		.expect("the manifests process");
+
+	assert!(loaded.spec().is_none());
+	assert_eq!(manifests.len(), 1);
+	assert_eq!(
+		rtk_environments::export::materialize_manifest(&manifests[0])
+			.expect("the manifest materializes")["metadata"],
+		serde_json::json!({"name": "settings"})
+	);
+}
+
+#[test]
 fn defaults_the_namespace_the_way_tanka_does() {
 	let project = Project::new();
 	static_environment(

@@ -18,9 +18,10 @@ use jrsonnet_evaluator::tla::TlaArg;
 use jrsonnet_evaluator::trace::PathResolver;
 use jrsonnet_evaluator::{FileImportResolver, IStr, State, Thunk, Val};
 use jrsonnet_gcmodule::Trace;
+pub use jrsonnet_stdlib::ContextInitializer;
 use jrsonnet_stdlib::{
-	ContextInitializer, ManifestYamlDocFormatting, ManifestYamlStreamEmptyBehavior,
-	ManifestYamlStreamFormatting, QuoteValuesBehavior,
+	ManifestYamlDocFormatting, ManifestYamlStreamEmptyBehavior, ManifestYamlStreamFormatting,
+	QuoteValuesBehavior,
 };
 use rtk_jsonnet_core::{EvaluatorError as _, FlagsExt, Function};
 use rtk_spec::canonical::{EnvironmentSpec, Rc};
@@ -132,6 +133,21 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
+	/// The configured context, including installed native functions.
+	pub fn context_initializer(&self) -> ContextInitializer {
+		self.context_initializer.clone()
+	}
+
+	/// Run work that invokes installed native functions outside this evaluator's
+	/// own evaluation methods.
+	pub fn with_current<T>(&self, callback: impl FnOnce() -> T) -> T {
+		let evaluator = StdRc::new(self.clone());
+		Evaluator::CURRENT.with(|current| {
+			let _guard = CurrentEvaluatorGuard::new(current, evaluator);
+			callback()
+		})
+	}
+
 	thread_local! {
 		static CURRENT: RefCell<Option<StdRc<Evaluator>>> = const { RefCell::new(None) };
 	}

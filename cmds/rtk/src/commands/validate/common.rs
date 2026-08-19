@@ -9,12 +9,11 @@ use std::{
 
 use anyhow::{Context, Result};
 use jrsonnet_evaluator::{
-	manifest::JsonFormat, stack::set_stack_depth_limit, trace::PathResolver, AsPathLike,
-	FileImportResolver, ImportResolver, State, Val,
+	manifest::JsonFormat, stack::set_stack_depth_limit, AsPathLike, FileImportResolver,
+	ImportResolver, State, Val,
 };
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_ir::{SourceFile, SourcePath};
-use jrsonnet_stdlib::ContextInitializer;
 use walkdir::WalkDir;
 
 /// Map of virtual file paths → contents, shared across worker threads.
@@ -136,12 +135,18 @@ pub fn find_validation_file_for_test(test_file: &Path) -> Option<PathBuf> {
 ///
 /// When `memory` is `Some`, imports of paths present in the map are served from
 /// memory; everything else falls through to the file-based resolver.
-fn build_state(import_paths: &[PathBuf], memory: Option<MemoryFiles>) -> State {
+#[derive(Clone)]
+struct ValidationState {
+	state: State,
+	context: rtk_jsonnet::JrsonnetContext,
+}
+
+fn build_state(import_paths: &[PathBuf], memory: Option<MemoryFiles>) -> ValidationState {
 	set_stack_depth_limit(500);
-	let context_init = ContextInitializer::new(PathResolver::Absolute);
-	crate::jsonnet::evaluator::jrsonnet::JrsonnetEvaluator::register_native_functions(
-		&context_init,
-	);
+	let context = rtk_jsonnet::Engine::new(rtk_jsonnet::Options::default())
+		.create_evaluator()
+		.jrsonnet_context()
+		.expect("the built-in jrsonnet evaluator should initialize");
 	let mut builder = State::builder();
 	let inner = FileImportResolver::new(import_paths.to_vec());
 	match memory {
@@ -152,30 +157,30 @@ fn build_state(import_paths: &[PathBuf], memory: Option<MemoryFiles>) -> State {
 			builder.import_resolver(inner);
 		}
 	}
-	builder.context_initializer(context_init);
-	builder.build()
+	builder.context_initializer(context.context_initializer());
+	ValidationState {
+		state: builder.build(),
+		context,
+	}
 }
 
 /// Evaluate a Jsonnet snippet inside a State, returning the JSON-encoded result.
 fn run_snippet_in_state(
-	state: &State,
+	state: &ValidationState,
 	snippet: &str,
 	name: &'static str,
 ) -> Result<serde_json::Value> {
-	let _state_guard = state.enter();
-
-	let result = state
-		.evaluate_snippet(name, snippet)
-		.map_err(|e| anyhow::anyhow!("evaluation error:\n{}", e))?;
-
-	let manifest = result
-		.manifest(JsonFormat::default())
-		.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
-
-	let value: serde_json::Value =
-		serde_json::from_str(&manifest.to_string()).context("failed to parse result as JSON")?;
-
-	Ok(value)
+	state.context.with_current(|| {
+		let _state_guard = state.state.enter();
+		let result = state
+			.state
+			.evaluate_snippet(name, snippet)
+			.map_err(|e| anyhow::anyhow!("evaluation error:\n{}", e))?;
+		let manifest = result
+			.manifest(JsonFormat::default())
+			.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
+		serde_json::from_str(&manifest.to_string()).context("failed to parse result as JSON")
+	})
 }
 
 /// Evaluate a Jsonnet snippet in memory without writing temp files.
@@ -191,7 +196,7 @@ pub fn eval_jsonnet_snippet(snippet: &str, import_paths: &[PathBuf]) -> Result<s
 struct PooledStateEntry {
 	import_paths: Vec<PathBuf>,
 	memory: Option<MemoryFiles>,
-	state: State,
+	state: ValidationState,
 }
 
 thread_local! {
@@ -230,40 +235,45 @@ pub fn eval_jsonnet_snippet_array_pooled(
 	memory: Option<&MemoryFiles>,
 ) -> Result<Vec<ElementResult>> {
 	with_pooled_state(import_paths, memory, |state| {
-		let _state_guard = state.enter();
+		state.context.with_current(|| {
+			let _state_guard = state.state.enter();
 
-		let result = state
-			.evaluate_snippet("<validate>", snippet)
-			.map_err(|e| anyhow::anyhow!("evaluation error:\n{}", e))?;
+			let result = state
+				.state
+				.evaluate_snippet("<validate>", snippet)
+				.map_err(|e| anyhow::anyhow!("evaluation error:\n{}", e))?;
 
-		let arr = match result {
-			Val::Arr(arr) => arr,
-			other => {
-				let manifest = other
-					.manifest(JsonFormat::default())
-					.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
-				let value: serde_json::Value = serde_json::from_str(&manifest.to_string())
-					.context("failed to parse result as JSON")?;
-				return Ok(vec![Ok(value)]);
-			}
-		};
-
-		let mut out: Vec<ElementResult> = Vec::with_capacity(arr.len() as usize);
-		for idx in 0..arr.len() {
-			let elem_result: ElementResult = match arr.get(idx) {
-				Ok(Some(val)) => match val.manifest(JsonFormat::default()) {
-					Ok(rendered) => match serde_json::from_str::<serde_json::Value>(&rendered) {
-						Ok(v) => Ok(v),
-						Err(e) => Err(format!("failed to parse element as JSON: {e}")),
-					},
-					Err(e) => Err(format!("manifest error:\n{e}")),
-				},
-				Ok(None) => Err("element out of bounds (jrsonnet bug?)".to_string()),
-				Err(e) => Err(format!("evaluation error:\n{e}")),
+			let arr = match result {
+				Val::Arr(arr) => arr,
+				other => {
+					let manifest = other
+						.manifest(JsonFormat::default())
+						.map_err(|e| anyhow::anyhow!("manifest error:\n{}", e))?;
+					let value: serde_json::Value = serde_json::from_str(&manifest.to_string())
+						.context("failed to parse result as JSON")?;
+					return Ok(vec![Ok(value)]);
+				}
 			};
-			out.push(elem_result);
-		}
-		Ok(out)
+
+			let mut out: Vec<ElementResult> = Vec::with_capacity(arr.len() as usize);
+			for idx in 0..arr.len() {
+				let elem_result: ElementResult = match arr.get(idx) {
+					Ok(Some(val)) => match val.manifest(JsonFormat::default()) {
+						Ok(rendered) => {
+							match serde_json::from_str::<serde_json::Value>(&rendered) {
+								Ok(v) => Ok(v),
+								Err(e) => Err(format!("failed to parse element as JSON: {e}")),
+							}
+						}
+						Err(e) => Err(format!("manifest error:\n{e}")),
+					},
+					Ok(None) => Err("element out of bounds (jrsonnet bug?)".to_string()),
+					Err(e) => Err(format!("evaluation error:\n{e}")),
+				};
+				out.push(elem_result);
+			}
+			Ok(out)
+		})
 	})
 }
 
@@ -272,7 +282,7 @@ pub fn eval_jsonnet_snippet_array_pooled(
 fn with_pooled_state<R>(
 	import_paths: &[PathBuf],
 	memory: Option<&MemoryFiles>,
-	f: impl FnOnce(&State) -> R,
+	f: impl FnOnce(&ValidationState) -> R,
 ) -> R {
 	POOLED_STATE.with(|cell| {
 		let needs_new = match &*cell.borrow() {
@@ -384,5 +394,17 @@ pub fn run_validation_function(
 		serde_json::Value::Null => Ok(None),
 		serde_json::Value::String(s) => Ok(Some(s)),
 		other => Ok(Some(format!("unexpected return type: {}", other))),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn validation_states_can_call_shared_native_functions() {
+		let value = eval_jsonnet_snippet("std.native('regexMatch')('^a', 'abc')", &[])
+			.expect("native function evaluation succeeds");
+		assert_eq!(value, serde_json::Value::Bool(true));
 	}
 }

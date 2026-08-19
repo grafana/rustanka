@@ -5,6 +5,8 @@
 //! environment again — this time keeping the manifests, captured rather than
 //! walked.
 
+use std::path::Path;
+
 use rtk_jsonnet::jpath::JPath;
 use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
@@ -69,6 +71,7 @@ impl Engine {
 				.with_spec(discovered.environment.spec.clone())
 				.with_data(OptionalData::new(evaluation))
 				.build()
+				.map(LoadedEnvironment::configured)
 				.map_err(|source| Error::Spec { source });
 		}
 
@@ -80,17 +83,109 @@ impl Engine {
 				.with_spec(discovered.environment.spec.clone())
 				.with_data(OptionalData::none())
 				.build()
+				.map(LoadedEnvironment::configured)
 				.map_err(|source| Error::Spec { source });
 		};
 
 		// Discovery worked out where the environment lives; the evaluated object
 		// cannot know it.
 		environment
+			.environment
 			.metadata
 			.namespace
 			.clone_from(&discovered.environment.metadata.namespace);
 
 		Ok(environment)
+	}
+
+	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
+	pub fn load_single(&self, path: &Path, name: Option<&str>) -> Result<LoadedEnvironment, Error> {
+		let jpath = JPath::resolve(path)?;
+		let directory = jpath
+			.entrypoint
+			.parent()
+			.map(Path::to_path_buf)
+			.unwrap_or_else(|| jpath.base_directory.clone());
+		let mut discovered = self
+			.discover(vec![directory.clone()])
+			.collect::<Result<Vec<_>, _>>()?;
+		discovered.retain(|environment| environment.path.as_path() == directory);
+		let mut available = discovered
+			.iter()
+			.filter_map(|environment| environment.environment.metadata.name.as_deref())
+			.map(str::to_owned)
+			.collect::<Vec<_>>();
+		available.sort();
+
+		if let Some(name) = name {
+			let mut exact = Vec::new();
+			let mut partial = Vec::new();
+			for environment in discovered {
+				let environment_name = environment.environment.metadata.name.as_deref();
+				if environment_name == Some(name) {
+					exact.push(environment);
+				} else if environment_name.is_some_and(|candidate| candidate.contains(name))
+					|| environment.path.to_string_lossy().contains(name)
+				{
+					partial.push(environment);
+				}
+			}
+			discovered = if exact.is_empty() { partial } else { exact };
+		}
+
+		match discovered.as_slice() {
+			[environment] => return self.load(environment),
+			[] if name.is_some() => {
+				return Err(Error::NoEnvironmentNamed {
+					name: name.expect("matched arm").to_owned(),
+					available: available.join(", "),
+				});
+			}
+			[] => {}
+			[_, _, ..] => {
+				let mut names = discovered
+					.iter()
+					.filter_map(|environment| environment.environment.metadata.name.as_deref())
+					.collect::<Vec<_>>();
+				names.sort_unstable();
+				let names = names.join("\n - ");
+				return Err(match name {
+					Some(name) => Error::MultipleEnvironmentsNamed {
+						path: path.display().to_string(),
+						name: name.to_owned(),
+						names,
+					},
+					None => Error::MultipleEnvironments {
+						path: path.display().to_string(),
+						names,
+					},
+				});
+			}
+		}
+
+		self.load_bare(jpath)
+	}
+
+	fn load_bare(&self, jpath: JPath) -> Result<LoadedEnvironment, Error> {
+		let options = self.jsonnet.options();
+		let mut evaluator = self.jsonnet.create_evaluator();
+		options.apply(&mut evaluator)?;
+		evaluator.with_import_paths(jpath.import_paths.clone())?;
+
+		let environment = Environment::new()
+			.with_spec(rtk_spec::canonical::EnvironmentSpec::default())
+			.build()
+			.map_err(|source| Error::Spec { source })?;
+		let processing = process::processing_script(&environment, false);
+		let entrypoint = jpath
+			.entrypoint
+			.strip_prefix(&jpath.base_directory)
+			.unwrap_or(&jpath.entrypoint)
+			.to_string_lossy();
+		let script = format!("{processing}\nprocessValue(main)");
+		let evaluation =
+			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?;
+		LoadedEnvironment::bare(evaluation.into_value())
 	}
 
 	fn evaluate(&self, discovered: &Discovered, jpath: &JPath) -> Result<EvaluationValue, Error> {
@@ -113,7 +208,7 @@ impl Engine {
 			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
 		}
 
-		let processing = process::processing_script(&discovered.environment);
+		let processing = process::processing_script(&discovered.environment, true);
 		let (selection, root) = match discovered.selected_by() {
 			// Selecting one of several inline environments has to happen inside
 			// Jsonnet, before anything is manifested.
@@ -162,7 +257,8 @@ fn find_environment(value: &EvaluationValue) -> Result<Option<LoadedEnvironment>
 		if kind.as_deref() != Some("Environment") {
 			return Ok(None);
 		}
-		return Ok(Some(value.clone().deserialize()?));
+		let environment = value.clone().deserialize()?;
+		return Ok(Some(LoadedEnvironment::configured(environment)));
 	}
 
 	for value in object.into_values() {

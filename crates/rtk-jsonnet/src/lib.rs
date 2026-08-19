@@ -7,7 +7,7 @@ mod scan;
 pub use crate::engine::{
 	Engine, Error, Evaluation, EvaluationArray, EvaluationArrayValues, EvaluationObject,
 	EvaluationObjectFields, EvaluationObjectValues, EvaluationStr, EvaluationValue, Evaluator,
-	Options, RawEvaluationValue,
+	JrsonnetContext, Options, RawEvaluationValue,
 };
 #[doc(inline)]
 pub use rtk_jsonnet_core::*;

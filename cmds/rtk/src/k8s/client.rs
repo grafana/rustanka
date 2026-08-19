@@ -10,7 +10,7 @@ use kube::{
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::spec::Spec;
+use rtk_spec::canonical::EnvironmentSpec;
 
 /// Default timeout for Kubernetes API requests.
 const DEFAULT_API_TIMEOUT: Duration = Duration::from_secs(30);
@@ -25,9 +25,6 @@ pub enum ConnectionError {
 		 Please see https://tanka.dev/config for reference"
 	)]
 	IncompleteSpec,
-
-	#[error("contextNames is empty")]
-	EmptyContextNames,
 
 	#[error(
 		"no cluster that matches the apiServer `{0}` was found. Please check your $KUBECONFIG"
@@ -76,7 +73,7 @@ impl ClusterConnection {
 	///   then finds and uses a context that references that cluster
 	/// - `spec.contextNames`: uses the first matching context name from kubeconfig
 	#[instrument(skip_all)]
-	pub async fn from_spec(spec: &Spec) -> Result<Self, ConnectionError> {
+	pub async fn from_spec(spec: &EnvironmentSpec) -> Result<Self, ConnectionError> {
 		let kubeconfig = Kubeconfig::read()?;
 		Self::from_spec_with_kubeconfig(spec, kubeconfig).await
 	}
@@ -84,7 +81,7 @@ impl ClusterConnection {
 	/// Connect to a cluster using the environment spec and a provided kubeconfig.
 	#[instrument(skip_all)]
 	pub async fn from_spec_with_kubeconfig(
-		spec: &Spec,
+		spec: &EnvironmentSpec,
 		kubeconfig: Kubeconfig,
 	) -> Result<Self, ConnectionError> {
 		let (mut config, cluster_identifier) = if let Some(api_server) = &spec.api_server {
@@ -111,13 +108,9 @@ impl ClusterConnection {
 				config,
 				format!("{}  (context:{})", api_server, context_name),
 			)
-		} else if let Some(context_names) = &spec.context_names {
+		} else if !spec.context_names.is_empty() {
 			// Use the first matching context name from kubeconfig
-			if context_names.is_empty() {
-				return Err(ConnectionError::EmptyContextNames);
-			}
-
-			let context_name = find_first_matching_context(&kubeconfig, context_names)?;
+			let context_name = find_first_matching_context(&kubeconfig, &spec.context_names)?;
 
 			tracing::debug!(context = %context_name, "using context from contextNames");
 
@@ -208,15 +201,17 @@ fn find_context_for_api_server(
 /// Find the first context from the list that exists in kubeconfig.
 fn find_first_matching_context(
 	kubeconfig: &Kubeconfig,
-	context_names: &[String],
+	context_names: &[Box<str>],
 ) -> Result<String, ConnectionError> {
 	for name in context_names {
-		if kubeconfig.contexts.iter().any(|c| &c.name == name) {
-			return Ok(name.clone());
+		if kubeconfig.contexts.iter().any(|c| c.name == name.as_ref()) {
+			return Ok(name.to_string());
 		}
 	}
 
-	Err(ConnectionError::ContextNotFound(context_names.to_vec()))
+	Err(ConnectionError::ContextNotFound(
+		context_names.iter().map(ToString::to_string).collect(),
+	))
 }
 
 #[cfg(test)]
@@ -227,7 +222,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_connect_no_cluster_specified_errors() {
-		let spec = Spec::default();
+		let spec = EnvironmentSpec::default();
 		let kubeconfig = Kubeconfig::default();
 
 		let result = ClusterConnection::from_spec_with_kubeconfig(&spec, kubeconfig).await;
@@ -236,22 +231,17 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_connect_empty_context_names_errors() {
-		let spec = Spec {
-			context_names: Some(vec![]),
-			..Spec::default()
-		};
+		let spec = EnvironmentSpec::default();
 		let kubeconfig = Kubeconfig::default();
 
 		let result = ClusterConnection::from_spec_with_kubeconfig(&spec, kubeconfig).await;
-		assert_matches!(result, Err(ConnectionError::EmptyContextNames));
+		assert_matches!(result, Err(ConnectionError::IncompleteSpec));
 	}
 
 	#[tokio::test]
 	async fn test_connect_context_not_found() {
-		let spec = Spec {
-			context_names: Some(vec!["nonexistent".to_string()]),
-			..Spec::default()
-		};
+		let mut spec = EnvironmentSpec::default();
+		spec.context_names = vec!["nonexistent".into()];
 		let kubeconfig = Kubeconfig::default();
 
 		let result = ClusterConnection::from_spec_with_kubeconfig(&spec, kubeconfig).await;
@@ -263,10 +253,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_connect_api_server_not_found() {
-		let spec = Spec {
-			api_server: Some("https://unknown:6443".to_string()),
-			..Spec::default()
-		};
+		let mut spec = EnvironmentSpec::default();
+		spec.api_server = Some("https://unknown:6443".into());
 		let kubeconfig = Kubeconfig::default();
 
 		let result = ClusterConnection::from_spec_with_kubeconfig(&spec, kubeconfig).await;

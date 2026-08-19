@@ -15,23 +15,21 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, get_or_create_connection, prompt_confirmation, setup_diff_engine,
-	validate_dry_run, DiffEngineConfig,
+	create_tokio_runtime, evaluate_manifests, get_or_create_connection, prompt_confirmation,
+	setup_diff_engine, validate_dry_run, DiffEngineConfig,
 };
 use super::diff::ColorMode;
 
 // Re-export AutoApprove for backwards compatibility
 pub use super::common::AutoApprove;
 use crate::{
-	environments::{extract_manifests, process_manifests},
-	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
+	k8s::diff::DiffStrategy,
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
 		diff::{DiffStatus, ResourceDiff},
 		output::DiffOutput,
 	},
-	spec::DiffStrategy,
 };
 
 /// Apply strategy for resource updates.
@@ -136,20 +134,12 @@ pub struct ApplyOpts {
 pub async fn apply_environment<W: Write>(
 	path: &Path,
 	connection: Option<ClusterConnection>,
-	global_opts: GlobalEvaluatorOptions,
-	eval_opts: EvaluatorOptions,
+	jsonnet: rtk_jsonnet::Options,
 	opts: ApplyOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
-	let env_spec = env_data.spec;
-
-	// Get the spec for cluster connection and strategy selection
-	let spec = env_spec.as_ref().map(|e| &e.spec);
-
-	// Extract manifests from environment data
-	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
+	let evaluated = evaluate_manifests(path, jsonnet, opts.name.as_deref(), &opts.target)?;
+	let manifests = evaluated.manifests;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests to apply");
 
 	if manifests.is_empty() {
@@ -158,9 +148,7 @@ pub async fn apply_environment<W: Write>(
 		return Ok(Vec::new());
 	}
 
-	process_manifests(&mut manifests, &env_spec);
-
-	let connection = get_or_create_connection(connection, spec).await?;
+	let connection = get_or_create_connection(connection, evaluated.spec.as_ref()).await?;
 
 	let apply_strategy = opts.apply_strategy.unwrap_or(ApplyStrategy::Client);
 	tracing::debug!(strategy = %apply_strategy, "using apply strategy");
@@ -168,7 +156,7 @@ pub async fn apply_environment<W: Write>(
 	// Set up diff engine
 	let setup = setup_diff_engine(DiffEngineConfig {
 		connection: &connection,
-		spec,
+		spec: evaluated.spec.as_ref(),
 		manifests: &manifests,
 		with_prune: false, // no prune for apply (use prune command)
 		diff_strategy_override: opts.diff_strategy,
@@ -286,8 +274,7 @@ pub async fn apply_environment<W: Write>(
 /// Async implementation of the apply command.
 #[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: ApplyArgs, writer: W) -> Result<()> {
-	let global_opts = args.jsonnet.into_global_evaluator_options();
-	let eval_opts = EvaluatorOptions::default();
+	let jsonnet = args.jsonnet.into_options();
 	let opts = ApplyOpts {
 		diff_strategy: args.diff_strategy,
 		apply_strategy: args.apply_strategy,
@@ -299,6 +286,6 @@ async fn run_async<W: Write>(args: ApplyArgs, writer: W) -> Result<()> {
 		name: args.name,
 	};
 
-	apply_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
+	apply_environment(&args.path, None, jsonnet, opts, writer).await?;
 	Ok(())
 }

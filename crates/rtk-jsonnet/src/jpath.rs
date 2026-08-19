@@ -80,6 +80,14 @@ impl JPath {
 		})
 	}
 
+	/// Find the outermost project root containing a Jsonnet project marker.
+	pub fn project_root<P>(path: P) -> Result<PathBuf, Error>
+	where
+		P: AsRef<Path>,
+	{
+		Self::find_root_directory_and_rc(path.as_ref()).map(|(root, _)| root)
+	}
+
 	/// Find the environment base directory by looking for the entrypoint.
 	fn find_base_directory(path: &Path, root_directory: &Path) -> Result<PathBuf, Error> {
 		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?.into_owned();
