@@ -186,6 +186,10 @@ pub struct Options {
 	/// Export every environment found, rather than refusing an ambiguous set.
 	/// Bulk exports only.
 	pub recursive: bool,
+	/// The directory an environment's `metadata.namespace` is resolved against
+	/// when an export re-resolves it, defaulting to the process working
+	/// directory. See [`Engine::reresolve`].
+	pub working_directory: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -203,6 +207,7 @@ impl Default for Options {
 			name: None,
 			selector: None,
 			recursive: false,
+			working_directory: None,
 		}
 	}
 }
@@ -525,6 +530,18 @@ impl Export {
 		}))
 	}
 
+	/// Where an environment's namespace is resolved from when it is re-resolved.
+	///
+	/// The process working directory, unless the caller named one — which tests
+	/// and the golden harness do, so that a fixture can be exported from its own
+	/// root without the process having to `chdir` into it.
+	fn working_directory(&self) -> Option<PathBuf> {
+		self.options
+			.working_directory
+			.clone()
+			.or_else(|| std::env::current_dir().ok())
+	}
+
 	fn aborted(&self) -> bool {
 		self.abort.load(Ordering::Relaxed)
 	}
@@ -834,6 +851,13 @@ impl Export {
 	/// one broken environment does not stop the others, and what it did manage to
 	/// write is still worth reporting.
 	fn export_environment(&self, engine: &Engine, discovered: &Discovered) -> Report {
+		// tk reloads an environment from its namespace rather than from where it
+		// was found, which usually lands back on the same environment.
+		let reresolved = self
+			.working_directory()
+			.and_then(|working_directory| engine.reresolve(discovered, &working_directory));
+		let discovered = reresolved.as_ref().unwrap_or(discovered);
+
 		let mut report = Report::from_source(Arc::clone(&discovered.path));
 
 		match self.run_environment(engine, discovered, &mut report) {

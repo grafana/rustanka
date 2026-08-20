@@ -276,7 +276,7 @@ impl Engine {
 	}
 
 	/// Every environment a directory declares.
-	fn resolve_candidate(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
+	pub(crate) fn resolve_candidate(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
 		if path.join("spec.json").exists() {
 			return Ok(vec![Discovered::from_static(path)?]);
 		}
@@ -441,11 +441,7 @@ impl Discovered {
 		let jpath = spec_path
 			.parent()
 			.and_then(|directory| JPath::resolve(directory).ok());
-		let resolved_spec = jpath
-			.as_ref()
-			.map(|jpath| jpath.base_directory.join("spec.json"))
-			.filter(|path| path.exists());
-		let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(&spec_path))?;
+		let content = fs::read_to_string(&spec_path)?;
 		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
 		let mut environment = environment.without_data();
 

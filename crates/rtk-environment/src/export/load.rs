@@ -6,6 +6,7 @@
 //! everything downstream works on owned JSON that can cross threads.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::Environment;
@@ -52,6 +53,57 @@ local selected = singleEnv(main);
 ";
 
 impl Engine {
+	/// Resolve an environment again the way Tanka's export does, from its
+	/// `metadata.namespace` rather than from where it was found.
+	///
+	/// `parallelLoadEnvironments` keeps only an environment's name and namespace,
+	/// then reloads it from `filepath.Join(FindRoot(namespace), namespace)`.
+	/// Because `metadata.namespace` is the entrypoint relative to *that
+	/// environment's own* project root, and `FindRoot` resolves a relative path
+	/// against the process working directory, the round trip is the identity only
+	/// when the two roots agree. They do for every ordinary layout, so this
+	/// almost always resolves back to the environment it started from.
+	///
+	/// Where they disagree, tk exports something else, and so does this: an
+	/// environment that vendors for itself inside another project has a namespace
+	/// relative to itself, which re-anchors somewhere else entirely. Reproduced
+	/// rather than corrected, because matching tk's output is the point.
+	///
+	/// Returns `None` when the environment resolves back to itself, which is the
+	/// common case and needs no further work.
+	pub fn reresolve(
+		&self,
+		discovered: &Discovered,
+		working_directory: &Path,
+	) -> Option<Discovered> {
+		let namespace = discovered.environment.metadata.namespace.as_deref()?;
+		let root = JPath::project_root(working_directory.join(namespace)).ok()?;
+		let entrypoint = root.join(namespace);
+
+		// Only the directory is re-resolved: discovery yields environments by
+		// directory, and an entrypoint is named relative to the root it was found
+		// under, so a bare filename means the root itself.
+		let directory = entrypoint.parent()?;
+		if directory == discovered.path.as_path() {
+			return None;
+		}
+
+		let mut candidates = self
+			.resolve_candidate(Arc::new(directory.to_path_buf()))
+			.ok()?;
+		if candidates.len() > 1 {
+			// An inline entrypoint declares several environments; tk carries the
+			// name across and selects with it.
+			let name = discovered.environment.metadata.name.as_deref();
+			candidates.retain(|candidate| candidate.environment.metadata.name.as_deref() == name);
+		}
+
+		match candidates.as_slice() {
+			[_] => candidates.pop(),
+			_ => None,
+		}
+	}
+
 	/// Evaluate a discovered environment, keeping its manifests.
 	pub fn load(&self, discovered: &Discovered) -> Result<LoadedEnvironment, Error> {
 		let entrypoint = discovered.path.join(JPath::DEFAULT_ENTRYPOINT);

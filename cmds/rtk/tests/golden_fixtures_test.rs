@@ -191,7 +191,10 @@ fn run_rtk_export(
 		.unwrap_or_else(|e| panic!("failed to parse argv {:?}: {}", argv, e));
 	let GoldenCommand::Export(args) = cli.command;
 	let mut output = Vec::new();
-	commands::export::run(args, &mut output).unwrap_or_else(|e| {
+	// tk-compare runs tk from the fixture root, and exporting resolves each
+	// environment against the working directory, so rtk has to be told the same
+	// root rather than inheriting the test runner's.
+	commands::export::run_in(args, &mut output, Some(env_path.to_path_buf())).unwrap_or_else(|e| {
 		panic!(
 			"rtk export failed for argv {:?}\nstderr:\n{}error:\n{}",
 			argv,

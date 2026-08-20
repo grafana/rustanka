@@ -44,7 +44,10 @@ impl JPath {
 	pub const DEFAULT_ENTRYPOINT: &str = "main.jsonnet";
 
 	/// Files that indicate a project root (in order of precedence)
-	const ROOT_MARKERS: &[&str] = &["tkrc.yaml", "tkrc.yml", "jsonnetfile.json"];
+	///
+	/// Tanka's `FindRoot` knows `tkrc.yaml` and `jsonnetfile.json`, and nothing
+	/// else — in particular there is no `.yml` spelling of the former.
+	const ROOT_MARKERS: &[&str] = &["tkrc.yaml", "jsonnetfile.json"];
 
 	/// Resolve jpath for the given path (file or directory)
 	///
@@ -80,7 +83,7 @@ impl JPath {
 		})
 	}
 
-	/// Find the outermost project root containing a Jsonnet project marker.
+	/// Find the nearest project root containing a Jsonnet project marker.
 	pub fn project_root<P>(path: P) -> Result<PathBuf, Error>
 	where
 		P: AsRef<Path>,
@@ -93,7 +96,7 @@ impl JPath {
 		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?.into_owned();
 		let entrypoint = JPath::get_entrypoint(path)?;
 
-		if let Some(base_directory) = JPath::find_outermost_directory_with_file_bounded(
+		if let Some(base_directory) = JPath::find_nearest_directory_with_file_bounded(
 			abs_path.clone(),
 			root_directory,
 			entrypoint,
@@ -155,16 +158,22 @@ impl JPath {
 	}
 
 	/// Find the project root directory by looking for marker files.
-	/// If a tkrc is found in the
+	///
+	/// Each marker is searched for on its own full walk, in precedence order, so
+	/// a `tkrc.yaml` anywhere above the path beats a `jsonnetfile.json` sitting
+	/// beside it. That is the one place an outer directory can win; within a
+	/// single marker the nearest match is taken. Both match Tanka's `FindRoot`.
+	///
+	/// A `tkrc` match also reports where it was found.
 	fn find_root_directory_and_rc(path: &Path) -> Result<(PathBuf, Option<PathBuf>), Error> {
 		let abs_path = JPath::find_close_directory(Cow::Borrowed(path))?;
 
 		for marker in JPath::ROOT_MARKERS {
 			// abs_path is cloned here in order to be used as a buffer while
-			// searching for the outermost directory.
+			// searching for the nearest directory.
 			let abs_path = abs_path.clone().into_owned();
 			if let Some(root_directory) =
-				JPath::find_outermost_directory_with_file(abs_path, marker.as_ref())
+				JPath::find_nearest_directory_with_file(abs_path, marker.as_ref())
 			{
 				if marker.starts_with("tkrc") {
 					let rc = Some(root_directory.join(marker));
@@ -180,44 +189,47 @@ impl JPath {
 		})
 	}
 
-	/// Find the outermost parent directory containing the specified file.
-	fn find_outermost_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
+	/// Find the nearest directory containing the specified file, starting at
+	/// `path` itself and ascending.
+	///
+	/// Mirrors Tanka's `FindParentFile`, which returns as soon as a directory
+	/// holds the file rather than continuing to look for a farther one.
+	fn find_nearest_directory_with_file(path: PathBuf, file: &Path) -> Option<PathBuf> {
 		let mut current = path;
-		let mut outermost = None;
 		loop {
 			current.push(file);
-			if current.exists() {
-				current.pop();
-				outermost = Some(current.clone());
-			} else {
-				current.pop();
+			let found = current.exists();
+			current.pop();
+			if found {
+				return Some(current);
 			}
 			if !current.pop() {
-				return outermost;
+				return None;
 			}
 		}
 	}
 
-	/// Find the outermost parent directory containing the specified file, bounded
-	/// by a root directory.
-	fn find_outermost_directory_with_file_bounded(
+	/// Find the nearest directory containing the specified file, bounded by a
+	/// root directory.
+	///
+	/// The root is inclusive: it is searched, and the walk stops there rather
+	/// than ascending past the project.
+	fn find_nearest_directory_with_file_bounded(
 		path: PathBuf,
 		root: &Path,
 		file: &Path,
 	) -> Option<PathBuf> {
 		let mut current = path;
-		let mut outermost = None;
 		loop {
 			current.push(file);
-			if current.exists() {
-				current.pop();
-				outermost = Some(current.clone());
-			} else {
-				current.pop();
+			let found = current.exists();
+			current.pop();
+			if found {
+				return Some(current);
 			}
 			// Ascend unless the root (checked above, inclusively) stopped the walk.
 			if current == root || !current.pop() {
-				return outermost;
+				return None;
 			}
 		}
 	}
@@ -289,7 +301,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_resolve_uses_the_outermost_nested_project() {
+	fn test_resolve_uses_the_nearest_nested_project() {
 		let temp = TempDir::new().unwrap();
 		let root = temp.path();
 		let nested = root.join("environments/demo");
@@ -300,10 +312,49 @@ mod tests {
 		fs::write(nested.join("jsonnetfile.json"), "{}").unwrap();
 		fs::write(nested.join("main.jsonnet"), "{}").unwrap();
 
+		// An environment that vendors for itself is its own project, exactly as
+		// Tanka's `scenarioLocalVendor` asserts.
+		let jpath = JPath::resolve(&nested).unwrap();
+		assert_eq!(jpath.root_directory, nested);
+		assert_eq!(jpath.base_directory, nested);
+		assert_eq!(jpath.entrypoint, nested.join("main.jsonnet"));
+	}
+
+	#[test]
+	fn test_resolve_uses_tkrc_above_a_nearer_jsonnetfile() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		let nested = root.join("environments/demo");
+
+		fs::create_dir_all(&nested).unwrap();
+		fs::write(root.join("tkrc.yaml"), "").unwrap();
+		fs::write(nested.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(nested.join("main.jsonnet"), "{}").unwrap();
+
+		// Marker precedence is the one way an outer directory wins: a tkrc.yaml
+		// anywhere above beats a jsonnetfile.json sitting beside the entrypoint.
 		let jpath = JPath::resolve(&nested).unwrap();
 		assert_eq!(jpath.root_directory, root);
-		assert_eq!(jpath.base_directory, root);
-		assert_eq!(jpath.entrypoint, root.join("main.jsonnet"));
+		assert_eq!(jpath.rc, Some(root.join("tkrc.yaml")));
+		assert_eq!(jpath.base_directory, nested);
+	}
+
+	#[test]
+	fn test_resolve_does_not_climb_past_the_nearest_root() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		let nested = root.join("environments/demo");
+
+		fs::create_dir_all(&nested).unwrap();
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+		// A top level entrypoint must not capture an environment below it.
+		fs::write(root.join("main.jsonnet"), "{}").unwrap();
+		fs::write(nested.join("main.jsonnet"), "{}").unwrap();
+
+		let jpath = JPath::resolve(&nested).unwrap();
+		assert_eq!(jpath.root_directory, root);
+		assert_eq!(jpath.base_directory, nested);
+		assert_eq!(jpath.entrypoint, nested.join("main.jsonnet"));
 	}
 
 	#[test]

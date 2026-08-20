@@ -125,6 +125,7 @@ impl ExportArgs {
 			name,
 			selector,
 			recursive,
+			working_directory: None,
 		};
 
 		Ok((paths, options, jsonnet))
@@ -132,7 +133,21 @@ impl ExportArgs {
 }
 
 /// Run the export command.
-pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
+pub fn run<W: Write>(args: ExportArgs, writer: W) -> Result<()> {
+	run_in(args, writer, None)
+}
+
+/// Run the export command, resolving environments against a named directory.
+///
+/// Exporting re-resolves each environment against the working directory, the
+/// way tk does. The golden harness exports a fixture staged into a temporary
+/// directory and has to say so, since `chdir` is process-wide and the tests run
+/// in parallel.
+pub fn run_in<W: Write>(
+	args: ExportArgs,
+	mut writer: W,
+	working_directory: Option<PathBuf>,
+) -> Result<()> {
 	UnimplementedArgs {
 		jsonnet_implementation: None,
 		cache_envs: Some(&args.cache_envs),
@@ -141,7 +156,8 @@ pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	}
 	.warn_if_set();
 
-	let (paths, options, jsonnet) = args.into_export_options()?;
+	let (paths, mut options, jsonnet) = args.into_export_options()?;
+	options.working_directory = working_directory;
 
 	let engine = Engine::new(rtk_jsonnet::Engine::new(jsonnet));
 	let exported = engine
