@@ -48,7 +48,7 @@ noDataEnv(main)
 ";
 
 /// Directories to skip during discovery.
-const SKIP_DIRS: &[&str] = &["vendor", "node_modules", ".git", "lib"];
+const SKIP_DIRS: &[&str] = &["vendor", "node_modules", ".git", "lib", "target"];
 
 type DirectoryIter =
 	walkdir::FilterEntry<walkdir::IntoIter, for<'a> fn(&'a walkdir::DirEntry) -> bool>;
@@ -827,7 +827,7 @@ mod tests {
 	fn skips_directories_and_suppresses_duplicates() {
 		let temp = TempDir::new().unwrap();
 		let root = temp.path();
-		for directory in ["env", "vendor/ignored"] {
+		for directory in ["env", "vendor/ignored", "target/helm/ignored"] {
 			fs::create_dir_all(root.join(directory)).unwrap();
 			fs::write(root.join(directory).join("main.jsonnet"), "{}").unwrap();
 			fs::write(

@@ -18,6 +18,8 @@ use rtk_spec::canonical::{EnvironmentSpec, JsonnetImplementation, Rc};
 use rustc_hash::FxHashMap;
 use thiserror::Error;
 
+use crate::jpath::JPath;
+
 /// An error returned by one of the various Jsonnet implementations.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -44,8 +46,14 @@ pub struct Engine(Arc<EngineInternals>);
 
 impl Engine {
 	pub fn new(options: Options) -> Engine {
-		Engine(Arc::new_cyclic(|engine| EngineInternals {
+		let helm = if options.helm_cache {
+			rtk_jsonnet_helm::Plugin::with_disk_cache(helm_cache_directory)
+		} else {
+			rtk_jsonnet_helm::Plugin::new()
+		};
+		Engine(Arc::new_cyclic(move |engine| EngineInternals {
 			options,
+			helm,
 			implementations: RwLock::new(Implementations {
 				engine: engine.clone(),
 				..Default::default()
@@ -81,7 +89,14 @@ impl Engine {
 #[derive(Debug)]
 struct EngineInternals {
 	options: Options,
+	helm: rtk_jsonnet_helm::Plugin,
 	implementations: RwLock<Implementations>,
+}
+
+fn helm_cache_directory(called_from: &Path) -> Option<PathBuf> {
+	let root = JPath::project_root(called_from).ok()?;
+	let root = root.canonicalize().unwrap_or(root);
+	Some(root.join("target").join("helm"))
 }
 
 #[derive(Debug)]
@@ -299,7 +314,7 @@ impl Evaluator {
 			call_implementation_evaluator_method!(@with: evaluator, with_rtk_memoize,);
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_native_functions::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_regex::Plugin::new());
-			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
+			call_implementation_evaluator_method!(@with: evaluator, with_plugin, self.engine.helm.clone());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_kustomize::Plugin::new());
 		}
 
@@ -871,6 +886,7 @@ impl Implementations {
 #[derive(Clone, Debug, Default)]
 pub struct Options {
 	pub rc: Rc,
+	pub helm_cache: bool,
 
 	pub ext_code: FxHashMap<Box<str>, Box<str>>,
 	pub ext_variables: FxHashMap<Box<str>, Box<str>>,
@@ -923,6 +939,7 @@ impl Options {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::fs;
 
 	#[test]
 	fn evaluates_composed_native_plugins() {
@@ -954,6 +971,32 @@ mod tests {
 				"yaml": "a: 1\n",
 			})
 		);
+	}
+
+	#[test]
+	fn helm_cache_directory_follows_each_tanka_project_root() {
+		let temp = tempfile::tempdir().unwrap();
+		let first = temp.path().join("first");
+		let second = temp.path().join("second");
+		for root in [&first, &second] {
+			fs::create_dir_all(root.join("environments/demo")).unwrap();
+			fs::write(root.join("tkrc.yaml"), "{}\n").unwrap();
+		}
+
+		let first_cache =
+			helm_cache_directory(&first.join("environments/demo/main.jsonnet")).unwrap();
+		let second_cache =
+			helm_cache_directory(&second.join("environments/demo/main.jsonnet")).unwrap();
+
+		assert_eq!(
+			first_cache,
+			first.canonicalize().unwrap().join("target/helm")
+		);
+		assert_eq!(
+			second_cache,
+			second.canonicalize().unwrap().join("target/helm")
+		);
+		assert_ne!(first_cache, second_cache);
 	}
 
 	#[test]

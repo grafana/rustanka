@@ -69,8 +69,7 @@ pub struct ExportArgs {
 	#[arg(long)]
 	pub skip_manifest: bool,
 
-	/// Experimental: maintain a `helm-cache/` directory in the output dir to
-	/// cache helmTemplate results across runs and environments.
+	/// Cache helmTemplate results across runs in each project's `target/helm` directory
 	#[arg(long)]
 	pub helm_cache: bool,
 
@@ -100,7 +99,7 @@ impl ExportArgs {
 			jsonnet,
 			cache_envs: _,
 			cache_path: _,
-			helm_cache: _,
+			helm_cache,
 			mem_ballast_size_bytes: _,
 		} = self;
 
@@ -108,6 +107,9 @@ impl ExportArgs {
 			.as_deref()
 			.unwrap_or_default()
 			.parse::<MergeStrategy>()?;
+
+		let mut jsonnet = jsonnet.into_options();
+		jsonnet.helm_cache = helm_cache;
 
 		let options = Options {
 			output_dir,
@@ -125,7 +127,7 @@ impl ExportArgs {
 			recursive,
 		};
 
-		Ok((paths, options, jsonnet.into_options()))
+		Ok((paths, options, jsonnet))
 	}
 }
 
@@ -136,7 +138,6 @@ pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 		cache_envs: Some(&args.cache_envs),
 		cache_path: Some(&args.cache_path),
 		mem_ballast_size_bytes: Some(&args.mem_ballast_size_bytes),
-		helm_cache: Some(args.helm_cache),
 	}
 	.warn_if_set();
 
@@ -212,4 +213,25 @@ fn report<W: Write>(exported: &Exported, writer: &mut W) -> Result<()> {
 	}
 
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::ExportArgs;
+
+	#[derive(Parser)]
+	struct TestCli {
+		#[command(flatten)]
+		export: ExportArgs,
+	}
+
+	#[test]
+	fn passes_helm_cache_to_the_jsonnet_engine() {
+		let args = TestCli::parse_from(["rtk", "out", "environment", "--helm-cache"]);
+		let (_, _, jsonnet) = args.export.into_export_options().unwrap();
+
+		assert!(jsonnet.helm_cache);
+	}
 }

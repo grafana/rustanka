@@ -55,6 +55,7 @@ clap_complete = "4.5"
 # Parsing, manifestification is implemented manually everywhere
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
+ciborium = "0.2.2"
 # Note on serde_yaml_with_quirks: This is a fork of serde-yaml with legacy yaml 1.1 support:
 # https://github.com/dtolnay/serde-yaml/pull/225
 serde_yaml_with_quirks = "0.8.24"

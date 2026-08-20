@@ -74,13 +74,19 @@ Jsonnet evaluator (`cmds/rtk/src/jsonnet/`) and spec types
 `validate` use. Those are a second, older stack; moving them over is unfinished
 work, so expect two of most things until it is done.
 
-### Known gaps against the old exporter
+### Helm Cache
 
-- **`--helm-cache` is accepted and does nothing.** The in-memory
-  `helmTemplate` cache still works within a single export; the `helm-cache/`
-  directory that outlived one is not written. It needs a stable cache key
-  first: the current one is an `FxHasher` value, which is neither stable across
-  builds nor collision-resistant enough to name a file by.
+`--helm-cache` persists successful `helmTemplate` results under each Tanka
+project's `target/helm/v1/` directory. Entries are individual CBOR files named
+by a SHA-256 digest of the release, render options, complete chart contents and
+Helm version. The cache is shared by all environments rooted in that project;
+an export spanning several projects uses each project's own target directory.
+
+Cache reads and writes are best-effort. Missing, corrupt or incompatible entries
+are misses, and write failures never replace a successful Helm render with an
+export failure. Writes use temporary files and an atomic persist so parallel rtk
+processes cannot expose partial entries. As with the in-memory cache, charts that
+deliberately generate random or time-dependent output are frozen by the cache.
 
 ### rtkMemoize
 

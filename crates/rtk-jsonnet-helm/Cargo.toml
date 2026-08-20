@@ -7,11 +7,17 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+ciborium.workspace = true
+hex.workspace = true
 rtk-jsonnet-core.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
 
 [lints]
 workspace = true

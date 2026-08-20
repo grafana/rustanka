@@ -146,7 +146,6 @@ pub struct UnimplementedArgs<'a> {
 	pub cache_envs: Option<&'a [String]>,
 	pub cache_path: Option<&'a Option<PathBuf>>,
 	pub mem_ballast_size_bytes: Option<&'a Option<i64>>,
-	pub helm_cache: Option<bool>,
 }
 
 impl<'a> UnimplementedArgs<'a> {
@@ -174,13 +173,6 @@ impl<'a> UnimplementedArgs<'a> {
 		if let Some(Some(_)) = self.mem_ballast_size_bytes {
 			warn!("--mem-ballast-size-bytes is unimplemented in rtk and has no effect");
 		}
-
-		if self.helm_cache == Some(true) {
-			warn!(
-				"--helm-cache is unimplemented in rtk and has no effect; helmTemplate \
-				 results are still cached for the duration of a single export"
-			);
-		}
 	}
 
 	/// Convenience method to warn only about jsonnet_implementation.
@@ -193,7 +185,6 @@ impl<'a> UnimplementedArgs<'a> {
 			cache_envs: None,
 			cache_path: None,
 			mem_ballast_size_bytes: None,
-			helm_cache: None,
 		}
 		.warn_if_set();
 	}

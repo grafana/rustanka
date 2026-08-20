@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::env;
-use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Child, ExitStatus, Stdio};
+use std::sync::Arc;
 use std::thread;
 
 use rtk_jsonnet_core as jsonnet;
@@ -13,14 +13,15 @@ use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::State;
+use crate::cache::{Key, KeyBuilder};
 
 #[derive(Debug)]
 pub struct Function {
-	state: &'static State,
+	state: Arc<State>,
 }
 
 impl Function {
-	pub(crate) fn new(state: &'static State) -> Function {
+	pub(crate) fn new(state: Arc<State>) -> Function {
 		Function { state }
 	}
 }
@@ -42,7 +43,7 @@ where
 
 		let called_from = &options.called_from;
 
-		let mut chart_path = {
+		let chart_path = {
 			if called_from.is_empty() {
 				return Err(E::Error::custom("calledFrom cannot be an empty string"));
 			}
@@ -62,11 +63,7 @@ where
 				)));
 			}
 
-			let chart_relative = if chart.starts_with('/') {
-				Cow::Owned(format!(".{chart}"))
-			} else {
-				Cow::Borrowed(chart.as_str())
-			};
+			let chart_relative = relative_chart_path(Path::new(&chart));
 			let chart_absolute = called_from_dir.join(&*chart_relative);
 
 			if !chart_absolute.exists() {
@@ -85,35 +82,128 @@ where
 		// deduplication.
 		let cache_disabled = env::var_os("RTK_HELM_DISABLE_MEMOIZATION").is_some();
 
-		let cache_key = if cache_disabled {
-			None
+		let value = if cache_disabled {
+			self.render::<E>(&name, &chart_path, &options)?
 		} else {
-			chart_path.push("Chart.yaml");
-			let chart_meta = fs::read_to_string(&chart_path).ok();
-			chart_path.pop();
-
-			let cache_key = State::cache_key(&name, &chart_path, chart_meta.as_deref(), &options);
-
-			let cache_read = self
-				.state
-				.template_cache
-				.read()
-				.unwrap_or_else(std::sync::PoisonError::into_inner);
-
-			let cached_json = cache_read.get(&cache_key).cloned();
-			drop(cache_read);
-			if let Some(cached_json) = cached_json {
-				let serializer = evaluator.create_serializer();
-				let value = cached_json.serialize(serializer)?;
-				return Ok(value);
-			}
-
-			Some(cache_key)
+			self.cached_or_render::<E>(&name, &chart_path, &options)?
 		};
 
-		let mut command = Command::new("helm");
+		let serializer = evaluator.create_serializer();
+		Ok(value.serialize(serializer)?)
+	}
+}
+
+fn relative_chart_path(chart: &Path) -> Cow<'_, Path> {
+	if !chart.has_root() && !matches!(chart.components().next(), Some(Component::Prefix(_))) {
+		return Cow::Borrowed(chart);
+	}
+
+	let mut relative = PathBuf::new();
+	for component in chart.components() {
+		if !matches!(component, Component::Prefix(_) | Component::RootDir) {
+			relative.push(component.as_os_str());
+		}
+	}
+	Cow::Owned(relative)
+}
+
+impl Function {
+	fn cached_or_render<E>(
+		&self,
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+	) -> Result<serde_json::Value, E::Error>
+	where
+		E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
+	{
+		self.cached_or_compute(name, chart_path, options, || {
+			self.render::<E>(name, chart_path, options)
+		})
+	}
+
+	fn cached_or_compute<T>(
+		&self,
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+		render: impl FnOnce() -> Result<serde_json::Value, T>,
+	) -> Result<serde_json::Value, T> {
+		let mut directory = self
+			.state
+			.cache
+			.directory(Path::new(&options.called_from))
+			.map(|path| crate::cache::canonicalize_with_missing(&path));
+		if let Some(cache_directory) = &directory {
+			let chart_directory = chart_path
+				.canonicalize()
+				.unwrap_or_else(|_| chart_path.to_owned());
+			if cache_directory.starts_with(&chart_directory) {
+				tracing::warn!(
+					chart = ?chart_path,
+					cache = ?cache_directory,
+					"helm disk cache cannot be stored inside its chart"
+				);
+				directory = None;
+			}
+		}
+		let key = match Key::render(name, chart_path, options, directory.as_deref()) {
+			Ok(key) => key,
+			Err(error) => {
+				tracing::warn!(chart = ?chart_path, %error, "helm cache key is unavailable");
+				return render();
+			}
+		};
+
+		if let Some(value) = self.state.cache.get(key) {
+			return Ok(value);
+		}
+
+		let computation = self.state.cache.computation(key);
+		let _guard = computation
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		if let Some(value) = self.state.cache.get(key) {
+			return Ok(value);
+		}
+
+		let helm_identity = directory
+			.as_deref()
+			.and_then(|_| self.state.helm_identity());
+		if let (Some(directory), Some(helm_identity)) = (directory.as_deref(), helm_identity)
+			&& let Some(value) = crate::cache::Cache::read_disk(key, directory, helm_identity)
+		{
+			self.state.cache.insert(key, value.clone());
+			return Ok(value);
+		}
+
+		let value = render()?;
+		if !matches!(
+			Key::render(name, chart_path, options, directory.as_deref()),
+			Ok(current_key) if current_key == key
+		) {
+			tracing::warn!(chart = ?chart_path, "helm inputs changed while rendering; result was not cached");
+			return Ok(value);
+		}
+		self.state.cache.insert(key, value.clone());
+		if let (Some(directory), Some(helm_identity)) = (directory.as_deref(), helm_identity) {
+			crate::cache::Cache::write_disk(key, directory, helm_identity, &value);
+		}
+		Ok(value)
+	}
+
+	fn render<E>(
+		&self,
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+	) -> Result<serde_json::Value, E::Error>
+	where
+		E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
+	{
+		let mut command = self.state.helm_command();
 		command.arg("template");
-		command.arg(&name);
+		command.arg(name);
 		command.arg(chart_path);
 
 		if let Some(namespace) = options.namespace.as_ref() {
@@ -172,25 +262,11 @@ where
 
 		let value = parse_helm_yaml_output(&yaml_content, options.name_format.as_deref())
 			.map_err(E::Error::custom)?;
-
-		let serializer = evaluator.create_serializer();
-		let evaluator_value = value.serialize(serializer)?;
-
-		if let Some(cache_key) = cache_key {
-			let mut write = self
-				.state
-				.template_cache
-				.write()
-				.unwrap_or_else(std::sync::PoisonError::into_inner);
-
-			write.insert(cache_key, value);
-		}
-
-		Ok(evaluator_value)
+		Ok(value)
 	}
 }
 
-#[derive(Debug, Deserialize, Hash)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Options {
 	#[serde(default)]
@@ -203,6 +279,23 @@ pub struct Options {
 	#[serde(default = "default_true")]
 	include_crds: bool,
 	values: Option<serde_json::Value>,
+}
+
+impl Options {
+	pub(crate) fn hash_cache_key(&self, builder: &mut KeyBuilder) {
+		builder.bytes(&(self.api_versions.len() as u64).to_le_bytes());
+		for api_version in &self.api_versions {
+			builder.string(api_version);
+		}
+		builder.boolean(self.no_hooks);
+		builder.optional_string(self.namespace.as_deref());
+		builder.optional_string(self.name_format.as_deref());
+		builder.boolean(self.include_crds);
+		builder.boolean(self.values.is_some());
+		if let Some(values) = &self.values {
+			builder.json(values);
+		}
+	}
 }
 
 const fn default_true() -> bool {
@@ -365,9 +458,38 @@ fn to_snake_case(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use serde_json::json;
+	use std::fs;
+	use std::path::{Path, PathBuf};
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicUsize, Ordering};
 
-	use super::{Options, parse_helm_yaml_output};
+	use serde_json::json;
+	use tempfile::tempdir;
+
+	use super::{Function, Options, parse_helm_yaml_output, relative_chart_path};
+	use crate::State;
+
+	fn cache_directory(called_from: &Path) -> Option<PathBuf> {
+		Some(called_from.parent()?.join("target/helm"))
+	}
+
+	fn function(disk: bool) -> Function {
+		let state = Arc::new(State::new(disk.then_some(cache_directory)));
+		state
+			.helm_identity
+			.set(Ok(b"helm test version".to_vec().into_boxed_slice()))
+			.unwrap();
+		Function::new(state)
+	}
+
+	fn cache_options(called_from: &Path) -> Options {
+		serde_json::from_value(json!({
+			"calledFrom": called_from,
+			"namespace": "default",
+			"values": { "enabled": true },
+		}))
+		.unwrap()
+	}
 
 	#[test]
 	fn include_crds_defaults_to_true_and_accepts_false() {
@@ -383,6 +505,150 @@ mod tests {
 		}))
 		.unwrap();
 		assert!(!disabled.include_crds);
+	}
+
+	#[test]
+	fn rooted_chart_paths_are_made_relative() {
+		#[cfg(unix)]
+		assert_eq!(
+			relative_chart_path(Path::new("/charts/example")),
+			Path::new("charts/example")
+		);
+
+		#[cfg(windows)]
+		for chart in [
+			Path::new(r"C:\charts\example"),
+			Path::new(r"\charts\example"),
+			Path::new(r"\\server\share\charts\example"),
+		] {
+			assert_eq!(relative_chart_path(chart), Path::new(r"charts\example"));
+		}
+	}
+
+	#[test]
+	fn a_fresh_function_reuses_the_persisted_render() {
+		let temp = tempdir().unwrap();
+		let called_from = temp.path().join("main.jsonnet");
+		let chart = temp.path().join("chart");
+		fs::create_dir_all(chart.join("templates")).unwrap();
+		fs::write(chart.join("Chart.yaml"), "name: test\nversion: 1.0.0\n").unwrap();
+		fs::write(chart.join("templates/value.yaml"), "value").unwrap();
+		let options = cache_options(&called_from);
+		let renders = AtomicUsize::new(0);
+
+		let first = function(true)
+			.cached_or_compute("release", &chart, &options, || {
+				renders.fetch_add(1, Ordering::SeqCst);
+				Ok::<_, ()>(json!({ "rendered": true }))
+			})
+			.unwrap();
+		let second = function(true)
+			.cached_or_compute("release", &chart, &options, || {
+				renders.fetch_add(1, Ordering::SeqCst);
+				Ok::<_, ()>(json!({ "rendered": false }))
+			})
+			.unwrap();
+
+		assert_eq!(first, json!({ "rendered": true }));
+		assert_eq!(second, first);
+		assert_eq!(renders.load(Ordering::SeqCst), 1);
+	}
+
+	#[test]
+	fn failed_renders_are_not_cached() {
+		let temp = tempdir().unwrap();
+		let called_from = temp.path().join("main.jsonnet");
+		let chart = temp.path().join("chart.tgz");
+		fs::write(&chart, "chart").unwrap();
+		let options = cache_options(&called_from);
+		let function = function(true);
+
+		let failed = function.cached_or_compute("release", &chart, &options, || {
+			Err::<serde_json::Value, _>("render failed")
+		});
+		assert_eq!(failed, Err("render failed"));
+		assert_eq!(
+			function
+				.cached_or_compute("release", &chart, &options, || Ok::<_, &str>(json!("ok")))
+				.unwrap(),
+			json!("ok")
+		);
+	}
+
+	#[test]
+	fn inputs_changed_during_render_are_not_cached() {
+		let temp = tempdir().unwrap();
+		let called_from = temp.path().join("main.jsonnet");
+		let chart = temp.path().join("chart.tgz");
+		fs::write(&chart, "before").unwrap();
+		let options = cache_options(&called_from);
+		let function = function(true);
+		let renders = AtomicUsize::new(0);
+
+		let first = function
+			.cached_or_compute("release", &chart, &options, || {
+				renders.fetch_add(1, Ordering::SeqCst);
+				fs::write(&chart, "after").unwrap();
+				Ok::<_, ()>(json!("first"))
+			})
+			.unwrap();
+		let second = function
+			.cached_or_compute("release", &chart, &options, || {
+				renders.fetch_add(1, Ordering::SeqCst);
+				Ok::<_, ()>(json!("second"))
+			})
+			.unwrap();
+
+		assert_eq!(first, json!("first"));
+		assert_eq!(second, json!("second"));
+		assert_eq!(renders.load(Ordering::SeqCst), 2);
+	}
+
+	#[test]
+	fn disabled_disk_cache_is_scoped_to_each_function_state() {
+		let temp = tempdir().unwrap();
+		let called_from = temp.path().join("main.jsonnet");
+		let chart = temp.path().join("chart.tgz");
+		fs::write(&chart, "chart").unwrap();
+		let options = cache_options(&called_from);
+		let renders = AtomicUsize::new(0);
+
+		for _ in 0..2 {
+			function(false)
+				.cached_or_compute("release", &chart, &options, || {
+					renders.fetch_add(1, Ordering::SeqCst);
+					Ok::<_, ()>(json!("rendered"))
+				})
+				.unwrap();
+		}
+
+		assert_eq!(renders.load(Ordering::SeqCst), 2);
+		assert!(!temp.path().join("target").exists());
+	}
+
+	#[test]
+	fn a_project_root_chart_does_not_cache_inside_itself() {
+		let temp = tempdir().unwrap();
+		let called_from = temp.path().join("main.jsonnet");
+		fs::write(
+			temp.path().join("Chart.yaml"),
+			"name: test\nversion: 1.0.0\n",
+		)
+		.unwrap();
+		let options = cache_options(&called_from);
+		let renders = AtomicUsize::new(0);
+
+		for _ in 0..2 {
+			function(true)
+				.cached_or_compute("release", temp.path(), &options, || {
+					renders.fetch_add(1, Ordering::SeqCst);
+					Ok::<_, ()>(json!("rendered"))
+				})
+				.unwrap();
+		}
+
+		assert_eq!(renders.load(Ordering::SeqCst), 2);
+		assert!(!temp.path().join("target").exists());
 	}
 
 	#[test]
