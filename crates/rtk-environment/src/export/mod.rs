@@ -31,7 +31,7 @@ use tracing::{debug, trace};
 
 use crate::export::manifest::Manifest;
 use crate::export::template::{FilenameTemplate, SpecializedTemplate};
-use crate::export::writer::{Directories, File, Written, write_files};
+use crate::export::writer::{Directories, File, Written};
 use crate::{Discover, Discovered, Engine};
 
 mod data;
@@ -128,6 +128,30 @@ impl LoadedEnvironment {
 	fn inner(&self) -> &Environment<'static, OptionalData> {
 		&self.environment
 	}
+
+	fn processed_manifests(
+		&self,
+		targets: &process::Targets,
+	) -> Result<Vec<serde_json::Value>, Error> {
+		let Some(data) = self.data() else {
+			return Ok(Vec::new());
+		};
+
+		let mut manifests = Vec::new();
+		process::collect_manifests(data.clone(), "", &mut manifests)?;
+		manifests.retain(|manifest| targets.keeps(manifest));
+
+		// Namespaces, labels and resource defaults are what the spec says this
+		// environment's resources are, so everything that reads manifests —
+		// exporting, diffing, applying — wants them injected. A bare Jsonnet
+		// entrypoint has no spec, and so gets no namespace.
+		let processing = process::Processing::new(self.inner(), self.environment().is_some());
+		for manifest in &mut manifests {
+			processing.apply(manifest);
+		}
+
+		Ok(manifests)
+	}
 }
 
 /// Options for both kinds of export.
@@ -215,7 +239,24 @@ pub struct Report {
 }
 
 impl Report {
-	fn new(source: Arc<PathBuf>, identifier: String) -> Report {
+	fn from_source(source: Arc<PathBuf>) -> Report {
+		let entrypoint = if source.is_file() {
+			source.as_ref().clone()
+		} else {
+			source.join(JPath::DEFAULT_ENTRYPOINT)
+		};
+		let identifier = std::env::current_dir()
+			.ok()
+			.and_then(|current_dir| {
+				entrypoint
+					.strip_prefix(current_dir)
+					.ok()
+					.map(Path::to_path_buf)
+			})
+			.unwrap_or(entrypoint)
+			.to_string_lossy()
+			.into_owned();
+
 		Report {
 			source,
 			identifier,
@@ -228,6 +269,15 @@ impl Report {
 
 	pub fn failed(&self) -> bool {
 		self.error.is_some()
+	}
+
+	fn record_written(&mut self, written: impl IntoIterator<Item = Written>) {
+		for written in written {
+			if written.unchanged {
+				self.unchanged += 1;
+			}
+			self.files.push(written.path);
+		}
 	}
 }
 
@@ -460,7 +510,7 @@ struct Export {
 	options: Options,
 	/// Compiled once, rather than per environment.
 	template: FilenameTemplate,
-	targets: Vec<process::TargetMatcher>,
+	targets: process::Targets,
 	/// Set when an environment fails fatally, so workers stop starting new ones.
 	abort: AtomicBool,
 }
@@ -469,7 +519,7 @@ impl Export {
 	fn new(options: &Options) -> Result<Arc<Export>, Error> {
 		Ok(Arc::new(Export {
 			template: FilenameTemplate::new(&options.format)?,
-			targets: process::TargetMatcher::compile(&options.targets)?,
+			targets: process::Targets::compile(&options.targets)?,
 			options: options.clone(),
 			abort: AtomicBool::new(false),
 		}))
@@ -485,7 +535,7 @@ impl Export {
 
 	/// Work out what an environment exports, without serializing any of it yet.
 	fn plan(&self, environment: &LoadedEnvironment) -> Result<Plan, Error> {
-		let manifests = manifests(environment, &self.targets)?;
+		let manifests = environment.processed_manifests(&self.targets)?;
 
 		Ok(Plan {
 			template: (!manifests.is_empty())
@@ -509,12 +559,8 @@ impl Export {
 		chunk
 			.iter()
 			.map(|manifest| {
-				let rendered = template.render(manifest)?;
-				let path =
-					template::to_relative_path(&rendered, &self.options.extension, manifest)?;
-
 				Ok(File {
-					path,
+					path: template.render_path(manifest, &self.options.extension)?,
 					contents: process::serialize(manifest)?,
 				})
 			})
@@ -550,8 +596,8 @@ impl Engine {
 		environment: &LoadedEnvironment,
 		targets: &[String],
 	) -> Result<Vec<serde_json::Value>, Error> {
-		let targets = process::TargetMatcher::compile(targets)?;
-		manifests(environment, &targets)
+		let targets = process::Targets::compile(targets)?;
+		environment.processed_manifests(&targets)
 	}
 
 	/// Export one environment that has already been evaluated.
@@ -566,10 +612,9 @@ impl Engine {
 		options: &Options,
 	) -> Result<Report, Error> {
 		let export = Export::new(options)?;
-		prepare_output_dir(&export)?;
+		export.prepare_output_dir()?;
 
-		let identifier = identify(source);
-		let mut report = Report::new(Arc::new(source.to_path_buf()), identifier.clone());
+		let mut report = Report::from_source(Arc::new(source.to_path_buf()));
 		let mut timing = options.timing.then(TimingData::default);
 
 		let planned = Instant::now();
@@ -585,11 +630,11 @@ impl Engine {
 			serializing += serialized.elapsed();
 
 			let queued = Instant::now();
-			written.extend(write_files(&options.output_dir, files, &mut directories)?);
+			written.extend(directories.write_files(&options.output_dir, files)?);
 			writing += queued.elapsed();
 		}
 
-		collect_written(&mut report, written);
+		report.record_written(written);
 		if let Some(timing) = timing.as_mut() {
 			timing.serialize = serializing;
 			timing.write = writing;
@@ -599,7 +644,10 @@ impl Engine {
 
 		if !options.skip_manifest {
 			let mut index = Manifest::read(&options.output_dir)?;
-			index.record(&identifier, report.files.iter().map(PathBuf::as_path));
+			index.record(
+				&report.identifier,
+				report.files.iter().map(PathBuf::as_path),
+			);
 			index.write()?;
 		}
 
@@ -619,7 +667,7 @@ impl Engine {
 				.transpose()?,
 		};
 
-		let mut environments = select(matching, options)?.peekable();
+		let mut environments = matching.select(options.recursive)?.peekable();
 
 		// Now that there is an environment to export, somewhere to put it. Left
 		// until here so that finding none leaves the filesystem alone, and so that
@@ -632,7 +680,7 @@ impl Engine {
 					.expect("just peeked")
 					.expect_err("just peeked an error"));
 			}
-			Some(Ok(_)) => prepare_output_dir(&export)?,
+			Some(Ok(_)) => export.prepare_output_dir()?,
 			None => {}
 		}
 
@@ -651,7 +699,7 @@ impl Engine {
 				.enumerate()
 				.par_bridge()
 				.map(|(index, discovered)| {
-					Ok((index, export_environment(&engine, &export, &discovered?)))
+					Ok((index, export.export_environment(&engine, &discovered?)))
 				})
 				.collect::<Result<Vec<_>, Error>>()
 		})?;
@@ -673,7 +721,7 @@ impl Engine {
 		// An export that found nothing to do leaves no trace of having run, as tk
 		// does not: no output directory, and no index claiming it is empty.
 		if !exported.reports.is_empty() {
-			reconcile(&export, &exported)?;
+			export.reconcile(&exported)?;
 		}
 
 		Ok(exported)
@@ -711,6 +759,52 @@ impl Matching {
 
 		true
 	}
+
+	/// Which environments an export will export.
+	///
+	/// A recursive export streams, so that evaluating one environment overlaps
+	/// with discovering the next. The other modes have to look at every
+	/// environment before dispatching any of them: `--name` prefers an exact
+	/// match that may turn up last, and an export given neither `--name` nor
+	/// `--recursive` has to refuse an ambiguous set outright.
+	fn select(
+		mut self,
+		recursive: bool,
+	) -> Result<Box<dyn Iterator<Item = Result<Discovered, Error>> + Send>, Error> {
+		if let Some(name) = self.name.clone() {
+			let (exact, partial): (Vec<_>, Vec<_>) = self
+				.collect::<Result<Vec<_>, _>>()?
+				.into_iter()
+				.partition(|discovered| {
+					discovered.environment.metadata.name.as_deref() == Some(name.as_str())
+				});
+
+			let selected = if exact.is_empty() { partial } else { exact };
+			return Ok(Box::new(selected.into_iter().map(Ok)));
+		}
+
+		if recursive {
+			return Ok(Box::new(self));
+		}
+
+		let Some(first) = self.next().transpose()? else {
+			return Ok(Box::new(std::iter::empty()));
+		};
+		let Some(second) = self.next().transpose()? else {
+			return Ok(Box::new(std::iter::once(Ok(first))));
+		};
+
+		let mut count = 2;
+		while self.next().transpose()?.is_some() {
+			count += 1;
+		}
+
+		Err(Error::Ambiguous {
+			count,
+			first: first.path.as_ref().clone(),
+			second: second.path.as_ref().clone(),
+		})
+	}
 }
 
 impl Iterator for Matching {
@@ -727,276 +821,173 @@ impl Iterator for Matching {
 	}
 }
 
-/// Which environments an export will export.
-///
-/// A recursive export streams, so that evaluating one environment overlaps with
-/// discovering the next. The other modes have to look at every environment
-/// before dispatching any of them: `--name` prefers an exact match that may turn
-/// up last, and an export given neither `--name` nor `--recursive` has to refuse
-/// an ambiguous set outright.
-fn select(
-	mut matching: Matching,
-	options: &Options,
-) -> Result<Box<dyn Iterator<Item = Result<Discovered, Error>> + Send>, Error> {
-	if let Some(name) = options.name.clone() {
-		let (exact, partial): (Vec<_>, Vec<_>) = matching
-			.collect::<Result<Vec<_>, _>>()?
-			.into_iter()
-			.partition(|discovered| {
-				discovered.environment.metadata.name.as_deref() == Some(name.as_str())
-			});
-
-		let selected = if exact.is_empty() { partial } else { exact };
-		return Ok(Box::new(selected.into_iter().map(Ok)));
-	}
-
-	if options.recursive {
-		return Ok(Box::new(matching));
-	}
-
-	let Some(first) = matching.next().transpose()? else {
-		return Ok(Box::new(std::iter::empty()));
-	};
-	let Some(second) = matching.next().transpose()? else {
-		return Ok(Box::new(std::iter::once(Ok(first))));
-	};
-
-	let mut count = 2;
-	while matching.next().transpose()?.is_some() {
-		count += 1;
-	}
-
-	Err(Error::Ambiguous {
-		count,
-		first: first.path.as_ref().clone(),
-		second: second.path.as_ref().clone(),
-	})
-}
-
-fn manifests(
-	environment: &LoadedEnvironment,
-	targets: &[process::TargetMatcher],
-) -> Result<Vec<serde_json::Value>, Error> {
-	let Some(data) = environment.data() else {
-		return Ok(Vec::new());
-	};
-
-	let mut manifests = Vec::new();
-	process::collect_manifests(data.clone(), "", &mut manifests)?;
-	if !targets.is_empty() {
-		manifests.retain(|manifest| process::keep_target(manifest, targets));
-	}
-
-	// Namespaces, labels and resource defaults are what the spec says this
-	// environment's resources are, so everything that reads manifests — exporting,
-	// diffing, applying — wants them injected. A bare Jsonnet entrypoint has no
-	// spec, and so gets no namespace.
-	let processing =
-		process::Processing::new(environment.inner(), environment.environment().is_some());
-	for manifest in &mut manifests {
-		processing.apply(manifest);
-	}
-
-	Ok(manifests)
-}
-
 /// Serialize one processed manifest using Tanka's YAML formatting.
 pub fn serialize_manifest(manifest: &serde_json::Value) -> Result<String, Error> {
 	process::serialize(manifest)
 }
 
-/// Evaluate, serialize and write one environment, all on the thread that picked
-/// it up.
-///
-/// An environment that fails reports its failure rather than returning it: one
-/// broken environment does not stop the others, and what it did manage to write
-/// is still worth reporting.
-fn export_environment(engine: &Engine, export: &Export, discovered: &Discovered) -> Report {
-	let mut report = Report::new(
-		Arc::clone(&discovered.path),
-		identify(discovered.path.as_path()),
-	);
+impl Export {
+	/// Evaluate, serialize and write one environment, all on the thread that
+	/// picked it up.
+	///
+	/// An environment that fails reports its failure rather than returning it:
+	/// one broken environment does not stop the others, and what it did manage to
+	/// write is still worth reporting.
+	fn export_environment(&self, engine: &Engine, discovered: &Discovered) -> Report {
+		let mut report = Report::from_source(Arc::clone(&discovered.path));
 
-	match run_environment(engine, export, discovered, &mut report) {
-		Ok(timing) => report.timing = timing,
-		Err(error) => {
-			if error.fatal() {
-				export.abort();
+		match self.run_environment(engine, discovered, &mut report) {
+			Ok(timing) => report.timing = timing,
+			Err(error) => {
+				if error.fatal() {
+					self.abort();
+				}
+				report.error = Some(Arc::new(error));
 			}
-			report.error = Some(Arc::new(error));
 		}
+
+		// Files land in whatever order they were serialized, which should not show
+		// up in the result.
+		report.files.sort();
+		report
 	}
 
-	// Files land in whatever order they were serialized, which should not show up
-	// in the result.
-	report.files.sort();
-	report
-}
-
-fn run_environment(
-	engine: &Engine,
-	export: &Export,
-	discovered: &Discovered,
-	report: &mut Report,
-) -> Result<Option<TimingData>, Error> {
-	if export.aborted() {
-		return Err(Error::Skipped);
-	}
-
-	let mut timing = export.options.timing.then(TimingData::default);
-	debug!(environment = ?discovered.path, "exporting");
-
-	let evaluate_started = Instant::now();
-	let environment = engine.load(discovered)?;
-	if let Some(timing) = timing.as_mut() {
-		timing.evaluate = evaluate_started.elapsed();
-	}
-
-	let planned = Instant::now();
-	let plan = export.plan(&environment)?;
-	let mut serializing = planned.elapsed();
-	let mut writing = Duration::ZERO;
-
-	// Written as they are serialized, and recorded as they are written, so that an
-	// environment that fails part way through still reports what it put on disk.
-	let mut directories = Directories::default();
-	for chunk in plan.chunks() {
-		let serialized = Instant::now();
-		let files = export.serialize_chunk(chunk, &plan)?;
-		serializing += serialized.elapsed();
-
-		let queued = Instant::now();
-		let written = write_files(&export.options.output_dir, files, &mut directories)?;
-		writing += queued.elapsed();
-		collect_written(report, written);
-	}
-
-	let manifests = plan.manifests();
-	if let Some(timing) = timing.as_mut() {
-		timing.serialize = serializing;
-		timing.write = writing;
-		timing.manifests = manifests;
-	}
-
-	trace!(environment = ?discovered.path, manifests, "exported");
-	Ok(timing)
-}
-
-/// Refuse to export into a directory that already holds an export, unless told
-/// otherwise, and make sure it exists.
-fn prepare_output_dir(export: &Export) -> Result<(), Error> {
-	let output_dir = &export.options.output_dir;
-
-	if export.options.merge_strategy == MergeStrategy::None && !manifest::is_empty_dir(output_dir)?
-	{
-		return Err(Error::OutputDirNotEmpty {
-			output_dir: output_dir.clone(),
-		});
-	}
-
-	std::fs::create_dir_all(output_dir).map_err(|source| Error::Write {
-		path: output_dir.clone(),
-		source,
-	})
-}
-
-fn collect_written(report: &mut Report, written: Vec<Written>) {
-	for written in written {
-		if written.unchanged {
-			report.unchanged += 1;
+	fn run_environment(
+		&self,
+		engine: &Engine,
+		discovered: &Discovered,
+		report: &mut Report,
+	) -> Result<Option<TimingData>, Error> {
+		if self.aborted() {
+			return Err(Error::Skipped);
 		}
-		report.files.push(written.path);
-	}
-}
 
-/// Check what the export wrote against what was there before, then update the
-/// index.
-///
-/// Conflicts are only detectable once every environment has been exported, since
-/// any two of them could produce the same file.
-fn reconcile(export: &Export, exported: &Exported) -> Result<(), Error> {
-	let options = &export.options;
-	let mut index = Manifest::read(&options.output_dir)?;
+		let mut timing = self.options.timing.then(TimingData::default);
+		debug!(environment = ?discovered.path, "exporting");
 
-	// Files the exported environments wrote last time can be overwritten and,
-	// if they are not written again, should be deleted.
-	let mut superseded = if options.merge_strategy == MergeStrategy::ReplaceEnvironments {
-		index.files_of(
-			exported
-				.reports
-				.iter()
-				.filter(|report| !report.failed())
-				.map(|report| report.identifier.as_str()),
-		)
-	} else {
-		FxHashSet::default()
-	};
-	superseded.extend(index.files_of(&options.merge_deleted_environments));
-
-	let mut owners: FxHashMap<String, &str> = FxHashMap::default();
-	for report in exported.reports.iter().filter(|report| !report.failed()) {
-		for file in &report.files {
-			let file = manifest::relative_key(file);
-
-			if let Some(first) = owners.get(&file) {
-				return Err(Error::DuplicateFile {
-					file,
-					first: (*first).to_owned(),
-					second: report.identifier.clone(),
-				});
-			}
-
-			// A file in the index that no exported environment is replacing
-			// belongs to somebody else.
-			if !superseded.contains(&file)
-				&& let Some(owner) = index.owner(&file)
-				&& owner != report.identifier
-			{
-				return Err(Error::ForeignFile {
-					file,
-					owner: owner.to_owned(),
-				});
-			}
-
-			superseded.remove(&file);
-			owners.insert(file, &report.identifier);
+		let evaluate_started = Instant::now();
+		let environment = engine.load(discovered)?;
+		if let Some(timing) = timing.as_mut() {
+			timing.evaluate = evaluate_started.elapsed();
 		}
-	}
 
-	manifest::prune(&options.output_dir, &superseded);
+		let planned = Instant::now();
+		let plan = self.plan(&environment)?;
+		let mut serializing = planned.elapsed();
+		let mut writing = Duration::ZERO;
 
-	if !options.skip_manifest {
-		index.forget(&superseded);
-		for report in exported.reports.iter().filter(|report| !report.failed()) {
-			index.record(
-				&report.identifier,
-				report.files.iter().map(PathBuf::as_path),
-			);
+		// Written as they are serialized, and recorded as they are written, so
+		// that an environment that fails part way through still reports what it
+		// put on disk.
+		let mut directories = Directories::default();
+		for chunk in plan.chunks() {
+			let serialized = Instant::now();
+			let files = self.serialize_chunk(chunk, &plan)?;
+			serializing += serialized.elapsed();
+
+			let queued = Instant::now();
+			let written = directories.write_files(&self.options.output_dir, files)?;
+			writing += queued.elapsed();
+			report.record_written(written);
 		}
-		index.write()?;
+
+		let manifests = plan.manifests();
+		if let Some(timing) = timing.as_mut() {
+			timing.serialize = serializing;
+			timing.write = writing;
+			timing.manifests = manifests;
+		}
+
+		trace!(environment = ?discovered.path, manifests, "exported");
+		Ok(timing)
 	}
 
-	Ok(())
-}
+	/// Refuse to export into a directory that already holds an export, unless
+	/// told otherwise, and make sure it exists.
+	fn prepare_output_dir(&self) -> Result<(), Error> {
+		let output_dir = &self.options.output_dir;
 
-/// How `manifest.json` refers to an environment: its entrypoint, relative to the
-/// working directory when it is below it.
-fn identify(source: &Path) -> String {
-	let entrypoint = if source.is_file() {
-		source.to_path_buf()
-	} else {
-		source.join(JPath::DEFAULT_ENTRYPOINT)
-	};
+		if self.options.merge_strategy == MergeStrategy::None
+			&& !manifest::is_empty_dir(output_dir)?
+		{
+			return Err(Error::OutputDirNotEmpty {
+				output_dir: output_dir.clone(),
+			});
+		}
 
-	std::env::current_dir()
-		.ok()
-		.and_then(|current_dir| {
-			entrypoint
-				.strip_prefix(current_dir)
-				.ok()
-				.map(Path::to_path_buf)
+		std::fs::create_dir_all(output_dir).map_err(|source| Error::Write {
+			path: output_dir.clone(),
+			source,
 		})
-		.unwrap_or(entrypoint)
-		.to_string_lossy()
-		.into_owned()
+	}
+
+	/// Check what the export wrote against what was there before, then update the
+	/// index.
+	///
+	/// Conflicts are only detectable once every environment has been exported,
+	/// since any two of them could produce the same file.
+	fn reconcile(&self, exported: &Exported) -> Result<(), Error> {
+		let options = &self.options;
+		let mut index = Manifest::read(&options.output_dir)?;
+
+		// Files the exported environments wrote last time can be overwritten and,
+		// if they are not written again, should be deleted.
+		let mut superseded = if options.merge_strategy == MergeStrategy::ReplaceEnvironments {
+			index.files_of(
+				exported
+					.reports
+					.iter()
+					.filter(|report| !report.failed())
+					.map(|report| report.identifier.as_str()),
+			)
+		} else {
+			FxHashSet::default()
+		};
+		superseded.extend(index.files_of(&options.merge_deleted_environments));
+
+		let mut owners: FxHashMap<String, &str> = FxHashMap::default();
+		for report in exported.reports.iter().filter(|report| !report.failed()) {
+			for file in &report.files {
+				let file = manifest::relative_key(file);
+
+				if let Some(first) = owners.get(&file) {
+					return Err(Error::DuplicateFile {
+						file,
+						first: (*first).to_owned(),
+						second: report.identifier.clone(),
+					});
+				}
+
+				// A file in the index that no exported environment is replacing
+				// belongs to somebody else.
+				if !superseded.contains(&file)
+					&& let Some(owner) = index.owner(&file)
+					&& owner != report.identifier
+				{
+					return Err(Error::ForeignFile {
+						file,
+						owner: owner.to_owned(),
+					});
+				}
+
+				superseded.remove(&file);
+				owners.insert(file, &report.identifier);
+			}
+		}
+
+		manifest::prune(&options.output_dir, &superseded);
+
+		if !options.skip_manifest {
+			index.forget(&superseded);
+			for report in exported.reports.iter().filter(|report| !report.failed()) {
+				index.record(
+					&report.identifier,
+					report.files.iter().map(PathBuf::as_path),
+				);
+			}
+			index.write()?;
+		}
+
+		Ok(())
+	}
 }

@@ -82,6 +82,53 @@ pub struct ExportArgs {
 	pub jsonnet: super::JsonnetArgs,
 }
 
+impl ExportArgs {
+	fn into_export_options(self) -> Result<(Vec<PathBuf>, Options, rtk_jsonnet::Options)> {
+		let ExportArgs {
+			output_dir,
+			paths,
+			extension,
+			format,
+			merge_deleted_envs,
+			merge_strategy,
+			name,
+			parallel,
+			recursive,
+			selector,
+			skip_manifest,
+			target,
+			jsonnet,
+			cache_envs: _,
+			cache_path: _,
+			helm_cache: _,
+			mem_ballast_size_bytes: _,
+		} = self;
+
+		let merge_strategy = merge_strategy
+			.as_deref()
+			.unwrap_or_default()
+			.parse::<MergeStrategy>()?;
+
+		let options = Options {
+			output_dir,
+			extension,
+			format,
+			targets: target,
+			merge_strategy,
+			merge_deleted_environments: merge_deleted_envs,
+			skip_manifest,
+			timing: false,
+			// Asking for fewer than one environment at a time is asking for one.
+			parallelism: parallel.max(1) as usize,
+			name,
+			selector,
+			recursive,
+		};
+
+		Ok((paths, options, jsonnet.into_options()))
+	}
+}
+
 /// Run the export command.
 pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	UnimplementedArgs {
@@ -93,7 +140,7 @@ pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	}
 	.warn_if_set();
 
-	let (paths, options, jsonnet) = build_export_opts(args)?;
+	let (paths, options, jsonnet) = args.into_export_options()?;
 
 	let engine = Engine::new(rtk_jsonnet::Engine::new(jsonnet));
 	let exported = engine
@@ -165,49 +212,4 @@ fn report<W: Write>(exported: &Exported, writer: &mut W) -> Result<()> {
 	}
 
 	Ok(())
-}
-
-fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, Options, rtk_jsonnet::Options)> {
-	let ExportArgs {
-		output_dir,
-		paths,
-		extension,
-		format,
-		merge_deleted_envs,
-		merge_strategy,
-		name,
-		parallel,
-		recursive,
-		selector,
-		skip_manifest,
-		target,
-		jsonnet,
-		cache_envs: _,
-		cache_path: _,
-		helm_cache: _,
-		mem_ballast_size_bytes: _,
-	} = args;
-
-	let merge_strategy = merge_strategy
-		.as_deref()
-		.unwrap_or_default()
-		.parse::<MergeStrategy>()?;
-
-	let options = Options {
-		output_dir,
-		extension,
-		format,
-		targets: target,
-		merge_strategy,
-		merge_deleted_environments: merge_deleted_envs,
-		skip_manifest,
-		timing: false,
-		// Asking for fewer than one environment at a time is asking for one.
-		parallelism: parallel.max(1) as usize,
-		name,
-		selector,
-		recursive,
-	};
-
-	Ok((paths, options, jsonnet.into_options()))
 }

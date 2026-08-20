@@ -11,7 +11,6 @@ use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::Environment;
 use serde::Deserialize as _;
 
-use crate::discover::entrypoint_snippet;
 use crate::export::{Error, LoadedEnvironment, OptionalData, process};
 use crate::{Discovered, Engine};
 
@@ -74,7 +73,7 @@ impl Engine {
 
 		// An inline environment declares itself somewhere inside the evaluated
 		// value, wherever the Jsonnet put it.
-		let Some(mut environment) = find_environment(evaluation)? else {
+		let Some(mut environment) = LoadedEnvironment::find_in(evaluation)? else {
 			return Environment::new()
 				.with_metadata(discovered.environment.metadata.clone())
 				.with_spec(discovered.environment.spec.clone())
@@ -175,7 +174,7 @@ impl Engine {
 			.unwrap_or(&jpath.entrypoint)
 			.to_string_lossy();
 		let evaluation =
-			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, "main"))?;
+			evaluator.evaluate_snippet(self.entrypoint_snippet(&entrypoint, "main"))?;
 
 		let data = process::materialize(&evaluation.into_value())?;
 		LoadedEnvironment::bare(data)
@@ -218,43 +217,46 @@ impl Engine {
 			.to_string_lossy();
 		let script = format!("{selection}\n{root}");
 		let evaluation =
-			evaluator.evaluate_snippet(entrypoint_snippet(options, &entrypoint, &script))?;
+			evaluator.evaluate_snippet(self.entrypoint_snippet(&entrypoint, &script))?;
 
 		process::materialize(&evaluation.into_value())
 	}
 }
 
-/// Find the environment an evaluated document declares, wherever it is.
-///
-/// Takes the environment out of the document rather than copying it: an
-/// environment's `data` is the bulk of what was evaluated.
-fn find_environment(value: serde_json::Value) -> Result<Option<LoadedEnvironment>, Error> {
-	match value {
-		serde_json::Value::Array(values) => {
-			for value in values {
-				if let Some(environment) = find_environment(value)? {
-					return Ok(Some(environment));
+impl LoadedEnvironment {
+	/// Find the environment an evaluated document declares, wherever it is.
+	///
+	/// Takes the environment out of the document rather than copying it: an
+	/// environment's `data` is the bulk of what was evaluated.
+	fn find_in(value: serde_json::Value) -> Result<Option<LoadedEnvironment>, Error> {
+		match value {
+			serde_json::Value::Array(values) => {
+				for value in values {
+					if let Some(environment) = Self::find_in(value)? {
+						return Ok(Some(environment));
+					}
 				}
 			}
-		}
-		serde_json::Value::Object(object) => {
-			if object.contains_key("apiVersion") && object.contains_key("kind") {
-				if object.get("kind").and_then(serde_json::Value::as_str) != Some("Environment") {
-					return Ok(None);
+			serde_json::Value::Object(object) => {
+				if object.contains_key("apiVersion") && object.contains_key("kind") {
+					if object.get("kind").and_then(serde_json::Value::as_str) != Some("Environment")
+					{
+						return Ok(None);
+					}
+					let environment = Environment::deserialize(serde_json::Value::Object(object))
+						.map_err(|source| Error::Environment { source })?;
+					return Ok(Some(LoadedEnvironment::configured(environment)));
 				}
-				let environment = Environment::deserialize(serde_json::Value::Object(object))
-					.map_err(|source| Error::Environment { source })?;
-				return Ok(Some(LoadedEnvironment::configured(environment)));
-			}
 
-			for (_, value) in object {
-				if let Some(environment) = find_environment(value)? {
-					return Ok(Some(environment));
+				for (_, value) in object {
+					if let Some(environment) = Self::find_in(value)? {
+						return Ok(Some(environment));
+					}
 				}
 			}
+			_ => {}
 		}
-		_ => {}
+
+		Ok(None)
 	}
-
-	Ok(None)
 }

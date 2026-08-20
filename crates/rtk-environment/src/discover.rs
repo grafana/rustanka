@@ -1,19 +1,18 @@
 use std::collections::VecDeque;
 use std::env;
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use rtk_jsonnet::jpath::JPath;
-use rtk_jsonnet::{Engine, EvaluationValue, Hidden};
+use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use tracing::Level;
 use walkdir::WalkDir;
 
-use crate::Error;
+use crate::{Engine, Error};
 
 /// Files that indicate a Tanka environment.
 const ENV_MARKERS: &[&str] = &["spec.json", "main.jsonnet"];
@@ -50,48 +49,6 @@ noDataEnv(main)
 
 /// Directories to skip during discovery.
 const SKIP_DIRS: &[&str] = &["vendor", "node_modules", ".git", "lib"];
-
-/// A snippet that imports an entrypoint as `main`, for `script` to work on.
-///
-/// An entrypoint taking top level arguments imports as a function rather than as
-/// what it builds, so it has to be called. The arguments reach it through a
-/// wrapping function for the evaluator to apply them to, and every parameter is
-/// given a default because the evaluator passes only the arguments it was
-/// actually given.
-pub(crate) fn entrypoint_snippet(
-	options: &rtk_jsonnet::Options,
-	entrypoint: &str,
-	script: &str,
-) -> String {
-	if !options.has_top_level_args() {
-		return format!(r#"local main = import "{entrypoint}"; {script}"#);
-	}
-
-	let count = options.top_level_arguments.len() + options.top_level_code.len();
-	let mut arguments = String::with_capacity(count * 16);
-	let mut parameters = String::with_capacity(count * 24);
-
-	let names = options
-		.top_level_arguments
-		.keys()
-		.chain(options.top_level_code.keys());
-
-	for (index, name) in names.enumerate() {
-		if index != 0 {
-			arguments.push_str(", ");
-			parameters.push_str(", ");
-		}
-
-		arguments.push_str(name);
-		let _ = write!(&mut parameters, "{name} = null");
-	}
-
-	format!(
-		r#"function({parameters})
-			local main = (import "{entrypoint}")({arguments});
-			{script}"#
-	)
-}
 
 type DirectoryIter =
 	walkdir::FilterEntry<walkdir::IntoIter, for<'a> fn(&'a walkdir::DirEntry) -> bool>;
@@ -140,8 +97,8 @@ const _: () = {
 /// The directories that hold environments, in the order they are found.
 ///
 /// Finding them is a filesystem walk and is cheap; working out what each one
-/// declares is not, and is [`resolve`]'s job. They are separate so that the
-/// expensive half can be done several at a time.
+/// declares is not, and is [`Engine::resolve_candidate`]'s job. They are separate
+/// so that the expensive half can be done several at a time.
 struct Candidates {
 	paths: <Vec<PathBuf> as IntoIterator>::IntoIter,
 	directory: Option<DirectoryIter>,
@@ -263,96 +220,108 @@ impl Iterator for Candidates {
 	}
 }
 
-/// Every environment a directory declares.
-fn resolve(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
-	let spec = path.join("spec.json");
-	if spec.exists() {
-		let environment = read_spec_json(&spec)?;
-		return Ok(vec![Discovered {
-			path,
-			is_static: true,
-			standalone: true,
-			environment,
-		}]);
+impl Engine {
+	/// Environments under `paths`, one at a time.
+	///
+	/// Reading what a directory declares means evaluating Jsonnet, and this does
+	/// it as it goes, so that a caller which stops early has not paid for the
+	/// rest. Exporting wants that: it evaluates one environment while discovering
+	/// the next.
+	#[tracing::instrument]
+	pub fn discover(&self, paths: Vec<PathBuf>) -> Discover {
+		Discover::new(self.clone(), paths)
 	}
 
-	inline_environments(engine, path)
-}
+	/// Every environment under `paths`, reading several directories at once.
+	///
+	/// For callers that want all of them anyway, which listing and diffing do.
+	/// The environments come back in the order [`Engine::discover`] would have
+	/// handed them out, and so does the first failure among them.
+	#[tracing::instrument]
+	pub fn discover_all(&self, paths: Vec<PathBuf>) -> Result<Vec<Discovered>, Error> {
+		let pool = rayon::ThreadPoolBuilder::new()
+			.num_threads(available_parallelism())
+			// Jsonnet evaluation recurses deeply.
+			.stack_size(8 * 1024 * 1024)
+			.build()
+			.expect("a rayon pool can be built");
 
-/// Every environment declared anywhere in a directory's entrypoint.
-#[tracing::instrument(skip(engine))]
-fn inline_environments(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
-	let main_path = path.join("main.jsonnet");
-	let options = engine.options();
+		// Failures are carried as text: a Jsonnet error's stack trace is `Rc`-based,
+		// so it cannot leave the thread that raised it.
+		let mut resolved: Vec<(usize, Result<Vec<Discovered>, String>)> = pool.install(|| {
+			Candidates::new(paths)
+				.enumerate()
+				.par_bridge()
+				.map(|(index, path)| {
+					let found = path
+						.map_err(Error::from)
+						.and_then(|path| self.resolve_candidate(path))
+						.map_err(|error| error.to_string());
+					(index, found)
+				})
+				.collect()
+		});
 
-	let jpath = JPath::resolve(&main_path)?;
-	let entrypoint = jpath
-		.entrypoint
-		.strip_prefix(&jpath.base_directory)
-		.unwrap_or(&jpath.entrypoint)
-		.to_string_lossy();
+		// Directories are resolved in whatever order the pool gets to them, which
+		// should show up neither in the order environments come back nor in which of
+		// several failures is reported.
+		resolved.sort_by_key(|(index, _)| *index);
 
-	let snippet = entrypoint_snippet(options, &entrypoint, METADATA_EVAL_SCRIPT);
-
-	// Inline environments are named by the Jsonnet that declares them, but
-	// their namespace still comes from where the entrypoint lives.
-	let namespace = namespace_of(&jpath);
-
-	// Deliberately not evaluated as any environment in particular: the specs
-	// that would say how to evaluate them are what this is reading, and an
-	// entrypoint may need Tanka's native functions just to declare them. tk
-	// discovers the same way, and applies what it finds only when exporting.
-	let mut evaluator = engine.create_evaluator();
-	options.apply(&mut evaluator)?;
-	evaluator.with_import_paths(jpath.import_paths)?;
-	let evaluation = evaluator.evaluate_snippet(snippet)?;
-
-	// Collected in one go, rather than yielded from an iterator that borrows the
-	// evaluation: evaluated values are `Rc`-based, so holding one would pin
-	// discovery — and everything reading it — to this thread. What comes out is
-	// owned, which is what lets one thread discover an environment and another
-	// export it. The metadata script has already pruned every environment's
-	// data, so this is small.
-	let mut found = Vec::new();
-	let standalone = collect_inline_envs(
-		&path,
-		namespace.as_deref(),
-		evaluation.into_value(),
-		&mut found,
-	)?;
-
-	// The entrypoint evaluated to one environment and nothing else, so there is
-	// nothing to pick it out from.
-	if standalone {
-		for discovered in &mut found {
-			discovered.standalone = true;
+		let mut environments = Vec::new();
+		for (_, found) in resolved {
+			environments.extend(found.map_err(Error::Rendered)?);
 		}
+
+		Ok(environments)
 	}
 
-	Ok(found)
-}
+	/// Every environment a directory declares.
+	fn resolve_candidate(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
+		if path.join("spec.json").exists() {
+			return Ok(vec![Discovered::from_static(path)?]);
+		}
 
-fn read_spec_json(spec_path: &Path) -> Result<Environment<'static>, Error> {
-	let jpath = spec_path
-		.parent()
-		.and_then(|directory| JPath::resolve(directory).ok());
-	let resolved_spec = jpath
-		.as_ref()
-		.map(|jpath| jpath.base_directory.join("spec.json"))
-		.filter(|path| path.exists());
-	let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(spec_path))?;
-	let environment = serde_json::from_str::<Environment<'_>>(&content)?;
-	let mut environment = environment.without_data();
-
-	// A static environment is named after its directory and carries its
-	// entrypoint as its namespace, whatever `spec.json` says. Best effort: an
-	// environment whose entrypoint cannot be resolved fails later, when it is
-	// evaluated, with a better error than discovery could give.
-	if let Some(jpath) = jpath {
-		crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
+		self.resolve_inline(path)
 	}
 
-	Ok(environment)
+	/// Every environment declared anywhere in a directory's entrypoint.
+	#[tracing::instrument(skip(self))]
+	fn resolve_inline(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
+		let main_path = path.join("main.jsonnet");
+		let options = self.jsonnet.options();
+
+		let jpath = JPath::resolve(&main_path)?;
+		let entrypoint = jpath
+			.entrypoint
+			.strip_prefix(&jpath.base_directory)
+			.unwrap_or(&jpath.entrypoint)
+			.to_string_lossy();
+
+		let snippet = self.entrypoint_snippet(&entrypoint, METADATA_EVAL_SCRIPT);
+
+		// Inline environments are named by the Jsonnet that declares them, but
+		// their namespace still comes from where the entrypoint lives.
+		let namespace = namespace_of(&jpath);
+
+		// Deliberately not evaluated as any environment in particular: the specs
+		// that would say how to evaluate them are what this is reading, and an
+		// entrypoint may need Tanka's native functions just to declare them. tk
+		// discovers the same way, and applies what it finds only when exporting.
+		let mut evaluator = self.jsonnet.create_evaluator();
+		options.apply(&mut evaluator)?;
+		evaluator.with_import_paths(jpath.import_paths)?;
+		let evaluation = evaluator.evaluate_snippet(snippet)?;
+
+		// Collected in one go, rather than yielded from an iterator that borrows the
+		// evaluation: evaluated values are `Rc`-based, so holding one would pin
+		// discovery — and everything reading it — to this thread. What comes out is
+		// owned, which is what lets one thread discover an environment and another
+		// export it. The metadata script has already pruned every environment's
+		// data, so this is small.
+		let mut collector = InlineCollector::new(&path, namespace.as_deref());
+		let standalone = collector.collect(evaluation.into_value())?;
+		Ok(collector.finish(standalone))
+	}
 }
 
 /// Environments under a set of paths, one at a time.
@@ -384,7 +353,7 @@ impl Iterator for Discover {
 			}
 
 			match self.candidates.next()? {
-				Ok(path) => match resolve(&self.engine, path) {
+				Ok(path) => match self.engine.resolve_candidate(path) {
 					Ok(found) => self.found.extend(found),
 					Err(error) => return Some(Err(error)),
 				},
@@ -394,100 +363,108 @@ impl Iterator for Discover {
 	}
 }
 
-/// Every environment under `paths`, resolving several directories at once.
-///
-/// Finding the directories stays on this thread — the walk is cheap, and skipping
-/// one already seen is easier when only one thread is looking. Reading what each
-/// declares is the expensive half, and is spread over a pool.
-pub(crate) fn resolve_all(engine: &Engine, paths: Vec<PathBuf>) -> Result<Vec<Discovered>, Error> {
-	let pool = rayon::ThreadPoolBuilder::new()
-		.num_threads(available_parallelism())
-		// Jsonnet evaluation recurses deeply.
-		.stack_size(8 * 1024 * 1024)
-		.build()
-		.expect("a rayon pool can be built");
-
-	// Failures are carried as text: a Jsonnet error's stack trace is `Rc`-based,
-	// so it cannot leave the thread that raised it.
-	let mut resolved: Vec<(usize, Result<Vec<Discovered>, String>)> = pool.install(|| {
-		Candidates::new(paths)
-			.enumerate()
-			.par_bridge()
-			.map(|(index, path)| {
-				let found = path
-					.map_err(Error::from)
-					.and_then(|path| resolve(engine, path))
-					.map_err(|error| error.to_string());
-				(index, found)
-			})
-			.collect()
-	});
-
-	// Directories are resolved in whatever order the pool gets to them, which
-	// should show up neither in the order environments come back nor in which of
-	// several failures is reported.
-	resolved.sort_by_key(|(index, _)| *index);
-
-	let mut environments = Vec::new();
-	for (_, found) in resolved {
-		environments.extend(found.map_err(Error::Rendered)?);
-	}
-
-	Ok(environments)
-}
-
 fn available_parallelism() -> usize {
 	std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
 }
 
-/// Collect every environment declared anywhere in `value`, depth first.
-///
-/// Returns whether `value` was itself an environment, rather than something with
-/// environments somewhere inside it.
-fn collect_inline_envs(
-	path: &Arc<PathBuf>,
-	namespace: Option<&str>,
-	value: EvaluationValue,
-	found: &mut Vec<Discovered>,
-) -> Result<bool, Error> {
-	let deserializable = value.clone();
-	match value.into_object() {
-		Ok(object) => {
-			// The metadata script leaves nothing but environments behind, but
-			// checking the kind is cheap and keeps a stray object from being
-			// deserialized as one.
-			if object.has("apiVersion", Hidden::Skip)?
-				&& object
-					.get("kind", Hidden::Skip)?
-					.and_then(|kind| kind.as_str())
-					.as_deref() == Some("Environment")
-			{
-				let environment: Environment<'static> = deserializable.deserialize()?;
-				found.push(Discovered::from_environment(
-					Arc::clone(path),
-					namespace,
-					environment,
-				));
-				return Ok(true);
-			}
+/// The state shared while recursively collecting inline environments.
+struct InlineCollector<'a> {
+	path: &'a Arc<PathBuf>,
+	namespace: Option<&'a str>,
+	found: Vec<Discovered>,
+}
 
-			for value in object.into_values() {
-				collect_inline_envs(path, namespace, value?, found)?;
-			}
-		}
-		Err(value) => {
-			if let Ok(array) = value.into_array() {
-				for value in array.into_values() {
-					collect_inline_envs(path, namespace, value?, found)?;
-				}
-			}
+impl<'a> InlineCollector<'a> {
+	fn new(path: &'a Arc<PathBuf>, namespace: Option<&'a str>) -> InlineCollector<'a> {
+		InlineCollector {
+			path,
+			namespace,
+			found: Vec::new(),
 		}
 	}
 
-	Ok(false)
+	/// Collect every environment declared anywhere in `value`, depth first.
+	///
+	/// Returns whether `value` was itself an environment, rather than something
+	/// with environments somewhere inside it.
+	fn collect(&mut self, value: EvaluationValue) -> Result<bool, Error> {
+		let deserializable = value.clone();
+		match value.into_object() {
+			Ok(object) => {
+				// The metadata script leaves nothing but environments behind, but
+				// checking the kind is cheap and keeps a stray object from being
+				// deserialized as one.
+				if object.has("apiVersion", Hidden::Skip)?
+					&& object
+						.get("kind", Hidden::Skip)?
+						.and_then(|kind| kind.as_str())
+						.as_deref() == Some("Environment")
+				{
+					let environment: Environment<'static> = deserializable.deserialize()?;
+					self.found.push(Discovered::from_environment(
+						Arc::clone(self.path),
+						self.namespace,
+						environment,
+					));
+					return Ok(true);
+				}
+
+				for value in object.into_values() {
+					self.collect(value?)?;
+				}
+			}
+			Err(value) => {
+				if let Ok(array) = value.into_array() {
+					for value in array.into_values() {
+						self.collect(value?)?;
+					}
+				}
+			}
+		}
+
+		Ok(false)
+	}
+
+	fn finish(mut self, standalone: bool) -> Vec<Discovered> {
+		if standalone {
+			for discovered in &mut self.found {
+				discovered.standalone = true;
+			}
+		}
+		self.found
+	}
 }
 
 impl Discovered {
+	fn from_static(path: Arc<PathBuf>) -> Result<Self, Error> {
+		let spec_path = path.join("spec.json");
+		let jpath = spec_path
+			.parent()
+			.and_then(|directory| JPath::resolve(directory).ok());
+		let resolved_spec = jpath
+			.as_ref()
+			.map(|jpath| jpath.base_directory.join("spec.json"))
+			.filter(|path| path.exists());
+		let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(&spec_path))?;
+		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
+		let mut environment = environment.without_data();
+
+		// A static environment is named after its directory and carries its
+		// entrypoint as its namespace, whatever `spec.json` says. Best effort: an
+		// environment whose entrypoint cannot be resolved fails later, when it is
+		// evaluated, with a better error than discovery could give.
+		if let Some(jpath) = jpath {
+			crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
+		}
+
+		Ok(Self {
+			path,
+			is_static: true,
+			standalone: true,
+			environment,
+		})
+	}
+
 	fn from_environment(
 		path: Arc<PathBuf>,
 		namespace: Option<&str>,
@@ -551,7 +528,7 @@ mod tests {
 	}
 
 	fn test_engine() -> Engine {
-		Engine::new(rtk_jsonnet::Options::default())
+		Engine::new(rtk_jsonnet::Engine::new(rtk_jsonnet::Options::default()))
 	}
 
 	/// An environment declared in Jsonnet, optionally alongside another.
@@ -667,7 +644,7 @@ mod tests {
 		let one_at_a_time = Discover::new(test_engine(), paths.clone())
 			.collect::<Result<Vec<_>, _>>()
 			.unwrap();
-		let all_at_once = resolve_all(&test_engine(), paths).unwrap();
+		let all_at_once = test_engine().discover_all(paths).unwrap();
 
 		assert!(one_at_a_time.len() >= 6, "{:?}", described(&one_at_a_time));
 		assert_eq!(described(&all_at_once), described(&one_at_a_time));
@@ -701,7 +678,8 @@ mod tests {
 		// Run it more than once: the answer should not depend on which thread
 		// finished first.
 		for _ in 0..8 {
-			let error = resolve_all(&test_engine(), paths.clone())
+			let error = test_engine()
+				.discover_all(paths.clone())
 				.expect_err("the broken environments fail");
 			assert_eq!(error.to_string(), expected);
 		}

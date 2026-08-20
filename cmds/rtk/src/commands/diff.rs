@@ -257,7 +257,7 @@ pub async fn diff_manifests<W: Write>(
 async fn run_async<W: Write>(args: DiffArgs, mut writer: W) -> Result<DiffResult> {
 	// Handle --list-modified-envs mode: find all environments and check each for changes
 	if args.list_modified_envs {
-		return list_modified_environments(&args, &mut writer).await;
+		return args.list_modified_environments(&mut writer).await;
 	}
 
 	let jsonnet = args.jsonnet.into_options();
@@ -276,119 +276,118 @@ async fn run_async<W: Write>(args: DiffArgs, mut writer: W) -> Result<DiffResult
 	Ok(DiffResult { has_changes })
 }
 
-/// List environments that have changes.
-///
-/// Discovers all environments in the path, checks each for changes in parallel,
-/// and prints the names of environments with differences.
-#[instrument(skip_all, fields(path = %args.path.display()))]
-async fn list_modified_environments<W: Write>(
-	args: &DiffArgs,
-	writer: &mut W,
-) -> Result<DiffResult> {
-	// Discover all environments in the path
-	tracing::debug!(path = %args.path.display(), "discovering environments");
-	let jsonnet = args.jsonnet.options();
-	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet.clone()));
-	let envs: Vec<rtk_environments::Discovered> = engine
-		.discover_all(vec![args.path.clone()])
-		.map_err(|error| anyhow::anyhow!("discovering environments: {error}"))?;
+impl DiffArgs {
+	/// List environments that have changes.
+	///
+	/// Discovers all environments in the path, checks each for changes in
+	/// parallel, and prints the names of environments with differences.
+	#[instrument(skip_all, fields(path = %self.path.display()))]
+	async fn list_modified_environments<W: Write>(&self, writer: &mut W) -> Result<DiffResult> {
+		// Discover all environments in the path
+		tracing::debug!(path = %self.path.display(), "discovering environments");
+		let jsonnet = self.jsonnet.options();
+		let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet.clone()));
+		let envs: Vec<rtk_environments::Discovered> = engine
+			.discover_all(vec![self.path.clone()])
+			.map_err(|error| anyhow::anyhow!("discovering environments: {error}"))?;
 
-	// Filter environments by --name if specified, preferring an exact match
-	let envs: Vec<_> = if let Some(ref target_name) = args.name {
-		let name_of = |env: &rtk_environments::Discovered| {
-			env.environment.metadata.name.clone().unwrap_or_default()
+		// Filter environments by --name if specified, preferring an exact match
+		let envs: Vec<_> = if let Some(ref target_name) = self.name {
+			let name_of = |env: &rtk_environments::Discovered| {
+				env.environment.metadata.name.clone().unwrap_or_default()
+			};
+
+			let exact: Vec<_> = envs
+				.iter()
+				.filter(|e| name_of(e) == *target_name)
+				.cloned()
+				.collect();
+
+			if exact.is_empty() {
+				envs.into_iter()
+					.filter(|e| name_of(e).contains(target_name))
+					.collect()
+			} else {
+				exact
+			}
+		} else {
+			envs
 		};
 
-		let exact: Vec<_> = envs
-			.iter()
-			.filter(|e| name_of(e) == *target_name)
-			.cloned()
-			.collect();
-
-		if exact.is_empty() {
-			envs.into_iter()
-				.filter(|e| name_of(e).contains(target_name))
-				.collect()
-		} else {
-			exact
+		if envs.is_empty() {
+			eprintln!("No environments with changes.");
+			return Ok(DiffResult { has_changes: false });
 		}
-	} else {
-		envs
-	};
 
-	if envs.is_empty() {
-		eprintln!("No environments with changes.");
-		return Ok(DiffResult { has_changes: false });
-	}
+		tracing::debug!(env_count = envs.len(), "found environments");
 
-	tracing::debug!(env_count = envs.len(), "found environments");
+		// Check all environments in parallel using JoinSet with concurrency limit
+		const MAX_PARALLEL: usize = 8;
+		let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_PARALLEL));
+		let target = std::sync::Arc::new(self.target.clone());
+		let mut join_set = tokio::task::JoinSet::new();
 
-	// Check all environments in parallel using JoinSet with concurrency limit
-	const MAX_PARALLEL: usize = 8;
-	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_PARALLEL));
-	let target = std::sync::Arc::new(args.target.clone());
-	let mut join_set = tokio::task::JoinSet::new();
+		for env in &envs {
+			let env_path = env.path.to_string_lossy().to_string();
+			let display_name = env
+				.environment
+				.metadata
+				.name
+				.clone()
+				.unwrap_or_else(|| env_path.clone());
 
-	for env in &envs {
-		let env_path = env.path.to_string_lossy().to_string();
-		let display_name = env
-			.environment
-			.metadata
-			.name
-			.clone()
-			.unwrap_or_else(|| env_path.clone());
+			let selected_name = env.selected_by().map(str::to_owned);
+			let jsonnet = jsonnet.clone();
 
-		let selected_name = env.selected_by().map(str::to_owned);
-		let jsonnet = jsonnet.clone();
+			let diff_strategy = self.diff_strategy;
+			let with_prune = self.with_prune;
+			let target = Arc::clone(&target);
+			let sem = semaphore.clone();
 
-		let diff_strategy = args.diff_strategy;
-		let with_prune = args.with_prune;
-		let target = Arc::clone(&target);
-		let sem = semaphore.clone();
-
-		join_set.spawn(async move {
-			let _permit = sem.acquire().await.expect("semaphore closed");
-			tracing::debug!(env_path = %env_path, "checking environment");
-			match check_environment_for_changes(
-				env_path.clone(),
-				jsonnet,
-				selected_name,
-				diff_strategy,
-				with_prune,
-				target,
-			)
-			.await
-			{
-				Ok(true) => Some(display_name),
-				Ok(false) => {
-					tracing::debug!(env_path = %env_path, "no changes");
-					None
+			join_set.spawn(async move {
+				let _permit = sem.acquire().await.expect("semaphore closed");
+				tracing::debug!(env_path = %env_path, "checking environment");
+				match check_environment_for_changes(
+					env_path.clone(),
+					jsonnet,
+					selected_name,
+					diff_strategy,
+					with_prune,
+					target,
+				)
+				.await
+				{
+					Ok(true) => Some(display_name),
+					Ok(false) => {
+						tracing::debug!(env_path = %env_path, "no changes");
+						None
+					}
+					Err(e) => {
+						tracing::warn!(env_path = %env_path, error = %e, "failed to check environment");
+						None
+					}
 				}
-				Err(e) => {
-					tracing::warn!(env_path = %env_path, error = %e, "failed to check environment");
-					None
-				}
+			});
+		}
+
+		let mut changed_envs = Vec::new();
+		while let Some(result) = join_set.join_next().await {
+			if let Ok(Some(name)) = result {
+				changed_envs.push(name);
 			}
-		});
-	}
-
-	let mut changed_envs = Vec::new();
-	while let Some(result) = join_set.join_next().await {
-		if let Ok(Some(name)) = result {
-			changed_envs.push(name);
 		}
-	}
 
-	// Print results
-	if changed_envs.is_empty() {
-		eprintln!("No environments with changes.");
-		Ok(DiffResult { has_changes: false })
-	} else {
-		changed_envs.sort();
-		for name in &changed_envs {
-			writeln!(writer, "{}", name)?;
+		// Print results
+		if changed_envs.is_empty() {
+			eprintln!("No environments with changes.");
+			Ok(DiffResult { has_changes: false })
+		} else {
+			changed_envs.sort();
+			for name in &changed_envs {
+				writeln!(writer, "{}", name)?;
+			}
+			Ok(DiffResult { has_changes: true })
 		}
-		Ok(DiffResult { has_changes: true })
 	}
 }
 

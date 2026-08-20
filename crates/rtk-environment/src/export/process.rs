@@ -346,64 +346,74 @@ fn validate_manifest(manifest: &serde_json::Value, path: &str) -> Result<(), Err
 	}
 }
 
-/// A compiled `-t/--target` expression.
-///
-/// Mirrors Tanka's `pkg/process/filter.go`: patterns are anchored with `^…$`,
-/// case-insensitive, and a leading `!` inverts the match.
+/// Compiled `-t/--target` expressions.
 #[derive(Clone, Debug)]
-pub(crate) struct TargetMatcher {
-	regex: regex::Regex,
-	negate: bool,
-}
+pub(crate) struct Targets(Vec<TargetMatcher>);
 
-impl TargetMatcher {
+impl Targets {
 	/// Compile raw `-t` arguments. Mirrors Tanka's `process.StrExps`.
-	pub(crate) fn compile<I, S>(patterns: I) -> Result<Vec<TargetMatcher>, Error>
+	pub(crate) fn compile<I, S>(patterns: I) -> Result<Targets, Error>
 	where
 		I: IntoIterator<Item = S>,
 		S: AsRef<str>,
 	{
 		patterns
 			.into_iter()
-			.map(|pattern| {
-				let pattern = pattern.as_ref();
-				let (negate, body) = match pattern.strip_prefix('!') {
-					Some(rest) => (true, rest),
-					None => (false, pattern),
-				};
-				let regex = regex::RegexBuilder::new(&format!("^{body}$"))
-					.case_insensitive(true)
-					.build()
-					.map_err(|source| Error::InvalidTarget {
-						target: pattern.into(),
-						source,
-					})?;
-				Ok(TargetMatcher { regex, negate })
-			})
-			.collect()
+			.map(TargetMatcher::compile)
+			.collect::<Result<Vec<_>, _>>()
+			.map(Targets)
+	}
+
+	/// Whether a manifest survives these matchers.
+	///
+	/// Mirrors Tanka's `process.Filter`: keep it if at least one matcher matches
+	/// and no negative matcher does. A negative matcher always satisfies the
+	/// "matches at least one" gate (Tanka's `NegMatcher.MatchString` is
+	/// unconditionally true), so a query of only `!…` patterns keeps everything
+	/// but the exclusions.
+	pub(crate) fn keeps(&self, manifest: &serde_json::Value) -> bool {
+		if self.0.is_empty() {
+			return true;
+		}
+
+		let kind_name = kind_name(manifest);
+		let matched = self
+			.0
+			.iter()
+			.any(|matcher| matcher.negate || matcher.regex.is_match(&kind_name));
+		let excluded = self
+			.0
+			.iter()
+			.any(|matcher| matcher.negate && matcher.regex.is_match(&kind_name));
+
+		matched && !excluded
 	}
 }
 
-/// Whether a manifest survives a set of `--target` matchers.
-///
-/// Mirrors Tanka's `process.Filter`: keep it if at least one matcher matches and
-/// no negative matcher does. A negative matcher always satisfies the "matches at
-/// least one" gate (Tanka's `NegMatcher.MatchString` is unconditionally true), so
-/// a query of only `!…` patterns keeps everything but the exclusions.
-pub(crate) fn keep_target(manifest: &serde_json::Value, matchers: &[TargetMatcher]) -> bool {
-	if matchers.is_empty() {
-		return true;
+/// One compiled target expression. Patterns are anchored with `^…$`,
+/// case-insensitive, and a leading `!` inverts the match.
+#[derive(Clone, Debug)]
+struct TargetMatcher {
+	regex: regex::Regex,
+	negate: bool,
+}
+
+impl TargetMatcher {
+	fn compile(pattern: impl AsRef<str>) -> Result<TargetMatcher, Error> {
+		let pattern = pattern.as_ref();
+		let (negate, body) = match pattern.strip_prefix('!') {
+			Some(rest) => (true, rest),
+			None => (false, pattern),
+		};
+		let regex = regex::RegexBuilder::new(&format!("^{body}$"))
+			.case_insensitive(true)
+			.build()
+			.map_err(|source| Error::InvalidTarget {
+				target: pattern.into(),
+				source,
+			})?;
+		Ok(TargetMatcher { regex, negate })
 	}
-
-	let kind_name = kind_name(manifest);
-	let matched = matchers
-		.iter()
-		.any(|matcher| matcher.negate || matcher.regex.is_match(&kind_name));
-	let excluded = matchers
-		.iter()
-		.any(|matcher| matcher.negate && matcher.regex.is_match(&kind_name));
-
-	matched && !excluded
 }
 
 /// Identify a manifest in a diagnostic, without dumping the whole thing.
@@ -835,12 +845,7 @@ mod tests {
 	fn filters_by_target() {
 		let manifest = json!({ "kind": "ConfigMap", "metadata": { "name": "settings" } });
 
-		let keep = |patterns: &[&str]| {
-			keep_target(
-				&manifest,
-				&TargetMatcher::compile(patterns).expect("valid patterns"),
-			)
-		};
+		let keep = |patterns: &[&str]| Targets::compile(patterns).unwrap().keeps(&manifest);
 
 		assert!(keep(&[]));
 		// Anchored and case-insensitive, as tk's are.
@@ -853,7 +858,7 @@ mod tests {
 		assert!(keep(&["!secret/.*"]));
 		assert!(!keep(&["configmap/.*", "!.*/settings"]));
 
-		assert!(TargetMatcher::compile(["["]).is_err());
+		assert!(Targets::compile(["["]).is_err());
 	}
 
 	#[test]

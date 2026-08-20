@@ -149,6 +149,48 @@ impl SpecializedTemplate {
 		self.render_context(context)
 	}
 
+	/// Render the relative path to write, extension included.
+	pub(crate) fn render_path(
+		&self,
+		manifest: &Value,
+		extension: &str,
+	) -> Result<std::path::PathBuf, Error> {
+		let rendered = self.render(manifest)?;
+		Self::to_relative_path(&rendered, extension, manifest)
+	}
+
+	/// Turn a rendered filename into the path to write.
+	///
+	/// Each segment is sanitized separately, so a rendered value can never
+	/// escape the output directory.
+	fn to_relative_path(
+		rendered: &str,
+		extension: &str,
+		manifest: &Value,
+	) -> Result<std::path::PathBuf, Error> {
+		let segments: Vec<Cow<'_, str>> = rendered
+			.split('/')
+			.map(str::trim)
+			.filter(|segment| !segment.is_empty())
+			.map(sanitize)
+			.filter(|segment| !segment.is_empty())
+			.collect();
+
+		let Some((file, directories)) = segments.split_last() else {
+			return Err(Error::EmptyFilename {
+				manifest: process::describe(manifest),
+			});
+		};
+
+		let mut path = std::path::PathBuf::new();
+		for directory in directories {
+			path.push(directory.as_ref());
+		}
+		path.push(format!("{file}.{extension}"));
+
+		Ok(path)
+	}
+
 	/// Render an evaluated manifest without manifesting it through JSON.
 	fn render_context(&self, context: Context) -> Result<String, Error> {
 		let rendered = self
@@ -272,38 +314,6 @@ fn replace_outside_actions(template: &str, old: &str, new: &str) -> String {
 
 	replaced.push_str(&remaining.replace(old, new));
 	replaced
-}
-
-/// Turn a rendered filename into the path to write, extension included.
-///
-/// Each segment is sanitized separately, so a rendered value can never escape
-/// the output directory.
-pub(crate) fn to_relative_path(
-	rendered: &str,
-	extension: &str,
-	manifest: &Value,
-) -> Result<std::path::PathBuf, Error> {
-	let segments: Vec<Cow<'_, str>> = rendered
-		.split('/')
-		.map(str::trim)
-		.filter(|segment| !segment.is_empty())
-		.map(sanitize)
-		.filter(|segment| !segment.is_empty())
-		.collect();
-
-	let Some((file, directories)) = segments.split_last() else {
-		return Err(Error::EmptyFilename {
-			manifest: process::describe(manifest),
-		});
-	};
-
-	let mut path = std::path::PathBuf::new();
-	for directory in directories {
-		path.push(directory.as_ref());
-	}
-	path.push(format!("{file}.{extension}"));
-
-	Ok(path)
 }
 
 /// Replace anything that has no business in a path component.
@@ -484,20 +494,20 @@ mod tests {
 	fn builds_relative_paths_with_the_extension() {
 		let manifest = config_map();
 		assert_eq!(
-			to_relative_path("dir/file.name", "yaml", &manifest).unwrap(),
+			SpecializedTemplate::to_relative_path("dir/file.name", "yaml", &manifest).unwrap(),
 			PathBuf::from("dir/file.name.yaml")
 		);
 		assert_eq!(
-			to_relative_path("only", "json", &manifest).unwrap(),
+			SpecializedTemplate::to_relative_path("only", "json", &manifest).unwrap(),
 			PathBuf::from("only.json")
 		);
 		// Empty segments are dropped rather than making empty directories.
 		assert_eq!(
-			to_relative_path("a//b", "yaml", &manifest).unwrap(),
+			SpecializedTemplate::to_relative_path("a//b", "yaml", &manifest).unwrap(),
 			PathBuf::from("a/b.yaml")
 		);
 		assert!(matches!(
-			to_relative_path("", "yaml", &manifest),
+			SpecializedTemplate::to_relative_path("", "yaml", &manifest),
 			Err(Error::EmptyFilename { .. })
 		));
 	}

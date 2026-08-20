@@ -7,6 +7,14 @@ Project-specific context for AI agents working on rustanka (rtk).
 - **Never run git commands** unless explicitly requested by the user
 - **Always run `make fmt`** after making changes
 
+## Code Organization
+
+- Prefer private methods when behavior naturally belongs to an existing type. A helper that takes that type as its primary state, mutates it, or consumes it should normally be an inherent method.
+- Functions that construct a domain type should generally be private associated constructors on that type.
+- Introduce a small private state type when several related values are repeatedly passed together through an operation or recursive traversal.
+- Keep free functions for genuinely stateless algorithms, parser primitives, externally prescribed callbacks, command entry points, and transformations without a natural owner.
+- Do not use free functions merely as substitutes for private methods.
+
 ## Project Overview
 
 rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Tanka](https://github.com/grafana/tanka) (tk). The primary goal is **exact output compatibility with Tanka**.

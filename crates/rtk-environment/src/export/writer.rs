@@ -20,6 +20,44 @@ pub(crate) struct File {
 	pub(crate) contents: String,
 }
 
+impl File {
+	/// Write this file, skipping the write if the contents are already on disk.
+	///
+	/// Reading first is worth it because most files do not change between
+	/// exports, and on network or otherwise slow storage a read beats a write.
+	fn write_to(self, path: PathBuf) -> Result<Written, Error> {
+		if let Ok(existing) = std::fs::read(&path)
+			&& existing == self.contents.as_bytes()
+		{
+			return Ok(Written {
+				path: self.path,
+				unchanged: true,
+			});
+		}
+
+		match std::fs::write(&path, &self.contents) {
+			Ok(()) => {}
+			// The parent directory is created before the write, so this only
+			// happens if something removed it in the meantime.
+			Err(error) if error.kind() == ErrorKind::NotFound => {
+				if let Some(parent) = path.parent() {
+					create_dir_all(parent)?;
+				}
+				std::fs::write(&path, &self.contents).map_err(|source| Error::Write {
+					path: path.clone(),
+					source,
+				})?;
+			}
+			Err(source) => return Err(Error::Write { path, source }),
+		}
+
+		Ok(Written {
+			path: self.path,
+			unchanged: false,
+		})
+	}
+}
+
 /// A file that has been dealt with.
 #[derive(Clone, Debug)]
 pub(crate) struct Written {
@@ -35,6 +73,23 @@ pub(crate) struct Written {
 pub(crate) struct Directories(FxHashSet<Box<Path>>);
 
 impl Directories {
+	/// Write `files` beneath `output_dir`, reporting what became of each.
+	pub(crate) fn write_files(
+		&mut self,
+		output_dir: &Path,
+		files: Vec<File>,
+	) -> Result<Vec<Written>, Error> {
+		let mut written = Vec::with_capacity(files.len());
+
+		for file in files {
+			let path = output_dir.join(&file.path);
+			self.ensure_parent(&path)?;
+			written.push(file.write_to(path)?);
+		}
+
+		Ok(written)
+	}
+
 	/// Create a file's parent directory, unless this export already has.
 	fn ensure_parent(&mut self, path: &Path) -> Result<(), Error> {
 		let Some(parent) = path.parent() else {
@@ -50,23 +105,6 @@ impl Directories {
 	}
 }
 
-/// Write `files` beneath `output_dir`, reporting what became of each.
-pub(crate) fn write_files(
-	output_dir: &Path,
-	files: Vec<File>,
-	directories: &mut Directories,
-) -> Result<Vec<Written>, Error> {
-	let mut written = Vec::with_capacity(files.len());
-
-	for file in files {
-		let path = output_dir.join(&file.path);
-		directories.ensure_parent(&path)?;
-		written.push(write(file, path)?);
-	}
-
-	Ok(written)
-}
-
 /// Create `directory` and its parents, tolerating one that is already there.
 ///
 /// `create_dir_all` reports success for existing directories, but it can still
@@ -80,42 +118,6 @@ fn create_dir_all(directory: &Path) -> Result<(), Error> {
 			source,
 		}),
 	}
-}
-
-/// Write one file, skipping the write if the contents are already on disk.
-///
-/// Reading first is worth it because most files do not change between exports,
-/// and on network or otherwise slow storage a read beats a write.
-fn write(file: File, path: PathBuf) -> Result<Written, Error> {
-	if let Ok(existing) = std::fs::read(&path)
-		&& existing == file.contents.as_bytes()
-	{
-		return Ok(Written {
-			path: file.path,
-			unchanged: true,
-		});
-	}
-
-	match std::fs::write(&path, &file.contents) {
-		Ok(()) => {}
-		// The parent directory is created before the write, so this only happens
-		// if something removed it in the meantime.
-		Err(error) if error.kind() == ErrorKind::NotFound => {
-			if let Some(parent) = path.parent() {
-				create_dir_all(parent)?;
-			}
-			std::fs::write(&path, &file.contents).map_err(|source| Error::Write {
-				path: path.clone(),
-				source,
-			})?;
-		}
-		Err(source) => return Err(Error::Write { path, source }),
-	}
-
-	Ok(Written {
-		path: file.path,
-		unchanged: false,
-	})
 }
 
 #[cfg(test)]
@@ -135,7 +137,9 @@ mod tests {
 	fn writes_files_into_directories_it_creates() {
 		let directory = tempfile::tempdir().unwrap();
 
-		let written = write_files(directory.path(), files(8), &mut Directories::default()).unwrap();
+		let written = Directories::default()
+			.write_files(directory.path(), files(8))
+			.unwrap();
 
 		assert_eq!(written.len(), 8);
 		assert!(written.iter().all(|written| !written.unchanged));
@@ -148,11 +152,15 @@ mod tests {
 	#[test]
 	fn leaves_files_that_are_already_what_they_should_be() {
 		let directory = tempfile::tempdir().unwrap();
-		write_files(directory.path(), files(8), &mut Directories::default()).unwrap();
+		Directories::default()
+			.write_files(directory.path(), files(8))
+			.unwrap();
 
 		// A second export finds every file unchanged, and the directory already
 		// there.
-		let written = write_files(directory.path(), files(8), &mut Directories::default()).unwrap();
+		let written = Directories::default()
+			.write_files(directory.path(), files(8))
+			.unwrap();
 
 		assert_eq!(written.len(), 8);
 		assert!(written.iter().all(|written| written.unchanged));
@@ -161,13 +169,17 @@ mod tests {
 	#[test]
 	fn overwrites_a_file_whose_contents_have_changed() {
 		let directory = tempfile::tempdir().unwrap();
-		write_files(directory.path(), files(1), &mut Directories::default()).unwrap();
+		Directories::default()
+			.write_files(directory.path(), files(1))
+			.unwrap();
 
 		let changed = vec![File {
 			path: PathBuf::from("nested/0.yaml"),
 			contents: "index: changed\n".to_owned(),
 		}];
-		let written = write_files(directory.path(), changed, &mut Directories::default()).unwrap();
+		let written = Directories::default()
+			.write_files(directory.path(), changed)
+			.unwrap();
 
 		assert_eq!(written.len(), 1);
 		assert!(!written[0].unchanged);
@@ -182,17 +194,17 @@ mod tests {
 		let directory = tempfile::tempdir().unwrap();
 		let mut directories = Directories::default();
 
-		write_files(directory.path(), files(2), &mut directories).unwrap();
+		directories.write_files(directory.path(), files(2)).unwrap();
 		// The second call reuses what the first created, and still writes.
-		let written = write_files(
-			directory.path(),
-			vec![File {
-				path: PathBuf::from("nested/deeper/8.yaml"),
-				contents: "index: 8\n".to_owned(),
-			}],
-			&mut directories,
-		)
-		.unwrap();
+		let written = directories
+			.write_files(
+				directory.path(),
+				vec![File {
+					path: PathBuf::from("nested/deeper/8.yaml"),
+					contents: "index: 8\n".to_owned(),
+				}],
+			)
+			.unwrap();
 
 		assert_eq!(written.len(), 1);
 		assert!(directory.path().join("nested/deeper/8.yaml").exists());

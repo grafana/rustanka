@@ -51,6 +51,30 @@ pub struct ListArgs {
 	pub tla_str: Vec<String>,
 }
 
+impl ListArgs {
+	fn jsonnet_options(&self) -> Result<rtk_jsonnet::Options> {
+		fn values(values: &[String]) -> Result<rustc_hash::FxHashMap<Box<str>, Box<str>>> {
+			values
+				.iter()
+				.map(|value| JsonnetArgs::parse_key_value(value).map_err(anyhow::Error::msg))
+				.collect()
+		}
+
+		Ok(rtk_jsonnet::Options {
+			ext_code: values(&self.ext_code)?,
+			ext_variables: values(&self.ext_str)?,
+			top_level_code: values(&self.tla_code)?,
+			top_level_arguments: values(&self.tla_str)?,
+			max_stack: Some(
+				self.max_stack
+					.try_into()
+					.context("max stack must be positive")?,
+			),
+			..rtk_jsonnet::Options::default()
+		})
+	}
+}
+
 /// Run the env list subcommand.
 pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
 	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
@@ -59,7 +83,7 @@ pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
 		.as_deref()
 		.map(PathBuf::from)
 		.unwrap_or(std::env::current_dir()?);
-	let options = jsonnet_options(&args)?;
+	let options = args.jsonnet_options()?;
 	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(options));
 	let mut environments = engine
 		.discover_all(vec![search_path.clone()])
@@ -112,28 +136,6 @@ pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
 	}
 	table.flush()?;
 	Ok(())
-}
-
-fn jsonnet_options(args: &ListArgs) -> Result<rtk_jsonnet::Options> {
-	fn values(values: &[String]) -> Result<rustc_hash::FxHashMap<Box<str>, Box<str>>> {
-		values
-			.iter()
-			.map(|value| JsonnetArgs::parse_key_value(value).map_err(anyhow::Error::msg))
-			.collect()
-	}
-
-	Ok(rtk_jsonnet::Options {
-		ext_code: values(&args.ext_code)?,
-		ext_variables: values(&args.ext_str)?,
-		top_level_code: values(&args.tla_code)?,
-		top_level_arguments: values(&args.tla_str)?,
-		max_stack: Some(
-			args.max_stack
-				.try_into()
-				.context("max stack must be positive")?,
-		),
-		..rtk_jsonnet::Options::default()
-	})
 }
 
 fn environment_json(

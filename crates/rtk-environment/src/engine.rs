@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use crate::discover::{self, Discover, Discovered};
+use std::fmt::Write;
 
 #[derive(Clone, Debug)]
 pub struct Engine {
@@ -21,24 +19,42 @@ impl Engine {
 		Engine { jsonnet: engine }
 	}
 
-	/// Environments under `paths`, one at a time.
+	/// A snippet that imports an entrypoint as `main`, for `script` to work on.
 	///
-	/// Reading what a directory declares means evaluating Jsonnet, and this does
-	/// it as it goes, so that a caller which stops early has not paid for the
-	/// rest. Exporting wants that: it evaluates one environment while discovering
-	/// the next.
-	#[tracing::instrument]
-	pub fn discover(&self, paths: Vec<PathBuf>) -> Discover {
-		Discover::new(self.jsonnet.clone(), paths)
-	}
+	/// An entrypoint taking top level arguments imports as a function rather than
+	/// as what it builds, so it has to be called. The arguments reach it through a
+	/// wrapping function for the evaluator to apply them to, and every parameter
+	/// is given a default because the evaluator passes only the arguments it was
+	/// actually given.
+	pub(crate) fn entrypoint_snippet(&self, entrypoint: &str, script: &str) -> String {
+		let options = self.jsonnet.options();
+		if !options.has_top_level_args() {
+			return format!(r#"local main = import "{entrypoint}"; {script}"#);
+		}
 
-	/// Every environment under `paths`, reading several directories at once.
-	///
-	/// For callers that want all of them anyway, which listing and diffing do.
-	/// The environments come back in the order [`Engine::discover`] would have
-	/// handed them out, and so does the first failure among them.
-	#[tracing::instrument]
-	pub fn discover_all(&self, paths: Vec<PathBuf>) -> Result<Vec<Discovered>, crate::Error> {
-		discover::resolve_all(&self.jsonnet, paths)
+		let count = options.top_level_arguments.len() + options.top_level_code.len();
+		let mut arguments = String::with_capacity(count * 16);
+		let mut parameters = String::with_capacity(count * 24);
+
+		let names = options
+			.top_level_arguments
+			.keys()
+			.chain(options.top_level_code.keys());
+
+		for (index, name) in names.enumerate() {
+			if index != 0 {
+				arguments.push_str(", ");
+				parameters.push_str(", ");
+			}
+
+			arguments.push_str(name);
+			let _ = write!(&mut parameters, "{name} = null");
+		}
+
+		format!(
+			r#"function({parameters})
+				local main = (import "{entrypoint}")({arguments});
+				{script}"#
+		)
 	}
 }
