@@ -32,7 +32,7 @@ use tracing::{debug, trace};
 use crate::export::manifest::Manifest;
 use crate::export::template::{FilenameTemplate, SpecializedTemplate};
 use crate::export::writer::{Directories, File, Written};
-use crate::{Discover, Discovered, Engine};
+use crate::{Discover, Discovered, Engine, Search};
 
 mod data;
 mod load;
@@ -674,8 +674,15 @@ impl Engine {
 	/// Discover environments under `paths` and export all of them.
 	pub fn export_bulk(&self, paths: Vec<PathBuf>, options: &Options) -> Result<Exported, Error> {
 		let export = Export::new(options)?;
+		// `--recursive` is what tk uses to choose between walking a tree and
+		// loading the path it was handed, so it chooses here too.
+		let search = if options.recursive {
+			Search::Tree
+		} else {
+			Search::Environment
+		};
 		let matching = Matching {
-			discover: self.discover(paths),
+			discover: self.discover(paths, search),
 			name: options.name.clone(),
 			selector: options
 				.selector

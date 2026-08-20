@@ -5,7 +5,7 @@ mod engine;
 pub mod export;
 mod metadata;
 
-pub use discover::{Discover, Discovered};
+pub use discover::{Discover, Discovered, Search};
 pub use engine::Engine;
 
 #[derive(Debug, thiserror::Error)]

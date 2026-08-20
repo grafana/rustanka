@@ -97,6 +97,32 @@ This is why `rtk show` and `rtk export` can disagree about a nested project,
 and tk disagrees with itself in the same way and for the same reason. The
 `nested_project_root_env` fixture pins it.
 
+Where the re-resolution lands somewhere that declares no matching environment,
+tk fails the whole export; rtk keeps the environment discovery actually found.
+Reproducing that failure would mean aborting an export over a layout rtk can
+resolve perfectly well, so this one is a deliberate divergence.
+
+### Finding Environments
+
+Discovery answers two different questions, and `Search` says which:
+
+- `Search::Environment` takes the path as the environment, as tk's `Peek`
+  does. It is what a non-recursive export and `load_single` want.
+- `Search::Tree` walks everything below the path, as tk's `FindFiles` does. It
+  is what `--recursive`, `env list` and `diff` want.
+
+tk chooses on the command rather than on what the path turns out to hold, so
+rtk does too. The case that tells them apart is a project whose root is an
+entrypoint in its own right: walking has to descend past it, or every
+environment underneath disappears. tk stopped at the first valid environment
+until v0.27.0, and the docstring in `find.go` still says it does.
+
+An entrypoint is imported by its **absolute** path, as tk imports
+`jpath.Entrypoint`. A relative name is resolved against the importing file
+first, and the generated snippet has no file, so the process working directory
+would decide — which quietly loaded the wrong entrypoint for exactly the layout
+above.
+
 ### Helm Cache
 
 `--helm-cache` persists successful `helmTemplate` results under each Tanka

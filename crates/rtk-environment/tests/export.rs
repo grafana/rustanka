@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rtk_environments::Engine;
 use rtk_environments::export::{MergeStrategy, Options};
+use rtk_environments::{Engine, Search};
 use tempfile::TempDir;
 
 /// A project to export, written out to a temporary directory.
@@ -837,7 +837,7 @@ fn exports_many_environments_while_streaming_discovery() {
 	// Reports come back in discovery order, whatever order the work finished in.
 	// Discovery walks the filesystem, which has an order of its own.
 	let discovered: Vec<PathBuf> = engine()
-		.discover(vec![project.path().join("environments")])
+		.discover(vec![project.path().join("environments")], Search::Tree)
 		.map(|discovered| {
 			discovered
 				.expect("discovery succeeds")
@@ -878,7 +878,7 @@ fn exports_a_single_loaded_environment() {
 	let engine = engine();
 	let source = project.path().join("environments/demo");
 	let discovered = engine
-		.discover(vec![source.clone()])
+		.discover(vec![source.clone()], Search::Environment)
 		.next()
 		.expect("an environment")
 		.expect("discovery succeeds");

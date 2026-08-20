@@ -13,7 +13,7 @@ use rtk_spec::canonical::Environment;
 use serde::Deserialize as _;
 
 use crate::export::{Error, LoadedEnvironment, OptionalData, process};
-use crate::{Discovered, Engine};
+use crate::{Discovered, Engine, Search};
 
 /// External variable Tanka exposes an environment's own spec through.
 const ENVIRONMENT_EXT_CODE: &str = "tanka.dev/environment";
@@ -154,8 +154,10 @@ impl Engine {
 			.parent()
 			.map(Path::to_path_buf)
 			.unwrap_or_else(|| jpath.base_directory.clone());
+		// Exactly the environment that was asked for, as tk's `Peek` loads it;
+		// anything below it belongs to a different environment.
 		let mut discovered = self
-			.discover(vec![directory.clone()])
+			.discover(vec![directory.clone()], Search::Environment)
 			.collect::<Result<Vec<_>, _>>()?;
 		discovered.retain(|environment| environment.path.as_path() == directory);
 		let mut available = discovered
@@ -220,13 +222,8 @@ impl Engine {
 		options.apply(&mut evaluator)?;
 		evaluator.with_import_paths(jpath.import_paths.clone())?;
 
-		let entrypoint = jpath
-			.entrypoint
-			.strip_prefix(&jpath.base_directory)
-			.unwrap_or(&jpath.entrypoint)
-			.to_string_lossy();
 		let evaluation =
-			evaluator.evaluate_snippet(self.entrypoint_snippet(&entrypoint, "main"))?;
+			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, "main"))?;
 
 		let data = process::materialize(&evaluation.into_value())?;
 		LoadedEnvironment::bare(data)
@@ -262,14 +259,9 @@ impl Engine {
 			),
 			None => (String::new(), "main"),
 		};
-		let entrypoint = jpath
-			.entrypoint
-			.strip_prefix(&jpath.base_directory)
-			.unwrap_or(&jpath.entrypoint)
-			.to_string_lossy();
 		let script = format!("{selection}\n{root}");
 		let evaluation =
-			evaluator.evaluate_snippet(self.entrypoint_snippet(&entrypoint, &script))?;
+			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, &script))?;
 
 		process::materialize(&evaluation.into_value())
 	}
