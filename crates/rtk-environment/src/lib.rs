@@ -18,4 +18,10 @@ pub enum Error {
 	JPath(#[from] rtk_jsonnet::jpath::Error),
 	#[error(transparent)]
 	Evaluation(#[from] rtk_jsonnet::Error),
+	/// A failure that happened on another thread.
+	///
+	/// Jsonnet's stack traces are `Rc`-based, so an error cannot leave the thread
+	/// that raised it; what crosses is what it said.
+	#[error("{0}")]
+	Rendered(String),
 }

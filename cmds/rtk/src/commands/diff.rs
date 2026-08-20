@@ -289,11 +289,8 @@ async fn list_modified_environments<W: Write>(
 	tracing::debug!(path = %args.path.display(), "discovering environments");
 	let jsonnet = args.jsonnet.options();
 	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet.clone()));
-	// Discovery holds evaluated Jsonnet, which is reference counted and cannot
-	// leave this thread, so its errors are rendered here rather than carried.
 	let envs: Vec<rtk_environments::Discovered> = engine
-		.discover(vec![args.path.clone()])
-		.collect::<Result<Vec<_>, _>>()
+		.discover_all(vec![args.path.clone()])
 		.map_err(|error| anyhow::anyhow!("discovering environments: {error}"))?;
 
 	// Filter environments by --name if specified, preferring an exact match

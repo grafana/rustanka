@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::discover::Discover;
+use crate::discover::{self, Discover, Discovered};
 
 #[derive(Clone, Debug)]
 pub struct Engine {
@@ -21,8 +21,24 @@ impl Engine {
 		Engine { jsonnet: engine }
 	}
 
+	/// Environments under `paths`, one at a time.
+	///
+	/// Reading what a directory declares means evaluating Jsonnet, and this does
+	/// it as it goes, so that a caller which stops early has not paid for the
+	/// rest. Exporting wants that: it evaluates one environment while discovering
+	/// the next.
 	#[tracing::instrument]
 	pub fn discover(&self, paths: Vec<PathBuf>) -> Discover {
 		Discover::new(self.jsonnet.clone(), paths)
+	}
+
+	/// Every environment under `paths`, reading several directories at once.
+	///
+	/// For callers that want all of them anyway, which listing and diffing do.
+	/// The environments come back in the order [`Engine::discover`] would have
+	/// handed them out, and so does the first failure among them.
+	#[tracing::instrument]
+	pub fn discover_all(&self, paths: Vec<PathBuf>) -> Result<Vec<Discovered>, crate::Error> {
+		discover::resolve_all(&self.jsonnet, paths)
 	}
 }

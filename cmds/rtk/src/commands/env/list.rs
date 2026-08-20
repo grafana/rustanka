@@ -62,8 +62,7 @@ pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
 	let options = jsonnet_options(&args)?;
 	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(options));
 	let mut environments = engine
-		.discover(vec![search_path.clone()])
-		.collect::<Result<Vec<_>, _>>()
+		.discover_all(vec![search_path.clone()])
 		.map_err(|error| anyhow::anyhow!("finding environments: {error}"))?;
 
 	if let Some(selector) = args.selector.as_deref() {

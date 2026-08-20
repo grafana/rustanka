@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use rtk_jsonnet::jpath::JPath;
 use rtk_jsonnet::{Engine, EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
@@ -129,90 +130,44 @@ impl Discovered {
 
 const fn assert_send<T: Send>() {}
 const _: () = {
-	// Discovery is pulled from several threads at once, so that environments can
-	// be exported in parallel. Holding an evaluated value anywhere in here would
-	// make that impossible: see `Discover::inline_environments`.
-	assert_send::<Discover>();
+	// Directories are resolved on several threads at once, so that environments
+	// can be discovered in parallel. Holding an evaluated value anywhere in here
+	// would make that impossible: see `inline_environments`.
 	assert_send::<Discovered>();
+	assert_send::<Candidates>();
 };
 
-pub struct Discover {
-	engine: Engine,
+/// The directories that hold environments, in the order they are found.
+///
+/// Finding them is a filesystem walk and is cheap; working out what each one
+/// declares is not, and is [`resolve`]'s job. They are separate so that the
+/// expensive half can be done several at a time.
+struct Candidates {
 	paths: <Vec<PathBuf> as IntoIterator>::IntoIter,
 	directory: Option<DirectoryIter>,
-	/// Environments found in an entrypoint that declares several, waiting to
-	/// be handed out one at a time.
-	found: VecDeque<Discovered>,
-	seen_dirs: FxHashSet<Arc<PathBuf>>,
+	/// Directories already handed out. A path can be reached more than once,
+	/// through a link or by being named as well as walked into.
+	seen: FxHashSet<Arc<PathBuf>>,
 	current_dir: Option<PathBuf>,
 	span: tracing::Span,
 }
 
-impl Discover {
-	pub fn new(engine: Engine, paths: Vec<PathBuf>) -> Self {
+impl Candidates {
+	fn new(paths: Vec<PathBuf>) -> Candidates {
 		let paths_len = paths.len();
-		Self {
-			engine,
+		Candidates {
 			paths: paths.into_iter(),
 			directory: None,
-			found: VecDeque::new(),
-			seen_dirs: FxHashSet::with_capacity_and_hasher(paths_len, FxBuildHasher),
+			seen: FxHashSet::with_capacity_and_hasher(paths_len, FxBuildHasher),
 			current_dir: None,
 			span: tracing::span!(Level::TRACE, "discover"),
 		}
 	}
 
-	/// Every environment declared anywhere in a directory's entrypoint.
-	#[tracing::instrument(skip(engine))]
-	fn inline_environments(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
-		let main_path = path.join("main.jsonnet");
-		let options = engine.options();
-
-		let jpath = JPath::resolve(&main_path)?;
-		let entrypoint = jpath
-			.entrypoint
-			.strip_prefix(&jpath.base_directory)
-			.unwrap_or(&jpath.entrypoint)
-			.to_string_lossy();
-
-		let snippet = entrypoint_snippet(options, &entrypoint, METADATA_EVAL_SCRIPT);
-
-		// Inline environments are named by the Jsonnet that declares them, but
-		// their namespace still comes from where the entrypoint lives.
-		let namespace = namespace_of(&jpath);
-
-		// Deliberately not evaluated as any environment in particular: the specs
-		// that would say how to evaluate them are what this is reading, and an
-		// entrypoint may need Tanka's native functions just to declare them. tk
-		// discovers the same way, and applies what it finds only when exporting.
-		let mut evaluator = engine.create_evaluator();
-		options.apply(&mut evaluator)?;
-		evaluator.with_import_paths(jpath.import_paths)?;
-		let evaluation = evaluator.evaluate_snippet(snippet)?;
-
-		// Collected in one go, rather than yielded from an iterator that borrows
-		// the evaluation: evaluated values are `Rc`-based, so holding one between
-		// calls would pin discovery — and everything reading it — to this thread.
-		// What comes out is owned, which is what lets environments be discovered
-		// on one thread and exported on another, several at a time. The metadata
-		// script has already pruned every environment's data, so this is small.
-		let mut found = Vec::new();
-		let standalone = collect_inline_envs(
-			&path,
-			namespace.as_deref(),
-			evaluation.into_value(),
-			&mut found,
-		)?;
-
-		// The entrypoint evaluated to one environment and nothing else, so there
-		// is nothing to pick it out from.
-		if standalone {
-			for discovered in &mut found {
-				discovered.standalone = true;
-			}
-		}
-
-		Ok(found)
+	/// Hand out a directory, unless it has been handed out already.
+	fn unseen(&mut self, path: PathBuf) -> Option<Arc<PathBuf>> {
+		let path = Arc::new(path);
+		self.seen.insert(Arc::clone(&path)).then_some(path)
 	}
 
 	#[tracing::instrument]
@@ -232,66 +187,16 @@ impl Discover {
 		tracing::trace!("has no markers (spec.json or main.jsonnet) -> false");
 		false
 	}
-
-	fn read_spec_json(spec_path: &Path) -> Result<Environment<'static>, Error> {
-		let jpath = spec_path
-			.parent()
-			.and_then(|directory| JPath::resolve(directory).ok());
-		let resolved_spec = jpath
-			.as_ref()
-			.map(|jpath| jpath.base_directory.join("spec.json"))
-			.filter(|path| path.exists());
-		let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(spec_path))?;
-		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
-		let mut environment = environment.without_data();
-
-		// A static environment is named after its directory and carries its
-		// entrypoint as its namespace, whatever `spec.json` says. Best effort:
-		// an environment whose entrypoint cannot be resolved fails later, when
-		// it is evaluated, with a better error than discovery could give.
-		if let Some(jpath) = jpath {
-			crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
-		}
-
-		Ok(environment)
-	}
-
-	fn discover_environment(&mut self, path: Arc<PathBuf>) -> Result<Option<Discovered>, Error> {
-		if !self.seen_dirs.insert(path.clone()) {
-			return Ok(None);
-		}
-
-		let mut path_buf = (*path).clone();
-
-		path_buf.push("spec.json");
-		if path_buf.exists() {
-			let environment = Self::read_spec_json(&path_buf)?;
-			return Ok(Some(Discovered {
-				path,
-				is_static: true,
-				standalone: true,
-				environment,
-			}));
-		}
-		path_buf.pop();
-
-		self.found
-			.extend(Self::inline_environments(&self.engine, path)?);
-		Ok(None)
-	}
 }
 
-impl Iterator for Discover {
-	type Item = Result<Discovered, Error>;
+impl Iterator for Candidates {
+	/// Walking cannot fail; only working out where a relative path starts can.
+	type Item = Result<Arc<PathBuf>, std::io::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
 			let span = self.span.clone();
 			let _guard = span.enter();
-
-			if let Some(discovered) = self.found.pop_front() {
-				return Some(Ok(discovered));
-			}
 
 			if let Some(directory) = &mut self.directory {
 				let entry = match directory.next() {
@@ -302,13 +207,11 @@ impl Iterator for Discover {
 						continue;
 					}
 				};
-				if entry.file_type().is_dir() && Self::is_environment(entry.path()) {
-					let path = Arc::new(entry.path().to_path_buf());
-					match self.discover_environment(path) {
-						Ok(Some(discovered)) => return Some(Ok(discovered)),
-						Ok(None) => continue,
-						Err(error) => return Some(Err(error)),
-					}
+				if entry.file_type().is_dir()
+					&& Self::is_environment(entry.path())
+					&& let Some(path) = self.unseen(entry.path().to_path_buf())
+				{
+					return Some(Ok(path));
 				}
 				continue;
 			}
@@ -322,7 +225,7 @@ impl Iterator for Discover {
 					Some(current_dir) => current_dir,
 					None => match env::current_dir() {
 						Ok(current_dir) => self.current_dir.insert(current_dir),
-						Err(error) => return Some(Err(error.into())),
+						Err(error) => return Some(Err(error)),
 					},
 				};
 				current_dir.join(path)
@@ -332,12 +235,13 @@ impl Iterator for Discover {
 				absolute = absolute.parent().map(Path::to_path_buf).unwrap_or(absolute);
 			}
 
+			// A path that is itself an environment is that environment, rather
+			// than somewhere to look for others.
 			if Self::is_environment(&absolute) {
-				match self.discover_environment(Arc::new(absolute)) {
-					Ok(Some(discovered)) => return Some(Ok(discovered)),
-					Ok(None) => continue,
-					Err(error) => return Some(Err(error)),
+				if let Some(path) = self.unseen(absolute) {
+					return Some(Ok(path));
 				}
+				continue;
 			}
 
 			let filter: for<'a> fn(&'a walkdir::DirEntry) -> bool = |entry| {
@@ -357,6 +261,183 @@ impl Iterator for Discover {
 			);
 		}
 	}
+}
+
+/// Every environment a directory declares.
+fn resolve(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
+	let spec = path.join("spec.json");
+	if spec.exists() {
+		let environment = read_spec_json(&spec)?;
+		return Ok(vec![Discovered {
+			path,
+			is_static: true,
+			standalone: true,
+			environment,
+		}]);
+	}
+
+	inline_environments(engine, path)
+}
+
+/// Every environment declared anywhere in a directory's entrypoint.
+#[tracing::instrument(skip(engine))]
+fn inline_environments(engine: &Engine, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
+	let main_path = path.join("main.jsonnet");
+	let options = engine.options();
+
+	let jpath = JPath::resolve(&main_path)?;
+	let entrypoint = jpath
+		.entrypoint
+		.strip_prefix(&jpath.base_directory)
+		.unwrap_or(&jpath.entrypoint)
+		.to_string_lossy();
+
+	let snippet = entrypoint_snippet(options, &entrypoint, METADATA_EVAL_SCRIPT);
+
+	// Inline environments are named by the Jsonnet that declares them, but
+	// their namespace still comes from where the entrypoint lives.
+	let namespace = namespace_of(&jpath);
+
+	// Deliberately not evaluated as any environment in particular: the specs
+	// that would say how to evaluate them are what this is reading, and an
+	// entrypoint may need Tanka's native functions just to declare them. tk
+	// discovers the same way, and applies what it finds only when exporting.
+	let mut evaluator = engine.create_evaluator();
+	options.apply(&mut evaluator)?;
+	evaluator.with_import_paths(jpath.import_paths)?;
+	let evaluation = evaluator.evaluate_snippet(snippet)?;
+
+	// Collected in one go, rather than yielded from an iterator that borrows the
+	// evaluation: evaluated values are `Rc`-based, so holding one would pin
+	// discovery — and everything reading it — to this thread. What comes out is
+	// owned, which is what lets one thread discover an environment and another
+	// export it. The metadata script has already pruned every environment's
+	// data, so this is small.
+	let mut found = Vec::new();
+	let standalone = collect_inline_envs(
+		&path,
+		namespace.as_deref(),
+		evaluation.into_value(),
+		&mut found,
+	)?;
+
+	// The entrypoint evaluated to one environment and nothing else, so there is
+	// nothing to pick it out from.
+	if standalone {
+		for discovered in &mut found {
+			discovered.standalone = true;
+		}
+	}
+
+	Ok(found)
+}
+
+fn read_spec_json(spec_path: &Path) -> Result<Environment<'static>, Error> {
+	let jpath = spec_path
+		.parent()
+		.and_then(|directory| JPath::resolve(directory).ok());
+	let resolved_spec = jpath
+		.as_ref()
+		.map(|jpath| jpath.base_directory.join("spec.json"))
+		.filter(|path| path.exists());
+	let content = fs::read_to_string(resolved_spec.as_deref().unwrap_or(spec_path))?;
+	let environment = serde_json::from_str::<Environment<'_>>(&content)?;
+	let mut environment = environment.without_data();
+
+	// A static environment is named after its directory and carries its
+	// entrypoint as its namespace, whatever `spec.json` says. Best effort: an
+	// environment whose entrypoint cannot be resolved fails later, when it is
+	// evaluated, with a better error than discovery could give.
+	if let Some(jpath) = jpath {
+		crate::metadata::apply_paths(&mut environment.metadata, &jpath, true);
+	}
+
+	Ok(environment)
+}
+
+/// Environments under a set of paths, one at a time.
+pub struct Discover {
+	engine: Engine,
+	candidates: Candidates,
+	/// Environments from a directory that declares several, waiting to be handed
+	/// out one at a time.
+	found: VecDeque<Discovered>,
+}
+
+impl Discover {
+	pub(crate) fn new(engine: Engine, paths: Vec<PathBuf>) -> Discover {
+		Discover {
+			engine,
+			candidates: Candidates::new(paths),
+			found: VecDeque::new(),
+		}
+	}
+}
+
+impl Iterator for Discover {
+	type Item = Result<Discovered, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			if let Some(discovered) = self.found.pop_front() {
+				return Some(Ok(discovered));
+			}
+
+			match self.candidates.next()? {
+				Ok(path) => match resolve(&self.engine, path) {
+					Ok(found) => self.found.extend(found),
+					Err(error) => return Some(Err(error)),
+				},
+				Err(error) => return Some(Err(error.into())),
+			}
+		}
+	}
+}
+
+/// Every environment under `paths`, resolving several directories at once.
+///
+/// Finding the directories stays on this thread — the walk is cheap, and skipping
+/// one already seen is easier when only one thread is looking. Reading what each
+/// declares is the expensive half, and is spread over a pool.
+pub(crate) fn resolve_all(engine: &Engine, paths: Vec<PathBuf>) -> Result<Vec<Discovered>, Error> {
+	let pool = rayon::ThreadPoolBuilder::new()
+		.num_threads(available_parallelism())
+		// Jsonnet evaluation recurses deeply.
+		.stack_size(8 * 1024 * 1024)
+		.build()
+		.expect("a rayon pool can be built");
+
+	// Failures are carried as text: a Jsonnet error's stack trace is `Rc`-based,
+	// so it cannot leave the thread that raised it.
+	let mut resolved: Vec<(usize, Result<Vec<Discovered>, String>)> = pool.install(|| {
+		Candidates::new(paths)
+			.enumerate()
+			.par_bridge()
+			.map(|(index, path)| {
+				let found = path
+					.map_err(Error::from)
+					.and_then(|path| resolve(engine, path))
+					.map_err(|error| error.to_string());
+				(index, found)
+			})
+			.collect()
+	});
+
+	// Directories are resolved in whatever order the pool gets to them, which
+	// should show up neither in the order environments come back nor in which of
+	// several failures is reported.
+	resolved.sort_by_key(|(index, _)| *index);
+
+	let mut environments = Vec::new();
+	for (_, found) in resolved {
+		environments.extend(found.map_err(Error::Rendered)?);
+	}
+
+	Ok(environments)
+}
+
+fn available_parallelism() -> usize {
+	std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
 }
 
 /// Collect every environment declared anywhere in `value`, depth first.
@@ -502,6 +583,128 @@ mod tests {
 		};
 
 		fs::write(root.join("env/main.jsonnet"), main).unwrap();
+	}
+
+	/// A project with every shape discovery has to walk: static environments, a
+	/// file declaring several inline ones, an environment nested below another
+	/// directory, and a directory that is not an environment at all.
+	fn mixed_project(root: &Path) {
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+
+		for name in ["alpha", "beta"] {
+			fs::create_dir_all(root.join(name)).unwrap();
+			fs::write(root.join(name).join("main.jsonnet"), "{}").unwrap();
+			fs::write(
+				root.join(name).join("spec.json"),
+				format!(
+					r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{"name":"{name}"}},"spec":{{}}}}"#
+				),
+			)
+			.unwrap();
+		}
+
+		fs::create_dir_all(root.join("several")).unwrap();
+		let declare = |name: &str| {
+			format!(
+				r"{{
+					apiVersion: 'tanka.dev/v1alpha1',
+					kind: 'Environment',
+					metadata: {{ name: '{name}' }},
+					spec: {{ namespace: '{name}' }},
+					data: {{}},
+				}}"
+			)
+		};
+		fs::write(
+			root.join("several/main.jsonnet"),
+			format!(
+				"{{ a: {}, b: {}, c: {} }}",
+				declare("one"),
+				declare("two"),
+				declare("three")
+			),
+		)
+		.unwrap();
+
+		fs::create_dir_all(root.join("nested/deeper/env")).unwrap();
+		fs::write(root.join("nested/deeper/env/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			root.join("nested/deeper/env/spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"nested"},"spec":{}}"#,
+		)
+		.unwrap();
+
+		fs::create_dir_all(root.join("not-an-environment")).unwrap();
+		fs::write(root.join("not-an-environment/readme.txt"), "nothing here").unwrap();
+	}
+
+	fn described(environments: &[Discovered]) -> Vec<(PathBuf, Option<String>, bool, bool)> {
+		environments
+			.iter()
+			.map(|found| {
+				(
+					found.path.as_ref().clone(),
+					found.environment.metadata.name.clone(),
+					found.is_static,
+					found.standalone,
+				)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn discovering_all_at_once_finds_what_discovering_one_at_a_time_does() {
+		let temp = TempDir::new().unwrap();
+		mixed_project(temp.path());
+		// Named twice, and once as a file rather than its directory, so that
+		// skipping a directory already seen is exercised.
+		let paths = vec![
+			temp.path().to_path_buf(),
+			temp.path().join("alpha"),
+			temp.path().join("several/main.jsonnet"),
+		];
+
+		let one_at_a_time = Discover::new(test_engine(), paths.clone())
+			.collect::<Result<Vec<_>, _>>()
+			.unwrap();
+		let all_at_once = resolve_all(&test_engine(), paths).unwrap();
+
+		assert!(one_at_a_time.len() >= 6, "{:?}", described(&one_at_a_time));
+		assert_eq!(described(&all_at_once), described(&one_at_a_time));
+	}
+
+	#[test]
+	fn discovering_all_at_once_reports_the_failure_discovering_one_at_a_time_would() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+
+		// Several environments that cannot be read, so that which failure is
+		// reported is a choice rather than a foregone conclusion.
+		for name in ["a-broken", "b-broken", "c-broken"] {
+			fs::create_dir_all(root.join(name)).unwrap();
+			fs::write(
+				root.join(name).join("main.jsonnet"),
+				format!("error '{name} is broken'"),
+			)
+			.unwrap();
+		}
+		fs::create_dir_all(root.join("d-fine")).unwrap();
+		fs::write(root.join("d-fine/main.jsonnet"), "{}").unwrap();
+
+		let paths = vec![root.to_path_buf()];
+		let expected = Discover::new(test_engine(), paths.clone())
+			.collect::<Result<Vec<_>, _>>()
+			.expect_err("the broken environments fail")
+			.to_string();
+
+		// Run it more than once: the answer should not depend on which thread
+		// finished first.
+		for _ in 0..8 {
+			let error = resolve_all(&test_engine(), paths.clone())
+				.expect_err("the broken environments fail");
+			assert_eq!(error.to_string(), expected);
+		}
 	}
 
 	#[test]
