@@ -183,3 +183,305 @@ pub fn set(path: &Path, options: &EnvSpecOptions) -> Result<()> {
 	fs::write(spec_path, contents).context("write spec.json")?;
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use serde_json::Value;
+	use tempfile::TempDir;
+
+	use super::*;
+
+	/// Mark a directory as a Jsonnet project, as `tk init` would.
+	fn create_project_root(dir: &Path) {
+		fs::write(
+			dir.join("jsonnetfile.json"),
+			r#"{"version": 1, "dependencies": [], "legacyImports": true}"#,
+		)
+		.unwrap();
+	}
+
+	fn options() -> EnvSpecOptions {
+		EnvSpecOptions {
+			namespace: None,
+			server: None,
+			server_from_context: None,
+			context_name: Vec::new(),
+			diff_strategy: None,
+			inject_labels: None,
+		}
+	}
+
+	fn spec_of(environment: &Path) -> Value {
+		let contents = fs::read_to_string(environment.join("spec.json")).unwrap();
+		serde_json::from_str(&contents).unwrap()
+	}
+
+	#[test]
+	fn test_env_add_creates_static_environment() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let environment = root.join("environments/dev");
+
+		add(
+			&environment,
+			false,
+			&EnvSpecOptions {
+				namespace: Some("my-namespace".to_owned()),
+				server: Some("https://kube.example.com".to_owned()),
+				inject_labels: Some(true),
+				..options()
+			},
+		)
+		.unwrap();
+
+		assert!(environment.is_dir(), "environments/dev should exist");
+		assert!(environment.join("main.jsonnet").exists());
+		assert!(environment.join("spec.json").exists());
+		assert_eq!(
+			fs::read_to_string(environment.join("main.jsonnet"))
+				.unwrap()
+				.trim(),
+			"{}"
+		);
+
+		let spec = spec_of(&environment);
+		assert_eq!(spec["spec"]["namespace"], "my-namespace");
+		assert_eq!(spec["spec"]["apiServer"], "https://kube.example.com");
+		assert_eq!(spec["spec"]["injectLabels"], true);
+	}
+
+	#[test]
+	fn test_env_add_inline_creates_main_only() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let environment = root.join("env-inline");
+
+		add(
+			&environment,
+			true,
+			&EnvSpecOptions {
+				namespace: Some("inline-ns".to_owned()),
+				server: Some("https://inline.example.com".to_owned()),
+				..options()
+			},
+		)
+		.unwrap();
+
+		assert!(environment.is_dir());
+		assert!(environment.join("main.jsonnet").exists());
+		assert!(
+			!environment.join("spec.json").exists(),
+			"inline env should not have spec.json"
+		);
+
+		let main = fs::read_to_string(environment.join("main.jsonnet")).unwrap();
+		assert!(main.contains("tanka.dev/v1alpha1"));
+		assert!(main.contains("inline-ns"));
+		assert!(main.contains("https://inline.example.com"));
+	}
+
+	#[test]
+	fn test_env_add_fails_when_already_exists() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let environment = root.join("environments/dev");
+
+		add(
+			&environment,
+			false,
+			&EnvSpecOptions {
+				inject_labels: Some(false),
+				..options()
+			},
+		)
+		.unwrap();
+		let error = add(
+			&environment,
+			false,
+			&EnvSpecOptions {
+				inject_labels: Some(false),
+				..options()
+			},
+		)
+		.unwrap_err();
+
+		assert!(error.to_string().contains("already exists"));
+	}
+
+	#[test]
+	fn test_env_set_updates_spec() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let environment = root.join("environments/dev");
+
+		add(
+			&environment,
+			false,
+			&EnvSpecOptions {
+				namespace: Some("original-ns".to_owned()),
+				server: Some("https://original.example.com".to_owned()),
+				inject_labels: Some(false),
+				..options()
+			},
+		)
+		.unwrap();
+
+		set(
+			&environment,
+			&EnvSpecOptions {
+				namespace: Some("updated-ns".to_owned()),
+				context_name: vec!["my-context".to_owned()],
+				diff_strategy: Some("server".to_owned()),
+				inject_labels: Some(true),
+				..options()
+			},
+		)
+		.unwrap();
+
+		let spec = spec_of(&environment);
+		assert_eq!(spec["spec"]["namespace"], "updated-ns");
+		assert_eq!(
+			spec["spec"]["contextNames"],
+			serde_json::json!(["my-context"])
+		);
+		assert_eq!(spec["spec"]["diffStrategy"], "server");
+		assert_eq!(spec["spec"]["injectLabels"], true);
+	}
+
+	#[test]
+	fn test_env_remove_deletes_environment() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let environment = root.join("environments/to-remove");
+
+		add(
+			&environment,
+			false,
+			&EnvSpecOptions {
+				namespace: Some("default".to_owned()),
+				inject_labels: Some(false),
+				..options()
+			},
+		)
+		.unwrap();
+		assert!(environment.exists());
+
+		remove(std::slice::from_ref(&environment)).unwrap();
+
+		assert!(!environment.exists());
+	}
+
+	#[test]
+	fn test_env_remove_multiple() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		create_project_root(root);
+		let first = root.join("environments/a");
+		let second = root.join("environments/b");
+
+		for environment in [&first, &second] {
+			add(
+				environment,
+				false,
+				&EnvSpecOptions {
+					namespace: Some("default".to_owned()),
+					inject_labels: Some(false),
+					..options()
+				},
+			)
+			.unwrap();
+		}
+
+		remove(&[first.clone(), second.clone()]).unwrap();
+
+		assert!(!first.exists());
+		assert!(!second.exists());
+	}
+
+	/// An environment that vendors for itself is its own project, so a new
+	/// environment beside it belongs to *it* rather than to whatever encloses it.
+	#[test]
+	fn adds_into_the_nearest_project_root() {
+		let temp = TempDir::new().unwrap();
+		let outer = temp.path();
+		let inner = outer.join("inner");
+		create_project_root(outer);
+		fs::create_dir_all(&inner).unwrap();
+		create_project_root(&inner);
+
+		let environment = inner.join("environments/dev");
+		add(&environment, false, &options()).unwrap();
+
+		let spec = spec_of(&environment);
+		assert_eq!(spec["metadata"]["name"], "environments/dev");
+		assert_eq!(
+			spec["metadata"]["namespace"],
+			"environments/dev/main.jsonnet"
+		);
+	}
+
+	/// Removing a nested environment must not reach the project around it.
+	#[test]
+	fn removes_only_the_environment_it_was_given() {
+		let temp = TempDir::new().unwrap();
+		let outer = temp.path();
+		let inner = outer.join("inner");
+		create_project_root(outer);
+		fs::write(outer.join("main.jsonnet"), "{}").unwrap();
+		fs::create_dir_all(&inner).unwrap();
+		create_project_root(&inner);
+		fs::write(inner.join("main.jsonnet"), "{}").unwrap();
+
+		remove(std::slice::from_ref(&inner)).unwrap();
+
+		assert!(!inner.exists());
+		assert!(
+			outer.join("main.jsonnet").exists(),
+			"the enclosing project must survive removing an environment inside it"
+		);
+	}
+
+	/// And neither must editing one.
+	#[test]
+	fn sets_the_spec_of_the_environment_it_was_given() {
+		let temp = TempDir::new().unwrap();
+		let outer = temp.path();
+		let inner = outer.join("inner");
+		create_project_root(outer);
+		fs::write(outer.join("main.jsonnet"), "{}").unwrap();
+		fs::create_dir_all(&inner).unwrap();
+		create_project_root(&inner);
+		add(
+			&inner,
+			false,
+			&EnvSpecOptions {
+				namespace: Some("inner-ns".to_owned()),
+				..options()
+			},
+		)
+		.unwrap();
+		let outer_spec = r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"outer"},"spec":{"namespace":"outer-ns"}}"#;
+		fs::write(outer.join("spec.json"), outer_spec).unwrap();
+
+		set(
+			&inner,
+			&EnvSpecOptions {
+				namespace: Some("updated-ns".to_owned()),
+				..options()
+			},
+		)
+		.unwrap();
+
+		assert_eq!(spec_of(&inner)["spec"]["namespace"], "updated-ns");
+		assert_eq!(
+			spec_of(outer)["spec"]["namespace"],
+			"outer-ns",
+			"the enclosing project's spec must not be edited"
+		);
+	}
+}

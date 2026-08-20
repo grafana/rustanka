@@ -68,11 +68,34 @@ renders failures and picks an exit code; everything else — discovery,
 evaluation, manifest processing, filenames, `manifest.json`, writing — belongs
 to the crate, and so do the tests for it.
 
-`cmds/rtk` no longer has an exporter of its own. It does still have its own
-Jsonnet evaluator (`cmds/rtk/src/jsonnet/`) and spec types
-(`cmds/rtk/src/spec.rs`), which `show`, `diff`, `apply`, `prune`, `env` and
-`validate` use. Those are a second, older stack; moving them over is unfinished
-work, so expect two of most things until it is done.
+`cmds/rtk` no longer has an exporter, a Jsonnet evaluator or spec types of its
+own: `show`, `diff`, `apply`, `prune`, `env` and `validate` all load through
+`rtk_environments::Engine`, so a fix to evaluation or manifest processing
+reaches every command at once. What is left in the command crate is the
+Kubernetes client (`cmds/rtk/src/k8s/`) and the YAML serializer the diff bodies
+still use (`cmds/rtk/src/yaml.rs`).
+
+### Where an Environment Lives
+
+`JPath` resolves the **nearest** project root, as Tanka's `FindParentFile`
+does — an environment carrying its own `jsonnetfile.json` is its own project.
+The one way an outer directory wins is marker precedence: a `tkrc.yaml`
+anywhere above beats a `jsonnetfile.json` sitting beside the entrypoint, which
+is how Tanka documents per-environment vendoring. There is no `tkrc.yml`.
+
+Exporting then resolves each environment a second time, because tk does:
+`parallelLoadEnvironments` keeps only an environment's name and namespace and
+reloads it from `Join(FindRoot(namespace), namespace)`. A namespace is relative
+to its own project root while `FindRoot` resolves against the working
+directory, so the round trip is the identity for ordinary layouts and lands
+somewhere else for an environment that vendors for itself inside another
+project. `Options::working_directory` names the directory this resolves
+against, defaulting to the process working directory; the golden harness sets
+it so a staged fixture can be exported without `chdir`.
+
+This is why `rtk show` and `rtk export` can disagree about a nested project,
+and tk disagrees with itself in the same way and for the same reason. The
+`nested_project_root_env` fixture pins it.
 
 ### Helm Cache
 

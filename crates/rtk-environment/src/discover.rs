@@ -839,4 +839,125 @@ mod tests {
 		assert_eq!(environments.len(), 1);
 		assert_eq!(environments[0].path.as_path(), root.join("env"));
 	}
+
+	/// An environment's namespace is its entrypoint relative to its project root,
+	/// so it says the same thing however discovery was pointed at it.
+	fn namespaces(path: PathBuf) -> Vec<String> {
+		let mut namespaces = test_engine()
+			.discover_all(vec![path])
+			.unwrap()
+			.into_iter()
+			.filter_map(|discovered| discovered.environment.metadata.namespace)
+			.collect::<Vec<_>>();
+		namespaces.sort();
+		namespaces
+	}
+
+	/// A project holding one inline entrypoint that declares two environments.
+	fn inline_project(root: &Path) -> PathBuf {
+		let project = root.join("project");
+		fs::create_dir_all(&project).unwrap();
+		inline(&project, true);
+		project
+	}
+
+	/// A project holding one static environment.
+	fn static_project(root: &Path) -> PathBuf {
+		let project = root.join("project");
+		let environment = project.join("environments/dev");
+		fs::create_dir_all(&environment).unwrap();
+		fs::write(project.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(environment.join("main.jsonnet"), "{}").unwrap();
+		fs::write(
+			environment.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"default"}}"#,
+		)
+		.unwrap();
+		project
+	}
+
+	#[test]
+	fn an_inline_environments_namespace_does_not_depend_on_where_it_was_found() {
+		let temp = TempDir::new().unwrap();
+		let project = inline_project(temp.path());
+		let expected = vec!["env/main.jsonnet".to_owned(), "env/main.jsonnet".to_owned()];
+
+		assert_eq!(
+			namespaces(project.clone()),
+			expected,
+			"from the project root"
+		);
+		assert_eq!(
+			namespaces(temp.path().to_path_buf()),
+			expected,
+			"from the directory above it"
+		);
+		assert_eq!(namespaces(project.join("env")), expected, "from inside it");
+		assert_eq!(
+			namespaces(project.join("env/main.jsonnet")),
+			expected,
+			"from the entrypoint itself"
+		);
+	}
+
+	#[test]
+	fn a_static_environments_namespace_does_not_depend_on_where_it_was_found() {
+		let temp = TempDir::new().unwrap();
+		let project = static_project(temp.path());
+		let expected = vec!["environments/dev/main.jsonnet".to_owned()];
+
+		assert_eq!(
+			namespaces(project.clone()),
+			expected,
+			"from the project root"
+		);
+		assert_eq!(
+			namespaces(temp.path().to_path_buf()),
+			expected,
+			"from the directory above it"
+		);
+		assert_eq!(
+			namespaces(project.join("environments")),
+			expected,
+			"from between the two"
+		);
+		assert_eq!(
+			namespaces(project.join("environments/dev")),
+			expected,
+			"from the environment itself"
+		);
+	}
+
+	/// An environment that vendors for itself is its own project, so its
+	/// namespace is relative to *it*, and it is named `.` for having nothing
+	/// left over. Verified against tk, which reports exactly this.
+	#[test]
+	fn an_environment_that_vendors_for_itself_is_its_own_root() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		let environment = root.join("project/environments/ge-logs/dev.ge-logs");
+		fs::create_dir_all(&environment).unwrap();
+		fs::write(root.join("project/jsonnetfile.json"), "{}").unwrap();
+		fs::write(environment.join("main.jsonnet"), "{}").unwrap();
+		fs::write(environment.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(
+			environment.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"ge-logs"}}"#,
+		)
+		.unwrap();
+
+		let discovered = test_engine()
+			.discover_all(vec![root.join("project")])
+			.unwrap();
+
+		assert_eq!(discovered.len(), 1);
+		assert_eq!(
+			discovered[0].environment.metadata.namespace.as_deref(),
+			Some("main.jsonnet")
+		);
+		assert_eq!(
+			discovered[0].environment.metadata.name.as_deref(),
+			Some(".")
+		);
+	}
 }
