@@ -4852,6 +4852,7 @@ version = "0.5.0-pre99"
 dependencies = [
  "jrsonnet-evaluator",
  "jrsonnet-gcmodule",
+ "jrsonnet-macros",
  "jrsonnet-stdlib",
  "rtk-jsonnet-core",
  "rtk-spec",

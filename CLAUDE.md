@@ -76,15 +76,25 @@ work, so expect two of most things until it is done.
 
 ### Known gaps against the old exporter
 
-- **`std.native('rtkMemoize')` is gone.** Its point was not evaluating its
-  second argument on a cache hit, which the current native-function ABI cannot
-  express — it hands functions a deserializer, and deserializing forces the
-  value. Restoring it needs a lazy-argument path in `rtk-jsonnet-core` first.
 - **`--helm-cache` is accepted and does nothing.** The in-memory
   `helmTemplate` cache still works within a single export; the `helm-cache/`
   directory that outlived one is not written. It needs a stable cache key
   first: the current one is an `FxHasher` value, which is neither stable across
   builds nor collision-resistant enough to name a file by.
+
+### rtkMemoize
+
+`std.native('rtkMemoize')` cannot use the serde-based native-function ABI:
+deserializing its second argument would evaluate it even on a cache hit. Each
+Jsonnet implementation therefore registers this native manually and stores its
+own native value type.
+
+The jrsonnet implementation caches `Val` directly for the lifetime of the OS
+thread. This preserves object identity, lazy fields, functions and assertions;
+it also means separate evaluator instances on one worker share entries, while
+different workers do not. Its TLS cache must initialize jrsonnet's thread-local
+GC object space before itself so cached values are dropped before that object
+space during thread teardown.
 
 ## Testing
 

@@ -27,6 +27,7 @@ use rtk_jsonnet_core::{EvaluatorError as _, FlagsExt, Function};
 use rtk_spec::canonical::{EnvironmentSpec, Rc};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
+mod memoize;
 mod native;
 mod serde;
 
@@ -410,6 +411,12 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 			},
 		);
 
+		Ok(self)
+	}
+
+	fn with_rtk_memoize(&mut self) -> Result<&mut Self, Self::Error> {
+		self.context_initializer
+			.add_native("rtkMemoize", memoize::rtkMemoize::default());
 		Ok(self)
 	}
 

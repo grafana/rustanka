@@ -76,6 +76,14 @@ pub trait Evaluator: Sized {
 	where
 		F: 'static + Function<Self>;
 
+	/// Register this implementation's native `rtkMemoize` function.
+	///
+	/// Memoization cannot use [`Function`]: its value argument has to remain lazy
+	/// on a cache hit, and the cached value stays in the implementation's native,
+	/// thread-local representation. Each implementation must therefore install
+	/// the function through its own native API.
+	fn with_rtk_memoize(&mut self) -> Result<&mut Self, Self::Error>;
+
 	fn with_top_level_argument(&mut self, key: &str, value: &str)
 	-> Result<&mut Self, Self::Error>;
 

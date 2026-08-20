@@ -293,6 +293,10 @@ impl Evaluator {
 				.is_some_and(EnvironmentSpec::emulates_jrsonnet);
 
 		if native_functions {
+			// This native stores implementation values directly and has to use
+			// each evaluator's own lazy callback API rather than the generic,
+			// serde-based plugin interface.
+			call_implementation_evaluator_method!(@with: evaluator, with_rtk_memoize,);
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_native_functions::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_regex::Plugin::new());
 			call_implementation_evaluator_method!(@with: evaluator, with_plugin, rtk_jsonnet_helm::Plugin::new());
@@ -952,6 +956,27 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn evaluates_rtk_memoize_without_forcing_a_hit() {
+		let evaluation = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet(
+				r#"{
+					first: std.native("rtkMemoize")("engine-test", "first"),
+					second: std.native("rtkMemoize")(
+						value=error "must not evaluate",
+						key="engine-test",
+					),
+				}"#,
+			)
+			.unwrap();
+
+		assert_eq!(
+			serde_json::to_value(evaluation).unwrap(),
+			serde_json::json!({ "first": "first", "second": "first" })
+		);
+	}
+
 	/// An environment spec, built the way one is really read.
 	fn environment_spec(implementation: Option<&str>) -> EnvironmentSpec {
 		let spec = match implementation {
@@ -967,6 +992,7 @@ mod tests {
 	/// Everything about an evaluation that the requested implementation decides.
 	const FORMATTING: &str = r#"{
 		floats: std.toString(0.6),
+		memoizeMissing: std.native("rtkMemoize") == null,
 		nativeFunctionsMissing: std.native("sha256") == null,
 		yamlDoc: std.manifestYamlDoc({ a: "b" }, false, false),
 		yamlStream: std.manifestYamlStream([]),
@@ -993,6 +1019,7 @@ mod tests {
 			),
 			serde_json::json!({
 				"floats": "0.6",
+				"memoizeMissing": true,
 				"nativeFunctionsMissing": true,
 				"yamlDoc": "a: b",
 				"yamlStream": "...\n",
@@ -1005,6 +1032,7 @@ mod tests {
 			formatting_of(&engine, Some(&environment_spec(None))),
 			serde_json::json!({
 				"floats": "0.59999999999999998",
+				"memoizeMissing": false,
 				"nativeFunctionsMissing": false,
 				"yamlDoc": "a: \"b\"",
 				"yamlStream": "---\n\n...\n",
@@ -1099,10 +1127,13 @@ mod tests {
 	fn honors_top_level_native_function_disable() {
 		let mut options = Options::default();
 		options.rc.spec.disable_native_functions = true;
-		let result = Engine::new(options)
-			.create_evaluator()
-			.evaluate_snippet(r#"std.native("sha256")("foo")"#);
-		assert!(result.is_err());
+		let engine = Engine::new(options);
+		for snippet in [
+			r#"std.native("sha256")("foo")"#,
+			r#"std.native("rtkMemoize")("disabled", 1)"#,
+		] {
+			assert!(engine.create_evaluator().evaluate_snippet(snippet).is_err());
+		}
 	}
 
 	#[test]
