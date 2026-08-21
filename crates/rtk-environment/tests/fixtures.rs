@@ -583,7 +583,7 @@ fn takes_a_path_to_an_environment_or_to_its_entrypoint() {
 }
 
 #[test]
-fn selects_one_environment_by_name_or_by_where_it_lives() {
+fn selects_one_environment_by_its_exact_name() {
 	// An inline environment is named by the Jsonnet declaring it.
 	let output = Output::new();
 	let exported = output.exported(
@@ -603,12 +603,13 @@ fn selects_one_environment_by_name_or_by_where_it_lives() {
 		]
 	);
 
-	// A static one can be picked out by its directory instead.
+	// A static one is named after where it lives, relative to the project root,
+	// and has to be named in full like any other.
 	let output = Output::new();
 	let exported = output.exported(
 		fixture("test-export-envs")
 			.recursive()
-			.named("static-env")
+			.named("test-export-envs/static-env")
 			.resources("path-filter-deployment", "path-filter-service"),
 	);
 	assert_eq!(exported.successful(), 1);
@@ -622,11 +623,49 @@ fn selects_one_environment_by_name_or_by_where_it_lives() {
 	);
 }
 
+/// A recursive `--name` is an exact comparison in tk, so part of a name selects
+/// nothing at all rather than everything it appears in.
+#[test]
+fn part_of_a_name_selects_nothing_recursively() {
+	let output = Output::new();
+	let exported = output.exported(fixture("test-export-envs").recursive().named("static-env"));
+
+	assert_eq!(exported.successful(), 0);
+	assert_eq!(output.files(), Vec::<String>::new());
+}
+
+/// The name is compared against the environment, never against where the
+/// repository happens to be checked out.
+#[test]
+fn a_name_is_not_matched_against_the_path() {
+	let output = Output::new();
+	let exported = output.exported(fixture("test-export-envs").recursive().named("testdata"));
+
+	assert_eq!(exported.successful(), 0);
+	assert_eq!(output.files(), Vec::<String>::new());
+}
+
+/// A recursive export filters what it walked over, and tk is content for that
+/// to leave nothing: it exports what survived and exits zero.
+#[test]
+fn a_recursive_export_matching_nothing_is_not_an_error() {
+	let output = Output::new();
+	let exported = output.exported(fixture("test-export-envs").recursive().named("nonexistent"));
+
+	assert_eq!(exported.successful(), 0);
+	assert_eq!(
+		output.files(),
+		Vec::<String>::new(),
+		"an export that matched nothing wrote something"
+	);
+}
+
+/// Asking for one environment and not finding it is a different matter.
 #[test]
 fn says_so_when_nothing_matches_what_was_asked_for() {
 	let output = Output::new();
 	let error = output
-		.export(fixture("test-export-envs").recursive().named("nonexistent"))
+		.export(fixture("test-export-envs/inline-envs").named("nonexistent"))
 		.expect_err("nothing matches");
 
 	assert!(

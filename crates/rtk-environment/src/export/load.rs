@@ -167,16 +167,20 @@ impl Engine {
 			.collect::<Vec<_>>();
 		available.sort();
 
+		// A name selects one of the environments an entrypoint declares, which is
+		// something only an inline environment has to do: tk's `StaticLoader`
+		// takes no notice of the filter at all, a static environment being named
+		// after where it lives rather than by the Jsonnet it is picked out of.
+		// The match itself is a substring, as `SingleEnvEvalScript`'s
+		// `std.member` is, with an exact one preferred over the rest.
 		if let Some(name) = name {
 			let mut exact = Vec::new();
 			let mut partial = Vec::new();
 			for environment in discovered {
 				let environment_name = environment.environment.metadata.name.as_deref();
-				if environment_name == Some(name) {
+				if environment.is_static || environment_name == Some(name) {
 					exact.push(environment);
-				} else if environment_name.is_some_and(|candidate| candidate.contains(name))
-					|| environment.path.to_string_lossy().contains(name)
-				{
+				} else if environment_name.is_some_and(|candidate| candidate.contains(name)) {
 					partial.push(environment);
 				}
 			}

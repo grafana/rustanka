@@ -446,6 +446,7 @@ impl Error {
 				| Error::Render(_)
 				| Error::EmptyFilename { .. }
 				| Error::Ambiguous { .. }
+				| Error::MultipleEnvironmentsNamed { .. }
 				| Error::OutputDirNotEmpty { .. }
 				| Error::DuplicateFile { .. }
 				| Error::ForeignFile { .. }
@@ -682,6 +683,11 @@ impl Engine {
 			Search::Environment
 		};
 		let matching = Matching {
+			path: paths
+				.iter()
+				.map(|path| path.display().to_string())
+				.collect::<Vec<_>>()
+				.join(", "),
 			discover: self.discover(paths, search),
 			name: options.name.clone(),
 			selector: options
@@ -689,9 +695,10 @@ impl Engine {
 				.as_deref()
 				.map(selector::parse)
 				.transpose()?,
+			recursive: options.recursive,
 		};
 
-		let mut environments = matching.select(options.recursive)?.peekable();
+		let mut environments = matching.select()?.peekable();
 
 		// Now that there is an environment to export, somewhere to put it. Left
 		// until here so that finding none leaves the filesystem alone, and so that
@@ -735,7 +742,14 @@ impl Engine {
 			reports: reports.into_iter().map(|(_, report)| report).collect(),
 		};
 
-		if exported.reports.is_empty() && (options.name.is_some() || options.selector.is_some()) {
+		// A recursive export filters what it walked over and exports whatever
+		// survived, which tk is content to have be nothing: `--name` and
+		// `--selector` are a filter there, not a lookup. Asking for one
+		// environment and not finding it is a different matter.
+		if exported.reports.is_empty()
+			&& !options.recursive
+			&& (options.name.is_some() || options.selector.is_some())
+		{
 			return Err(Error::NothingMatched {
 				name: options.name.clone(),
 				selector: options.selector.clone(),
@@ -755,23 +769,51 @@ impl Engine {
 /// Discovery, filtered by `--name` and `--selector`.
 struct Matching {
 	discover: Discover,
+	/// What was asked for, as it was written, for an error to name it the way
+	/// tk's `ErrMultipleEnvs` does.
+	path: String,
 	name: Option<String>,
 	selector: Option<Selector>,
+	recursive: bool,
 }
 
 impl Matching {
+	/// Whether `--name` selects this environment.
+	///
+	/// Tanka has two rules and chooses between them by command rather than by
+	/// what it finds. A recursive export compares the name exactly, in
+	/// `cmd/tk/export.go`. Everything else loads a single environment through a
+	/// loader: the inline one matches a substring, because `SingleEnvEvalScript`
+	/// asks `std.member`, and the static one ignores the filter altogether,
+	/// since a static environment is named after its directory rather than by
+	/// the Jsonnet being selected from.
+	///
+	/// What Tanka never does is compare the name against a path. rtk used to,
+	/// which meant a filter could be satisfied by the directory someone happened
+	/// to check the repository out into.
+	fn named(&self, discovered: &Discovered) -> bool {
+		let Some(name) = self.name.as_deref() else {
+			return true;
+		};
+
+		if !self.recursive && discovered.is_static {
+			return true;
+		}
+
+		let Some(environment) = discovered.environment.metadata.name.as_deref() else {
+			return false;
+		};
+
+		if self.recursive {
+			environment == name
+		} else {
+			environment.contains(name)
+		}
+	}
+
 	fn matches(&self, discovered: &Discovered) -> bool {
-		if let Some(name) = self.name.as_deref() {
-			let matches_name = discovered
-				.environment
-				.metadata
-				.name
-				.as_deref()
-				.is_some_and(|environment| environment.contains(name))
-				|| discovered.path.to_string_lossy().contains(name);
-			if !matches_name {
-				return false;
-			}
+		if !self.named(discovered) {
+			return false;
 		}
 
 		if let Some(selector) = self.selector.as_ref() {
@@ -787,46 +829,54 @@ impl Matching {
 	/// Which environments an export will export.
 	///
 	/// A recursive export streams, so that evaluating one environment overlaps
-	/// with discovering the next. The other modes have to look at every
-	/// environment before dispatching any of them: `--name` prefers an exact
-	/// match that may turn up last, and an export given neither `--name` nor
-	/// `--recursive` has to refuse an ambiguous set outright.
-	fn select(
-		mut self,
-		recursive: bool,
-	) -> Result<Box<dyn Iterator<Item = Result<Discovered, Error>> + Send>, Error> {
-		if let Some(name) = self.name.clone() {
-			let (exact, partial): (Vec<_>, Vec<_>) = self
-				.collect::<Result<Vec<_>, _>>()?
-				.into_iter()
-				.partition(|discovered| {
-					discovered.environment.metadata.name.as_deref() == Some(name.as_str())
-				});
-
-			let selected = if exact.is_empty() { partial } else { exact };
-			return Ok(Box::new(selected.into_iter().map(Ok)));
-		}
-
-		if recursive {
+	/// with discovering the next: its `--name` is an exact comparison, which
+	/// cannot become ambiguous, and nothing downstream needs the whole set.
+	///
+	/// Everything else has to look at every environment before dispatching any
+	/// of them. A substring `--name` may turn out to match one environment
+	/// exactly and others only in part, and Tanka prefers the exact one however
+	/// late it is found; what is still ambiguous after that is refused, as is an
+	/// export given neither `--name` nor `--recursive`.
+	fn select(self) -> Result<Box<dyn Iterator<Item = Result<Discovered, Error>> + Send>, Error> {
+		if self.recursive {
 			return Ok(Box::new(self));
 		}
 
-		let Some(first) = self.next().transpose()? else {
-			return Ok(Box::new(std::iter::empty()));
-		};
-		let Some(second) = self.next().transpose()? else {
-			return Ok(Box::new(std::iter::once(Ok(first))));
-		};
+		let name = self.name.clone();
+		let self_path = self.path.clone();
+		let mut found = self.collect::<Result<Vec<_>, _>>()?;
 
-		let mut count = 2;
-		while self.next().transpose()?.is_some() {
-			count += 1;
+		let exactly = |discovered: &Discovered, name: &str| {
+			discovered.environment.metadata.name.as_deref() == Some(name)
+		};
+		if let Some(name) = name.as_deref()
+			&& found.iter().any(|discovered| exactly(discovered, name))
+		{
+			found.retain(|discovered| exactly(discovered, name));
 		}
 
-		Err(Error::Ambiguous {
-			count,
-			first: first.path.as_ref().clone(),
-			second: second.path.as_ref().clone(),
+		if found.len() < 2 {
+			return Ok(Box::new(found.into_iter().map(Ok)));
+		}
+
+		Err(match name {
+			Some(name) => {
+				let mut names = found
+					.iter()
+					.filter_map(|discovered| discovered.environment.metadata.name.as_deref())
+					.collect::<Vec<_>>();
+				names.sort_unstable();
+				Error::MultipleEnvironmentsNamed {
+					path: self_path,
+					name,
+					names: names.join("\n - "),
+				}
+			}
+			None => Error::Ambiguous {
+				count: found.len(),
+				first: found[0].path.as_ref().clone(),
+				second: found[1].path.as_ref().clone(),
+			},
 		})
 	}
 }

@@ -391,6 +391,129 @@ fn refuses_to_export_an_ambiguous_set_of_environments() {
 	assert!(project.exported().is_empty());
 }
 
+/// Selecting by name is a substring match without `--recursive`, so a name that
+/// several environments contain is still ambiguous and still refused. tk says
+/// the same thing, from `ErrMultipleEnvs`.
+#[test]
+fn refuses_a_name_several_inline_environments_share() {
+	let project = Project::new();
+	let declare = |name: &str| {
+		format!(
+			r"{{
+				apiVersion: 'tanka.dev/v1alpha1',
+				kind: 'Environment',
+				metadata: {{ name: '{name}' }},
+				spec: {{ namespace: '{name}' }},
+				data: {{ config: {CONFIG_MAP} }},
+			}}"
+		)
+	};
+	// Neither name matches in full, so there is nothing to break the tie.
+	project.write(
+		"environments/several/main.jsonnet",
+		&format!(
+			"{{ first: {}, second: {} }}",
+			declare("base-one"),
+			declare("base-two")
+		),
+	);
+
+	let error = engine()
+		.export_bulk(
+			vec![project.path().join("environments/several")],
+			&Options {
+				name: Some("base".to_owned()),
+				..options(&project)
+			},
+		)
+		.expect_err("two environments contain the name");
+
+	let message = error.to_string();
+	assert!(
+		message.contains("matching \"base\". Provide a more specific name"),
+		"unexpected error: {message}"
+	);
+	assert!(
+		message.contains("base-one") && message.contains("base-two"),
+		"the error should list what it found: {message}"
+	);
+	assert!(error.fatal());
+	assert!(project.exported().is_empty());
+}
+
+/// Among several substring matches, the one that matches in full wins, so
+/// `--name base` takes `base` rather than refusing it alongside
+/// `base-extended`. tk prefers a full match the same way.
+#[test]
+fn prefers_the_environment_whose_name_matches_in_full() {
+	let project = Project::new();
+	let declare = |name: &str, resource: &str| {
+		format!(
+			r"{{
+				apiVersion: 'tanka.dev/v1alpha1',
+				kind: 'Environment',
+				metadata: {{ name: '{name}' }},
+				spec: {{ namespace: '{name}' }},
+				data: {{ config: {{
+					apiVersion: 'v1',
+					kind: 'ConfigMap',
+					metadata: {{ name: '{resource}' }},
+				}} }},
+			}}"
+		)
+	};
+	project.write(
+		"environments/several/main.jsonnet",
+		&format!(
+			"{{ first: {}, second: {} }}",
+			declare("base", "exact"),
+			declare("base-extended", "substring")
+		),
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/several")],
+			&Options {
+				name: Some("base".to_owned()),
+				..options(&project)
+			},
+		)
+		.expect("the full match is unambiguous");
+
+	assert_eq!(exported.successful(), 1);
+	assert_eq!(
+		project.exported().keys().collect::<Vec<_>>(),
+		["manifest.json", "v1.ConfigMap-exact.yaml"]
+	);
+}
+
+/// A static environment is named after where it lives rather than by the
+/// Jsonnet it would be picked out of, and tk's `StaticLoader` takes no notice
+/// of `--name` at all.
+#[test]
+fn a_name_does_not_filter_a_static_environment() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+		&format!("{{ config: {CONFIG_MAP} }}"),
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&Options {
+				name: Some("nothing-like-it".to_owned()),
+				..options(&project)
+			},
+		)
+		.expect("a static environment ignores the name");
+
+	assert_eq!(exported.successful(), 1);
+}
+
 #[test]
 fn selects_environments_by_name_and_labels() {
 	let project = Project::new();
@@ -405,11 +528,14 @@ fn selects_environments_by_name_and_labels() {
 		);
 	}
 
+	// A static environment is named after where it lives, and a recursive
+	// `--name` is exact, so it is selected by that name in full.
 	let by_name = engine()
 		.export_bulk(
 			vec![project.path().join("environments")],
 			&Options {
-				name: Some("one".to_owned()),
+				name: Some("environments/one".to_owned()),
+				recursive: true,
 				..options(&project)
 			},
 		)
