@@ -364,6 +364,12 @@ pub enum Error {
 		second: PathBuf,
 	},
 
+	#[error("could not start {parallelism} export workers")]
+	Pool {
+		parallelism: usize,
+		source: rayon::ThreadPoolBuildError,
+	},
+
 	#[error(
 		"output dir `{output_dir}` not empty. Pass a different --merge-strategy to ignore this"
 	)]
@@ -716,38 +722,68 @@ impl Engine {
 			None => {}
 		}
 
+		let parallelism = options.parallelism.max(1);
 		let pool = rayon::ThreadPoolBuilder::new()
-			.num_threads(options.parallelism.max(1))
+			.num_threads(parallelism)
 			// Jsonnet evaluation recurses deeply.
 			.stack_size(8 * 1024 * 1024)
 			.build()
-			.expect("a rayon pool can be built");
+			.map_err(|source| Error::Pool {
+				parallelism,
+				source,
+			})?;
 
 		// Discovery is pulled from the pool rather than up front, so that
 		// evaluating one environment overlaps with discovering the next.
+		//
+		// Every environment produces a slot, failures included, so that this
+		// cannot end early and leave what has already been written unrecorded.
+		// Which failure is reported is then a decision made below, on results
+		// put back in order, rather than whichever worker got there first.
 		let engine = self.clone();
-		let mut reports = pool.install(|| {
+		let mut results: Vec<(usize, Result<Report, Error>)> = pool.install(|| {
 			environments
 				.enumerate()
 				.par_bridge()
 				.map(|(index, discovered)| {
-					Ok((index, export.export_environment(&engine, &discovered?)))
+					let result = match discovered {
+						Ok(discovered) => Ok(export.export_environment(&engine, &discovered)),
+						Err(error) => {
+							// A directory that cannot be read is not one
+							// environment's failure, and there is no telling what
+							// the rest of the walk holds: nothing further is
+							// evaluated or written.
+							export.abort();
+							Err(error)
+						}
+					};
+					(index, result)
 				})
-				.collect::<Result<Vec<_>, Error>>()
-		})?;
+				.collect()
+		});
 
 		// Environments finish in whatever order the pool gets to them, which
 		// should not show up in the result.
-		reports.sort_by_key(|(index, _)| *index);
-		let exported = Exported {
-			reports: reports.into_iter().map(|(_, report)| report).collect(),
-		};
+		results.sort_by_key(|(index, _)| *index);
+
+		let mut reports = Vec::with_capacity(results.len());
+		let mut discovery_failure = None;
+		for (_, result) in results {
+			match result {
+				Ok(report) => reports.push(report),
+				Err(error) => {
+					discovery_failure.get_or_insert(error);
+				}
+			}
+		}
+		let exported = Exported { reports };
 
 		// A recursive export filters what it walked over and exports whatever
 		// survived, which tk is content to have be nothing: `--name` and
 		// `--selector` are a filter there, not a lookup. Asking for one
 		// environment and not finding it is a different matter.
 		if exported.reports.is_empty()
+			&& discovery_failure.is_none()
 			&& !options.recursive
 			&& (options.name.is_some() || options.selector.is_some())
 		{
@@ -759,11 +795,19 @@ impl Engine {
 
 		// An export that found nothing to do leaves no trace of having run, as tk
 		// does not: no output directory, and no index claiming it is empty.
+		//
+		// One that did write something records it even when it is about to fail,
+		// so that the index describes the directory rather than the export that
+		// was meant to happen. A failure here displaces the one that stopped the
+		// export, being about what the filesystem is left holding.
 		if !exported.reports.is_empty() {
 			export.reconcile(&exported)?;
 		}
 
-		Ok(exported)
+		match discovery_failure {
+			Some(error) => Err(error),
+			None => Ok(exported),
+		}
 	}
 }
 

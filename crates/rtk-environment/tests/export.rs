@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rtk_environments::export::{MergeStrategy, Options};
+use rtk_environments::export::{Error as ExportError, Exported, MergeStrategy, Options};
 use rtk_environments::{Engine, Search};
 use tempfile::TempDir;
 
@@ -1181,6 +1181,137 @@ fn reports_failures_per_environment() {
 	let index: BTreeMap<String, String> =
 		serde_json::from_str(&files["manifest.json"]).expect("a valid index");
 	assert_eq!(index.len(), 1);
+}
+
+/// A project holding one environment that exports and some that cannot even be
+/// discovered.
+///
+/// Only an inline entrypoint can fail that way: a static environment is
+/// discovered by reading `spec.json`, and its Jsonnet is not evaluated until
+/// much later, where a failure belongs to that one environment.
+fn project_with_broken_discovery(broken: &[&str]) -> Project {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/good",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		&format!("{{ config: {CONFIG_MAP} }}"),
+	);
+	for name in broken {
+		project.write(
+			&format!("environments/{name}/main.jsonnet"),
+			&format!("error 'cannot discover {name}'"),
+		);
+	}
+	project
+}
+
+/// Export the named directories, in that order.
+///
+/// Discovery walks in `readdir` order, which is nobody's idea of an order, so
+/// these name what they want rather than relying on it.
+fn export_in_order(project: &Project, environments: &[&str]) -> Result<Exported, ExportError> {
+	engine().export_bulk(
+		environments
+			.iter()
+			.map(|name| project.path().join("environments").join(name))
+			.collect(),
+		&Options {
+			recursive: true,
+			// One at a time, so that "after the failure" means something.
+			parallelism: 1,
+			format: "{{env.metadata.name}}/{{.kind}}-{{.metadata.name}}".to_owned(),
+			..options(project)
+		},
+	)
+}
+
+/// A directory that cannot be discovered stops the export, but what was written
+/// before it is still recorded: files on disk that the index does not mention
+/// are what make the *next* export go wrong.
+#[test]
+fn a_discovery_failure_still_records_what_was_exported() {
+	let project = project_with_broken_discovery(&["broken"]);
+
+	let error = export_in_order(&project, &["good", "broken"]).expect_err("discovery fails");
+	assert!(
+		error.to_string().contains("cannot discover broken"),
+		"unexpected error: {error}"
+	);
+
+	let files = project.exported();
+	assert!(
+		files.contains_key("environments-good/ConfigMap-settings.yaml"),
+		"the good environment should have been exported: {:?}",
+		files.keys().collect::<Vec<_>>()
+	);
+	let index: BTreeMap<String, String> =
+		serde_json::from_str(&files["manifest.json"]).expect("a valid index");
+	assert_eq!(
+		index.keys().collect::<Vec<_>>(),
+		["environments-good/ConfigMap-settings.yaml"],
+		"the index should describe the directory it was left with"
+	);
+}
+
+/// The failure reported is the first in discovery order.
+///
+/// `par_bridge` serializes pulling from the iterator, and discovery is what
+/// fails, so failures are usually produced in order anyway — but rayon promises
+/// nothing about which of several errors a `Result` collect keeps, and this is
+/// now decided on sorted results rather than by whichever worker recorded its
+/// failure first.
+#[test]
+fn a_discovery_failure_is_reported_the_same_way_every_time() {
+	let broken = ["first-broken", "second-broken", "third-broken"];
+
+	for _ in 0..8 {
+		let project = project_with_broken_discovery(&broken);
+		let error = engine()
+			.export_bulk(
+				std::iter::once("good".to_owned())
+					.chain(broken.iter().map(|name| (*name).to_owned()))
+					.map(|name| project.path().join("environments").join(name))
+					.collect(),
+				&Options {
+					recursive: true,
+					format: "{{env.metadata.name}}/{{.kind}}-{{.metadata.name}}".to_owned(),
+					..options(&project)
+				},
+			)
+			.expect_err("discovery fails");
+
+		assert!(
+			error.to_string().contains("cannot discover first-broken"),
+			"the first failure in discovery order should be the one reported: {error}"
+		);
+	}
+}
+
+/// Nothing is evaluated or written once the export has been stopped.
+#[test]
+fn nothing_is_exported_after_a_discovery_failure() {
+	let project = project_with_broken_discovery(&["broken"]);
+	for name in ["late-one", "late-two"] {
+		static_environment(
+			&project,
+			&format!("environments/{name}"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+			&format!("{{ config: {CONFIG_MAP} }}"),
+		);
+	}
+
+	export_in_order(&project, &["good", "broken", "late-one", "late-two"])
+		.expect_err("discovery fails");
+
+	let files = project.exported();
+	let exported = files.keys().collect::<Vec<_>>();
+	assert!(
+		!exported
+			.iter()
+			.any(|file| file.contains("late-one") || file.contains("late-two")),
+		"the environments after the failure should not have been exported: {exported:?}"
+	);
 }
 
 /// Tanka only treats `kind` as meaningful when it is a string; anything else is

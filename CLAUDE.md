@@ -243,6 +243,29 @@ Finding nothing is otherwise indistinguishable from exporting an environment
 that produces nothing: no output directory is created, no `manifest.json` is
 written, the exit code is zero. The command logs a warning; the library does not.
 
+### An export interrupted part way through
+
+A `--recursive` export streams discovery through the worker pool, so that
+evaluating one environment overlaps with discovering the next. tk discovers
+everything up front instead, in `FindEnvsFromPaths`, and only then writes
+anything. So an entrypoint that cannot even be discovered — an inline one whose
+Jsonnet fails; a static one is only read, and fails later as itself — lands
+differently:
+
+- tk writes nothing at all, having failed before `ExportEnvironments`.
+- rtk has already exported the environments discovered before it.
+
+Both exit 1. rtk keeps the streaming and makes the outcome coherent instead:
+whatever was written is recorded, so `manifest.json` describes the directory
+rather than the export that was meant to happen. Leaving files behind that the
+index does not mention is what breaks the *next* export — `fail-on-conflicts`
+cannot protect a file it has no owner for, and `replace-envs` will not prune it.
+
+Discovery failing stops the export: nothing after it is evaluated or written,
+and those environments are reported as skipped. Which failure is reported is
+decided on results put back into discovery order, not by whichever worker
+recorded one first.
+
 ### Conflicting filenames are reported differently from tk
 
 When two resources want the same file, both tools write what they have so far
