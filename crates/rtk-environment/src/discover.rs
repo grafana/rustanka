@@ -55,9 +55,17 @@ type DirectoryIter =
 
 /// Result of environment discovery.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Discovered {
 	/// Path to the environment directory.
 	pub path: Arc<PathBuf>,
+	/// The entrypoint to evaluate, inside [`Discovered::path`].
+	///
+	/// Usually `main.jsonnet`, and always that when an environment was found by
+	/// walking, as Tanka's recursive discovery keeps no other name. A path named
+	/// on the command line may point at a file instead, and then that file is
+	/// the entrypoint.
+	pub entrypoint: Arc<PathBuf>,
 	/// Whether this environment has a `spec.json`.
 	pub is_static: bool,
 	/// Whether the entrypoint evaluates to this environment and nothing else,
@@ -94,11 +102,6 @@ const _: () = {
 	assert_send::<Candidates>();
 };
 
-/// The directories that hold environments, in the order they are found.
-///
-/// Finding them is a filesystem walk and is cheap; working out what each one
-/// declares is not, and is [`Engine::resolve_candidate`]'s job. They are separate
-/// so that the expensive half can be done several at a time.
 /// Whether a path that is itself an environment is that environment, or only
 /// where to start looking for them.
 ///
@@ -114,11 +117,23 @@ pub enum Search {
 	Tree,
 }
 
+/// Somewhere that may hold environments, and the file to read it by.
+#[derive(Clone, Debug)]
+pub(crate) struct Candidate {
+	pub(crate) directory: Arc<PathBuf>,
+	pub(crate) entrypoint: Arc<PathBuf>,
+}
+
+/// The places that hold environments, in the order they are found.
+///
+/// Finding them is a filesystem walk and is cheap; working out what each one
+/// declares is not, and is [`Engine::resolve_candidate`]'s job. They are
+/// separate so that the expensive half can be done several at a time.
 struct Candidates {
 	paths: <Vec<PathBuf> as IntoIterator>::IntoIter,
 	search: Search,
 	directory: Option<DirectoryIter>,
-	/// Directories already handed out. A path can be reached more than once,
+	/// Entrypoints already handed out. One can be reached more than once,
 	/// through a link or by being named as well as walked into.
 	seen: FxHashSet<Arc<PathBuf>>,
 	current_dir: Option<PathBuf>,
@@ -138,10 +153,24 @@ impl Candidates {
 		}
 	}
 
-	/// Hand out a directory, unless it has been handed out already.
-	fn unseen(&mut self, path: PathBuf) -> Option<Arc<PathBuf>> {
-		let path = Arc::new(path);
-		self.seen.insert(Arc::clone(&path)).then_some(path)
+	/// Hand out a candidate, unless its entrypoint has been handed out already.
+	///
+	/// Two paths naming one entrypoint are one environment; two entrypoints in
+	/// one directory are not.
+	fn unseen(&mut self, directory: PathBuf, entrypoint: PathBuf) -> Option<Candidate> {
+		let entrypoint = Arc::new(entrypoint);
+		self.seen
+			.insert(Arc::clone(&entrypoint))
+			.then(|| Candidate {
+				directory: Arc::new(directory),
+				entrypoint,
+			})
+	}
+
+	/// The candidate a directory is read by, which is always `main.jsonnet`.
+	fn in_directory(&mut self, directory: PathBuf) -> Option<Candidate> {
+		let entrypoint = directory.join(JPath::DEFAULT_ENTRYPOINT);
+		self.unseen(directory, entrypoint)
 	}
 
 	#[tracing::instrument]
@@ -165,7 +194,7 @@ impl Candidates {
 
 impl Iterator for Candidates {
 	/// Walking cannot fail; only working out where a relative path starts can.
-	type Item = Result<Arc<PathBuf>, std::io::Error>;
+	type Item = Result<Candidate, std::io::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
@@ -181,18 +210,21 @@ impl Iterator for Candidates {
 						continue;
 					}
 				};
+				// Walking finds environments by their default entrypoint and no
+				// other, as Tanka's `FindFiles` does: a custom one is reachable
+				// only by naming it.
 				if entry.file_type().is_dir()
 					&& Self::is_environment(entry.path())
-					&& let Some(path) = self.unseen(entry.path().to_path_buf())
+					&& let Some(candidate) = self.in_directory(entry.path().to_path_buf())
 				{
-					return Some(Ok(path));
+					return Some(Ok(candidate));
 				}
 				continue;
 			}
 
 			let path = self.paths.next()?;
 			tracing::trace!(path = ?path, "processing path");
-			let mut absolute = if path.is_absolute() {
+			let absolute = if path.is_absolute() {
 				path
 			} else {
 				let current_dir = match &self.current_dir {
@@ -205,8 +237,30 @@ impl Iterator for Candidates {
 				current_dir.join(path)
 			};
 
+			// A path naming a file names the entrypoint, whatever it is called.
+			// Tanka reads the same thing out of it, in `jpath.Filename`, and
+			// asks no further questions: an existing file is an environment.
+			//
+			// Walking is the exception. `FindFiles` hands a named file straight
+			// back and the walk then keeps only what is called `main.jsonnet`,
+			// so naming anything else recursively finds nothing at all.
 			if absolute.is_file() {
-				absolute = absolute.parent().map(Path::to_path_buf).unwrap_or(absolute);
+				let named_default = absolute
+					.file_name()
+					.is_some_and(|name| name == JPath::DEFAULT_ENTRYPOINT);
+				if self.search == Search::Tree && !named_default {
+					tracing::trace!(path = ?absolute, "walking keeps only the default entrypoint");
+					continue;
+				}
+
+				let directory = absolute
+					.parent()
+					.map(Path::to_path_buf)
+					.unwrap_or_else(|| absolute.clone());
+				if let Some(candidate) = self.unseen(directory, absolute) {
+					return Some(Ok(candidate));
+				}
+				continue;
 			}
 
 			// A path that is itself an environment is that environment, rather
@@ -214,8 +268,8 @@ impl Iterator for Candidates {
 			// asked for, in which case it is both, and what it contains is
 			// found by walking it like any other directory.
 			if self.search == Search::Environment && Self::is_environment(&absolute) {
-				if let Some(path) = self.unseen(absolute) {
-					return Some(Ok(path));
+				if let Some(candidate) = self.in_directory(absolute) {
+					return Some(Ok(candidate));
 				}
 				continue;
 			}
@@ -273,10 +327,10 @@ impl Engine {
 			Candidates::new(paths, Search::Tree)
 				.enumerate()
 				.par_bridge()
-				.map(|(index, path)| {
-					let found = path
+				.map(|(index, candidate)| {
+					let found = candidate
 						.map_err(Error::from)
-						.and_then(|path| self.resolve_candidate(path))
+						.and_then(|candidate| self.resolve_candidate(candidate))
 						.map_err(|error| error.to_string());
 					(index, found)
 				})
@@ -296,22 +350,23 @@ impl Engine {
 		Ok(environments)
 	}
 
-	/// Every environment a directory declares.
-	pub(crate) fn resolve_candidate(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
-		if path.join("spec.json").exists() {
-			return Ok(vec![Discovered::from_static(path)?]);
+	/// Every environment a candidate declares.
+	pub(crate) fn resolve_candidate(&self, candidate: Candidate) -> Result<Vec<Discovered>, Error> {
+		// A `spec.json` beside the entrypoint is what makes an environment
+		// static, exactly as tk's `DetectLoader` decides it.
+		if candidate.directory.join("spec.json").exists() {
+			return Ok(vec![Discovered::from_static(candidate)?]);
 		}
 
-		self.resolve_inline(path)
+		self.resolve_inline(candidate)
 	}
 
-	/// Every environment declared anywhere in a directory's entrypoint.
+	/// Every environment declared anywhere in an entrypoint.
 	#[tracing::instrument(skip(self))]
-	fn resolve_inline(&self, path: Arc<PathBuf>) -> Result<Vec<Discovered>, Error> {
-		let main_path = path.join("main.jsonnet");
+	fn resolve_inline(&self, candidate: Candidate) -> Result<Vec<Discovered>, Error> {
 		let options = self.jsonnet.options();
 
-		let jpath = JPath::resolve(&main_path)?;
+		let jpath = JPath::resolve(candidate.entrypoint.as_ref())?;
 		let snippet = self.entrypoint_snippet(&jpath.entrypoint, METADATA_EVAL_SCRIPT);
 
 		// Inline environments are named by the Jsonnet that declares them, but
@@ -333,7 +388,7 @@ impl Engine {
 		// owned, which is what lets one thread discover an environment and another
 		// export it. The metadata script has already pruned every environment's
 		// data, so this is small.
-		let mut collector = InlineCollector::new(&path, namespace.as_deref());
+		let mut collector = InlineCollector::new(&candidate, namespace.as_deref());
 		let standalone = collector.collect(evaluation.into_value())?;
 		Ok(collector.finish(standalone))
 	}
@@ -384,15 +439,15 @@ fn available_parallelism() -> usize {
 
 /// The state shared while recursively collecting inline environments.
 struct InlineCollector<'a> {
-	path: &'a Arc<PathBuf>,
+	candidate: &'a Candidate,
 	namespace: Option<&'a str>,
 	found: Vec<Discovered>,
 }
 
 impl<'a> InlineCollector<'a> {
-	fn new(path: &'a Arc<PathBuf>, namespace: Option<&'a str>) -> InlineCollector<'a> {
+	fn new(candidate: &'a Candidate, namespace: Option<&'a str>) -> InlineCollector<'a> {
 		InlineCollector {
-			path,
+			candidate,
 			namespace,
 			found: Vec::new(),
 		}
@@ -417,7 +472,7 @@ impl<'a> InlineCollector<'a> {
 				{
 					let environment: Environment<'static> = deserializable.deserialize()?;
 					self.found.push(Discovered::from_environment(
-						Arc::clone(self.path),
+						self.candidate,
 						self.namespace,
 						environment,
 					));
@@ -451,11 +506,9 @@ impl<'a> InlineCollector<'a> {
 }
 
 impl Discovered {
-	fn from_static(path: Arc<PathBuf>) -> Result<Self, Error> {
-		let spec_path = path.join("spec.json");
-		let jpath = spec_path
-			.parent()
-			.and_then(|directory| JPath::resolve(directory).ok());
+	fn from_static(candidate: Candidate) -> Result<Self, Error> {
+		let spec_path = candidate.directory.join("spec.json");
+		let jpath = JPath::resolve(candidate.entrypoint.as_ref()).ok();
 		let content = fs::read_to_string(&spec_path)?;
 		let environment = serde_json::from_str::<Environment<'_>>(&content)?;
 		let mut environment = environment.without_data();
@@ -469,7 +522,8 @@ impl Discovered {
 		}
 
 		Ok(Self {
-			path,
+			path: candidate.directory,
+			entrypoint: candidate.entrypoint,
 			is_static: true,
 			standalone: true,
 			environment,
@@ -477,7 +531,7 @@ impl Discovered {
 	}
 
 	fn from_environment(
-		path: Arc<PathBuf>,
+		candidate: &Candidate,
 		namespace: Option<&str>,
 		environment: Environment<'_>,
 	) -> Self {
@@ -487,7 +541,8 @@ impl Discovered {
 		}
 
 		Self {
-			path,
+			path: Arc::clone(&candidate.directory),
+			entrypoint: Arc::clone(&candidate.entrypoint),
 			is_static: false,
 			standalone: false,
 			environment,
@@ -979,6 +1034,79 @@ mod tests {
 		names.sort();
 
 		assert_eq!(names, vec!["alpha".to_owned(), "beta".to_owned()]);
+	}
+
+	/// A directory holding two entrypoints is two environments, told apart by
+	/// which one was named — and walking only ever finds the default.
+	#[test]
+	fn an_entrypoint_of_another_name_is_found_only_by_naming_it() {
+		let temp = TempDir::new().unwrap();
+		let root = temp.path();
+		let environment = root.join("env");
+		fs::create_dir_all(&environment).unwrap();
+		fs::write(root.join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(environment.join("main.jsonnet"), "{}").unwrap();
+		fs::write(environment.join("custom.jsonnet"), "{}").unwrap();
+		fs::write(
+			environment.join("spec.json"),
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
+		)
+		.unwrap();
+
+		let entrypoints = |paths: Vec<PathBuf>, search| {
+			let mut found = Discover::new(test_engine(), paths, search)
+				.collect::<Result<Vec<_>, _>>()
+				.unwrap()
+				.into_iter()
+				.map(|discovered| discovered.entrypoint.as_ref().clone())
+				.collect::<Vec<_>>();
+			found.sort();
+			found
+		};
+
+		assert_eq!(
+			entrypoints(
+				vec![environment.join("custom.jsonnet")],
+				Search::Environment
+			),
+			[environment.join("custom.jsonnet")],
+			"naming an entrypoint selects it"
+		);
+		assert_eq!(
+			entrypoints(vec![environment.clone()], Search::Environment),
+			[environment.join("main.jsonnet")],
+			"naming the directory takes the default entrypoint"
+		);
+		assert_eq!(
+			entrypoints(vec![root.to_path_buf()], Search::Tree),
+			[environment.join("main.jsonnet")],
+			"walking finds the default entrypoint and no other"
+		);
+		assert_eq!(
+			entrypoints(vec![environment.join("custom.jsonnet")], Search::Tree),
+			Vec::<PathBuf>::new(),
+			"walking keeps only the default entrypoint, even when named"
+		);
+
+		// Two entrypoints in one directory are two environments; the same
+		// entrypoint reached twice is one.
+		assert_eq!(
+			entrypoints(
+				vec![environment.clone(), environment.join("custom.jsonnet")],
+				Search::Environment
+			),
+			[
+				environment.join("custom.jsonnet"),
+				environment.join("main.jsonnet")
+			]
+		);
+		assert_eq!(
+			entrypoints(
+				vec![environment.clone(), environment.join("main.jsonnet")],
+				Search::Environment
+			),
+			[environment.join("main.jsonnet")]
+		);
 	}
 
 	/// Asking for one environment still means that one, not everything below it.

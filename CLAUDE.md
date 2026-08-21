@@ -123,6 +123,29 @@ first, and the generated snippet has no file, so the process working directory
 would decide — which quietly loaded the wrong entrypoint for exactly the layout
 above.
 
+Naming a file names the entrypoint, whatever it is called, as `jpath.Filename`
+does. Walking is the exception and keeps only `main.jsonnet`, because
+`FindFiles` does: a custom entrypoint is reachable by naming it and by nothing
+else, and naming one recursively finds nothing at all.
+
+### Selecting by Name
+
+`--name` means two different things in tk, chosen by command:
+
+- `--recursive` compares `metadata.name` exactly, so part of a name selects
+  nothing rather than everything containing it.
+- Everything else loads one environment through a loader. The inline loader
+  matches a substring, because `SingleEnvEvalScript` asks `std.member`, and
+  prefers a full match among what survives; the static loader ignores the
+  filter entirely, a static environment being named after where it lives.
+
+What survives can still be several environments, and that is refused with tk's
+own wording. tk never compares the name against a filesystem path.
+
+A recursive export that matches nothing is not an error: `--name` and
+`--selector` are a filter over what was walked, and tk exports what survived
+and exits zero. Asking for one environment and not finding it still fails.
+
 ### Helm Cache
 
 `--helm-cache` persists successful `helmTemplate` results under each Tanka

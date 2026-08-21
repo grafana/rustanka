@@ -12,6 +12,7 @@ use rtk_jsonnet::jpath::JPath;
 use rtk_spec::canonical::Environment;
 use serde::Deserialize as _;
 
+use crate::discover::Candidate;
 use crate::export::{Error, LoadedEnvironment, OptionalData, process};
 use crate::{Discovered, Engine, Search};
 
@@ -80,16 +81,20 @@ impl Engine {
 		let root = JPath::project_root(working_directory.join(namespace)).ok()?;
 		let entrypoint = root.join(namespace);
 
-		// Only the directory is re-resolved: discovery yields environments by
-		// directory, and an entrypoint is named relative to the root it was found
-		// under, so a bare filename means the root itself.
-		let directory = entrypoint.parent()?;
-		if directory == discovered.path.as_path() {
+		// A namespace names the entrypoint, so this compares entrypoints: the
+		// same directory reached by a different file is a different environment.
+		if entrypoint == discovered.entrypoint.as_path() {
 			return None;
 		}
 
+		// A namespace is relative to a root, so a bare filename means the root
+		// itself holds the entrypoint.
+		let directory = entrypoint.parent()?;
 		let mut candidates = self
-			.resolve_candidate(Arc::new(directory.to_path_buf()))
+			.resolve_candidate(Candidate {
+				directory: Arc::new(directory.to_path_buf()),
+				entrypoint: Arc::new(entrypoint),
+			})
 			.ok()?;
 		if candidates.len() > 1 {
 			// An inline entrypoint declares several environments; tk carries the
@@ -106,8 +111,7 @@ impl Engine {
 
 	/// Evaluate a discovered environment, keeping its manifests.
 	pub fn load(&self, discovered: &Discovered) -> Result<LoadedEnvironment, Error> {
-		let entrypoint = discovered.path.join(JPath::DEFAULT_ENTRYPOINT);
-		let jpath = JPath::resolve(&entrypoint)?;
+		let jpath = JPath::resolve(discovered.entrypoint.as_ref())?;
 
 		let evaluation = self.evaluate(discovered, &jpath)?;
 
@@ -149,17 +153,16 @@ impl Engine {
 	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
 	pub fn load_single(&self, path: &Path, name: Option<&str>) -> Result<LoadedEnvironment, Error> {
 		let jpath = JPath::resolve(path)?;
-		let directory = jpath
-			.entrypoint
-			.parent()
-			.map(Path::to_path_buf)
-			.unwrap_or_else(|| jpath.base_directory.clone());
+		// Discovery is pointed at the resolved entrypoint rather than at the
+		// path as given, which may have named a directory, or a file above the
+		// environment that holds it.
+		//
 		// Exactly the environment that was asked for, as tk's `Peek` loads it;
 		// anything below it belongs to a different environment.
 		let mut discovered = self
-			.discover(vec![directory.clone()], Search::Environment)
+			.discover(vec![jpath.entrypoint.clone()], Search::Environment)
 			.collect::<Result<Vec<_>, _>>()?;
-		discovered.retain(|environment| environment.path.as_path() == directory);
+		discovered.retain(|environment| environment.entrypoint.as_path() == jpath.entrypoint);
 		let mut available = discovered
 			.iter()
 			.filter_map(|environment| environment.environment.metadata.name.as_deref())

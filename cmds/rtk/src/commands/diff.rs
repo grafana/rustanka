@@ -328,13 +328,16 @@ impl DiffArgs {
 		let mut join_set = tokio::task::JoinSet::new();
 
 		for env in &envs {
-			let env_path = env.path.to_string_lossy().to_string();
+			// Loaded by its entrypoint rather than its directory, so that an
+			// environment named by a file other than main.jsonnet is the one
+			// evaluated.
+			let env_path = env.entrypoint.to_string_lossy().to_string();
 			let display_name = env
 				.environment
 				.metadata
 				.name
 				.clone()
-				.unwrap_or_else(|| env_path.clone());
+				.unwrap_or_else(|| env.path.to_string_lossy().to_string());
 
 			let selected_name = env.selected_by().map(str::to_owned);
 			let jsonnet = jsonnet.clone();

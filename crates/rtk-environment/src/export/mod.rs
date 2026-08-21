@@ -244,12 +244,8 @@ pub struct Report {
 }
 
 impl Report {
-	fn from_source(source: Arc<PathBuf>) -> Report {
-		let entrypoint = if source.is_file() {
-			source.as_ref().clone()
-		} else {
-			source.join(JPath::DEFAULT_ENTRYPOINT)
-		};
+	/// A report for an environment found at `source`, read by `entrypoint`.
+	fn from_entrypoint(source: Arc<PathBuf>, entrypoint: PathBuf) -> Report {
 		let identifier = std::env::current_dir()
 			.ok()
 			.and_then(|current_dir| {
@@ -632,7 +628,12 @@ impl Engine {
 		let export = Export::new(options)?;
 		export.prepare_output_dir()?;
 
-		let mut report = Report::from_source(Arc::new(source.to_path_buf()));
+		let entrypoint = if source.is_file() {
+			source.to_path_buf()
+		} else {
+			source.join(JPath::DEFAULT_ENTRYPOINT)
+		};
+		let mut report = Report::from_entrypoint(Arc::new(source.to_path_buf()), entrypoint);
 		let mut timing = options.timing.then(TimingData::default);
 
 		let planned = Instant::now();
@@ -915,7 +916,10 @@ impl Export {
 			.and_then(|working_directory| engine.reresolve(discovered, &working_directory));
 		let discovered = reresolved.as_ref().unwrap_or(discovered);
 
-		let mut report = Report::from_source(Arc::clone(&discovered.path));
+		let mut report = Report::from_entrypoint(
+			Arc::clone(&discovered.path),
+			discovered.entrypoint.as_ref().clone(),
+		);
 
 		match self.run_environment(engine, discovered, &mut report) {
 			Ok(timing) => report.timing = timing,

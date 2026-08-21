@@ -582,6 +582,41 @@ fn takes_a_path_to_an_environment_or_to_its_entrypoint() {
 	}
 }
 
+/// Naming a file names the entrypoint, whatever it is called. tk reads the
+/// same thing out of the path in `jpath.Filename`, and evaluates that file.
+#[test]
+fn takes_a_path_to_an_entrypoint_of_another_name() {
+	let output = Output::new();
+	let exported = output.exported(
+		fixture("test-export-custom-entrypoint/custom.jsonnet").format("{{.metadata.name}}"),
+	);
+
+	assert_eq!(exported.successful(), 1);
+	assert_eq!(output.files(), ["from-custom.yaml", "manifest.json"]);
+
+	for owner in output.index().values() {
+		assert!(
+			owner.ends_with("test-export-custom-entrypoint/custom.jsonnet"),
+			"the index should name the entrypoint that was exported: {owner}"
+		);
+	}
+}
+
+/// Walking finds environments by their default entrypoint and no other, as
+/// tk's `FindFiles` does, so a custom one is reachable only by naming it.
+#[test]
+fn walking_does_not_find_an_entrypoint_of_another_name() {
+	let output = Output::new();
+	let exported = output.exported(
+		fixture("test-export-custom-entrypoint")
+			.recursive()
+			.format("{{.metadata.name}}"),
+	);
+
+	assert_eq!(exported.successful(), 1);
+	assert_eq!(output.files(), ["from-main.yaml", "manifest.json"]);
+}
+
 #[test]
 fn selects_one_environment_by_its_exact_name() {
 	// An inline environment is named by the Jsonnet declaring it.
