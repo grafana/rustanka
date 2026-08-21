@@ -297,6 +297,29 @@ mod tests {
 	}
 
 	#[test]
+	fn distinct_keys_do_not_collide() {
+		clear();
+		let evaluation = evaluate(
+			r"
+				local memo = std.native('rtkMemoize');
+				{
+					first: memo('distinct-first', 'one'),
+					second: memo('distinct-second', 'two'),
+					again: memo('distinct-first', error 'must not evaluate'),
+				}
+			",
+		);
+
+		let Val::Obj(object) = &evaluation.value().0 else {
+			panic!("result is not an object");
+		};
+		let text = |name| field(object, name).as_str().unwrap().to_string();
+		assert_eq!(text("first"), "one");
+		assert_eq!(text("second"), "two");
+		assert_eq!(text("again"), "one");
+	}
+
+	#[test]
 	fn different_keys_can_be_computed_recursively() {
 		clear();
 		let evaluation =

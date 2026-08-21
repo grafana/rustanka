@@ -167,12 +167,36 @@ deserializing its second argument would evaluate it even on a cache hit. Each
 Jsonnet implementation therefore registers this native manually and stores its
 own native value type.
 
+**It exists to cross evaluations.** Jsonnet already memoizes within one — a
+thunk is computed once, and an object caches its fields — so a cache scoped to
+a single evaluation would do nothing at all. What it saves is the work a worker
+would otherwise repeat for every environment it exports, which is why the cache
+outlives the evaluator that filled it.
+
+So a memoized value must not depend on *which* environment computed it.
+Anything that varies per environment belongs in the key, the way a caller
+already writes `per_cluster-<hash of the labels>`. Two things make that concrete,
+and both are pinned by tests:
+
+- The value keeps the external variables, native functions and YAML formatting
+  of the environment that computed it, so one reading `std.extVar` reports that
+  environment's answer to every later one.
+- An `import` inside it is resolved when the value is *forced*, so it resolves
+  against whichever evaluation forces it, with that evaluation's import paths.
+  Float formatting and the stack limit follow the same rule.
+
+There is deliberately no evaluator fingerprint in the key. Environments differ
+in their import paths by construction, so a key that accounted for them would
+never hit, leaving only what Jsonnet does for free.
+
 The jrsonnet implementation caches `Val` directly for the lifetime of the OS
 thread. This preserves object identity, lazy fields, functions and assertions;
 it also means separate evaluator instances on one worker share entries, while
-different workers do not. Its TLS cache must initialize jrsonnet's thread-local
-GC object space before itself so cached values are dropped before that object
-space during thread teardown.
+different workers do not, so an N-worker export computes each key up to N
+times. Nothing is ever evicted: entries are bounded by how many distinct keys
+are used, and the process is a short-lived CLI. Its TLS cache must initialize
+jrsonnet's thread-local GC object space before itself so cached values are
+dropped before that object space during thread teardown.
 
 ## Testing
 

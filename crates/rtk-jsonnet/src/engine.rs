@@ -1020,6 +1020,133 @@ mod tests {
 		);
 	}
 
+	/// Memoizing is for carrying a value from one environment to the next.
+	///
+	/// Jsonnet already memoizes within a single evaluation, so a cache that did
+	/// not outlive one would do nothing at all. A worker exports environments
+	/// one after another, and this is the work that saves them.
+	#[test]
+	fn environments_on_one_thread_share_memoized_values() {
+		let engine = Engine::new(Options::default());
+		let first = environment_in("first");
+		let second = environment_in("second");
+
+		assert_eq!(
+			evaluate_as(
+				&engine,
+				Some(&first),
+				r#"std.native("rtkMemoize")("shared-between-environments", "computed once")"#
+			),
+			serde_json::json!("computed once")
+		);
+
+		// The candidate would fail if this environment computed it again.
+		assert_eq!(
+			evaluate_as(
+				&engine,
+				Some(&second),
+				r#"std.native("rtkMemoize")(
+					"shared-between-environments",
+					error "must not evaluate",
+				)"#
+			),
+			serde_json::json!("computed once"),
+			"the second environment did not reuse what the first had memoized"
+		);
+	}
+
+	/// Which is why a memoized value must not depend on its environment.
+	///
+	/// It keeps the external variables of whichever environment computed it, so
+	/// one that reads them reports that environment's answer forever after.
+	/// Anything that varies per environment belongs in the key instead.
+	#[test]
+	fn a_memoized_value_keeps_the_environment_that_computed_it() {
+		let engine_reading = |answer: &str| {
+			let mut options = Options::default();
+			options.ext_variables.insert("where".into(), answer.into());
+			Engine::new(options)
+		};
+		let snippet = r#"std.native("rtkMemoize")(
+			"environment-dependent",
+			{ where: std.extVar("where") },
+		)"#;
+
+		assert_eq!(
+			evaluate_as(&engine_reading("first"), None, snippet)["where"],
+			serde_json::json!("first")
+		);
+		assert_eq!(
+			evaluate_as(&engine_reading("second"), None, snippet)["where"],
+			serde_json::json!("first"),
+			"a memoized value should carry the environment that computed it"
+		);
+	}
+
+	/// An import inside a memoized value is resolved when it is forced, not when
+	/// it is cached, so it resolves against whichever evaluation forces it.
+	#[test]
+	fn imports_resolve_against_the_evaluation_that_forces_them() {
+		let first = tempfile::tempdir().unwrap();
+		let second = tempfile::tempdir().unwrap();
+		fs::write(first.path().join("shared.libsonnet"), r#""from the first""#).unwrap();
+		fs::write(
+			second.path().join("shared.libsonnet"),
+			r#""from the second""#,
+		)
+		.unwrap();
+
+		let engine = Engine::new(Options::default());
+		let evaluate_from = |directory: &Path, snippet: &str| {
+			let mut evaluator = engine.create_evaluator();
+			engine.options().apply(&mut evaluator).unwrap();
+			evaluator
+				.with_import_paths(vec![directory.to_path_buf()])
+				.unwrap();
+			serde_json::to_value(evaluator.evaluate_snippet(snippet).unwrap()).unwrap()
+		};
+
+		// Cached without reading the field, so the import stays unresolved.
+		assert_eq!(
+			evaluate_from(
+				first.path(),
+				r#"std.type(std.native("rtkMemoize")(
+					"lazy-import",
+					{ imported: import "shared.libsonnet" },
+				))"#
+			),
+			serde_json::json!("object")
+		);
+
+		assert_eq!(
+			evaluate_from(
+				second.path(),
+				r#"std.native("rtkMemoize")(
+					"lazy-import",
+					error "must not evaluate",
+				).imported"#
+			),
+			serde_json::json!("from the second")
+		);
+	}
+
+	/// An environment spec that differs from another only in where it deploys.
+	fn environment_in(namespace: &str) -> EnvironmentSpec {
+		serde_json::from_str(&format!(r#"{{ "namespace": "{namespace}" }}"#))
+			.expect("a valid environment spec")
+	}
+
+	/// Evaluate `snippet` the way `environment` would be evaluated.
+	fn evaluate_as(
+		engine: &Engine,
+		environment: Option<&EnvironmentSpec>,
+		snippet: &str,
+	) -> serde_json::Value {
+		let mut evaluator = engine.create_evaluator_for(environment);
+		engine.options().apply(&mut evaluator).unwrap();
+		serde_json::to_value(evaluator.evaluate_snippet(snippet).unwrap()).unwrap()
+	}
+
 	/// An environment spec, built the way one is really read.
 	fn environment_spec(implementation: Option<&str>) -> EnvironmentSpec {
 		let spec = match implementation {
