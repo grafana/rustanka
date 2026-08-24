@@ -59,8 +59,14 @@ ciborium = "0.2.2"
 # Note on serde_yaml_with_quirks: This is a fork of serde-yaml with legacy yaml 1.1 support:
 # https://github.com/dtolnay/serde-yaml/pull/225
 serde_yaml_with_quirks = "0.8.24"
-serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "jj/fix/go-scientific-notation" }
-saphyr = { git = "https://github.com/grafana/saphyr", branch = "jj/live-key-ordering" }
+# Pinned by rev rather than tracked by branch: these decide how every exported
+# byte is written, and a blanket `cargo update` should not be able to move them.
+# Bumping one means looking up the new commit and editing it here, which is the
+# point — it shows up in the manifest rather than only in the lock.
+# Tip of grafana/serde-saphyr `jj/fix/go-scientific-notation`.
+serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", rev = "5824dc9c09cfc847335631da74bbd1cfdde90032" }
+# Tip of grafana/saphyr `jj/live-key-ordering`.
+saphyr = { git = "https://github.com/grafana/saphyr", rev = "0d26c036f086f61207282671c802643037cd5f0e" }
 
 # Error handling
 anyhow = "1.0.101"
