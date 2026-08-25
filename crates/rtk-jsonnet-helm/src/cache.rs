@@ -14,6 +14,11 @@ use walkdir::WalkDir;
 use crate::CacheDirectoryResolver;
 use crate::functions::template::Options;
 
+/// Bumped when the shape of a stored entry changes.
+///
+/// What an entry *contains* is covered by the build identity `build.rs`
+/// computes, so a change to how a render is post-processed does not need a bump
+/// here — only a change to [`Entry`] itself does.
 const CACHE_SCHEMA: u32 = 2;
 const CACHE_VERSION_DIRECTORY: &str = "v1";
 const RENDER_KEY_DOMAIN: &[u8] = b"rtk helm render key v1";
@@ -43,7 +48,7 @@ impl Key {
 
 	fn disk(self, helm_identity: &[u8]) -> Key {
 		let mut builder = KeyBuilder::new(DISK_KEY_DOMAIN);
-		builder.string(env!("CARGO_PKG_VERSION"));
+		builder.string(env!("RTK_HELM_BUILD"));
 		builder.bytes(&CACHE_SCHEMA.to_le_bytes());
 		builder.bytes(&self.0);
 		builder.bytes(helm_identity);
