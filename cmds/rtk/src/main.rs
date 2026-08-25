@@ -7,7 +7,6 @@ mod k8s;
 mod telemetry;
 #[cfg(test)]
 pub mod test_utils;
-mod yaml;
 
 #[cfg(all(
 	target_os = "linux",

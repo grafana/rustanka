@@ -104,8 +104,11 @@ impl std::fmt::Debug for RedactedObject {
 
 impl RedactedObject {
 	/// Convert this object to a YAML string.
-	pub fn to_yaml(&self) -> Result<String, serde_saphyr::ser_error::Error> {
-		crate::yaml::to_yaml(&self.value)
+	///
+	/// The same serializer the export uses, so a diff body is written the way
+	/// the manifests it is comparing were.
+	pub fn to_yaml(&self) -> Result<String, rtk_environments::export::Error> {
+		rtk_environments::export::serialize_manifest(&self.value)
 	}
 
 	/// Redact a pair of objects for diff comparison.
@@ -434,5 +437,33 @@ mod tests {
 		// Debug output should NOT contain the secret value
 		assert!(!debug_output.contains("super-secret-value"));
 		assert!(debug_output.contains("REDACTED"));
+	}
+
+	/// A diff body is written by the same serializer the export uses, so it
+	/// spells values the way the manifests being compared were spelled.
+	#[test]
+	fn renders_yaml_the_way_the_export_does() {
+		let object = RedactedObject {
+			value: serde_json::json!({
+				"item10": 1,
+				"item2": 2,
+				"zero": -0.0,
+			}),
+			gvk: GroupVersionKind {
+				group: String::new(),
+				version: "v1".to_owned(),
+				kind: "ConfigMap".to_owned(),
+			},
+		};
+
+		let yaml = object.to_yaml().expect("the object serializes");
+
+		// Negative zero keeps its sign, which the diff's own serializer used to
+		// drop; go-yaml keeps it, and so does the export.
+		assert!(yaml.contains("zero: -0.0"), "unexpected output:\n{yaml}");
+		// Digit runs compare numerically, so item2 precedes item10.
+		let item2 = yaml.find("item2").expect("item2 is present");
+		let item10 = yaml.find("item10").expect("item10 is present");
+		assert!(item2 < item10, "unexpected key order:\n{yaml}");
 	}
 }

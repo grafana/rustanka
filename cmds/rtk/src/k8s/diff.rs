@@ -165,7 +165,7 @@ pub enum DiffError {
 	JsonSerialization(#[source] serde_json::Error),
 
 	#[error("converting resource to YAML")]
-	YamlConversion(#[source] serde_saphyr::ser_error::Error),
+	YamlConversion(#[source] rtk_environments::export::Error),
 }
 
 /// Status of a single resource comparison.
@@ -1560,7 +1560,8 @@ mod tests {
 
 	#[test]
 	fn test_unified_diff_added_secret_uses_null_marker() {
-		let current_yaml = crate::yaml::to_yaml(&serde_json::Value::Null).unwrap();
+		let current_yaml =
+			rtk_environments::export::serialize_manifest(&serde_json::Value::Null).unwrap();
 		let resource_diff = ResourceDiff {
 			gvk: GroupVersionKind::gvk("", "v1", "Secret"),
 			namespace: Some("default".to_string()),
