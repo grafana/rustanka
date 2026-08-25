@@ -19,6 +19,15 @@ use crate::{Discovered, Engine, Search};
 /// External variable Tanka exposes an environment's own spec through.
 const ENVIRONMENT_EXT_CODE: &str = "tanka.dev/environment";
 
+/// What an inline environment gets instead of its own spec.
+///
+/// An inline environment is declared by the Jsonnet being evaluated, so its spec
+/// is not known until after evaluation and cannot be handed to it. Tanka binds
+/// the external variable to an `error` anyway (`InlineLoader.Eval`), which costs
+/// nothing until something reads it and then says why it is empty rather than
+/// leaving Jsonnet to report an undefined external variable.
+const INLINE_ENVIRONMENT_EXT_CODE: &str = r#"error "Using tk.env and std.extVar('tanka.dev/environment') is only supported for static environments. Directly access this data using standard Jsonnet instead.""#;
+
 /// Selects a single inline environment by name, discarding the rest.
 ///
 /// Mirrors Tanka's `SingleEnvEvalScript` (`pkg/tanka/evaluators.go`): the
@@ -150,6 +159,58 @@ impl Engine {
 		Ok(environment)
 	}
 
+	/// Evaluate an entrypoint and hand back what it evaluated to, as `tk eval`.
+	///
+	/// Nothing is manifested: tk prints the Jsonnet result itself, so an
+	/// environment appears as the object the program wrote rather than as the
+	/// Kubernetes objects an export would draw out of it.
+	///
+	/// Which environment the program can read is decided the way tk's
+	/// `DetectLoader` decides, on nothing more than whether a `spec.json` sits
+	/// beside the entrypoint — not on what evaluating it turns out to declare. A
+	/// static one is read straight from that file, as `StaticLoader.Peek` does,
+	/// so nothing is evaluated twice.
+	pub fn eval(&self, path: &Path, expression: Option<&str>) -> Result<serde_json::Value, Error> {
+		let jpath = JPath::resolve(path)?;
+		let environment = if jpath.base_directory.join("spec.json").exists() {
+			Some(Discovered::from_static(Candidate {
+				directory: Arc::new(jpath.base_directory.clone()),
+				entrypoint: Arc::new(jpath.entrypoint.clone()),
+			})?)
+		} else {
+			None
+		};
+
+		let options = self.jsonnet.options();
+		let mut evaluator = self
+			.jsonnet
+			.create_evaluator_for(environment.as_ref().map(|found| &found.environment.spec));
+		options.apply(&mut evaluator)?;
+		evaluator.with_import_paths(jpath.import_paths.clone())?;
+		match &environment {
+			Some(found) => {
+				let spec = serde_json::to_string(&found.environment)?;
+				evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
+			}
+			None => {
+				evaluator.with_external_code(ENVIRONMENT_EXT_CODE, INLINE_ENVIRONMENT_EXT_CODE)?;
+			}
+		}
+
+		let evaluation = match expression {
+			// tk's `PatternEvalScript`: a leading bracket indexes `main`, and
+			// anything else names a field of it.
+			Some(expression) => {
+				let separator = if expression.starts_with('[') { "" } else { "." };
+				let script = format!("main{separator}{expression}");
+				evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, &script))?
+			}
+			None => evaluator.evaluate_file(jpath.entrypoint)?,
+		};
+
+		process::materialize(&evaluation.into_value())
+	}
+
 	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
 	pub fn load_single(&self, path: &Path, name: Option<&str>) -> Result<LoadedEnvironment, Error> {
 		let jpath = JPath::resolve(path)?;
@@ -250,10 +311,12 @@ impl Engine {
 
 		// Tanka lets an environment read its own spec. Inline environments
 		// declare theirs in the Jsonnet being evaluated, so only static ones have
-		// something to expose here.
+		// something to expose here; the rest get the error tk binds instead.
 		if discovered.is_static {
 			let spec = serde_json::to_string(&discovered.environment)?;
 			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, &spec)?;
+		} else {
+			evaluator.with_external_code(ENVIRONMENT_EXT_CODE, INLINE_ENVIRONMENT_EXT_CODE)?;
 		}
 
 		let (selection, root) = match discovered.selected_by() {

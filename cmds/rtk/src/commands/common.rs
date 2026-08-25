@@ -79,7 +79,7 @@ pub fn evaluate_manifests(
 	})
 }
 
-fn environment_error(error: EnvironmentError) -> anyhow::Error {
+pub(crate) fn environment_error(error: EnvironmentError) -> anyhow::Error {
 	anyhow::anyhow!(error.report())
 }
 

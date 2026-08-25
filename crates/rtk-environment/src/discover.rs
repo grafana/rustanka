@@ -506,7 +506,7 @@ impl<'a> InlineCollector<'a> {
 }
 
 impl Discovered {
-	fn from_static(candidate: Candidate) -> Result<Self, Error> {
+	pub(crate) fn from_static(candidate: Candidate) -> Result<Self, Error> {
 		let spec_path = candidate.directory.join("spec.json");
 		let jpath = JPath::resolve(candidate.entrypoint.as_ref()).ok();
 		let content = fs::read_to_string(&spec_path)?;
