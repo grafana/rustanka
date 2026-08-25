@@ -566,12 +566,33 @@ pub struct EnvironmentSpec {
 	#[serde(default)]
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub tanka_env_label_from_fields: Vec<Box<str>>,
-	#[serde(skip_serializing_if = "Option::is_none")]
+	#[serde(default, serialize_with = "serialize_defaulted")]
 	pub resource_defaults: Option<ResourceDefaults>,
-	#[serde(skip_serializing_if = "Option::is_none")]
+	#[serde(default, serialize_with = "serialize_defaulted")]
 	pub expect_versions: Option<ExpectVersions>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub export_jsonnet_implementation: Option<JsonentImplementationOrConfig>,
+}
+
+/// Serialize an absent value as an empty object.
+///
+/// Go declares `ResourceDefaults` and `ExpectVersions` as plain structs rather
+/// than pointers, so `encoding/json` marshals them whatever they hold and an
+/// absent one appears as `{}`. That reaches further than `spec.json`: it is what
+/// tk injects as `tanka.dev/environment`, so a program reading the extVar sees
+/// the two empty objects, and `tk env list --json` prints them.
+///
+/// Deserialization keeps treating them as optional, so nothing has to
+/// distinguish an absent one from an empty one.
+fn serialize_defaulted<T, S>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+where
+	T: Default + Serialize,
+	S: serde::Serializer,
+{
+	match value {
+		Some(value) => value.serialize(serializer),
+		None => T::default().serialize(serializer),
+	}
 }
 
 impl EnvironmentSpec {
@@ -655,7 +676,7 @@ impl DeepMerge for ExpectVersions {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceDefaults {
 	#[serde(default)]
@@ -741,10 +762,27 @@ mod tests {
 		}))
 		.unwrap();
 
+		// `resourceDefaults` and `expectVersions` are always present, since Go
+		// declares them as plain structs; everything empty here is dropped.
 		assert_eq!(
 			serde_json::to_value(spec).unwrap(),
-			json!({ "expectVersions": {} })
+			json!({ "resourceDefaults": {}, "expectVersions": {} })
 		);
+	}
+
+	/// Go marshals both whatever they hold, so an absent one is `{}`.
+	#[test]
+	fn resource_defaults_and_expect_versions_are_always_serialized() {
+		assert_eq!(
+			serde_json::to_value(EnvironmentSpec::default()).unwrap(),
+			json!({ "resourceDefaults": {}, "expectVersions": {} }),
+			"an empty spec should still carry both objects"
+		);
+
+		// And deserialization still does not need them.
+		let spec: EnvironmentSpec = serde_json::from_value(json!({})).unwrap();
+		assert!(spec.resource_defaults.is_none());
+		assert!(spec.expect_versions.is_none());
 	}
 
 	#[test]

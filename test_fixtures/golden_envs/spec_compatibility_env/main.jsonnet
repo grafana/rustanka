@@ -17,6 +17,11 @@ local environment = std.extVar('tanka.dev/environment');
       applyStrategy: environment.spec.applyStrategy,
       expectedTanka: environment.spec.expectVersions.tanka,
       unknownVersionField: if std.objectHas(environment.spec.expectVersions, 'kubectl') then 'kept' else 'ignored',
+      // Go declares resourceDefaults and expectVersions as plain structs, so
+      // both are marshalled whatever they hold. This spec.json sets neither
+      // resourceDefaults nor any of the fields inside it, and the environment
+      // Jsonnet sees should still carry it as an empty object.
+      wholeSpec: std.manifestJsonEx(environment.spec, '  '),
     },
   },
 }

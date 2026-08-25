@@ -1,0 +1,20 @@
+[
+  {
+    "apiVersion": "tanka.dev/v1alpha1",
+    "kind": "Environment",
+    "metadata": {
+      "name": ".",
+      "namespace": "main.jsonnet"
+    },
+    "spec": {
+      "apiServer": "https://cluster.example:6443",
+      "namespace": "default",
+      "diffStrategy": "native",
+      "applyStrategy": "future-apply",
+      "resourceDefaults": {},
+      "expectVersions": {
+        "tanka": ">= 0.0.0 || < 0.0.0"
+      }
+    }
+  }
+]

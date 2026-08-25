@@ -5,6 +5,19 @@ data:
   diffStrategy: native
   expectedTanka: '>= 0.0.0 || < 0.0.0'
   unknownVersionField: ignored
+  wholeSpec: |-
+    {
+      "apiServer": "https://cluster.example:6443",
+      "applyStrategy": "future-apply",
+      "diffStrategy": "native",
+      "expectVersions": {
+        "tanka": ">= 0.0.0 || < 0.0.0"
+      },
+      "namespace": "default",
+      "resourceDefaults": {
+
+      }
+    }
 kind: ConfigMap
 metadata:
   name: environment-spec
