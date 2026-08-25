@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, SystemTime};
 
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::{Deserialize, Serialize};
@@ -175,6 +176,7 @@ impl Cache {
 			tracing::warn!(path = ?directory, %error, "failed to create helm cache directory");
 			return;
 		}
+		sweep_abandoned_temporaries(&directory);
 		let path = directory.join(key.filename());
 		let mut temporary = match NamedTempFile::new_in(&directory) {
 			Ok(temporary) => temporary,
@@ -199,6 +201,51 @@ impl Cache {
 		}
 		if let Err(error) = temporary.persist(&path) {
 			tracing::warn!(path = ?path, error = %error.error, "failed to persist helm cache entry");
+		}
+	}
+}
+
+/// Remove temporaries an interrupted process left in the cache directory.
+///
+/// A [`NamedTempFile`] deletes itself when dropped, and every failure here
+/// drops one — a failed `persist` included, since the error owns the file. Only
+/// a process killed outright between creating one and persisting it can leave
+/// anything behind, which is rare but permanent, and it lands in a directory
+/// inside the user's own tree.
+///
+/// Only temporaries old enough to be nobody's are touched: another rtk process
+/// sharing this project's cache has a live one, and deleting it would turn its
+/// successful render into a lost write. Best effort throughout; a cache that
+/// cannot be tidied is still a cache.
+fn sweep_abandoned_temporaries(directory: &Path) {
+	/// Long enough that no live render is still holding one.
+	const ABANDONED_AFTER: Duration = Duration::from_secs(60 * 60);
+
+	let Ok(entries) = fs::read_dir(directory) else {
+		return;
+	};
+
+	for entry in entries.flatten() {
+		// Entries are named for their key and suffixed `.cbor`; `tempfile`
+		// names its own with a leading dot, so the two cannot be confused.
+		if !entry.file_name().to_string_lossy().starts_with('.') {
+			continue;
+		}
+		let abandoned = entry
+			.metadata()
+			.and_then(|metadata| metadata.modified())
+			.and_then(|modified| {
+				SystemTime::now()
+					.duration_since(modified)
+					.map_err(io::Error::other)
+			})
+			.is_ok_and(|age| age > ABANDONED_AFTER);
+		if !abandoned {
+			continue;
+		}
+		let path = entry.path();
+		if let Err(error) = fs::remove_file(&path) {
+			tracing::debug!(path = ?path, %error, "failed to remove an abandoned helm cache temporary");
 		}
 	}
 }
@@ -755,6 +802,40 @@ mod tests {
 		fs::write(&blocked, "file").unwrap();
 
 		Cache::write_disk(Key([11; 32]), &blocked, b"helm-v1", &json!(1));
+	}
+
+	#[test]
+	fn abandoned_temporaries_are_swept_but_live_ones_are_left() {
+		let temp = tempdir().unwrap();
+		let directory = temp.path().join(CACHE_VERSION_DIRECTORY);
+		fs::create_dir_all(&directory).unwrap();
+
+		// What an interrupted process leaves, aged past the threshold.
+		let abandoned = directory.join(".tmpAbandoned");
+		fs::write(&abandoned, "partial").unwrap();
+		let old = SystemTime::now() - Duration::from_secs(60 * 60 * 2);
+		fs::File::open(&abandoned)
+			.unwrap()
+			.set_modified(old)
+			.unwrap();
+
+		// What a concurrent render is holding, and a real entry.
+		let live = directory.join(".tmpLive");
+		fs::write(&live, "in flight").unwrap();
+		let entry = directory.join(format!("{}.cbor", "0".repeat(64)));
+		fs::write(&entry, "an entry").unwrap();
+
+		sweep_abandoned_temporaries(&directory);
+
+		assert!(
+			!abandoned.exists(),
+			"an abandoned temporary should be swept"
+		);
+		assert!(
+			live.exists(),
+			"another process's temporary must be left alone"
+		);
+		assert!(entry.exists(), "a cache entry is not a temporary");
 	}
 
 	#[test]
