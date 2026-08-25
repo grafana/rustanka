@@ -64,7 +64,7 @@ serde_yaml_with_quirks = "0.8.24"
 # Bumping one means looking up the new commit and editing it here, which is the
 # point — it shows up in the manifest rather than only in the lock.
 # Tip of grafana/serde-saphyr `jj/fix/go-scientific-notation`.
-serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", rev = "5824dc9c09cfc847335631da74bbd1cfdde90032" }
+serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", rev = "637152257318243bfc447dda07e7667029537294" }
 # Tip of grafana/saphyr `jj/live-key-ordering`.
 saphyr = { git = "https://github.com/grafana/saphyr", rev = "0d26c036f086f61207282671c802643037cd5f0e" }
 

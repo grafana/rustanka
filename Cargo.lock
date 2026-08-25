@@ -5054,16 +5054,7 @@ dependencies = [
  "encoding_rs",
  "hashlink",
  "ordered-float 5.3.0",
- "saphyr-parser 0.0.11",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "saphyr-parser"
-version = "0.0.6"
-source = "git+https://github.com/grafana/saphyr?branch=master#bd64ba34832792080dc7ad5f70df16e13be77a2f"
-dependencies = [
- "arraydeque",
+ "saphyr-parser",
  "thiserror 2.0.18",
 ]
 
@@ -5172,7 +5163,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?rev=5824dc9c09cfc847335631da74bbd1cfdde90032#5824dc9c09cfc847335631da74bbd1cfdde90032"
+source = "git+https://github.com/grafana/serde-saphyr?rev=637152257318243bfc447dda07e7667029537294#637152257318243bfc447dda07e7667029537294"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -5180,7 +5171,7 @@ dependencies = [
  "nohash-hasher",
  "num-traits",
  "ryu",
- "saphyr-parser 0.0.6",
+ "saphyr-parser",
  "serde",
  "serde_json",
  "smallvec 2.0.0-alpha.12",
