@@ -546,7 +546,7 @@ pub struct EnvironmentSpec {
 	#[serde(default)]
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub context_names: Vec<Box<str>>,
-	#[serde(skip_serializing_if = "Option::is_none")]
+	#[serde(default, serialize_with = "serialize_namespace")]
 	pub namespace: Option<Box<str>>,
 	#[serde(
 		default,
@@ -595,6 +595,26 @@ where
 	}
 }
 
+/// The namespace an environment that names none is exported into.
+const DEFAULT_NAMESPACE: &str = "default";
+
+/// Serialize an unnamed namespace as `default`.
+///
+/// Go's `namespace` carries no `omitempty` and `spec.Parse` starts from
+/// `v1alpha1.New()`, which sets it to `default` before unmarshalling. So tk
+/// always emits one, and a `spec.json` that says nothing about it reports
+/// `default` rather than nothing — which is what a program reading
+/// `std.extVar('tanka.dev/environment').spec.namespace` gets.
+///
+/// An explicit empty string is left alone, since unmarshalling that over the
+/// default is how tk arrives at an empty namespace too.
+fn serialize_namespace<S>(namespace: &Option<Box<str>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: serde::Serializer,
+{
+	serializer.serialize_str(namespace.as_deref().unwrap_or(DEFAULT_NAMESPACE))
+}
+
 impl EnvironmentSpec {
 	/// The namespace resources without one of their own are exported into.
 	///
@@ -602,8 +622,6 @@ impl EnvironmentSpec {
 	/// environment) leaves `spec.namespace` unset, so anything that injects
 	/// namespaces must go through here rather than reading the field.
 	pub fn namespace(&self) -> &str {
-		const DEFAULT_NAMESPACE: &str = "default";
-
 		self.namespace.as_deref().unwrap_or(DEFAULT_NAMESPACE)
 	}
 
@@ -762,12 +780,54 @@ mod tests {
 		}))
 		.unwrap();
 
-		// `resourceDefaults` and `expectVersions` are always present, since Go
-		// declares them as plain structs; everything empty here is dropped.
+		// `namespace`, `resourceDefaults` and `expectVersions` are always
+		// present, none of them carrying `omitempty` in Go; everything empty
+		// here is dropped.
 		assert_eq!(
 			serde_json::to_value(spec).unwrap(),
-			json!({ "resourceDefaults": {}, "expectVersions": {} })
+			json!({
+				"namespace": "default",
+				"resourceDefaults": {},
+				"expectVersions": {}
+			})
 		);
+	}
+
+	/// Go's `namespace` has no `omitempty`, and `spec.Parse` starts from
+	/// `v1alpha1.New()`, which has already set it to `default`.
+	#[test]
+	fn an_unnamed_namespace_serializes_as_default() {
+		let spec: EnvironmentSpec = serde_json::from_value(json!({})).unwrap();
+		assert!(
+			spec.namespace.is_none(),
+			"deserialization should still record that nothing was said"
+		);
+		assert_eq!(
+			serde_json::to_value(&spec).unwrap()["namespace"],
+			json!("default")
+		);
+		assert_eq!(spec.namespace(), "default");
+	}
+
+	/// Unmarshalling an empty string over that default is how tk arrives at an
+	/// empty namespace, so it is kept rather than treated as absent.
+	#[test]
+	fn an_explicitly_empty_namespace_is_kept() {
+		let spec: EnvironmentSpec = serde_json::from_value(json!({ "namespace": "" })).unwrap();
+		assert_eq!(spec.namespace.as_deref(), Some(""));
+		assert_eq!(serde_json::to_value(&spec).unwrap()["namespace"], json!(""));
+		assert_eq!(spec.namespace(), "");
+	}
+
+	#[test]
+	fn a_named_namespace_survives_a_round_trip() {
+		let spec: EnvironmentSpec =
+			serde_json::from_value(json!({ "namespace": "chosen" })).unwrap();
+		assert_eq!(
+			serde_json::to_value(&spec).unwrap()["namespace"],
+			json!("chosen")
+		);
+		assert_eq!(spec.namespace(), "chosen");
 	}
 
 	/// Go marshals both whatever they hold, so an absent one is `{}`.
@@ -775,7 +835,11 @@ mod tests {
 	fn resource_defaults_and_expect_versions_are_always_serialized() {
 		assert_eq!(
 			serde_json::to_value(EnvironmentSpec::default()).unwrap(),
-			json!({ "resourceDefaults": {}, "expectVersions": {} }),
+			json!({
+				"namespace": "default",
+				"resourceDefaults": {},
+				"expectVersions": {}
+			}),
 			"an empty spec should still carry both objects"
 		);
 

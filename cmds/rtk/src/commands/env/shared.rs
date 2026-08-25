@@ -102,10 +102,9 @@ pub fn add(path: &Path, inline: bool, options: &EnvSpecOptions) -> Result<()> {
 		.map(|path| path.to_string_lossy().into_owned())
 		.unwrap_or_else(|_| environment_directory.display().to_string());
 
-	// tk's `v1alpha1.New()` defaults the namespace before any flag is applied,
-	// so an environment created without `--namespace` still names one.
+	// An environment created without `--namespace` still names one: an unset
+	// namespace serializes as `default`, as tk's `v1alpha1.New()` leaves it.
 	let mut spec = EnvironmentSpec::default();
-	spec.namespace = Some("default".into());
 	apply_spec_options(&mut spec, options)?;
 
 	if inline {
