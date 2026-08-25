@@ -146,6 +146,49 @@ A recursive export that matches nothing is not an error: `--name` and
 `--selector` are a filter over what was walked, and tk exports what survived
 and exits zero. Asking for one environment and not finding it still fails.
 
+### What an Environment Can Read About Itself
+
+`std.extVar('tanka.dev/environment')` is bound for every command that
+evaluates, `eval` included — tk's `StaticLoader.Eval` hands the environment over
+exactly as its `Load` does, so `eval` and `export` evaluate the same program.
+Which environment is offered is decided the way tk's `DetectLoader` decides it,
+on whether a `spec.json` sits beside the entrypoint and not on what evaluating
+it turns out to declare, so the spec is read straight from the file and nothing
+is evaluated twice.
+
+An inline environment cannot be handed its own spec, since evaluating it is how
+the spec becomes known. tk binds the variable to an `error` explaining that,
+which costs nothing until something reads it, and rtk binds the same one.
+
+`resourceDefaults` and `expectVersions` are always serialized. Go declares them
+as plain structs rather than pointers, so `encoding/json` marshals them whatever
+they hold and an absent one appears as `{}` — in the extVar, in `env list
+--json` and in a written `spec.json` alike. Deserialization still treats them as
+optional.
+
+### Creating an Environment
+
+`env add` writes what tk writes, byte for byte. Both files are pinned by tests
+because every part of them was wrong once: `spec.json` gets only
+`metadata.name` (the namespace is the entrypoint discovery derives, not a stored
+field), the namespace tk defaults in `v1alpha1.New()` before any flag applies,
+and the trailing newline `writeJSON` appends.
+
+An inline environment is the same marshalled `Environment` passed through
+go-jsonnet's formatter, which rewrites JSON's syntax without reflowing it. So
+the layout is the JSON's — one member per line, trailing commas, empty objects
+inline — and rendering the spec from its own serialization is what keeps its
+fields and their order those of `spec.json`. Quoting follows the formatter:
+single, switching to double as soon as the text holds a single quote.
+
+Two divergences are deliberate. `tk env set` mutates the spec, prints what it
+changed, then tries to reach the cluster and exits 1 **without writing**,
+whichever flag was given — so on a machine with no matching context it never
+persists anything; rtk writes and exits 0. `tk env add` does the same for
+`--server-from-context` and `--context-name`, the only two flags that make it
+call `Connect()`. Reproducing either would make the commands useless without a
+live cluster. `rtk init` is a stub that exits 1; completing it means vendoring.
+
 ### Helm Cache
 
 `--helm-cache` persists successful `helmTemplate` results under each Tanka
