@@ -191,6 +191,9 @@ impl Function {
 		if let (Some(directory), Some(helm_identity)) = (directory.as_deref(), helm_identity)
 			&& let Some(value) = crate::cache::Cache::read_disk(key, directory, helm_identity)
 		{
+			// The one externally visible sign that the cache did its job, and
+			// the first thing worth looking at when it appears not to have.
+			tracing::debug!(chart = ?chart_path, "helm render served from the disk cache");
 			self.state.cache.insert(key, value.clone());
 			return Ok(value);
 		}

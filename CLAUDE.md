@@ -160,6 +160,37 @@ export failure. Writes use temporary files and an atomic persist so parallel rtk
 processes cannot expose partial entries. As with the in-memory cache, charts that
 deliberately generate random or time-dependent output are frozen by the cache.
 
+**What the key covers, and why so little of the environment.** helm reads a
+great deal of it, and almost none can change what `helm template` writes for a
+chart already on disk: repository and registry configuration is never consulted
+for a local path, a plugin cannot claim `--values=-` or a filesystem chart, and
+rtk never passes `--validate`, so no request is made and nothing about kube
+transport, authentication or the kubeconfig matters. `PATH` reaches nothing
+without an explicit `--post-renderer`.
+
+What is left is the clock and the namespace. `TZ` is read by any chart calling
+sprig's `now` or `date`. A namespace the caller names reaches helm as a
+client-go override, and an override short-circuits the resolution chain, so in
+that case — which is every real caller — nothing else can decide
+`.Release.Namespace`. Where none is named, `helm env HELM_NAMESPACE` reports the
+same `settings.Namespace()` that rendering asks, so helm answers for itself
+rather than rtk reimplementing client-go's precedence.
+
+Entries are also keyed on the build that filled them: `build.rs` supplies the
+commit and whether the tree is dirty, because the stored value is the
+*post-processed* render and a change here has to invalidate it. A dirty tree
+shares one identity, so use `RTK_HELM_DISABLE_MEMOIZATION` while iterating on
+that crate. A disk hit logs at debug level, which is the first thing to look at
+when a cache appears not to be working.
+
+Only abandoned temporaries are swept, and only once they are old enough to be
+nobody's — a concurrent rtk process holds a live one. Entries themselves are
+never evicted: they are bounded by how many distinct renders a project has, and
+they live under `target`.
+
+Note that the `helm_*` golden fixtures render with whatever helm the CI runner
+image provides, so an image bump that changes helm's output breaks them.
+
 ### rtkMemoize
 
 `std.native('rtkMemoize')` cannot use the serde-based native-function ABI:

@@ -219,7 +219,7 @@ impl Cache {
 /// cannot be tidied is still a cache.
 fn sweep_abandoned_temporaries(directory: &Path) {
 	/// Long enough that no live render is still holding one.
-	const ABANDONED_AFTER: Duration = Duration::from_secs(60 * 60);
+	const ABANDONED_AFTER: Duration = Duration::from_hours(1);
 
 	let Ok(entries) = fs::read_dir(directory) else {
 		return;
@@ -813,7 +813,7 @@ mod tests {
 		// What an interrupted process leaves, aged past the threshold.
 		let abandoned = directory.join(".tmpAbandoned");
 		fs::write(&abandoned, "partial").unwrap();
-		let old = SystemTime::now() - Duration::from_secs(60 * 60 * 2);
+		let old = SystemTime::now() - Duration::from_hours(2);
 		fs::File::open(&abandoned)
 			.unwrap()
 			.set_modified(old)
