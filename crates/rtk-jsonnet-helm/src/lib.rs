@@ -53,6 +53,7 @@ struct State {
 	cache: cache::Cache,
 	helm_binary: PathBuf,
 	helm_identity: OnceLock<Result<Box<[u8]>, Box<str>>>,
+	helm_namespace: OnceLock<Result<Box<str>, Box<str>>>,
 }
 
 impl State {
@@ -62,6 +63,7 @@ impl State {
 			helm_binary: env::var_os("RTK_HELM_PATH")
 				.map_or_else(|| PathBuf::from("helm"), PathBuf::from),
 			helm_identity: OnceLock::new(),
+			helm_namespace: OnceLock::new(),
 		}
 	}
 
@@ -69,29 +71,42 @@ impl State {
 		Command::new(&self.helm_binary)
 	}
 
+	/// Run helm and take its standard output, or say why not.
+	fn ask_helm(&self, arguments: &[&str]) -> Result<String, Box<str>> {
+		let output = self
+			.helm_command()
+			.args(arguments)
+			.stdin(Stdio::null())
+			.output()
+			.map_err(|error| format!("failed to run helm: {error}").into_boxed_str())?;
+		if !output.status.success() {
+			return Err(format!(
+				"helm {} failed: {}",
+				arguments.join(" "),
+				String::from_utf8_lossy(&output.stderr).trim()
+			)
+			.into_boxed_str());
+		}
+
+		String::from_utf8(output.stdout)
+			.map(|text| text.trim().to_owned())
+			.map_err(|error| format!("invalid UTF-8 from helm: {error}").into_boxed_str())
+	}
+
+	/// Which helm this is, in as much detail as it will give.
+	///
+	/// All four fields, because a chart can render every one of them through
+	/// `.Capabilities.HelmVersion` — `GoVersion` included, so a toolchain bump
+	/// with no helm change still counts as a different helm.
 	fn helm_identity(&self) -> Option<&[u8]> {
 		let identity = self.helm_identity.get_or_init(|| {
-			let identity = (|| {
-				let output = self
-					.helm_command()
-					.args(["version", "--template", "{{ .Version }}|{{ .GitCommit }}"])
-					.stdin(Stdio::null())
-					.output()
-					.map_err(|error| {
-						format!("failed to identify helm: {error}").into_boxed_str()
-					})?;
-				if !output.status.success() {
-					return Err(format!(
-						"helm version failed: {}",
-						String::from_utf8_lossy(&output.stderr).trim()
-					)
-					.into_boxed_str());
-				}
-				let version = String::from_utf8(output.stdout).map_err(|error| {
-					format!("invalid UTF-8 in helm version: {error}").into_boxed_str()
-				})?;
-				Ok(cache::helm_identity(&self.helm_binary, version.trim()))
-			})();
+			let identity = self
+				.ask_helm(&[
+					"version",
+					"--template",
+					"{{ .Version }}|{{ .GitCommit }}|{{ .GitTreeState }}|{{ .GoVersion }}",
+				])
+				.map(|version| cache::helm_identity(&self.helm_binary, &version));
 			if let Err(error) = &identity {
 				tracing::warn!(%error, "helm disk cache is unavailable");
 			}
@@ -99,6 +114,29 @@ impl State {
 		});
 		match identity {
 			Ok(identity) => Some(identity),
+			Err(_) => None,
+		}
+	}
+
+	/// The namespace helm resolves when a caller names none.
+	///
+	/// `helm env HELM_NAMESPACE` reports the same `settings.Namespace()` that
+	/// rendering asks for, so this is helm's own answer rather than a second
+	/// implementation of client-go's precedence — which reaches `HELM_NAMESPACE`,
+	/// the current context in whichever kubeconfig applies, and a service
+	/// account token inside a pod.
+	fn helm_namespace(&self) -> Option<&str> {
+		let namespace = self.helm_namespace.get_or_init(|| {
+			let namespace = self
+				.ask_helm(&["env", "HELM_NAMESPACE"])
+				.map(String::into_boxed_str);
+			if let Err(error) = &namespace {
+				tracing::warn!(%error, "helm disk cache is unavailable");
+			}
+			namespace
+		});
+		match namespace {
+			Ok(namespace) => Some(namespace),
 			Err(_) => None,
 		}
 	}

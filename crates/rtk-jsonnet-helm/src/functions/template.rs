@@ -147,7 +147,25 @@ impl Function {
 				directory = None;
 			}
 		}
-		let key = match Key::render(name, chart_path, options, directory.as_deref()) {
+		// When the caller named a namespace, helm takes it as an override and
+		// nothing else in the environment can reach `.Release.Namespace`.
+		// Otherwise helm resolves one, and its answer is part of what the render
+		// depends on — so a render that cannot be asked cannot be keyed either.
+		let resolved_namespace = match options.namespace.as_deref() {
+			Some(_) => None,
+			None => match self.state.helm_namespace() {
+				Some(namespace) => Some(namespace),
+				None => return render(),
+			},
+		};
+
+		let key = match Key::render(
+			name,
+			chart_path,
+			options,
+			directory.as_deref(),
+			resolved_namespace,
+		) {
 			Ok(key) => key,
 			Err(error) => {
 				tracing::warn!(chart = ?chart_path, %error, "helm cache key is unavailable");
@@ -179,7 +197,13 @@ impl Function {
 
 		let value = render()?;
 		if !matches!(
-			Key::render(name, chart_path, options, directory.as_deref()),
+			Key::render(
+				name,
+				chart_path,
+				options,
+				directory.as_deref(),
+				resolved_namespace
+			),
 			Ok(current_key) if current_key == key
 		) {
 			tracing::warn!(chart = ?chart_path, "helm inputs changed while rendering; result was not cached");

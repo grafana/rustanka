@@ -28,20 +28,26 @@ const DISK_KEY_DOMAIN: &[u8] = b"rtk helm disk key v1";
 pub(super) struct Key([u8; 32]);
 
 impl Key {
+	/// A key over everything that can change what helm writes.
+	///
+	/// `resolved_namespace` is helm's own answer for the release namespace, and
+	/// is wanted only when the caller named none — see
+	/// [`KeyBuilder::helm_environment`].
+	///
+	/// The cache directory is deliberately absent: entries are already
+	/// namespaced by living under one project's `target/helm`, so including it
+	/// would only stop two projects sharing an identical render in memory.
 	pub(super) fn render(
 		name: &str,
 		chart_path: &Path,
 		options: &Options,
 		cache_directory: Option<&Path>,
+		resolved_namespace: Option<&str>,
 	) -> io::Result<Key> {
 		let mut builder = KeyBuilder::new(RENDER_KEY_DOMAIN);
 		builder.string(name);
 		options.hash_cache_key(&mut builder);
-		builder.helm_environment();
-		builder.boolean(cache_directory.is_some());
-		if let Some(cache_directory) = cache_directory {
-			builder.path(cache_directory);
-		}
+		builder.helm_environment(resolved_namespace);
 		builder.chart(chart_path, cache_directory)?;
 		Ok(builder.finish())
 	}
@@ -320,57 +326,37 @@ impl KeyBuilder {
 		}
 	}
 
-	fn helm_environment(&mut self) {
-		for name in [
-			"HELM_CACHE_HOME",
-			"HELM_CONFIG_HOME",
-			"HELM_DATA_HOME",
-			"HELM_KUBECONTEXT",
-			"HELM_NAMESPACE",
-			"HELM_PLUGINS",
-			"HOMEDRIVE",
-			"HOMEPATH",
-			"HOME",
-			"KUBECONFIG",
-			"PATH",
-			"USERPROFILE",
-		] {
-			self.string(name);
-			let value = env::var_os(name);
-			self.boolean(value.is_some());
-			if let Some(value) = value {
-				self.os_str(&value);
-			}
-		}
+	/// The environment inputs that can reach a render.
+	///
+	/// helm reads a great deal of the environment and almost none of it can
+	/// change what `helm template` writes for a chart already on disk:
+	/// repository and registry configuration is never consulted for a local
+	/// path, a plugin cannot claim `--values=-` or a filesystem chart, and no
+	/// request is made, so nothing about kube transport or authentication
+	/// matters. `PATH` reaches nothing without an explicit `--post-renderer`.
+	/// What is left is the clock and the namespace.
+	fn helm_environment(&mut self, resolved_namespace: Option<&str>) {
+		// Read by any chart calling sprig's `now` or `date`. This pins the zone
+		// and not the instant, so a chart rendering the time is still frozen by
+		// any cache at all — but the zone is genuinely an input.
+		self.environment_variable("TZ");
 
-		let mut kubeconfig: Vec<PathBuf> = env::var_os("KUBECONFIG")
-			.filter(|paths| !paths.is_empty())
-			.map_or_else(
-				|| {
-					let mut configs = [env::var_os("HOME"), env::var_os("USERPROFILE")]
-						.into_iter()
-						.flatten()
-						.map(PathBuf::from)
-						.map(|home| home.join(".kube/config"))
-						.collect::<Vec<_>>();
-					if let (Some(mut drive), Some(path)) =
-						(env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH"))
-					{
-						drive.push(path);
-						configs.push(PathBuf::from(drive).join(".kube/config"));
-					}
-					configs
-				},
-				|paths| env::split_paths(&paths).collect(),
-			);
-		kubeconfig.sort_unstable();
-		kubeconfig.dedup();
-		for path in kubeconfig {
-			self.path(&path);
-			match fs::read(path) {
-				Ok(contents) => self.bytes(&contents),
-				Err(error) => self.string(&format!("unreadable:{:?}", error.kind())),
-			}
+		// A namespace the caller named reaches helm as a client-go override, and
+		// an override short-circuits the whole resolution chain, so nothing else
+		// in the environment can decide `.Release.Namespace`. It is already in
+		// the key as one of the render options.
+		self.boolean(resolved_namespace.is_some());
+		if let Some(namespace) = resolved_namespace {
+			self.string(namespace);
+		}
+	}
+
+	fn environment_variable(&mut self, name: &str) {
+		self.string(name);
+		let value = env::var_os(name);
+		self.boolean(value.is_some());
+		if let Some(value) = value {
+			self.os_str(&value);
 		}
 	}
 
@@ -528,7 +514,7 @@ mod tests {
 		fs::write(chart.join("templates/deployment.yaml"), "first").unwrap();
 		let called_from = temp.path().join("main.jsonnet");
 		let base = base_options(&called_from);
-		let base_key = Key::render("release", &chart, &options(base.clone()), None).unwrap();
+		let base_key = Key::render("release", &chart, &options(base.clone()), None, None).unwrap();
 
 		for (field, value) in [
 			("apiVersions", json!(["example.test/v2"])),
@@ -542,19 +528,19 @@ mod tests {
 			changed[field] = value;
 			assert_ne!(
 				base_key,
-				Key::render("release", &chart, &options(changed), None).unwrap(),
+				Key::render("release", &chart, &options(changed), None, None).unwrap(),
 				"{field} was omitted from the key"
 			);
 		}
 
 		assert_ne!(
 			base_key,
-			Key::render("other-release", &chart, &options(base.clone()), None).unwrap()
+			Key::render("other-release", &chart, &options(base.clone()), None, None).unwrap()
 		);
 		fs::write(chart.join("templates/deployment.yaml"), "second").unwrap();
 		assert_ne!(
 			base_key,
-			Key::render("release", &chart, &options(base), None).unwrap()
+			Key::render("release", &chart, &options(base), None, None).unwrap()
 		);
 	}
 
@@ -573,24 +559,28 @@ mod tests {
 		);
 
 		assert_eq!(
-			Key::render("release", &chart, &first, None).unwrap(),
-			Key::render("release", &chart, &second, None).unwrap()
+			Key::render("release", &chart, &first, None, None).unwrap(),
+			Key::render("release", &chart, &second, None, None).unwrap()
 		);
 	}
 
+	/// Two projects rendering the same chart the same way render the same
+	/// thing, so they share the answer in memory. On disk they cannot collide
+	/// anyway: entries live under the project's own `target/helm`.
 	#[test]
-	fn render_key_is_scoped_to_its_project_cache() {
+	fn render_key_does_not_depend_on_which_project_cache_holds_it() {
 		let temp = tempdir().unwrap();
 		let chart = temp.path().join("chart.tgz");
 		fs::write(&chart, "chart bytes").unwrap();
 		let options = options(json!({ "calledFrom": temp.path().join("main.jsonnet") }));
 
-		assert_ne!(
+		assert_eq!(
 			Key::render(
 				"release",
 				&chart,
 				&options,
 				Some(&temp.path().join("first/target/helm")),
+				None,
 			)
 			.unwrap(),
 			Key::render(
@@ -598,8 +588,34 @@ mod tests {
 				&chart,
 				&options,
 				Some(&temp.path().join("second/target/helm")),
+				None,
 			)
 			.unwrap(),
+		);
+	}
+
+	/// When a caller names no namespace, helm resolves one, and its answer
+	/// decides `.Release.Namespace` — so it has to reach the key.
+	#[test]
+	fn render_key_covers_the_namespace_helm_would_resolve() {
+		let temp = tempdir().unwrap();
+		let chart = temp.path().join("chart.tgz");
+		fs::write(&chart, "chart bytes").unwrap();
+		let unnamed = options(json!({ "calledFrom": temp.path().join("main.jsonnet") }));
+
+		let first = Key::render("release", &chart, &unnamed, None, Some("first")).unwrap();
+		let second = Key::render("release", &chart, &unnamed, None, Some("second")).unwrap();
+		assert_ne!(first, second);
+
+		// A namespace the caller named is an override, so nothing is resolved
+		// and the option itself carries it.
+		let named = options(json!({
+			"calledFrom": temp.path().join("main.jsonnet"),
+			"namespace": "first",
+		}));
+		assert_ne!(
+			Key::render("release", &chart, &named, None, None).unwrap(),
+			first
 		);
 	}
 
@@ -616,10 +632,10 @@ mod tests {
 		fs::write(shared.join("value.yaml"), "first").unwrap();
 		symlink(&shared, chart.join("linked")).unwrap();
 		let options = options(json!({ "calledFrom": temp.path().join("main.jsonnet") }));
-		let first = Key::render("release", &chart, &options, None).unwrap();
+		let first = Key::render("release", &chart, &options, None, None).unwrap();
 
 		fs::write(shared.join("value.yaml"), "second").unwrap();
-		let second = Key::render("release", &chart, &options, None).unwrap();
+		let second = Key::render("release", &chart, &options, None, None).unwrap();
 		assert_ne!(first, second);
 	}
 
@@ -637,7 +653,7 @@ mod tests {
 		symlink(&socket, chart.join("linked.sock")).unwrap();
 		let options = options(json!({ "calledFrom": temp.path().join("main.jsonnet") }));
 
-		assert!(Key::render("release", &chart, &options, None).is_err());
+		assert!(Key::render("release", &chart, &options, None, None).is_err());
 	}
 
 	#[cfg(unix)]
