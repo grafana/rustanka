@@ -385,8 +385,10 @@ pub enum Error {
 	#[error("file '{file}' already exists from environment '{owner}'. Aborting")]
 	ForeignFile { file: String, owner: String },
 
-	#[error("found invalid Kubernetes object (at {path}): missing attribute \"apiVersion\"")]
-	MissingApiVersion { path: String },
+	#[error(
+		"found a tanka Environment resource. Check that you aren't using a spec.json and inline environments simultaneously"
+	)]
+	EnvironmentResource,
 
 	#[error("found invalid Kubernetes object (at {path}): {reason}")]
 	InvalidManifest { path: String, reason: String },
@@ -596,6 +598,17 @@ struct Plan {
 	template: Option<SpecializedTemplate>,
 }
 
+/// Whether a manifest is a Tanka `Environment` rather than a Kubernetes resource.
+///
+/// tk filters with `(?i)^Environment/.*$` against `<kind>/<name>`, so the kind is
+/// compared without regard to case and the name is not compared at all.
+fn is_environment_resource(manifest: &serde_json::Value) -> bool {
+	manifest
+		.get("kind")
+		.and_then(serde_json::Value::as_str)
+		.is_some_and(|kind| kind.eq_ignore_ascii_case("Environment"))
+}
+
 impl Plan {
 	fn manifests(&self) -> usize {
 		self.manifests.len()
@@ -617,7 +630,18 @@ impl Engine {
 		targets: &[String],
 	) -> Result<Vec<serde_json::Value>, Error> {
 		let targets = process::Targets::compile(targets)?;
-		environment.processed_manifests(&targets)
+		let manifests = environment.processed_manifests(&targets)?;
+
+		// tk's `Load` refuses these once the manifests are processed: an
+		// Environment is not a Kubernetes resource and cannot be applied, so
+		// every command that reaches a cluster rejects one — and so does `show`,
+		// which previews what those commands would send. Exporting keeps them,
+		// which is why this belongs here rather than in `plan`.
+		if manifests.iter().any(is_environment_resource) {
+			return Err(Error::EnvironmentResource);
+		}
+
+		Ok(manifests)
 	}
 
 	/// Export one environment that has already been evaluated.

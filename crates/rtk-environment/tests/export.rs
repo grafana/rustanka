@@ -159,6 +159,60 @@ fn loads_processed_manifests_without_exporting() {
 	assert!(!project.output().exists());
 }
 
+/// tk's `Load` refuses a nested `Environment` once the manifests are processed,
+/// so `show`, `diff` and `apply` all reject one — while `export` keeps it. Both
+/// halves matter: rtk showed the rest and dropped the Environment in silence.
+#[test]
+fn a_nested_environment_is_refused_for_everything_but_export() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+		&format!(
+			r"{{
+				config: {CONFIG_MAP},
+				nested: {{
+					apiVersion: 'tanka.dev/v1alpha1',
+					kind: 'Environment',
+					metadata: {{ name: 'inner' }},
+					spec: {{ namespace: 'inner-ns' }},
+					data: {{}},
+				}},
+			}}"
+		),
+	);
+	let engine = engine();
+	let loaded = engine
+		.load_single(&project.path().join("environments/demo"), None)
+		.expect("the environment loads");
+
+	let error = engine
+		.manifests(&loaded, &[])
+		.expect_err("the manifests path refuses it");
+	assert_eq!(
+		error.to_string(),
+		"found a tanka Environment resource. Check that you aren't using a spec.json and inline environments simultaneously"
+	);
+
+	// Exporting the same environment keeps both objects, as tk does.
+	let exported = engine
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&options(&project),
+		)
+		.expect("the export succeeds");
+	assert_eq!(exported.successful(), 1);
+	assert_eq!(
+		project
+			.exported()
+			.keys()
+			.filter(|name| name.ends_with(".yaml"))
+			.count(),
+		2
+	);
+}
+
 #[test]
 fn loads_a_bare_jsonnet_entrypoint() {
 	let project = Project::new();
@@ -659,6 +713,9 @@ fn nested_object_assertions_are_forced_before_export() {
 	assert!(error.contains("nested assertion forced"), "{error}");
 }
 
+/// A container key is never special, whatever it is called. The value has to be
+/// something walkable: tk refuses an export that reaches a bare string, so the
+/// reserved name is exercised where a name can actually appear.
 #[test]
 fn reserved_processing_key_in_a_container_is_ordinary_user_data() {
 	let project = Project::new();
@@ -666,7 +723,7 @@ fn reserved_processing_key_in_a_container_is_ordinary_user_data() {
 		&project,
 		"environments/demo",
 		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
-		&format!(r#"{{ "$rtk.dev/processedManifest": "user value", config: {CONFIG_MAP} }}"#),
+		&format!(r#"{{ "$rtk.dev/processedManifest": {CONFIG_MAP} }}"#),
 	);
 
 	let exported = engine()
@@ -1290,36 +1347,12 @@ fn a_discovery_failure_is_reported_the_same_way_every_time() {
 	}
 }
 
-/// Nothing is evaluated or written once the export has been stopped.
+/// tk's `isKubernetesManifest` requires `apiVersion` and `kind` to be strings,
+/// so an object carrying a numeric `kind` is not a manifest — and, having no
+/// walkable fields either, fails the export rather than being written out as it
+/// stands.
 #[test]
-fn nothing_is_exported_after_a_discovery_failure() {
-	let project = project_with_broken_discovery(&["broken"]);
-	for name in ["late-one", "late-two"] {
-		static_environment(
-			&project,
-			&format!("environments/{name}"),
-			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{}}"#,
-			&format!("{{ config: {CONFIG_MAP} }}"),
-		);
-	}
-
-	export_in_order(&project, &["good", "broken", "late-one", "late-two"])
-		.expect_err("discovery fails");
-
-	let files = project.exported();
-	let exported = files.keys().collect::<Vec<_>>();
-	assert!(
-		!exported
-			.iter()
-			.any(|file| file.contains("late-one") || file.contains("late-two")),
-		"the environments after the failure should not have been exported: {exported:?}"
-	);
-}
-
-/// Tanka only treats `kind` as meaningful when it is a string; anything else is
-/// exported as the manifest it appears to be.
-#[test]
-fn exports_manifests_whose_kind_is_not_a_string() {
+fn refuses_a_manifest_whose_kind_is_not_a_string() {
 	let project = Project::new();
 	static_environment(
 		&project,
@@ -1342,10 +1375,27 @@ fn exports_manifests_whose_kind_is_not_a_string() {
 				..options(&project)
 			},
 		)
-		.expect("the export succeeds");
+		.expect("the bulk export reports per-environment failures");
 
-	assert_eq!(exported.successful(), 1);
-	assert!(project.exported()["odd.yaml"].contains("kind: 12"));
+	assert_eq!(exported.successful(), 0);
+	let error = exported.reports[0]
+		.error
+		.as_ref()
+		.expect("the extraction error")
+		.to_string();
+	assert!(
+		error.contains(
+			r#"found invalid Kubernetes object (at .odd): attribute "kind" is not a string, it is a float64"#
+		),
+		"{error}"
+	);
+	// The object is not written out as the manifest it appeared to be. rtk still
+	// leaves an index describing the directory, where tk writes nothing at all.
+	assert!(
+		!project.exported().contains_key("odd.yaml"),
+		"{:?}",
+		project.exported().keys().collect::<Vec<_>>()
+	);
 }
 
 #[test]

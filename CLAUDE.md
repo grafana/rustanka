@@ -166,6 +166,34 @@ they hold and an absent one appears as `{}` — in the extVar, in `env list
 --json` and in a written `spec.json` alike. Deserialization still treats them as
 optional.
 
+### What Counts as a Manifest
+
+Extraction mirrors tk's `walkJSON`. Anything carrying an `apiVersion` and a
+`kind` — both present, both strings, both non-empty — is a manifest and is taken
+whole. Anything else is a container to walk into, and **reaching a value that
+cannot be walked fails the export**, as tk does: a manifest whose `kind` was
+misspelled would otherwise leave the export in silence, which is what rtk used
+to do while exiting zero.
+
+Three details are load-bearing and each is pinned by a test:
+
+- Fields are walked in **sorted** order, because which failure gets reported
+  depends on it. `{metadata: …, data: …}` blames `.data`.
+- A `null` field is skipped rather than treated as unwalkable, or every `if`
+  without an `else` in a Tanka library would fail the export.
+- `__ksonnet` is dropped before anything is decided, so it neither blocks the
+  walk nor reaches the output.
+
+The reported path is the *containing object's*, while the reason is the innermost
+enclosing object's — which is why a bad value inside a list reports the list's
+parent and the reason of the object above it. Two things are deliberately not
+reproduced: tk appends a YAML dump of the offending object, and where nothing
+encloses the value at all tk prints its nil error as `%!s(<nil>)`.
+
+A nested `Environment` is refused by `Engine::manifests` and kept by `export`,
+which is tk's own split: `Load` filters `(?i)^Environment/.*$` after processing
+and refuses, so `show`, `diff` and `apply` reject one, while exporting writes it.
+
 ### Creating an Environment
 
 `env add` writes what tk writes, byte for byte. Both files are pinned by tests

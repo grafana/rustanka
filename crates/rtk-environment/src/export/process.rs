@@ -259,10 +259,15 @@ fn strip_empty_metadata_maps(manifest: &mut serde_json::Value) {
 
 /// Collect the Kubernetes manifests below `data`.
 ///
-/// Containers are walked into; anything that looks like a Kubernetes object is
-/// taken whole. `List` objects are expanded into their items, as Tanka does. An
-/// `Environment` is an object like any other here: tk exports a nested one
-/// rather than unwrapping it.
+/// Mirrors Tanka's `process.Extract`/`walkJSON`. Anything carrying an
+/// `apiVersion` and a `kind` is taken whole; anything else is a container to
+/// walk into, and reaching a value that cannot be walked at all means the
+/// Jsonnet produced something that was never a Kubernetes object. tk refuses
+/// the whole export in that case, and so does this: a manifest whose `kind` was
+/// misspelled would otherwise leave the export without a word.
+///
+/// `List` objects are expanded into their items. An `Environment` is an object
+/// like any other here: tk exports a nested one rather than unwrapping it.
 ///
 /// `path` is the JSON path walked so far, used for error messages.
 pub(crate) fn collect_manifests(
@@ -270,46 +275,159 @@ pub(crate) fn collect_manifests(
 	path: &str,
 	manifests: &mut Vec<serde_json::Value>,
 ) -> Result<(), Error> {
+	walk(value, path, manifests).map_err(|interrupted| match interrupted {
+		// Nothing enclosed the value, so there is no object to blame — tk
+		// formats its nil error as `%!s(<nil>)` here, which is an artifact
+		// rather than a message worth reproducing.
+		Interrupted::Primitive { path } => Error::InvalidManifest {
+			path,
+			reason: "not a Kubernetes object".to_owned(),
+		},
+		Interrupted::Failed(error) => error,
+	})
+}
+
+/// A walk that ended early.
+enum Interrupted {
+	/// A value was reached that is neither an object nor an array.
+	///
+	/// Tanka's `ErrorPrimitiveReached`, which carries no reason of its own: the
+	/// innermost object enclosing it supplies one, being the thing that should
+	/// have been a manifest and was not. `path` is already that object's path.
+	Primitive {
+		path: String,
+	},
+	Failed(Error),
+}
+
+impl From<Error> for Interrupted {
+	fn from(error: Error) -> Interrupted {
+		Interrupted::Failed(error)
+	}
+}
+
+fn walk(
+	value: serde_json::Value,
+	path: &str,
+	manifests: &mut Vec<serde_json::Value>,
+) -> Result<(), Interrupted> {
 	match value {
 		serde_json::Value::Array(items) => {
 			for (index, item) in items.into_iter().enumerate() {
-				collect_manifests(item, &format!("{path}[{index}]"), manifests)?;
+				walk(item, &format!("{path}[{index}]"), manifests)?;
 			}
+			Ok(())
 		}
-		serde_json::Value::Object(mut object) => {
-			let has_kind = object.contains_key("kind");
-			if object.contains_key("apiVersion") && has_kind {
-				// A `kind` that is not a string means this is not a manifest Tanka
-				// recognizes; it is exported as it stands.
-				if object.get("kind").and_then(serde_json::Value::as_str) == Some("List") {
-					if let Some(serde_json::Value::Array(items)) = object.remove("items") {
-						for (index, item) in items.into_iter().enumerate() {
-							collect_manifests(item, &format!("{path}.items[{index}]"), manifests)?;
-						}
+		serde_json::Value::Object(object) => walk_object(object, path, manifests),
+		// The path of the object that should have explained this value, which is
+		// this one with its last step removed, as tk's `trace.Base` does.
+		_ => Err(Interrupted::Primitive {
+			path: parent_path(path),
+		}),
+	}
+}
+
+fn walk_object(
+	mut object: serde_json::Map<String, serde_json::Value>,
+	path: &str,
+	manifests: &mut Vec<serde_json::Value>,
+) -> Result<(), Interrupted> {
+	// ksonnet's private field, which tk drops before deciding anything and so
+	// never exports either.
+	object.remove("__ksonnet");
+
+	let defect = match manifest_defect(&object) {
+		None => {
+			if object.get("kind").and_then(serde_json::Value::as_str) == Some("List") {
+				if let Some(serde_json::Value::Array(items)) = object.remove("items") {
+					for (index, item) in items.into_iter().enumerate() {
+						walk(item, &format!("{path}.items[{index}]"), manifests)?;
 					}
-				} else {
-					let manifest = serde_json::Value::Object(object);
-					validate_manifest(&manifest, path)?;
-					manifests.push(manifest);
 				}
-
-				return Ok(());
+			} else {
+				let manifest = serde_json::Value::Object(object);
+				validate_manifest(&manifest, path)?;
+				manifests.push(manifest);
 			}
-
-			// An object that looks like a Kubernetes manifest but has no apiVersion
-			// is a mistake rather than a container to walk into, and Tanka says so.
-			if has_kind && object.contains_key("metadata") {
-				return Err(Error::MissingApiVersion { path: path.into() });
-			}
-
-			for (field, value) in object {
-				collect_manifests(value, &format!("{path}.{field}"), manifests)?;
-			}
+			return Ok(());
 		}
-		_ => {}
+		Some(defect) => defect,
+	};
+
+	// Sorted, because which failure is reported depends on it and tk sorts.
+	let mut fields = object.into_iter().collect::<Vec<_>>();
+	fields.sort_by(|(one, _), (other, _)| one.cmp(other));
+
+	for (field, value) in fields {
+		// A field left unset by a false condition in Jsonnet, which tk skips
+		// rather than treating as a value that cannot be walked.
+		if value.is_null() {
+			continue;
+		}
+		walk(value, &format!("{path}.{field}"), manifests).map_err(|interrupted| {
+			match interrupted {
+				// The innermost object to see this is the one that has to
+				// explain it, so it becomes an ordinary failure here and outer
+				// frames leave it alone.
+				Interrupted::Primitive { path } => Error::InvalidManifest {
+					path,
+					reason: defect.clone(),
+				}
+				.into(),
+				failed @ Interrupted::Failed(_) => failed,
+			}
+		})?;
 	}
 
 	Ok(())
+}
+
+/// A JSON path with its last step removed. Tanka's `trace.Base`.
+fn parent_path(path: &str) -> String {
+	let base = match path.rfind(['.', '[']) {
+		Some(0) | None => "",
+		Some(index) => &path[..index],
+	};
+	if base.is_empty() {
+		".".to_owned()
+	} else {
+		base.to_owned()
+	}
+}
+
+/// Why an object is not a Kubernetes manifest, or `None` if it is one.
+///
+/// Tanka's `isKubernetesManifest`: `apiVersion` and `kind` must both be present,
+/// be strings, and be non-empty. Checking only that they exist let rtk treat
+/// `kind: 42` as a manifest.
+fn manifest_defect(object: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+	for attribute in ["apiVersion", "kind"] {
+		let defect = match object.get(attribute) {
+			None | Some(serde_json::Value::Null) => format!("missing attribute {attribute:?}"),
+			Some(serde_json::Value::String(text)) if text.is_empty() => {
+				format!("attribute {attribute:?} is empty")
+			}
+			Some(serde_json::Value::String(_)) => continue,
+			Some(other) => format!(
+				"attribute {attribute:?} is not a string, it is a {}",
+				go_type_name(other)
+			),
+		};
+		return Some(defect);
+	}
+	None
+}
+
+/// Go's name for the dynamic type behind a JSON value, which tk reports.
+fn go_type_name(value: &serde_json::Value) -> &'static str {
+	match value {
+		serde_json::Value::Null => "<nil>",
+		serde_json::Value::Bool(_) => "bool",
+		serde_json::Value::Number(_) => "float64",
+		serde_json::Value::String(_) => "string",
+		serde_json::Value::Array(_) => "[]interface {}",
+		serde_json::Value::Object(_) => "map[string]interface {}",
+	}
 }
 
 fn validate_manifest(manifest: &serde_json::Value, path: &str) -> Result<(), Error> {
@@ -625,6 +743,125 @@ mod tests {
 	use serde_json::json;
 
 	use super::*;
+
+	/// Collect from a document, reporting the message a caller would see.
+	fn collect(value: Value) -> Result<Vec<Value>, String> {
+		let mut manifests = Vec::new();
+		collect_manifests(value, "", &mut manifests)
+			.map(|()| manifests)
+			.map_err(|error| error.to_string())
+	}
+
+	/// Every shape rtk used to walk past in silence, with the message tk gives.
+	///
+	/// Reaching a value that cannot be walked means the Jsonnet produced
+	/// something that was never a Kubernetes object, and tk refuses the export.
+	/// rtk exported nothing and exited zero, so a misspelled `kind` disappeared.
+	#[test]
+	fn a_value_that_is_not_a_kubernetes_object_fails_the_export() {
+		for (document, expected) in [
+			(
+				json!({ "x": { "apiVersion": "v1", "metadata": { "name": "a" } } }),
+				r#"found invalid Kubernetes object (at .x): missing attribute "kind""#,
+			),
+			(
+				json!({ "x": { "kind": "ConfigMap", "metadata": { "name": "a" } } }),
+				r#"found invalid Kubernetes object (at .x): missing attribute "apiVersion""#,
+			),
+			(
+				json!({ "x": { "metadata": { "name": "a" }, "data": { "k": "v" } } }),
+				r#"found invalid Kubernetes object (at .x.data): missing attribute "apiVersion""#,
+			),
+			(
+				json!({ "x": "just a string" }),
+				r#"found invalid Kubernetes object (at .): missing attribute "apiVersion""#,
+			),
+			(
+				json!({ "x": ["a"] }),
+				r#"found invalid Kubernetes object (at .x): missing attribute "apiVersion""#,
+			),
+			(
+				json!({ "x": { "apiVersion": "v1", "kind": 42, "metadata": { "name": "a" } } }),
+				r#"found invalid Kubernetes object (at .x): attribute "kind" is not a string, it is a float64"#,
+			),
+			(
+				json!({ "x": { "apiVersion": "v1", "kind": "", "metadata": { "name": "a" } } }),
+				r#"found invalid Kubernetes object (at .x): attribute "kind" is empty"#,
+			),
+		] {
+			assert_eq!(
+				collect(document.clone()).unwrap_err(),
+				expected,
+				"for {document}"
+			);
+		}
+	}
+
+	/// Which failure is reported depends on the order fields are walked, and tk
+	/// sorts them: `data` is reached before `metadata`, so it is `data` that is
+	/// blamed even though both are equally unwalkable.
+	#[test]
+	fn fields_are_walked_in_sorted_order() {
+		let error = collect(json!({
+			"x": { "metadata": { "name": "a" }, "data": { "k": "v" } }
+		}))
+		.unwrap_err();
+
+		assert!(error.contains(".x.data"), "{error}");
+	}
+
+	/// A field a false condition left unset is skipped rather than treated as a
+	/// value that cannot be walked, or every `if` in a Tanka library would fail.
+	#[test]
+	fn a_null_field_is_skipped() {
+		let manifests = collect(json!({
+			"absent": null,
+			"present": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "kept" },
+			},
+		}))
+		.expect("a null beside a manifest is not a failure");
+
+		assert_eq!(manifests.len(), 1);
+		assert_eq!(manifests[0]["metadata"]["name"], "kept");
+	}
+
+	/// ksonnet's private field is dropped before anything is decided, so it
+	/// neither blocks the walk nor reaches the exported manifest.
+	#[test]
+	fn the_ksonnet_field_is_dropped() {
+		let manifests = collect(json!({
+			"__ksonnet": "private",
+			"present": {
+				"apiVersion": "v1",
+				"kind": "ConfigMap",
+				"metadata": { "name": "kept" },
+				"__ksonnet": "private",
+			},
+		}))
+		.expect("a __ksonnet sibling is not a failure");
+
+		assert_eq!(manifests.len(), 1);
+		assert_eq!(manifests[0].get("__ksonnet"), None);
+	}
+
+	/// A `List` is still expanded into its items rather than exported whole.
+	#[test]
+	fn a_list_is_expanded() {
+		let manifests = collect(json!({
+			"apiVersion": "v1",
+			"kind": "List",
+			"items": [
+				{ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "one" } },
+				{ "apiVersion": "v1", "kind": "ConfigMap", "metadata": { "name": "two" } },
+			],
+		}))
+		.expect("a list of manifests");
+
+		assert_eq!(manifests.len(), 2);
+	}
 
 	fn environment(build: impl FnOnce(&mut EnvironmentSpec)) -> Environment<'static> {
 		let mut spec = EnvironmentSpec::default();
