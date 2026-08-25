@@ -458,9 +458,9 @@ mod tests {
 
 		let yaml = object.to_yaml().expect("the object serializes");
 
-		// Negative zero keeps its sign, which the diff's own serializer used to
-		// drop; go-yaml keeps it, and so does the export.
-		assert!(yaml.contains("zero: -0.0"), "unexpected output:\n{yaml}");
+		// Negative zero keeps its sign, spelled as go-yaml spells it. The diff's
+		// own serializer used to drop the sign entirely.
+		assert!(yaml.contains("zero: -0\n"), "unexpected output:\n{yaml}");
 		// Digit runs compare numerically, so item2 precedes item10.
 		let item2 = yaml.find("item2").expect("item2 is present");
 		let item10 = yaml.find("item10").expect("item10 is present");

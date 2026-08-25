@@ -15,16 +15,20 @@ spec:
   - 1e+06
   - 0.0001
   - 0.30000000000000004
+  - -0
   manyDigits: 1.2345678901234567
   million: 1e+06
   negativeFraction: -0.5
   negativeOne: -1
+  negativeZero: -0
+  negativeZeroComputed: -0
   nested:
     exponent: 1e+21
     value: 2.5
   one: 1
   oneThird: 0.3333333333333333
   pointOnePlusPointTwo: 0.30000000000000004
+  positiveZero: 0
   smallBoundary: 0.0001
   tenMillion: 1e+07
   twoPow53: 9.007199254740992e+15

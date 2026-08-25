@@ -56,12 +56,18 @@
     manyDigits: 1.2345678901234567,
     negativeFraction: -0.5,
 
+    // The one float whose sign cannot survive being written as an integer, so
+    // a formatter has to keep it a float and spell it Go's way.
+    negativeZero: -0.0,
+    negativeZeroComputed: 0.0 * -1,
+    positiveZero: 0.0,
+
     // The same choices again, nested and inside a sequence, in case the
     // formatter treats those paths differently.
     nested: {
       value: 2.5,
       exponent: 1e21,
     },
-    list: [1, 1.5, 1000000, 0.0001, 0.1 + 0.2],
+    list: [1, 1.5, 1000000, 0.0001, 0.1 + 0.2, -0.0],
   },
 }

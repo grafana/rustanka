@@ -1057,10 +1057,12 @@ fn numbers_are_formatted_the_way_tanka_formats_them() {
 	// Verified byte for byte against tk. Note `huge`: the value survives, where
 	// deserializing through serde's data model would have saturated it to
 	// `i64::MAX`. Its shortest round-tripping form is `1e+100`; deriving a
-	// mantissa through floating-point division used to corrupt it.
+	// mantissa through floating-point division used to corrupt it. And
+	// `negative`: a negative zero cannot be written as an integer without
+	// losing its sign, so it stays a float, spelled as go-yaml spells one.
 	assert_eq!(
 		project.exported()["v1.ConfigMap-numbers.yaml"],
-		"apiVersion: v1\ndata:\n  huge: 1e+100\n  negative: -0.0\n  \
+		"apiVersion: v1\ndata:\n  huge: 1e+100\n  negative: -0\n  \
 		 ratio: 0.1\n  whole: 3\nkind: ConfigMap\nmetadata:\n  name: numbers\n  \
 		 namespace: default\n"
 	);

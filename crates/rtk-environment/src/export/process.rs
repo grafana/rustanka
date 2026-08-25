@@ -488,17 +488,6 @@ impl Serialize for ExportValue<'_> {
 		S: Serializer,
 	{
 		match self.0 {
-			serde_json::Value::Number(number) => {
-				// serde-saphyr spells a negative zero float `0`, where go-yaml keeps
-				// the sign. Everything else it formats as tk does.
-				if number
-					.as_f64()
-					.is_some_and(|number| number == 0.0 && number.is_sign_negative())
-				{
-					return serde_saphyr::RawScalar("-0.0").serialize(serializer);
-				}
-				number.serialize(serializer)
-			}
 			serde_json::Value::Array(values) => {
 				let mut sequence = serializer.serialize_seq(Some(values.len()))?;
 				for value in values {
@@ -540,6 +529,8 @@ pub(crate) fn serialize(manifest: &serde_json::Value) -> Result<String, Error> {
 		// go-yaml v3 quotes them.
 		quote_ambiguous_keys: true,
 		quote_numeric_strings: true,
+		// A negative zero has to stay a float, and go-yaml writes one as `-0`.
+		go_style_negative_zero: true,
 		..Default::default()
 	};
 
