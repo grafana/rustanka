@@ -102,46 +102,132 @@ pub fn add(path: &Path, inline: bool, options: &EnvSpecOptions) -> Result<()> {
 		.map(|path| path.to_string_lossy().into_owned())
 		.unwrap_or_else(|_| environment_directory.display().to_string());
 
+	// tk's `v1alpha1.New()` defaults the namespace before any flag is applied,
+	// so an environment created without `--namespace` still names one.
+	let mut spec = EnvironmentSpec::default();
+	spec.namespace = Some("default".into());
+	apply_spec_options(&mut spec, options)?;
+
 	if inline {
-		let namespace = options.namespace.as_deref().unwrap_or("default");
-		let server = match (
-			options.server.as_deref(),
-			options.server_from_context.as_deref(),
-		) {
-			(Some(server), _) => server.to_owned(),
-			(None, Some(context)) => server_from_kubeconfig_context(context)?,
-			(None, None) => "https://localhost:6443".to_owned(),
-		};
-		let name = relative.replace('/', "-");
-		let contents = format!(
-			r#"{{
-  apiVersion: 'tanka.dev/v1alpha1',
-  kind: 'Environment',
-  metadata: {{ name: '{name}' }},
-  spec: {{ namespace: '{namespace}', apiServer: '{server}' }},
-  data: {{}},
-}}"#
-		);
+		let contents = inline_environment(&relative, &spec)?;
 		fs::write(environment_directory.join("main.jsonnet"), contents)
 			.context("write main.jsonnet")?;
 		return Ok(());
 	}
 
-	fs::write(environment_directory.join("main.jsonnet"), "{}").context("write main.jsonnet")?;
-	let mut spec = EnvironmentSpec::default();
-	apply_spec_options(&mut spec, options)?;
+	// tk writes this through the Jsonnet formatter, which terminates the file.
+	fs::write(environment_directory.join("main.jsonnet"), "{}\n").context("write main.jsonnet")?;
+	// Only the name: tk's `addEnv` sets nothing else, and the namespace rtk used
+	// to write here is the entrypoint that discovery derives, not a stored field.
 	let environment = Environment::new()
 		.with_metadata(ObjectMeta {
 			name: Some(relative.clone()),
-			namespace: Some(format!("{relative}/main.jsonnet")),
 			..ObjectMeta::default()
 		})
 		.with_spec(spec)
 		.build()
 		.context("build spec.json")?;
-	let contents = serde_json::to_string_pretty(&environment).context("serialize spec.json")?;
+	let mut contents = serde_json::to_string_pretty(&environment).context("serialize spec.json")?;
+	// tk's `writeJSON` appends one.
+	contents.push('\n');
 	fs::write(environment_directory.join("spec.json"), contents).context("write spec.json")?;
 	Ok(())
+}
+
+/// The Jsonnet an inline environment is created as.
+///
+/// tk marshals the same `Environment` it would write to `spec.json`, with an
+/// empty `data`, and hands the JSON to the Jsonnet formatter (`writeJsonnet`).
+/// The envelope is fixed — `addEnv` fills in nothing but the name — so only the
+/// spec has to be rendered, and rendering it from its own serialization is what
+/// keeps the fields and their order those of `spec.json`.
+fn inline_environment(name: &str, spec: &EnvironmentSpec) -> Result<String> {
+	let spec = serde_json::to_value(spec).context("serialize spec")?;
+	let spec = jsonnet_from_json(&spec, "  ");
+	let name = jsonnet_string(name);
+	Ok(format!(
+		"{{\n  apiVersion: 'tanka.dev/v1alpha1',\n  kind: 'Environment',\n  \
+		 metadata: {{\n    name: {name},\n  }},\n  spec: {spec},\n  data: {{}},\n}}\n"
+	))
+}
+
+/// Render JSON as the Jsonnet tk would have written for it.
+///
+/// tk formats with go-jsonnet's formatter, which rewrites JSON's syntax without
+/// reflowing it: a quoted key loses its quotes where it is an identifier, a
+/// string takes single ones, and every member gains a trailing comma. Since
+/// `json.MarshalIndent` already put each member on its own line and left an
+/// empty object as `{}`, the JSON's line structure is the Jsonnet's, and this
+/// reproduces it rather than deciding a layout of its own.
+fn jsonnet_from_json(value: &serde_json::Value, indent: &str) -> String {
+	let nested = format!("{indent}  ");
+	match value {
+		serde_json::Value::Object(members) if !members.is_empty() => {
+			let mut rendered = String::from("{\n");
+			for (key, member) in members {
+				let key = jsonnet_field_name(key);
+				let member = jsonnet_from_json(member, &nested);
+				rendered.push_str(&format!("{nested}{key}: {member},\n"));
+			}
+			rendered.push_str(indent);
+			rendered.push('}');
+			rendered
+		}
+		serde_json::Value::Array(items) if !items.is_empty() => {
+			let mut rendered = String::from("[\n");
+			for item in items {
+				let item = jsonnet_from_json(item, &nested);
+				rendered.push_str(&format!("{nested}{item},\n"));
+			}
+			rendered.push_str(indent);
+			rendered.push(']');
+			rendered
+		}
+		serde_json::Value::String(text) => jsonnet_string(text),
+		// Numbers, booleans, null, and the empty object and array, all of which
+		// JSON already spells the way Jsonnet does.
+		scalar => scalar.to_string(),
+	}
+}
+
+/// A field name, left bare where Jsonnet would accept it as one.
+fn jsonnet_field_name(name: &str) -> String {
+	let identifier = !name.is_empty()
+		&& !name.starts_with(|first: char| first.is_ascii_digit())
+		&& name
+			.chars()
+			.all(|character| character.is_ascii_alphanumeric() || character == '_');
+	if identifier {
+		name.to_owned()
+	} else {
+		jsonnet_string(name)
+	}
+}
+
+/// A quoted Jsonnet string, in the style the formatter would have chosen.
+///
+/// go-jsonnet prefers single quotes and switches to double ones as soon as the
+/// text contains a single quote — whatever else it contains, so a string holding
+/// both kinds is double-quoted with its double quotes escaped.
+fn jsonnet_string(text: &str) -> String {
+	let quote = if text.contains('\'') { '"' } else { '\'' };
+	let mut quoted = String::with_capacity(text.len() + 2);
+	quoted.push(quote);
+	for character in text.chars() {
+		match character {
+			'\\' => quoted.push_str("\\\\"),
+			'\n' => quoted.push_str("\\n"),
+			'\r' => quoted.push_str("\\r"),
+			'\t' => quoted.push_str("\\t"),
+			_ if character == quote => {
+				quoted.push('\\');
+				quoted.push(character);
+			}
+			_ => quoted.push(character),
+		}
+	}
+	quoted.push(quote);
+	quoted
 }
 
 pub fn remove(paths: &[PathBuf]) -> Result<()> {
@@ -403,6 +489,129 @@ mod tests {
 		assert!(!second.exists());
 	}
 
+	/// Byte for byte what `tk env add environments/e --namespace new-ns` writes.
+	///
+	/// Verified against tk 0.38, and kept whole rather than as field assertions
+	/// because every part of it was wrong at some point: the namespace rtk
+	/// invented in `metadata`, the two objects Go always marshals, and the
+	/// trailing newline `writeJSON` appends.
+	#[test]
+	fn a_static_environment_is_written_the_way_tk_writes_it() {
+		let temp = TempDir::new().unwrap();
+		create_project_root(temp.path());
+		let environment = temp.path().join("environments/e");
+
+		let mut options = options();
+		options.namespace = Some("new-ns".to_owned());
+		add(&environment, false, &options).unwrap();
+
+		assert_eq!(
+			fs::read_to_string(environment.join("spec.json")).unwrap(),
+			r#"{
+  "apiVersion": "tanka.dev/v1alpha1",
+  "kind": "Environment",
+  "metadata": {
+    "name": "environments/e"
+  },
+  "spec": {
+    "namespace": "new-ns",
+    "resourceDefaults": {},
+    "expectVersions": {}
+  }
+}
+"#
+		);
+		// tk writes this one through the Jsonnet formatter, which terminates it.
+		assert_eq!(
+			fs::read_to_string(environment.join("main.jsonnet")).unwrap(),
+			"{}\n"
+		);
+	}
+
+	/// And what `tk env add environments/e --inline ...` writes.
+	///
+	/// tk formats the marshalled environment as Jsonnet, so the layout is the
+	/// JSON's: one member per line, trailing commas, empty objects left inline.
+	/// The name keeps its separator — rtk used to replace it with a dash — and no
+	/// `apiServer` is invented for an environment that was not given one.
+	#[test]
+	fn an_inline_environment_is_written_the_way_tk_writes_it() {
+		let temp = TempDir::new().unwrap();
+		create_project_root(temp.path());
+		let environment = temp.path().join("environments/e");
+
+		let mut options = options();
+		options.namespace = Some("ns".to_owned());
+		options.diff_strategy = Some("native".to_owned());
+		options.inject_labels = Some(true);
+		add(&environment, true, &options).unwrap();
+
+		assert_eq!(
+			fs::read_to_string(environment.join("main.jsonnet")).unwrap(),
+			r"{
+  apiVersion: 'tanka.dev/v1alpha1',
+  kind: 'Environment',
+  metadata: {
+    name: 'environments/e',
+  },
+  spec: {
+    namespace: 'ns',
+    diffStrategy: 'native',
+    injectLabels: true,
+    resourceDefaults: {},
+    expectVersions: {},
+  },
+  data: {},
+}
+"
+		);
+		assert!(
+			!environment.join("spec.json").exists(),
+			"an inline environment declares itself in its Jsonnet"
+		);
+	}
+
+	/// An environment created without `--namespace` still names one, because
+	/// tk's `v1alpha1.New()` defaults it before any flag is applied.
+	#[test]
+	fn a_namespace_is_defaulted_the_way_tk_defaults_it() {
+		let temp = TempDir::new().unwrap();
+		create_project_root(temp.path());
+		let environment = temp.path().join("environments/e");
+
+		add(&environment, false, &options()).unwrap();
+
+		assert_eq!(spec_of(&environment)["spec"]["namespace"], "default");
+	}
+
+	/// go-jsonnet's formatter prefers single quotes and switches to double ones
+	/// as soon as the text holds a single quote, whatever else it holds.
+	#[test]
+	fn strings_are_quoted_the_way_the_formatter_quotes_them() {
+		assert_eq!(jsonnet_string("plain"), "'plain'");
+		assert_eq!(jsonnet_string("has'single"), "\"has'single\"");
+		assert_eq!(jsonnet_string("has\"double"), "'has\"double'");
+		assert_eq!(jsonnet_string("both'and\"quotes"), "\"both'and\\\"quotes\"");
+		assert_eq!(jsonnet_string(r"back\slash"), r"'back\\slash'");
+		assert_eq!(
+			jsonnet_string("line1\nline2\ttabbed"),
+			r"'line1\nline2\ttabbed'"
+		);
+	}
+
+	/// A key that is not an identifier keeps its quotes.
+	#[test]
+	fn field_names_are_left_bare_only_where_jsonnet_accepts_them() {
+		assert_eq!(jsonnet_field_name("apiServer"), "apiServer");
+		assert_eq!(jsonnet_field_name("with_underscore"), "with_underscore");
+		assert_eq!(
+			jsonnet_field_name("tanka.dev/environment"),
+			"'tanka.dev/environment'"
+		);
+		assert_eq!(jsonnet_field_name("1leading"), "'1leading'");
+		assert_eq!(jsonnet_field_name(""), "''");
+	}
+
 	/// An environment that vendors for itself is its own project, so a new
 	/// environment beside it belongs to *it* rather than to whatever encloses it.
 	#[test]
@@ -417,11 +626,15 @@ mod tests {
 		let environment = inner.join("environments/dev");
 		add(&environment, false, &options()).unwrap();
 
+		// Named relative to `inner`, which vendors for itself, rather than to the
+		// project around it.
 		let spec = spec_of(&environment);
 		assert_eq!(spec["metadata"]["name"], "environments/dev");
+		// tk's `addEnv` writes nothing else. An environment's namespace is the
+		// entrypoint discovery derives for it, not a field of its `spec.json`.
 		assert_eq!(
-			spec["metadata"]["namespace"],
-			"environments/dev/main.jsonnet"
+			spec["metadata"],
+			serde_json::json!({ "name": "environments/dev" })
 		);
 	}
 
