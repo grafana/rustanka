@@ -91,10 +91,13 @@ impl Plan {
 		self
 	}
 
-	fn deleted(mut self, environment: &Path) -> Plan {
+	/// Name an environment as deleted, the way `manifest.json` names it: by its
+	/// `metadata.namespace`, which is its entrypoint relative to the project
+	/// root. tk's own `--merge-deleted-envs` test passes exactly this spelling.
+	fn deleted(mut self, namespace: &str) -> Plan {
 		self.options
 			.merge_deleted_environments
-			.push(environment.to_string_lossy().into_owned());
+			.push(namespace.to_owned());
 		self
 	}
 
@@ -354,7 +357,7 @@ fn merging_replaces_the_environments_it_exports_and_leaves_the_rest() {
 	let exported = output.exported(
 		fixture("test-export-envs/static-env")
 			.merging(MergeStrategy::ReplaceEnvironments)
-			.deleted(&testdata("test-export-envs/inline-envs/main.jsonnet"))
+			.deleted("test-export-envs/inline-envs/main.jsonnet")
 			.resources("updated-again-deployment", "updated-again-service"),
 	);
 	assert_eq!(exported.successful(), 1);
@@ -476,7 +479,7 @@ fn releasing_an_environment_lets_another_take_over_its_files() {
 	let exported = output.exported(
 		fixture("test-export-conflict/env2")
 			.merging(MergeStrategy::ReplaceEnvironments)
-			.deleted(&testdata("test-export-conflict/env1")),
+			.deleted("test-export-conflict/env1"),
 	);
 	assert_eq!(exported.successful(), 1);
 	assert_eq!(

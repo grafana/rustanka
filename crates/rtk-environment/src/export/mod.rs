@@ -230,8 +230,8 @@ pub struct TimingData {
 pub struct Report {
 	/// Where the environment was found.
 	pub source: Arc<PathBuf>,
-	/// How `manifest.json` refers to the environment: its entrypoint, relative to
-	/// the working directory where possible.
+	/// How `manifest.json` refers to the environment: its `metadata.namespace`,
+	/// which is its entrypoint relative to its project root.
 	pub identifier: String,
 	/// Files written, relative to [`Options::output_dir`], sorted.
 	pub files: Vec<PathBuf>,
@@ -245,18 +245,37 @@ pub struct Report {
 
 impl Report {
 	/// A report for an environment found at `source`, read by `entrypoint`.
-	fn from_entrypoint(source: Arc<PathBuf>, entrypoint: PathBuf) -> Report {
-		let identifier = std::env::current_dir()
-			.ok()
-			.and_then(|current_dir| {
-				entrypoint
-					.strip_prefix(current_dir)
-					.ok()
-					.map(Path::to_path_buf)
-			})
-			.unwrap_or(entrypoint)
-			.to_string_lossy()
-			.into_owned();
+	///
+	/// `namespace` is the environment's `metadata.namespace` — its entrypoint
+	/// relative to its own project root — which is what tk records against every
+	/// file it writes (`fileToEnv[relpath] = env.Metadata.Namespace`). It has to
+	/// be that rather than the path the export was given: the index is read back
+	/// by a later export to decide which files an environment owns, so a value
+	/// that depended on the working directory would stop matching as soon as one
+	/// ran from somewhere else.
+	///
+	/// A bare Jsonnet entrypoint is not a Tanka environment and has no namespace.
+	/// tk cannot export one at all, so there is nothing to match: it falls back
+	/// to the entrypoint, relative to the working directory where possible.
+	fn from_entrypoint(
+		source: Arc<PathBuf>,
+		entrypoint: PathBuf,
+		namespace: Option<&str>,
+	) -> Report {
+		let identifier = match namespace {
+			Some(namespace) => namespace.to_owned(),
+			None => std::env::current_dir()
+				.ok()
+				.and_then(|current_dir| {
+					entrypoint
+						.strip_prefix(current_dir)
+						.ok()
+						.map(Path::to_path_buf)
+				})
+				.unwrap_or(entrypoint)
+				.to_string_lossy()
+				.into_owned(),
+		};
 
 		Report {
 			source,
@@ -663,7 +682,13 @@ impl Engine {
 		} else {
 			source.join(JPath::DEFAULT_ENTRYPOINT)
 		};
-		let mut report = Report::from_entrypoint(Arc::new(source.to_path_buf()), entrypoint);
+		let mut report = Report::from_entrypoint(
+			Arc::new(source.to_path_buf()),
+			entrypoint,
+			environment
+				.environment()
+				.and_then(|environment| environment.metadata.namespace.as_deref()),
+		);
 		let mut timing = options.timing.then(TimingData::default);
 
 		let planned = Instant::now();
@@ -987,6 +1012,7 @@ impl Export {
 		let mut report = Report::from_entrypoint(
 			Arc::clone(&discovered.path),
 			discovered.entrypoint.as_ref().clone(),
+			discovered.environment.metadata.namespace.as_deref(),
 		);
 
 		match self.run_environment(engine, discovered, &mut report) {

@@ -89,29 +89,6 @@ fn fixtures_path(subpath: &str) -> PathBuf {
 		.join(subpath)
 }
 
-fn copy_golden_without_manifest(src: &Path, dst: &Path) {
-	for entry in walkdir::WalkDir::new(src) {
-		let entry = entry.expect("walkdir entry");
-		let path = entry.path();
-		if !entry.file_type().is_file() {
-			continue;
-		}
-		let rel_path = path
-			.strip_prefix(src)
-			.expect("strip prefix")
-			.to_string_lossy()
-			.to_string();
-		if rel_path == "manifest.json" {
-			continue;
-		}
-		let target = dst.join(&rel_path);
-		if let Some(parent) = target.parent() {
-			fs::create_dir_all(parent).expect("create parent");
-		}
-		fs::copy(path, &target).expect("copy file");
-	}
-}
-
 fn stage_fixture(src: &Path, dst: &Path) {
 	for entry in walkdir::WalkDir::new(src) {
 		let entry = entry.expect("walkdir entry");
@@ -222,17 +199,14 @@ fn run_golden_test(env_path: &Path) {
 
 	let suite_path = env_path.parent().expect("env_path should have a parent");
 	let (export_paths, mut extra_args) = load_fixture_export_config(suite_path, env_path);
-	extra_args.extend([
-		"--skip-manifest".to_string(),
-		"--parallel".to_string(),
-		"1".to_string(),
-	]);
+	extra_args.extend(["--parallel".to_string(), "1".to_string()]);
 	run_rtk_export(&staged_env_path, output_dir, &export_paths, &extra_args);
 
-	let filtered_golden_dir = tempfile::TempDir::new().unwrap();
-	copy_golden_without_manifest(&golden_dir, filtered_golden_dir.path());
+	// `manifest.json` is compared along with everything else: it is what a later
+	// export reads to know which environment owns a file, so a golden that
+	// leaves it out cannot catch an index that has drifted from the directory.
 	let comparison = rtk_diff::directory::compare_directories_detailed(
-		filtered_golden_dir.path().to_string_lossy().as_ref(),
+		golden_dir.to_string_lossy().as_ref(),
 		output_dir.to_string_lossy().as_ref(),
 	)
 	.unwrap();

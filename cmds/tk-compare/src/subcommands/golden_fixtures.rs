@@ -118,8 +118,8 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			Ok(()) => {
 				let golden_dir = fixture_dir.join("golden");
 				if cli.dry_run {
-					let differences = differences_without_manifest(&golden_dir, &generated_dir)
-						.with_context(|| {
+					let differences =
+						differences(&golden_dir, &generated_dir).with_context(|| {
 							format!("failed comparing fixture {}", fixture_dir.display())
 						})?;
 					if !differences.is_empty() {
@@ -269,7 +269,11 @@ fn run_tk_export(
 	);
 }
 
-fn differences_without_manifest(expected: &Path, actual: &Path) -> Result<Vec<String>> {
+/// Compare a committed golden directory against a freshly generated one.
+///
+/// `manifest.json` is included: it is what a later export reads to know which
+/// environment owns a file, so leaving it out hid an index that had drifted.
+fn differences(expected: &Path, actual: &Path) -> Result<Vec<String>> {
 	if !expected.exists() {
 		return Ok(vec![format!(
 			"golden directory missing: {}",
@@ -283,16 +287,9 @@ fn differences_without_manifest(expected: &Path, actual: &Path) -> Result<Vec<St
 		)]);
 	}
 
-	let expected_filtered =
-		TempDir::create("tk-compare-golden-expected").context("failed creating temp dir")?;
-	let actual_filtered =
-		TempDir::create("tk-compare-golden-actual").context("failed creating temp dir")?;
-	copy_without_manifest(expected, expected_filtered.path())?;
-	copy_without_manifest(actual, actual_filtered.path())?;
-
 	let cmp = compare_directories_detailed(
-		expected_filtered.path().to_string_lossy().as_ref(),
-		actual_filtered.path().to_string_lossy().as_ref(),
+		expected.to_string_lossy().as_ref(),
+		actual.to_string_lossy().as_ref(),
 	)?;
 	if cmp.matched {
 		return Ok(Vec::new());
@@ -321,30 +318,6 @@ fn replace_directory_contents(target_dir: &Path, source_dir: &Path) -> Result<()
 			.with_context(|| format!("failed to remove {}", target_dir.display()))?;
 	}
 	copy_dir_recursive(source_dir, target_dir)
-}
-
-fn copy_without_manifest(src: &Path, dst: &Path) -> Result<()> {
-	std::fs::create_dir_all(dst)?;
-	for entry in std::fs::read_dir(src)? {
-		let entry = entry?;
-		let src_path = entry.path();
-		let dst_path = dst.join(entry.file_name());
-		if src_path.is_dir() {
-			copy_without_manifest(&src_path, &dst_path)?;
-			continue;
-		}
-		if dst_path == dst.join("manifest.json") {
-			continue;
-		}
-		std::fs::copy(&src_path, &dst_path).with_context(|| {
-			format!(
-				"failed copying {} -> {}",
-				src_path.display(),
-				dst_path.display()
-			)
-		})?;
-	}
-	Ok(())
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
