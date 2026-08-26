@@ -601,6 +601,56 @@ fn media_range_requests_aggregated_discovery(item: &QualityItem<Mime>) -> bool {
 	})
 }
 
+/// Built-in API groups that accept `application/strategic-merge-patch+json`.
+/// Custom resources in CRD-backed groups (for example `keda.sh`) return 415 for
+/// that content type.
+fn supports_strategic_merge_patch(path: &str) -> bool {
+	if path.starts_with("/api/") {
+		return true;
+	}
+	let Some(rest) = path.strip_prefix("/apis/") else {
+		return false;
+	};
+	let Some(group) = rest.split('/').next() else {
+		return false;
+	};
+	matches!(
+		group,
+		"apps"
+			| "batch" | "autoscaling"
+			| "policy"
+			| "rbac.authorization.k8s.io"
+			| "networking.k8s.io"
+			| "storage.k8s.io"
+			| "admissionregistration.k8s.io"
+			| "coordination.k8s.io"
+			| "discovery.k8s.io"
+			| "flowcontrol.apiserver.k8s.io"
+			| "node.k8s.io"
+			| "scheduling.k8s.io"
+			| "certificates.k8s.io"
+			| "authentication.k8s.io"
+			| "authorization.k8s.io"
+			| "events.k8s.io"
+			| "apiextensions.k8s.io"
+			| "apiregistration.k8s.io"
+	)
+}
+
+fn content_type_header(req: &Request) -> Option<&str> {
+	req.headers
+		.get("content-type")
+		.and_then(|v| v.to_str().ok())
+}
+
+fn is_strategic_merge_patch(req: &Request) -> bool {
+	content_type_header(req).is_some_and(|ct| ct.contains("strategic-merge-patch"))
+}
+
+fn is_server_side_apply_patch(req: &Request) -> bool {
+	content_type_header(req).is_some_and(|ct| ct.contains("apply-patch"))
+}
+
 fn merge_type_from_content_type(req: &Request) -> MergeType {
 	let Some(content_type) = req
 		.headers
@@ -671,6 +721,22 @@ async fn mount_resources(
 			let (api_path, name) = parse_resource_path(path_str);
 			let name = name.unwrap_or_default();
 
+			// Content-type negotiation happens before the object lookup, so custom
+			// resources reject strategic merge whether or not the object exists.
+			if is_strategic_merge_patch(req) && !supports_strategic_merge_patch(path_str) {
+				let body = serde_json::json!({
+					"kind": "Status",
+					"apiVersion": "v1",
+					"metadata": {},
+					"status": "Failure",
+					"message": "the body of the request was in an unknown format - accepted media types include: application/json-patch+json, application/merge-patch+json, application/apply-patch+yaml",
+					"reason": "UnsupportedMediaType",
+					"code": 415
+				});
+				record_exchange(&patch_exchanges, req, 415, &body.to_string());
+				return ResponseTemplate::new(415).set_body_json(body);
+			}
+
 			// Determine merge type based on Content-Type header
 			// - application/strategic-merge-patch+json -> StrategicMergePatch (kubectl)
 			// - application/apply-patch+yaml -> ServerSideApply
@@ -683,8 +749,21 @@ async fn mount_resources(
 				let resources = patch_resources.read().unwrap();
 				if let Some(existing) = resources.get(&(api_path.clone(), name.clone())) {
 					merge_json_with_type(existing.clone(), patch, merge_type)
-				} else {
+				} else if is_server_side_apply_patch(req) {
+					// Server-side apply creates on missing objects; merge/strategic patch does not.
 					patch
+				} else {
+					let body = serde_json::json!({
+						"kind": "Status",
+						"apiVersion": "v1",
+						"metadata": {},
+						"status": "Failure",
+						"message": format!("{} \"{}\" not found", api_path, name),
+						"reason": "NotFound",
+						"code": 404
+					});
+					record_exchange(&patch_exchanges, req, 404, &body.to_string());
+					return ResponseTemplate::new(404).set_body_json(body);
 				}
 			};
 
@@ -722,6 +801,7 @@ async fn mount_resources(
 
 			let body: serde_json::Value =
 				serde_json::from_slice(&req.body).unwrap_or(serde_json::Value::Null);
+			let body = strip_empty_metadata_fields(body);
 
 			// Extract name from the body
 			let name = body
@@ -1042,7 +1122,7 @@ mod tests {
 
 	use super::{
 		accepts_aggregated_discovery, accepts_legacy_json, merge_type_from_content_type,
-		parse_resource_path,
+		parse_resource_path, supports_strategic_merge_patch,
 	};
 
 	fn request_with_accept(accept: Option<&str>) -> Request {
@@ -1126,6 +1206,19 @@ mod tests {
 			merge_type_from_content_type(&req),
 			MergeType::StrategicMergePatch
 		);
+	}
+
+	#[test]
+	fn strategic_merge_supported_for_core_and_apps() {
+		assert!(supports_strategic_merge_patch(
+			"/api/v1/namespaces/default/configmaps/x"
+		));
+		assert!(supports_strategic_merge_patch(
+			"/apis/apps/v1/namespaces/default/deployments/x"
+		));
+		assert!(!supports_strategic_merge_patch(
+			"/apis/keda.sh/v1alpha1/namespaces/default/scaledobjects/x"
+		));
 	}
 
 	#[test]
