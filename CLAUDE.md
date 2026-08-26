@@ -392,6 +392,29 @@ and those environments are reported as skipped. Which failure is reported is
 decided on results put back into discovery order, not by whichever worker
 recorded one first.
 
+**The index describes the directory, whatever happened.** Everything that
+reached disk is recorded, including what a failed environment wrote before it
+failed and what was written before a conflict was found — a conflict is only
+detectable once every environment has been exported, so refusing to write the
+index then left files owned by nobody. Nothing is pruned on the strength of a
+run that did not finish, only what pruning actually deleted is forgotten, and
+the index is renamed into place: a torn `manifest.json` costs every file in the
+directory its owner at once.
+
+**How many environments were skipped depends on the run.** It is however many
+workers had not yet started when the export was stopped, which is a fact about
+scheduling rather than about the environments, so only `successful + skipped` is
+fixed for a given input. What is stable is what matters: exactly the
+environments that genuinely failed are counted as failures, the first failure in
+discovery order is the one reported, and the exit code follows. Relabelling
+environments that did export would make the count look steady while
+contradicting `manifest.json`.
+
+tk detects two environments writing the same file with a `stat` immediately
+before each write, which two workers can both pass: at its default parallelism
+it misses the collision rtk catches, and only reports it reliably at
+`--parallel 1` or `2`. rtk checks after the fact, so it always finds it.
+
 ### Conflicting filenames are reported differently from tk
 
 When two resources want the same file, both tools write what they have so far

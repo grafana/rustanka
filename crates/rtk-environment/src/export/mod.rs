@@ -309,12 +309,34 @@ pub struct Exported {
 }
 
 impl Exported {
+	/// Environments that were exported.
 	pub fn successful(&self) -> usize {
-		self.reports.len() - self.failed()
+		self.reports.len() - self.failed() - self.skipped()
 	}
 
+	/// Environments that were tried and failed.
+	///
+	/// Not the ones that never got their turn: an environment abandoned after
+	/// something else went wrong has said nothing about itself, and counting it
+	/// as a failure made the tally depend on how far the pool had got.
 	pub fn failed(&self) -> usize {
-		self.reports.iter().filter(|report| report.failed()).count()
+		self.reports
+			.iter()
+			.filter(|report| report.error.as_ref().is_some_and(|error| !error.skipped()))
+			.count()
+	}
+
+	/// Environments abandoned because an earlier failure stopped the export.
+	///
+	/// How many there are depends on how many workers had already started when
+	/// the export was stopped, which is a fact about the run rather than about
+	/// the environments. Only the total of this and [`Exported::successful`] is
+	/// fixed for a given input.
+	pub fn skipped(&self) -> usize {
+		self.reports
+			.iter()
+			.filter(|report| report.error.as_ref().is_some_and(|error| error.skipped()))
+			.count()
 	}
 
 	/// Every file the export wrote, relative to the output directory.

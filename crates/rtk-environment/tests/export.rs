@@ -1606,12 +1606,16 @@ fn stops_the_whole_export_once_one_environment_cannot_be_written() {
 	assert!(fatal[0].error.as_ref().expect("an error").fatal());
 
 	// The rest were either already done or never started; none of them failed on
-	// their own account.
-	let skipped = exported
-		.reports
-		.iter()
-		.filter(|report| report.error.as_ref().is_some_and(|error| error.skipped()))
-		.count();
-	assert!(skipped > 0, "nothing was reported as skipped: {exported:?}");
-	assert_eq!(exported.failed(), 1 + skipped);
+	// their own account. How many of each depends on how far the pool had got,
+	// so only the total is fixed — but exactly one environment actually failed.
+	assert!(
+		exported.skipped() > 0,
+		"nothing was reported as skipped: {exported:?}"
+	);
+	assert_eq!(exported.failed(), 1, "only `b` failed on its own account");
+	assert_eq!(
+		exported.successful() + exported.skipped(),
+		3,
+		"the other three were either exported or abandoned"
+	);
 }
