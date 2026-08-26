@@ -1491,6 +1491,61 @@ fn names_exported_files_by_the_extension_it_was_given() {
 	}
 }
 
+/// An environment that fails part way through a chunk still reports the files it
+/// already wrote, so they reach `manifest.json`.
+///
+/// The writer used to build its list locally and drop it when a write failed,
+/// losing up to a whole chunk of files that were already on disk — files that
+/// `fail-on-conflicts` then cannot protect and `replace-envs` will not prune.
+///
+/// The failure is arranged by putting a directory where the second manifest's
+/// file has to go, which no amount of retrying will make writable.
+#[test]
+fn a_failure_part_way_through_still_records_what_reached_disk() {
+	let project = Project::new();
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+		r"{
+			first: { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'aaa' } },
+			second: { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'bbb' } },
+		}",
+	);
+	// Manifests are written in sorted order, so `aaa` lands before `bbb` fails.
+	fs::create_dir_all(project.output().join("bbb.yaml")).expect("the obstruction");
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments/demo")],
+			&Options {
+				format: "{{.metadata.name}}".to_owned(),
+				// The obstruction makes the output directory non-empty.
+				merge_strategy: MergeStrategy::FailOnConflicts,
+				..options(&project)
+			},
+		)
+		.expect("the export itself to run");
+
+	let report = &exported.reports[0];
+	assert!(report.failed(), "the obstructed write should have failed");
+	assert_eq!(
+		report.files,
+		vec![PathBuf::from("aaa.yaml")],
+		"the file written before the failure should still be reported"
+	);
+
+	// And it is recorded, so the next export knows who owns it.
+	let index: BTreeMap<String, String> = serde_json::from_str(
+		&fs::read_to_string(project.output().join("manifest.json")).expect("an index"),
+	)
+	.expect("valid JSON");
+	assert_eq!(
+		index.get("aaa.yaml").map(String::as_str),
+		Some("environments/demo/main.jsonnet")
+	);
+}
+
 #[test]
 fn stops_the_whole_export_once_one_environment_cannot_be_written() {
 	let project = Project::new();

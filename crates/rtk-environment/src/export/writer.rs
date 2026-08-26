@@ -73,13 +73,20 @@ pub(crate) struct Written {
 pub(crate) struct Directories(FxHashSet<Box<Path>>);
 
 impl Directories {
-	/// Write `files` beneath `output_dir`, reporting what became of each.
+	/// Write `files` beneath `output_dir`, recording what became of each.
+	///
+	/// Recorded into the caller's `written` as each file lands, rather than
+	/// returned once they all have, so that a failure part way through still
+	/// accounts for the ones already on disk. A file left out of the report is
+	/// left out of `manifest.json`, and a file the index does not mention is one
+	/// `fail-on-conflicts` cannot protect and `replace-envs` will not prune.
 	pub(crate) fn write_files(
 		&mut self,
 		output_dir: &Path,
 		files: Vec<File>,
-	) -> Result<Vec<Written>, Error> {
-		let mut written = Vec::with_capacity(files.len());
+		written: &mut Vec<Written>,
+	) -> Result<(), Error> {
+		written.reserve(files.len());
 
 		for file in files {
 			let path = output_dir.join(&file.path);
@@ -87,7 +94,7 @@ impl Directories {
 			written.push(file.write_to(path)?);
 		}
 
-		Ok(written)
+		Ok(())
 	}
 
 	/// Create a file's parent directory, unless this export already has.
@@ -133,13 +140,20 @@ mod tests {
 			.collect()
 	}
 
+	/// Write and hand back what was written, as the tests want to read it.
+	fn write(directories: &mut Directories, output_dir: &Path, files: Vec<File>) -> Vec<Written> {
+		let mut written = Vec::new();
+		directories
+			.write_files(output_dir, files, &mut written)
+			.unwrap();
+		written
+	}
+
 	#[test]
 	fn writes_files_into_directories_it_creates() {
 		let directory = tempfile::tempdir().unwrap();
 
-		let written = Directories::default()
-			.write_files(directory.path(), files(8))
-			.unwrap();
+		let written = write(&mut Directories::default(), directory.path(), files(8));
 
 		assert_eq!(written.len(), 8);
 		assert!(written.iter().all(|written| !written.unchanged));
@@ -152,15 +166,11 @@ mod tests {
 	#[test]
 	fn leaves_files_that_are_already_what_they_should_be() {
 		let directory = tempfile::tempdir().unwrap();
-		Directories::default()
-			.write_files(directory.path(), files(8))
-			.unwrap();
+		write(&mut Directories::default(), directory.path(), files(8));
 
 		// A second export finds every file unchanged, and the directory already
 		// there.
-		let written = Directories::default()
-			.write_files(directory.path(), files(8))
-			.unwrap();
+		let written = write(&mut Directories::default(), directory.path(), files(8));
 
 		assert_eq!(written.len(), 8);
 		assert!(written.iter().all(|written| written.unchanged));
@@ -169,17 +179,13 @@ mod tests {
 	#[test]
 	fn overwrites_a_file_whose_contents_have_changed() {
 		let directory = tempfile::tempdir().unwrap();
-		Directories::default()
-			.write_files(directory.path(), files(1))
-			.unwrap();
+		write(&mut Directories::default(), directory.path(), files(1));
 
 		let changed = vec![File {
 			path: PathBuf::from("nested/0.yaml"),
 			contents: "index: changed\n".to_owned(),
 		}];
-		let written = Directories::default()
-			.write_files(directory.path(), changed)
-			.unwrap();
+		let written = write(&mut Directories::default(), directory.path(), changed);
 
 		assert_eq!(written.len(), 1);
 		assert!(!written[0].unchanged);
@@ -194,17 +200,16 @@ mod tests {
 		let directory = tempfile::tempdir().unwrap();
 		let mut directories = Directories::default();
 
-		directories.write_files(directory.path(), files(2)).unwrap();
+		write(&mut directories, directory.path(), files(2));
 		// The second call reuses what the first created, and still writes.
-		let written = directories
-			.write_files(
-				directory.path(),
-				vec![File {
-					path: PathBuf::from("nested/deeper/8.yaml"),
-					contents: "index: 8\n".to_owned(),
-				}],
-			)
-			.unwrap();
+		let written = write(
+			&mut directories,
+			directory.path(),
+			vec![File {
+				path: PathBuf::from("nested/deeper/8.yaml"),
+				contents: "index: 8\n".to_owned(),
+			}],
+		);
 
 		assert_eq!(written.len(), 1);
 		assert!(directory.path().join("nested/deeper/8.yaml").exists());

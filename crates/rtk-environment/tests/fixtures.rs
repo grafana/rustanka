@@ -460,6 +460,40 @@ fn refuses_two_resources_of_one_environment_that_share_a_filename() {
 	);
 }
 
+/// A conflict is only found once everything has been written, so the files are
+/// already on disk. The index has to describe them anyway: a file it does not
+/// mention is one `fail-on-conflicts` cannot protect and `replace-envs` will not
+/// prune, which is the drift that outlives the failed export.
+#[test]
+fn a_conflicting_export_still_records_what_it_wrote() {
+	let output = Output::new();
+	let error = output
+		.export(fixture("test-export-conflict/env-duplicate"))
+		.expect_err("two resources want the same file");
+	assert!(
+		error.to_string().contains("written by multiple"),
+		"unexpected error: {error}"
+	);
+
+	let written = output
+		.files()
+		.into_iter()
+		.filter(|file| file != "manifest.json")
+		.collect::<Vec<_>>();
+	assert!(
+		!written.is_empty(),
+		"the export should have written something before the conflict was found"
+	);
+
+	let index = output.index();
+	for file in &written {
+		assert!(
+			index.contains_key(file),
+			"{file} is on disk but not in the index: {index:?}"
+		);
+	}
+}
+
 #[test]
 fn releasing_an_environment_lets_another_take_over_its_files() {
 	let output = Output::new();

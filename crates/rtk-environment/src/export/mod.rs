@@ -617,6 +617,54 @@ struct Plan {
 	template: Option<SpecializedTemplate>,
 }
 
+/// Work out which environment owns each written file, and what that conflicts
+/// with.
+///
+/// Every report that wrote something is considered, failed or not: the files are
+/// on disk either way, so they need an owner and they can still collide.
+///
+/// Claimed files are removed from `superseded`, which is left partly reduced
+/// when a conflict stops the walk — which is why the caller must not prune on
+/// the strength of it.
+fn claim_files(
+	exported: &Exported,
+	index: &Manifest,
+	superseded: &mut FxHashSet<String>,
+) -> Option<Error> {
+	let mut owners: FxHashMap<String, &str> = FxHashMap::default();
+
+	for report in &exported.reports {
+		for file in &report.files {
+			let file = manifest::relative_key(file);
+
+			if let Some(first) = owners.get(&file) {
+				return Some(Error::DuplicateFile {
+					file,
+					first: (*first).to_owned(),
+					second: report.identifier.clone(),
+				});
+			}
+
+			// A file in the index that no exported environment is replacing
+			// belongs to somebody else.
+			if !superseded.contains(&file)
+				&& let Some(owner) = index.owner(&file)
+				&& owner != report.identifier
+			{
+				return Some(Error::ForeignFile {
+					file,
+					owner: owner.to_owned(),
+				});
+			}
+
+			superseded.remove(&file);
+			owners.insert(file, &report.identifier);
+		}
+	}
+
+	None
+}
+
 /// Whether a manifest is a Tanka `Environment` rather than a Kubernetes resource.
 ///
 /// tk filters with `(?i)^Environment/.*$` against `<kind>/<name>`, so the kind is
@@ -704,7 +752,7 @@ impl Engine {
 			serializing += serialized.elapsed();
 
 			let queued = Instant::now();
-			written.extend(directories.write_files(&options.output_dir, files)?);
+			directories.write_files(&options.output_dir, files, &mut written)?;
 			writing += queued.elapsed();
 		}
 
@@ -1065,9 +1113,13 @@ impl Export {
 			serializing += serialized.elapsed();
 
 			let queued = Instant::now();
-			let written = directories.write_files(&self.options.output_dir, files)?;
+			let mut written = Vec::new();
+			let outcome = directories.write_files(&self.options.output_dir, files, &mut written);
 			writing += queued.elapsed();
+			// Recorded whether or not the chunk finished: up to `CHUNK_SIZE`
+			// files can already be on disk when one of them fails.
 			report.record_written(written);
+			outcome?;
 		}
 
 		let manifests = plan.manifests();
@@ -1124,41 +1176,24 @@ impl Export {
 		};
 		superseded.extend(index.files_of(&options.merge_deleted_environments));
 
-		let mut owners: FxHashMap<String, &str> = FxHashMap::default();
-		for report in exported.reports.iter().filter(|report| !report.failed()) {
-			for file in &report.files {
-				let file = manifest::relative_key(file);
+		let conflict = claim_files(exported, &index, &mut superseded);
 
-				if let Some(first) = owners.get(&file) {
-					return Err(Error::DuplicateFile {
-						file,
-						first: (*first).to_owned(),
-						second: report.identifier.clone(),
-					});
-				}
-
-				// A file in the index that no exported environment is replacing
-				// belongs to somebody else.
-				if !superseded.contains(&file)
-					&& let Some(owner) = index.owner(&file)
-					&& owner != report.identifier
-				{
-					return Err(Error::ForeignFile {
-						file,
-						owner: owner.to_owned(),
-					});
-				}
-
-				superseded.remove(&file);
-				owners.insert(file, &report.identifier);
-			}
-		}
-
-		manifest::prune(&options.output_dir, &superseded);
+		// A conflict is only found once everything has been written, so the files
+		// are already on disk. Nothing is deleted on the strength of a run that
+		// did not finish, but the index still has to describe the directory:
+		// files it does not mention are the ones `fail-on-conflicts` cannot
+		// protect and `replace-envs` will not prune.
+		let removed = if conflict.is_none() {
+			// Only what actually went may be forgotten. Pruning is best effort,
+			// and a file it could not delete is still there and still owned.
+			manifest::prune(&options.output_dir, &superseded)
+		} else {
+			FxHashSet::default()
+		};
 
 		if !options.skip_manifest {
-			index.forget(&superseded);
-			for report in exported.reports.iter().filter(|report| !report.failed()) {
+			index.forget(&removed);
+			for report in &exported.reports {
 				index.record(
 					&report.identifier,
 					report.files.iter().map(PathBuf::as_path),
@@ -1167,6 +1202,9 @@ impl Export {
 			index.write()?;
 		}
 
-		Ok(())
+		match conflict {
+			Some(conflict) => Err(conflict),
+			None => Ok(()),
+		}
 	}
 }
