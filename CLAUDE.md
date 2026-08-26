@@ -300,6 +300,43 @@ are used, and the process is a short-lived CLI. Its TLS cache must initialize
 jrsonnet's thread-local GC object space before itself so cached values are
 dropped before that object space during thread teardown.
 
+## Performance and Memory
+
+### Benchmarking
+
+`rtk-benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
+runs the same comparisons CI does. The jobs validate that rtk's output still
+matches tk's, but nothing gates on timing, so a regression lands green.
+
+**Point `TMPDIR` at a real disk.** The fixtures land in a temporary directory,
+and on most machines `/tmp` is tmpfs, where `fsync` is a no-op. An export that
+had gained a disk flush measured 1.00 locally and 1.37 in CI until `TMPDIR` was
+moved onto a real filesystem, where it measured 1.68. Anything touching how
+files reach disk is invisible by default.
+
+Compare against a binary built from the commit before the change rather than
+against the PR base: the ratio CI prints is against the base, so a regression
+introduced mid-branch is diluted by everything else on it.
+
+### The evaluation GC, and why export pays for it
+
+`Drop for Evaluation` runs a full `collect_thread_cycles()`
+(`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Measured on a 200-environment
+recursive export, that collection costs **17% of wall time** (130 ms against
+111 ms without it) and saves **32% of peak RSS** (23 MB against 30 MB).
+
+**Memory is the deliberate choice here**, so the collection stays. Do not
+"optimize" it away without a decision about the memory budget; the speed is
+already accounted for and was not judged worth the resident set.
+
+It also explains why `eval` costs about 18% more than it did before it started
+binding `tanka.dev/environment` and materializing through `process::materialize`.
+`materialize` forces and caches the whole object graph before that single
+collection runs, so the collection has the largest possible graph to traverse;
+the previous serde round-trip left much less behind. `materialize`'s own logic is
+only 5% of eval's runtime, so there is nothing to win by micro-optimizing it —
+the cost is the collection, and it is being paid on purpose.
+
 ## Testing
 
 ### Test Priority
