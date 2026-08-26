@@ -1,0 +1,27 @@
+{
+  "benchmark_name": "Export (Replace)",
+  "benchmark_id": "export-replace",
+  "tests": [
+    {
+      "name": "Single Static Environment",
+      "rtk_mean": 0.02221155094666668,
+      "rtk_stddev": 0.002335374793318056,
+      "vs_tk": 6.88,
+      "vs_base": "equal"
+    },
+    {
+      "name": "Single Inline Environment",
+      "rtk_mean": 0.03415136268656717,
+      "rtk_stddev": 0.004412150063009745,
+      "vs_tk": 23.9,
+      "vs_base": "equal"
+    },
+    {
+      "name": "All Environments",
+      "rtk_mean": 0.12987440685714285,
+      "rtk_stddev": 0.011418106015980218,
+      "vs_tk": 42.31,
+      "vs_base": "equal"
+    }
+  ]
+}

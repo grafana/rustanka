@@ -397,9 +397,13 @@ reached disk is recorded, including what a failed environment wrote before it
 failed and what was written before a conflict was found — a conflict is only
 detectable once every environment has been exported, so refusing to write the
 index then left files owned by nobody. Nothing is pruned on the strength of a
-run that did not finish, only what pruning actually deleted is forgotten, and
-the index is renamed into place: a torn `manifest.json` costs every file in the
-directory its owner at once.
+run that did not finish, and only what pruning actually deleted is forgotten.
+
+The index is written in place, with no temporary and no flush. Making it durable
+while the manifests it describes go out through a plain `fs::write` would be
+theatre — a crash loses the files as readily as their owners, and an index that
+survives to describe missing files is worth nothing. It cost a disk flush on
+every export, which is 2-3 ms of a 5 ms one.
 
 **How many environments were skipped depends on the run.** It is however many
 workers had not yet started when the export was stopped, which is a fact about

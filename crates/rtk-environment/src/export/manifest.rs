@@ -6,7 +6,6 @@
 //! up files it no longer produces.
 
 use std::collections::BTreeMap;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
@@ -157,23 +156,15 @@ impl Manifest {
 		let mut serializer = serde_json::Serializer::with_formatter(&mut serialized, formatter);
 		self.files.serialize(&mut serializer)?;
 
-		// Written through a temporary and renamed into place. A torn
-		// `manifest.json` is worse than a stale one: every file in the directory
-		// loses its owner at once, and nothing afterwards can tell which
-		// environment wrote what.
-		let directory = self.path.parent().unwrap_or_else(|| Path::new("."));
-		let write = |source| Error::Write {
+		// Written in place. Writing through a temporary and flushing it was
+		// theatre: the manifests this index describes are written with a plain
+		// `fs::write` too, so a crash loses the files as readily as their owners
+		// and a durable index describing missing files is worth nothing. What it
+		// did cost was a disk flush on every single export.
+		std::fs::write(&self.path, serialized).map_err(|source| Error::Write {
 			path: self.path.clone(),
 			source,
-		};
-		let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(write)?;
-		temporary.write_all(&serialized).map_err(write)?;
-		temporary.as_file().sync_all().map_err(write)?;
-		temporary
-			.persist(&self.path)
-			.map_err(|error| write(error.error))?;
-
-		Ok(())
+		})
 	}
 }
 
