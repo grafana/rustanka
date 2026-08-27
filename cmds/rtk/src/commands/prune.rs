@@ -44,8 +44,10 @@ pub struct PruneArgs {
 	pub color: ColorMode,
 
 	/// Force the diff-strategy to use. Automatically chosen if not set.
-	#[arg(long, value_enum)]
-	pub diff_strategy: Option<DiffStrategy>,
+	/// One of `native`, `server`, `subset` or `validate`. Checked here so an
+	/// unknown name is refused in tk's words.
+	#[arg(long, value_name = "DIFF_STRATEGY")]
+	pub diff_strategy: Option<String>,
 
 	/// --dry-run parameter to pass down to kubectl, must be "none", "server", or "client"
 	#[arg(long)]
@@ -130,6 +132,8 @@ pub async fn prune_environment<W: Write>(
 		manifests: &manifests,
 		with_prune: true,
 		diff_strategy_override: opts.diff_strategy,
+		// Diffing on its own, with no apply to take a lead from.
+		apply_strategy: None,
 	})
 	.await?;
 	let diff_engine = setup.engine;
@@ -247,7 +251,11 @@ pub async fn prune_environment<W: Write>(
 async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 	let jsonnet = args.jsonnet.into_options();
 	let opts = PruneOpts {
-		diff_strategy: args.diff_strategy,
+		diff_strategy: args
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?,
 		auto_approve: args.auto_approve.unwrap_or_default(),
 		dry_run: args.dry_run,
 		force: args.force,

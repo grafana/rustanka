@@ -319,6 +319,11 @@ pub struct DiffEngineConfig<'a> {
 	pub with_prune: bool,
 	/// Optional override for diff strategy.
 	pub diff_strategy_override: Option<DiffStrategy>,
+	/// The apply strategy in force, when this diff precedes an apply.
+	///
+	/// tk defaults the diff to server-side whenever the apply is, and decides
+	/// that from the strategy it resolved rather than from the spec alone.
+	pub apply_strategy: Option<&'a str>,
 }
 
 /// Result of setting up a diff engine.
@@ -339,13 +344,17 @@ pub struct DiffEngineSetup {
 /// 3. Creating the diff engine
 pub async fn setup_diff_engine(config: DiffEngineConfig<'_>) -> Result<DiffEngineSetup> {
 	// Determine diff strategy
-	let strategy = config.diff_strategy_override.unwrap_or_else(|| {
-		if let Some(s) = config.spec {
-			DiffStrategy::from_spec(s, config.connection.server_version())
-		} else {
-			DiffStrategy::Native
-		}
-	});
+	let strategy = match config.diff_strategy_override {
+		Some(strategy) => strategy,
+		None => match config.spec {
+			Some(spec) => DiffStrategy::from_spec(
+				spec,
+				config.connection.server_version(),
+				config.apply_strategy,
+			)?,
+			None => DiffStrategy::Native,
+		},
+	};
 	tracing::debug!(strategy = %strategy, "using diff strategy");
 
 	// Get default namespace from spec or connection

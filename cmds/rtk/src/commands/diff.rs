@@ -76,8 +76,10 @@ pub struct DiffArgs {
 	pub color: ColorMode,
 
 	/// Force the diff-strategy to use. Automatically chosen if not set.
-	#[arg(long, value_enum)]
-	pub diff_strategy: Option<DiffStrategy>,
+	/// One of `native`, `server`, `subset` or `validate`. Checked here so an
+	/// unknown name is refused in tk's words.
+	#[arg(long, value_name = "DIFF_STRATEGY")]
+	pub diff_strategy: Option<String>,
 
 	/// Exit with 0 even when differences are found
 	#[arg(short = 'z', long)]
@@ -210,6 +212,8 @@ pub async fn diff_manifests<W: Write>(
 		manifests: &manifests,
 		with_prune: opts.with_prune,
 		diff_strategy_override: opts.strategy,
+		// Diffing on its own, with no apply to take a lead from.
+		apply_strategy: None,
 	})
 	.await?;
 	let engine = setup.engine;
@@ -262,7 +266,11 @@ async fn run_async<W: Write>(args: DiffArgs, mut writer: W) -> Result<DiffResult
 
 	let jsonnet = args.jsonnet.into_options();
 	let opts = DiffOpts {
-		strategy: args.diff_strategy,
+		strategy: args
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?,
 		with_prune: args.with_prune,
 		color: args.color,
 		summarize: args.summarize,
@@ -283,6 +291,14 @@ impl DiffArgs {
 	/// parallel, and prints the names of environments with differences.
 	#[instrument(skip_all, fields(path = %self.path.display()))]
 	async fn list_modified_environments<W: Write>(&self, writer: &mut W) -> Result<DiffResult> {
+		// Resolved once, before any environment is looked at, so an unknown
+		// strategy is refused rather than reported per environment.
+		let strategy = self
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?;
+
 		// Discover all environments in the path
 		tracing::debug!(path = %self.path.display(), "discovering environments");
 		let jsonnet = self.jsonnet.options();
@@ -342,7 +358,7 @@ impl DiffArgs {
 			let selected_name = env.selected_by().map(str::to_owned);
 			let jsonnet = jsonnet.clone();
 
-			let diff_strategy = self.diff_strategy;
+			let diff_strategy = strategy;
 			let with_prune = self.with_prune;
 			let target = Arc::clone(&target);
 			let sem = semaphore.clone();
@@ -415,14 +431,15 @@ async fn check_environment_for_changes(
 	let spec_for_connection = evaluated.spec.clone().unwrap_or_default();
 	let connection = ClusterConnection::from_spec(&spec_for_connection).await?;
 
-	// Determine diff strategy
-	let strategy = diff_strategy.unwrap_or_else(|| {
-		if let Some(spec) = evaluated.spec.as_ref() {
-			DiffStrategy::from_spec(spec, connection.server_version())
-		} else {
-			DiffStrategy::Native
-		}
-	});
+	// Determine diff strategy. No apply strategy is in play here: this is a
+	// diff, so nothing resolves one.
+	let strategy = match diff_strategy {
+		Some(strategy) => strategy,
+		None => match evaluated.spec.as_ref() {
+			Some(spec) => DiffStrategy::from_spec(spec, connection.server_version(), None)?,
+			None => DiffStrategy::Native,
+		},
+	};
 
 	// Get default namespace
 	let default_namespace = evaluated

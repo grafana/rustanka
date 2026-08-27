@@ -310,47 +310,6 @@ impl Default for JsonentImplementationOrConfig {
 	}
 }
 
-/// A strategy used for `kubectl apply` and `kubectl diff`- `client` or `server`.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Strategy {
-	Client,
-	Server,
-}
-
-impl DeepMerge for Strategy {
-	fn merge_from(&mut self, other: Self) {
-		*self = other;
-	}
-}
-
-/// A [`semver::Version`] with a [`JsonSchema`] implementation.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Version(pub semver::Version);
-
-impl DeepMerge for Version {
-	fn merge_from(&mut self, other: Self) {
-		*self = other;
-	}
-}
-
-impl JsonSchema for Version {
-	fn schema_id() -> Cow<'static, str> {
-		Cow::Borrowed("Version")
-	}
-
-	fn schema_name() -> Cow<'static, str> {
-		Cow::Borrowed(concat!(module_path!(), "::Version").into())
-	}
-
-	fn json_schema(_: &mut SchemaGenerator) -> Schema {
-		json_schema!({
-			"type": "string",
-			"pattern": r#"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"#,
-		})
-	}
-}
-
 /// A [`semver::VersionReq`] with a [`JsonSchema`] implementation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VersionReq(pub semver::VersionReq);

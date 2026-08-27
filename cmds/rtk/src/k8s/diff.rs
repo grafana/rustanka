@@ -49,25 +49,32 @@ impl fmt::Display for DiffStrategy {
 }
 
 impl DiffStrategy {
+	/// Every strategy that can be named, in the order this reports them.
+	///
+	/// tk builds its list by iterating a Go map, so the order it prints is
+	/// whatever the runtime felt like; sorted is the only reproducible choice.
+	const NAMES: [&'static str; 4] = ["native", "server", "subset", "validate"];
+
+	/// The strategy an environment asked for, or the one its cluster deserves.
+	///
+	/// A strategy that does not exist is refused rather than warned about: tk's
+	/// `differ` looks the name up in a map and fails when it is absent, so
+	/// falling back to automatic selection meant rtk quietly diffed a different
+	/// way than the environment asked for.
 	pub fn from_spec(
 		spec: &EnvironmentSpec,
 		server_version: &k8s_openapi::apimachinery::pkg::version::Info,
-	) -> Self {
+		apply_strategy: Option<&str>,
+	) -> Result<Self, UnknownDiffStrategy> {
 		if let Some(strategy) = spec.diff_strategy.as_deref() {
-			match strategy {
-				"native" => return DiffStrategy::Native,
-				"server" => return DiffStrategy::Server,
-				"validate" => return DiffStrategy::Validate,
-				"subset" => return DiffStrategy::Subset,
-				_ => tracing::warn!(
-					"Unknown diffStrategy '{}', using automatic selection",
-					strategy
-				),
-			}
+			return Self::named(strategy);
 		}
 
-		if spec.apply_strategy.as_deref() == Some("server") {
-			return DiffStrategy::Server;
+		// tk defaults the diff to server-side when the apply is, which it
+		// decides from the resolved strategy rather than from the spec alone —
+		// so `--apply-strategy server` reaches this too.
+		if apply_strategy == Some("server") {
+			return Ok(DiffStrategy::Server);
 		}
 
 		let major: u32 = server_version.major.parse().unwrap_or(1);
@@ -76,12 +83,35 @@ impl DiffStrategy {
 			.trim_end_matches('+')
 			.parse()
 			.unwrap_or(0);
-		if major >= 1 && minor >= 13 {
+		Ok(if major >= 1 && minor >= 13 {
 			DiffStrategy::Native
 		} else {
 			DiffStrategy::Subset
+		})
+	}
+
+	/// The strategy of this name, or [`UnknownDiffStrategy`].
+	pub fn named(strategy: &str) -> Result<Self, UnknownDiffStrategy> {
+		match strategy {
+			"native" => Ok(DiffStrategy::Native),
+			"server" => Ok(DiffStrategy::Server),
+			"validate" => Ok(DiffStrategy::Validate),
+			"subset" => Ok(DiffStrategy::Subset),
+			_ => Err(UnknownDiffStrategy {
+				requested: strategy.to_owned(),
+			}),
 		}
 	}
+}
+
+/// A diff strategy nobody implements.
+#[derive(Debug, Error)]
+#[error(
+	"diff strategy `{requested}` does not exist. Pick one of: [{}]",
+	DiffStrategy::NAMES.join(" ")
+)]
+pub struct UnknownDiffStrategy {
+	requested: String,
 }
 
 /// Errors that can occur during diff operations.
@@ -1447,6 +1477,83 @@ fn filter_to_manifest_fields(
 
 #[cfg(test)]
 mod tests {
+	/// tk's `differ` looks the name up in a map and fails when it is absent, so
+	/// a strategy that does not exist is refused rather than quietly replaced.
+	#[test]
+	fn an_unknown_diff_strategy_is_refused_in_tks_words() {
+		let error = DiffStrategy::named("nonsense").expect_err("no such strategy");
+		assert_eq!(
+			error.to_string(),
+			"diff strategy `nonsense` does not exist. Pick one of: [native server subset validate]"
+		);
+		// tk prints its list in Go map order, which is not an order at all; this
+		// one is sorted so that the message is reproducible.
+		assert_eq!(DiffStrategy::named("native").unwrap(), DiffStrategy::Native);
+		assert_eq!(DiffStrategy::named("server").unwrap(), DiffStrategy::Server);
+		assert_eq!(
+			DiffStrategy::named("validate").unwrap(),
+			DiffStrategy::Validate
+		);
+		assert_eq!(DiffStrategy::named("subset").unwrap(), DiffStrategy::Subset);
+	}
+
+	/// `none` is an apply-only spelling; tk's diff rejects it through the same
+	/// map lookup as any other unknown name.
+	#[test]
+	fn none_is_not_a_diff_strategy() {
+		assert!(DiffStrategy::named("none").is_err());
+	}
+
+	fn server_version(minor: &str) -> k8s_openapi::apimachinery::pkg::version::Info {
+		k8s_openapi::apimachinery::pkg::version::Info {
+			major: "1".to_owned(),
+			minor: minor.to_owned(),
+			..Default::default()
+		}
+	}
+
+	fn spec(diff: Option<&str>) -> EnvironmentSpec {
+		let mut spec = EnvironmentSpec::default();
+		spec.diff_strategy = diff.map(Into::into);
+		spec
+	}
+
+	#[test]
+	fn a_named_strategy_wins_over_the_automatic_one() {
+		let strategy = DiffStrategy::from_spec(&spec(Some("subset")), &server_version("30"), None)
+			.expect("a known strategy");
+		assert_eq!(strategy, DiffStrategy::Subset);
+	}
+
+	/// tk defaults the diff to server-side whenever the apply is, and decides it
+	/// from the strategy it resolved — so a `--apply-strategy server` flag
+	/// reaches here even when the spec says nothing.
+	#[test]
+	fn a_server_side_apply_defaults_the_diff_to_server_side() {
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("30"), Some("server"))
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Server);
+
+		// And a client-side apply leaves the automatic choice alone.
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("30"), Some("client"))
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Native);
+	}
+
+	#[test]
+	fn an_old_cluster_still_gets_the_subset_diff() {
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("12"), None)
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Subset);
+	}
+
+	#[test]
+	fn an_unknown_strategy_in_the_spec_fails_the_operation() {
+		let error = DiffStrategy::from_spec(&spec(Some("nonsense")), &server_version("30"), None)
+			.expect_err("the spec names no such strategy");
+		assert!(error.to_string().contains("does not exist"), "{error}");
+	}
+
 	use indoc::indoc;
 
 	use super::*;
