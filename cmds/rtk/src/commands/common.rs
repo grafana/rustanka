@@ -61,13 +61,17 @@ pub struct EvaluatedManifests {
 
 /// Evaluate and fully process manifests before they cross into async Kubernetes
 /// work. Evaluated Jsonnet values are dropped in this function.
+///
+/// Takes the engine rather than building one, so that a command looking at
+/// several environments looks at them through the same one. The engine carries
+/// the Helm render cache, and building one per environment meant a chart shared
+/// by twenty environments was rendered twenty times.
 pub fn evaluate_manifests(
+	engine: &rtk_environments::Engine,
 	path: &Path,
-	jsonnet: rtk_jsonnet::Options,
 	name: Option<&str>,
 	targets: &[String],
 ) -> Result<EvaluatedManifests> {
-	let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet));
 	let environment = engine.load_single(path, name).map_err(environment_error)?;
 	let manifests = engine
 		.manifests(&environment, targets)
@@ -77,6 +81,14 @@ pub fn evaluate_manifests(
 		environment_label: environment.environment_label(),
 		manifests,
 	})
+}
+
+/// The engine a command evaluates through.
+///
+/// One per process: the Helm render cache lives on it, so everything a command
+/// evaluates should go through the same one.
+pub fn engine(jsonnet: rtk_jsonnet::Options) -> rtk_environments::Engine {
+	rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet))
 }
 
 pub(crate) fn environment_error(error: EnvironmentError) -> anyhow::Error {
@@ -97,6 +109,14 @@ pub struct JsonnetArgs {
 	/// This argument is ignored- it will always be "jrsonnet".
 	#[arg(long = "jsonnet-implementation", default_value_t)]
 	pub implementation: EvaluatorImplementation,
+
+	/// Cache helmTemplate results across runs in each project's `target/helm` directory
+	///
+	/// Declared here rather than on one command, so that anything which
+	/// evaluates Jsonnet can reuse a chart it already rendered — a diff or a show
+	/// benefits from it exactly as an export does.
+	#[arg(long)]
+	pub helm_cache: bool,
 
 	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
 	///
@@ -128,6 +148,7 @@ impl JsonnetArgs {
 			ext_variables: self.ext_str.iter().cloned().collect(),
 			top_level_arguments: self.tla_str.iter().cloned().collect(),
 			top_level_code: self.tla_code.iter().cloned().collect(),
+			helm_cache: self.helm_cache,
 			max_stack: self.max_stack,
 			..rtk_jsonnet::Options::default()
 		}

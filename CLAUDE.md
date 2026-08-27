@@ -225,6 +225,13 @@ by a SHA-256 digest of the release, render options, complete chart contents and
 Helm version. The cache is shared by all environments rooted in that project;
 an export spanning several projects uses each project's own target directory.
 
+The engine is shared for the whole of a command, so the in-memory half of the
+cache spans every environment it touches: a chart twenty environments share is
+rendered once. `diff --list-modified-envs` used to build an engine per
+environment and so rendered it twenty times. `--helm-cache` is declared on the
+shared Jsonnet arguments rather than on `export`, so a diff or a show reuses a
+chart it rendered on a previous run exactly as an export does.
+
 Cache reads and writes are best-effort. Missing, corrupt or incompatible entries
 are misses, and write failures never replace a successful Helm render with an
 export failure. Writes use temporary files and an atomic persist so parallel rtk

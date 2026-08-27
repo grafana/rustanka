@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, evaluate_manifests, get_or_create_connection, setup_diff_engine,
+	create_tokio_runtime, engine, evaluate_manifests, get_or_create_connection, setup_diff_engine,
 	DiffEngineConfig,
 };
 use crate::{
@@ -170,7 +170,8 @@ pub async fn diff_environment<W: Write>(
 	opts: DiffOpts,
 	writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluated = evaluate_manifests(path, jsonnet, opts.name.as_deref(), &opts.target)?;
+	let engine = engine(jsonnet);
+	let evaluated = evaluate_manifests(&engine, path, opts.name.as_deref(), &opts.target)?;
 	let manifests = evaluated.manifests;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests to diff");
 
@@ -356,7 +357,9 @@ impl DiffArgs {
 				.unwrap_or_else(|| env.path.to_string_lossy().to_string());
 
 			let selected_name = env.selected_by().map(str::to_owned);
-			let jsonnet = jsonnet.clone();
+			// The engine discovery was done through, so every environment shares
+			// one Helm render cache rather than rendering the same chart again.
+			let engine = engine.clone();
 
 			let diff_strategy = strategy;
 			let with_prune = self.with_prune;
@@ -368,7 +371,7 @@ impl DiffArgs {
 				tracing::debug!(env_path = %env_path, "checking environment");
 				match check_environment_for_changes(
 					env_path.clone(),
-					jsonnet,
+					engine,
 					selected_name,
 					diff_strategy,
 					with_prune,
@@ -414,13 +417,13 @@ impl DiffArgs {
 #[instrument(skip_all, fields(path = %path))]
 async fn check_environment_for_changes(
 	path: String,
-	jsonnet: rtk_jsonnet::Options,
+	engine: rtk_environments::Engine,
 	name: Option<String>,
 	diff_strategy: Option<DiffStrategy>,
 	with_prune: bool,
 	target: Arc<Vec<String>>,
 ) -> Result<bool> {
-	let evaluated = evaluate_manifests(Path::new(&path), jsonnet, name.as_deref(), target.as_ref())
+	let evaluated = evaluate_manifests(&engine, Path::new(&path), name.as_deref(), target.as_ref())
 		.context("evaluating environment")?;
 	let manifests = evaluated.manifests;
 	if manifests.is_empty() {
@@ -494,6 +497,7 @@ mod tests {
 			exit_zero: false,
 			name: Some("my-env".to_string()),
 			jsonnet: crate::commands::JsonnetArgs {
+				helm_cache: false,
 				ext_code: vec![("code1".into(), "{}".into())],
 				ext_str: vec![("str1".into(), "value1".into())],
 				implementation: EvaluatorImplementation::default(),

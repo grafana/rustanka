@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, evaluate_manifests, get_or_create_connection, prompt_confirmation,
-	setup_diff_engine, validate_dry_run, DiffEngineConfig,
+	create_tokio_runtime, engine, evaluate_manifests, get_or_create_connection,
+	prompt_confirmation, setup_diff_engine, validate_dry_run, DiffEngineConfig,
 };
 use super::diff::ColorMode;
 
@@ -228,7 +228,8 @@ pub async fn apply_environment<W: Write>(
 	opts: ApplyOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluated = evaluate_manifests(path, jsonnet, opts.name.as_deref(), &opts.target)?;
+	let engine = engine(jsonnet);
+	let evaluated = evaluate_manifests(&engine, path, opts.name.as_deref(), &opts.target)?;
 	let manifests = evaluated.manifests;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests to apply");
 

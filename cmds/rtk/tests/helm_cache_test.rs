@@ -173,3 +173,128 @@ fn the_cache_survives_an_unrelated_kube_environment() {
 		"an unrelated kube environment should not have made a second entry"
 	);
 }
+
+/// A project of `count` environments, all rendering the same chart.
+///
+/// Each names an apiServer nothing can reach: `diff` evaluates every
+/// environment — and so renders every chart — before it tries to connect, which
+/// is what lets this count renders without a cluster.
+fn project_sharing_one_chart(count: usize) -> tempfile::TempDir {
+	let project = tempfile::Builder::new()
+		.prefix("rtk-shared-engine")
+		.tempdir()
+		.expect("a temporary directory");
+	let root = project.path();
+	fs::write(
+		root.join("jsonnetfile.json"),
+		r#"{"version":1,"dependencies":[],"legacyImports":true}"#,
+	)
+	.expect("the project marker");
+
+	let chart = root.join("charts/demo/templates");
+	fs::create_dir_all(&chart).expect("the chart directory");
+	fs::write(
+		root.join("charts/demo/Chart.yaml"),
+		"apiVersion: v2\nname: demo\nversion: 1.0.0\n",
+	)
+	.expect("the chart");
+	fs::write(
+		chart.join("configmap.yaml"),
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-config\ndata:\n  who: demo\n",
+	)
+	.expect("the template");
+
+	for index in 0..count {
+		let environment = root.join(format!("environments/e{index}"));
+		fs::create_dir_all(&environment).expect("the environment directory");
+		fs::write(
+			environment.join("spec.json"),
+			format!(
+				r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{}},"spec":{{"apiServer":"https://unreachable.invalid:6443","namespace":"ns{index}"}}}}"#
+			),
+		)
+		.expect("the spec");
+		fs::write(
+			environment.join("main.jsonnet"),
+			"local helm = std.native('helmTemplate');\n{ rendered: helm('demo', '../../charts/demo', { calledFrom: std.thisFile, namespace: 'ns' }) }\n",
+		)
+		.expect("the entrypoint");
+	}
+
+	project
+}
+
+/// A helm that records what it was asked before handing over to the real one.
+fn counting_helm(directory: &Path, log: &Path) -> PathBuf {
+	let helm = directory.join("helm-counter");
+	let real = which_helm();
+	fs::write(
+		&helm,
+		format!(
+			"#!/bin/sh\necho \"$*\" >> {}\nexec {} \"$@\"\n",
+			log.display(),
+			real.display()
+		),
+	)
+	.expect("the wrapper");
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt as _;
+		fs::set_permissions(&helm, fs::Permissions::from_mode(0o755)).expect("executable");
+	}
+	helm
+}
+
+fn which_helm() -> PathBuf {
+	let output = Command::new("sh")
+		.args(["-c", "command -v helm"])
+		.output()
+		.expect("looking for helm");
+	PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// How many times helm was asked to render, ignoring the one version probe rtk
+/// makes to identify which helm it is talking to.
+fn renders(log: &Path) -> usize {
+	fs::read_to_string(log)
+		.unwrap_or_default()
+		.lines()
+		.filter(|line| line.starts_with("template"))
+		.count()
+}
+
+/// Every environment a command looks at goes through one engine, so a chart
+/// they share is rendered once rather than once each.
+///
+/// `diff --list-modified-envs` used to build an engine per environment, and the
+/// Helm render cache lives on the engine — six environments sharing a chart
+/// rendered it six times.
+#[test]
+fn environments_sharing_a_chart_render_it_once() {
+	if which_helm().as_os_str().is_empty() {
+		return;
+	}
+
+	const ENVIRONMENTS: usize = 6;
+	let project = project_sharing_one_chart(ENVIRONMENTS);
+	let log = project.path().join("helm-calls.log");
+	let helm = counting_helm(project.path(), &log);
+
+	// Every environment fails to connect, which is beside the point and does not
+	// even change the exit code: `--list-modified-envs` always reports success,
+	// as tk does. What matters is that they were all evaluated first.
+	Command::new(env!("CARGO_BIN_EXE_rtk"))
+		.current_dir(project.path())
+		.args(["diff", ".", "--list-modified-envs"])
+		.env("RTK_HELM_PATH", &helm)
+		.output()
+		.expect("rtk runs");
+
+	// A count of zero would mean nothing was evaluated at all, so this asserts
+	// both that the work happened and that it happened once.
+	assert_eq!(
+		renders(&log),
+		1,
+		"{ENVIRONMENTS} environments share one chart, so it should be rendered once"
+	);
+}

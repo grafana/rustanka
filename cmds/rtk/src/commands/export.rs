@@ -69,10 +69,6 @@ pub struct ExportArgs {
 	#[arg(long)]
 	pub skip_manifest: bool,
 
-	/// Cache helmTemplate results across runs in each project's `target/helm` directory
-	#[arg(long)]
-	pub helm_cache: bool,
-
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -99,7 +95,6 @@ impl ExportArgs {
 			jsonnet,
 			cache_envs: _,
 			cache_path: _,
-			helm_cache,
 			mem_ballast_size_bytes: _,
 		} = self;
 
@@ -108,8 +103,7 @@ impl ExportArgs {
 			.unwrap_or_default()
 			.parse::<MergeStrategy>()?;
 
-		let mut jsonnet = jsonnet.into_options();
-		jsonnet.helm_cache = helm_cache;
+		let jsonnet = jsonnet.into_options();
 
 		let options = Options {
 			output_dir,
@@ -243,11 +237,16 @@ mod tests {
 		export: ExportArgs,
 	}
 
+	/// The flag lives on the shared Jsonnet arguments now, so every command that
+	/// evaluates has it; this checks it still reaches the engine from export.
 	#[test]
 	fn passes_helm_cache_to_the_jsonnet_engine() {
 		let args = TestCli::parse_from(["rtk", "out", "environment", "--helm-cache"]);
 		let (_, _, jsonnet) = args.export.into_export_options().unwrap();
-
 		assert!(jsonnet.helm_cache);
+
+		let args = TestCli::parse_from(["rtk", "out", "environment"]);
+		let (_, _, jsonnet) = args.export.into_export_options().unwrap();
+		assert!(!jsonnet.helm_cache, "off unless asked for");
 	}
 }
