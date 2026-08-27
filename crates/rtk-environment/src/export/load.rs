@@ -181,7 +181,7 @@ impl Engine {
 			None
 		};
 
-		let options = self.jsonnet.options();
+		let options = self.jsonnet.options().for_project(&jpath)?;
 		let mut evaluator = self
 			.jsonnet
 			.create_evaluator_for(environment.as_ref().map(|found| &found.environment.spec));
@@ -285,7 +285,7 @@ impl Engine {
 	}
 
 	fn load_bare(&self, jpath: JPath) -> Result<LoadedEnvironment, Error> {
-		let options = self.jsonnet.options();
+		let options = self.jsonnet.options().for_project(&jpath)?;
 		let mut evaluator = self.jsonnet.create_evaluator();
 		options.apply(&mut evaluator)?;
 		evaluator.with_import_paths(jpath.import_paths.clone())?;
@@ -298,7 +298,7 @@ impl Engine {
 	}
 
 	fn evaluate(&self, discovered: &Discovered, jpath: &JPath) -> Result<serde_json::Value, Error> {
-		let options = self.jsonnet.options();
+		let options = self.jsonnet.options().for_project(jpath)?;
 
 		// Discovery evaluated this environment without knowing what it asked for,
 		// since what it asked for is what discovery was reading. Now that its

@@ -364,9 +364,10 @@ impl Engine {
 	/// Every environment declared anywhere in an entrypoint.
 	#[tracing::instrument(skip(self))]
 	fn resolve_inline(&self, candidate: Candidate) -> Result<Vec<Discovered>, Error> {
-		let options = self.jsonnet.options();
-
 		let jpath = JPath::resolve(candidate.entrypoint.as_ref())?;
+		// The project's own configuration applies here too, or discovery would
+		// evaluate an entrypoint differently than exporting it does.
+		let options = self.jsonnet.options().for_project(&jpath)?;
 		let snippet = self.entrypoint_snippet(&jpath.entrypoint, METADATA_EVAL_SCRIPT);
 
 		// Inline environments are named by the Jsonnet that declares them, but

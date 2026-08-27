@@ -4818,6 +4818,7 @@ dependencies = [
  "rtk-jsonnet-kustomize",
  "rtk-jsonnet-native-functions",
  "rtk-jsonnet-regex",
+ "rtk-masterminds",
  "rtk-spec",
  "rustc-hash 2.1.1",
  "serde",
@@ -4926,6 +4927,7 @@ dependencies = [
  "serde",
  "serde-saphyr 0.0.11",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

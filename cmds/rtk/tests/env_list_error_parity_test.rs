@@ -82,7 +82,7 @@ fn run_rtk_env_list(env_path: &PathBuf) -> Result<String, String> {
 		ext_str: Vec::new(),
 		json: true,
 		jsonnet_implementation: "go".to_owned(),
-		max_stack: 500,
+		max_stack: Some(500),
 		names: false,
 		selector: None,
 		tla_code: Vec::new(),

@@ -153,7 +153,7 @@ impl LoadedEnvironment {
 			}
 		})?;
 
-		if constraints.matches(&tanka_version()) {
+		if constraints.matches(&rtk_masterminds::tanka_version()) {
 			return Ok(());
 		}
 
@@ -190,12 +190,6 @@ impl LoadedEnvironment {
 
 		Ok(manifests)
 	}
-}
-
-/// The version [`crate::TANKA_COMPATIBLE_VERSION`] names, ready to compare.
-fn tanka_version() -> semver::Version {
-	semver::Version::parse(crate::TANKA_COMPATIBLE_VERSION.trim_start_matches('v'))
-		.expect("the compatible Tanka version is a semantic version")
 }
 
 /// Options for both kinds of export.

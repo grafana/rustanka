@@ -16,6 +16,7 @@ rtk-jsonnet-jrsonnet.workspace = true
 rtk-jsonnet-kustomize.workspace = true
 rtk-jsonnet-native-functions.workspace = true
 rtk-jsonnet-regex.workspace = true
+rtk-masterminds.workspace = true
 rtk-spec.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true

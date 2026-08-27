@@ -21,6 +21,10 @@ pub struct RcSpec {
 		skip_serializing_if = "Option::is_none"
 	)]
 	pub api_server: Option<Box<str>>,
+	// Defaulted, or a `tkrc.yaml` would have to spell out every field it does
+	// not care about. Nothing loaded one until the project configuration was
+	// wired up, so this had never been exercised.
+	#[serde(default)]
 	#[serde(skip_serializing_if = "crate::v1alpha1::common::bool_is_false")]
 	pub disable_native_functions: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]

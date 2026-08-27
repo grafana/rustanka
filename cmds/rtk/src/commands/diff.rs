@@ -497,7 +497,7 @@ mod tests {
 				ext_code: vec![("code1".into(), "{}".into())],
 				ext_str: vec![("str1".into(), "value1".into())],
 				implementation: EvaluatorImplementation::default(),
-				max_stack: 500,
+				max_stack: Some(500),
 				tla_code: vec![("tla1".into(), "true".into())],
 				tla_str: vec![("tla2".into(), "hello".into())],
 			},

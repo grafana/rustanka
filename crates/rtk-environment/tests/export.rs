@@ -213,6 +213,76 @@ fn a_nested_environment_is_refused_for_everything_but_export() {
 	);
 }
 
+/// A `tkrc.yaml` reaches evaluation, which is the whole point of reading it.
+///
+/// tk uses the file only to mark where a project starts and never reads what is
+/// in it; rtk's settings lived in the type and were never loaded from anywhere,
+/// so none of them did anything. `disableNativeFunctions` is the plainest to
+/// observe: an environment can ask whether Tanka's natives exist.
+#[test]
+fn a_projects_tkrc_reaches_evaluation() {
+	let probe = r"{
+		config: {
+			apiVersion: 'v1',
+			kind: 'ConfigMap',
+			metadata: { name: 'probe' },
+			data: { helm: if std.native('helmTemplate') != null then 'present' else 'absent' },
+		},
+	}";
+
+	for (tkrc, expected) in [
+		(None, "present"),
+		(Some("spec:\n  disableNativeFunctions: true\n"), "absent"),
+		(Some("spec: {}\n"), "present"),
+	] {
+		let project = Project::new();
+		if let Some(contents) = tkrc {
+			project.write("tkrc.yaml", contents);
+		}
+		static_environment(
+			&project,
+			"environments/demo",
+			r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+			probe,
+		);
+
+		let engine = engine();
+		let loaded = engine
+			.load_single(&project.path().join("environments/demo"), None)
+			.expect("the environment loads");
+		let manifests = engine.manifests(&loaded, &[]).expect("it processes");
+
+		assert_eq!(manifests[0]["data"]["helm"], expected, "for tkrc {tkrc:?}");
+	}
+}
+
+/// And a project can refuse the tool outright.
+#[test]
+fn a_project_demanding_another_tanka_stops_the_export() {
+	let project = Project::new();
+	project.write(
+		"tkrc.yaml",
+		"spec:\n  expectVersions:\n    tanka: \">=0.99.0\"\n",
+	);
+	static_environment(
+		&project,
+		"environments/demo",
+		r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{},"spec":{"namespace":"demo"}}"#,
+		&format!("{{ config: {CONFIG_MAP} }}"),
+	);
+
+	let error = engine()
+		.load_single(&project.path().join("environments/demo"), None)
+		.expect_err("the project refuses this Tanka");
+	assert!(
+		error
+			.report()
+			.contains("does not satisfy the version required by the project: '>=0.99.0'"),
+		"{}",
+		error.report()
+	);
+}
+
 /// A static environment naming the Tanka it needs, with the constraint written
 /// the way Masterminds reads it.
 fn environment_expecting_tanka(project: &Project, name: &str, constraint: &str) {

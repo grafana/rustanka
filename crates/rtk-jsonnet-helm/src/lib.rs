@@ -29,6 +29,25 @@ impl Plugin {
 	}
 }
 
+/// The major version of the helm rtk would run, as helm reports it.
+///
+/// For a project that named the helm it expects in `tkrc.yaml`. Asking helm
+/// costs a process launch, so this is only called when a project actually
+/// declared an expectation — nothing pays for a check it did not ask for.
+pub fn installed_helm_major_version() -> Result<u64, Box<str>> {
+	let state = State::new(None);
+	let reported = state.ask_helm(&["version", "--template", "{{ .Version }}"])?;
+	let digits = reported
+		.trim()
+		.trim_start_matches('v')
+		.split('.')
+		.next()
+		.unwrap_or_default();
+	digits.parse().map_err(|_| {
+		format!("could not read a major version out of helm's {reported:?}").into_boxed_str()
+	})
+}
+
 impl Default for Plugin {
 	fn default() -> Self {
 		Self::new()

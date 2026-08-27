@@ -31,8 +31,10 @@ pub struct ListArgs {
 	pub jsonnet_implementation: String,
 
 	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: i32,
+	///
+	/// Unset by default, so a project's `tkrc.yaml` can decide instead.
+	#[arg(long)]
+	pub max_stack: Option<i32>,
 
 	/// Plain names output
 	#[arg(long)]
@@ -65,11 +67,10 @@ impl ListArgs {
 			ext_variables: values(&self.ext_str)?,
 			top_level_code: values(&self.tla_code)?,
 			top_level_arguments: values(&self.tla_str)?,
-			max_stack: Some(
-				self.max_stack
-					.try_into()
-					.context("max stack must be positive")?,
-			),
+			max_stack: self
+				.max_stack
+				.map(|max_stack| max_stack.try_into().context("max stack must be positive"))
+				.transpose()?,
 			..rtk_jsonnet::Options::default()
 		})
 	}
@@ -170,7 +171,7 @@ mod tests {
 			ext_str: vec![],
 			json: false,
 			jsonnet_implementation: "go".to_string(),
-			max_stack: 500,
+			max_stack: Some(500),
 			names: false,
 			selector: None,
 			tla_code: vec![],

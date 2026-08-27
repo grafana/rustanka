@@ -27,6 +27,32 @@ pub enum Error {
 	/// already clear from what it says, and is not the reason for it.
 	#[error(transparent)]
 	Jrsonnet(#[from] JrsonnetError),
+
+	#[error("reading {path}: {source}")]
+	Rc {
+		path: String,
+		#[source]
+		source: rtk_spec::canonical::RcError,
+	},
+
+	#[error(
+		"parsing version constraint: '{reason}'. Please check 'expectVersions.tanka' in {path}"
+	)]
+	UnreadableProjectTankaConstraint { path: String, reason: String },
+
+	#[error(
+		"current version '{}' does not satisfy the version required by the project: '{constraint}'. You likely need to use another version of Tanka",
+		rtk_masterminds::TANKA_COMPATIBLE_VERSION
+	)]
+	UnsatisfiedProjectTankaVersion { constraint: String },
+
+	#[error("could not read the installed helm version: {reason}")]
+	UnreadableHelmVersion { reason: String },
+
+	#[error(
+		"helm {installed} is installed, but the project expects helm {expected}. Please check 'expectVersions.helm'"
+	)]
+	UnsatisfiedHelmVersion { expected: u64, installed: u64 },
 }
 
 impl From<Infallible> for Error {
@@ -902,6 +928,111 @@ pub struct Options {
 }
 
 impl Options {
+	/// These options with the project's own `tkrc.yaml` merged in.
+	///
+	/// tk uses `tkrc.yaml` only to mark where a project starts and never reads
+	/// what is in it. rtk reads it, so a project can name the Jsonnet
+	/// implementation to use, how deep evaluation may recurse, whether Tanka's
+	/// native functions exist, and the versions it expects of its tools. A
+	/// project without one is configured exactly as before.
+	///
+	/// The more direct request still wins: [`Options::apply`] overrides the
+	/// configured stack depth with `--max-stack` when that was given.
+	pub fn for_project(&self, jpath: &JPath) -> Result<Options, Error> {
+		let Some(path) = jpath.rc.as_deref() else {
+			return Ok(self.clone());
+		};
+
+		let rc = rtk_spec::canonical::Rc::load(path).map_err(|source| Error::Rc {
+			path: path.display().to_string(),
+			source,
+		})?;
+
+		let mut options = self.clone();
+		options.rc.spec.merge_from(rc.spec);
+		options.check_expected_tanka_version(path)?;
+		options.check_expected_helm_version()?;
+		Ok(options)
+	}
+
+	/// Refuse to work with a helm the project did not ask for.
+	///
+	/// Only a project that named one pays for this: helm has to be run to be
+	/// asked its version, so a project that said nothing is never made to wait
+	/// for it. Checked here rather than when a chart is first rendered because
+	/// the helm plugin is shared by every project an export touches, while this
+	/// expectation belongs to one of them.
+	///
+	/// `expectVersions.helm` names a major version, so that is all that is
+	/// compared. rtk has no tk behaviour to match: tk never reads this file.
+	fn check_expected_helm_version(&self) -> Result<(), Error> {
+		let Some(expected) = self
+			.rc
+			.spec
+			.expect_versions
+			.as_ref()
+			.and_then(|versions| versions.helm)
+		else {
+			return Ok(());
+		};
+
+		let expected_major = match expected {
+			rtk_spec::canonical::HelmVersion::V3 => 3,
+			rtk_spec::canonical::HelmVersion::V4 => 4,
+		};
+
+		let installed = rtk_jsonnet_helm::installed_helm_major_version().map_err(|reason| {
+			Error::UnreadableHelmVersion {
+				reason: reason.into_string(),
+			}
+		})?;
+
+		if installed == expected_major {
+			return Ok(());
+		}
+
+		Err(Error::UnsatisfiedHelmVersion {
+			expected: expected_major,
+			installed,
+		})
+	}
+
+	/// Refuse to work in a project that asked for a different Tanka.
+	///
+	/// The environment-level `spec.expectVersions.tanka` is checked where tk
+	/// checks it, which leaves `eval` and `env list` out. This one is a
+	/// statement about the whole project rather than about one environment, and
+	/// is checked as soon as the project's configuration is read — so every
+	/// command that evaluates anything honours it. There is no tk behaviour to
+	/// match: tk never reads this file.
+	fn check_expected_tanka_version(&self, path: &Path) -> Result<(), Error> {
+		let Some(constraint) = self
+			.rc
+			.spec
+			.expect_versions
+			.as_ref()
+			.and_then(|versions| versions.tanka.as_deref())
+			.filter(|constraint| !constraint.is_empty())
+		else {
+			return Ok(());
+		};
+
+		let constraints = rtk_masterminds::Constraints::parse(constraint).map_err(|source| {
+			Error::UnreadableProjectTankaConstraint {
+				path: path.display().to_string(),
+				reason: source.to_string(),
+			}
+		})?;
+
+		if constraints.matches(&rtk_masterminds::tanka_version()) {
+			return Ok(());
+		}
+
+		Err(Error::UnsatisfiedProjectTankaVersion {
+			constraint: constraint.to_owned(),
+		})
+	}
+
 	pub fn apply(&self, evaluator: &mut Evaluator) -> Result<(), Error> {
 		let rc = match self.max_stack {
 			Some(max_stack) => {
@@ -1226,6 +1357,157 @@ mod tests {
 			formatting_of(&engine, Some(&plain))["floats"],
 			"0.59999999999999998",
 			"the previous environment's formatting leaked into this one"
+		);
+	}
+
+	/// A project with a `tkrc.yaml`, and a jpath pointing at it.
+	fn project(tkrc: Option<&str>) -> (tempfile::TempDir, JPath) {
+		let directory = tempfile::tempdir().expect("a temporary directory");
+		std::fs::write(directory.path().join("jsonnetfile.json"), "{}").expect("the marker");
+		if let Some(contents) = tkrc {
+			std::fs::write(directory.path().join("tkrc.yaml"), contents).expect("the tkrc");
+		}
+		std::fs::write(directory.path().join("main.jsonnet"), "{}").expect("the entrypoint");
+		let jpath = JPath::resolve(&directory.path().join("main.jsonnet")).expect("it resolves");
+		(directory, jpath)
+	}
+
+	/// tk uses `tkrc.yaml` only to mark where a project starts. rtk reads it, so
+	/// its settings finally reach evaluation — nothing loaded the file before.
+	#[test]
+	fn a_projects_configuration_is_read_from_its_tkrc() {
+		let (_directory, jpath) = project(Some("spec:\n  maxStackDepth: 42\n"));
+		let options = Options::default()
+			.for_project(&jpath)
+			.expect("the tkrc reads");
+		assert_eq!(options.rc.spec.max_stack_depth, Some(42));
+	}
+
+	#[test]
+	fn a_project_without_a_tkrc_is_configured_as_before() {
+		let (_directory, jpath) = project(None);
+		assert!(jpath.rc.is_none(), "there is no tkrc to find");
+		let options = Options::default()
+			.for_project(&jpath)
+			.expect("nothing to read");
+		assert_eq!(options.rc.spec.max_stack_depth, None);
+	}
+
+	/// The flag is the more direct request, so it wins — but only when it was
+	/// actually given. It used to carry a default of 500, which was passed on
+	/// every run and so beat the project's depth every time, which is why
+	/// `maxStackDepth` could never take effect.
+	#[test]
+	fn a_given_max_stack_beats_the_projects_depth() {
+		let (_directory, jpath) = project(Some("spec:\n  maxStackDepth: 42\n"));
+
+		let configured = Options::default()
+			.for_project(&jpath)
+			.expect("the tkrc reads");
+		assert_eq!(configured.rc.spec.max_stack_depth, Some(42));
+
+		let overridden = Options {
+			max_stack: Some(900),
+			..Options::default()
+		}
+		.for_project(&jpath)
+		.expect("the tkrc reads");
+		// `apply` is what resolves the two, and prefers the flag.
+		assert_eq!(overridden.max_stack, Some(900));
+		assert_eq!(overridden.rc.spec.max_stack_depth, Some(42));
+	}
+
+	#[test]
+	fn a_project_demanding_another_tanka_is_refused() {
+		let (_directory, jpath) =
+			project(Some("spec:\n  expectVersions:\n    tanka: \">=0.99.0\"\n"));
+		let error = Options::default()
+			.for_project(&jpath)
+			.expect_err("this Tanka is too old for it");
+		assert!(
+			error
+				.to_string()
+				.contains("does not satisfy the version required by the project: '>=0.99.0'"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn a_project_constraint_masterminds_cannot_read_is_refused() {
+		let (_directory, jpath) = project(Some("spec:\n  expectVersions:\n    tanka: nonsense\n"));
+		let error = Options::default()
+			.for_project(&jpath)
+			.expect_err("that is not a constraint");
+		assert!(
+			error
+				.to_string()
+				.contains("parsing version constraint: 'improper constraint: nonsense'"),
+			"{error}"
+		);
+	}
+
+	/// Including the `||` alternatives that are why this goes through
+	/// `rtk-masterminds` rather than the `semver` crate.
+	#[test]
+	fn a_project_constraint_this_tanka_satisfies_is_accepted() {
+		for constraint in [">=0.30.0", ">= 0.0.0 || < 0.0.0", "0.38.x", "^0.1.2"] {
+			let (_directory, jpath) = project(Some(&format!(
+				"spec:\n  expectVersions:\n    tanka: \"{constraint}\"\n"
+			)));
+			Options::default()
+				.for_project(&jpath)
+				.unwrap_or_else(|error| panic!("{constraint:?} should be satisfied: {error}"));
+		}
+	}
+
+	/// A project naming a helm it has not got is refused. Skipped where there is
+	/// no helm to ask, as the helm golden fixtures are.
+	#[test]
+	fn a_project_expecting_another_helm_is_refused() {
+		let Ok(installed) = rtk_jsonnet_helm::installed_helm_major_version() else {
+			return;
+		};
+		let unwanted = if installed == 3 { 4 } else { 3 };
+
+		let (_directory, jpath) = project(Some(&format!(
+			"spec:\n  expectVersions:\n    helm: {unwanted}\n"
+		)));
+		let error = Options::default()
+			.for_project(&jpath)
+			.expect_err("that helm is not installed");
+		assert!(
+			error.to_string().contains(&format!(
+				"helm {installed} is installed, but the project expects helm {unwanted}"
+			)),
+			"{error}"
+		);
+
+		// And the helm it does have is accepted.
+		let (_directory, jpath) = project(Some(&format!(
+			"spec:\n  expectVersions:\n    helm: {installed}\n"
+		)));
+		Options::default()
+			.for_project(&jpath)
+			.expect("the installed helm is what was asked for");
+	}
+
+	/// A project that named no helm is never made to wait for one. Verified by
+	/// hand with `RTK_HELM_PATH` pointing at nothing: the export still runs,
+	/// because helm is only asked when an expectation was declared.
+	#[test]
+	fn a_project_naming_no_helm_does_not_ask_for_one() {
+		let (_directory, jpath) = project(Some("spec:\n  maxStackDepth: 42\n"));
+		let options = Options::default()
+			.for_project(&jpath)
+			.expect("no helm expectation to check");
+		assert!(
+			options
+				.rc
+				.spec
+				.expect_versions
+				.as_ref()
+				.and_then(|versions| versions.helm)
+				.is_none()
 		);
 	}
 

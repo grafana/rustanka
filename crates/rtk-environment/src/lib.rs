@@ -26,15 +26,4 @@ pub enum Error {
 	Rendered(String),
 }
 
-/// The Tanka whose behaviour rtk implements, spelled as tk spells its own.
-///
-/// tk builds this in with `git describe --tags`, so a release reports
-/// `v0.38.0`, and its version messages quote the string verbatim. rtk reports
-/// the same one because that is the question an environment's
-/// `spec.expectVersions.tanka` asks: not what version of rtk is running, but
-/// whether the tool provides the Tanka the environment needs.
-///
-/// Note the absence of a prerelease. Masterminds treats a prerelease version as
-/// unsatisfying any constraint that did not ask for one, so a `-pre` here would
-/// fail nearly every constraint an environment could write.
-pub const TANKA_COMPATIBLE_VERSION: &str = "v0.38.0";
+pub use rtk_masterminds::TANKA_COMPATIBLE_VERSION;

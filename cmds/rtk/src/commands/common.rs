@@ -99,8 +99,13 @@ pub struct JsonnetArgs {
 	pub implementation: EvaluatorImplementation,
 
 	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: usize,
+	///
+	/// Deliberately without a default. A default here would be passed on every
+	/// run and would always beat the depth a project's `tkrc.yaml` asks for,
+	/// which is the more general setting of the two. Left unset, the project's
+	/// depth applies, and failing that the same 500 tk uses.
+	#[arg(long)]
+	pub max_stack: Option<usize>,
 
 	/// Set code value of top level function (Format: key=<code>)
 	#[arg(long, value_parser = JsonnetArgs::parse_key_value)]
@@ -123,7 +128,7 @@ impl JsonnetArgs {
 			ext_variables: self.ext_str.iter().cloned().collect(),
 			top_level_arguments: self.tla_str.iter().cloned().collect(),
 			top_level_code: self.tla_code.iter().cloned().collect(),
-			max_stack: Some(self.max_stack),
+			max_stack: self.max_stack,
 			..rtk_jsonnet::Options::default()
 		}
 	}
