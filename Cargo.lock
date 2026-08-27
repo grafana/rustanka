@@ -4902,6 +4902,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtk-masterminds"
+version = "0.5.0-pre99"
+dependencies = [
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rtk-spec"
 version = "0.5.0-pre99"
 dependencies = [

@@ -149,6 +149,7 @@ rustls = { version = "0.23", default-features = false }
 # Rustanka
 rtk-environments = { path = "./crates/rtk-environment", version = "0.5.0-pre99" }
 rtk-jsonnet = { path = "./crates/rtk-jsonnet", version = "0.5.0-pre99" }
+rtk-masterminds = { path = "./crates/rtk-masterminds", version = "0.5.0-pre99" }
 rtk-jsonnet-core = { path = "./crates/rtk-jsonnet-core", version = "0.5.0-pre99" }
 rtk-jsonnet-helm = { path = "./crates/rtk-jsonnet-helm", version = "0.5.0-pre99" }
 rtk-jsonnet-jrsonnet = { path = "./crates/rtk-jsonnet-jrsonnet", version = "0.5.0-pre99" }
