@@ -131,7 +131,8 @@ impl ApplyEngine {
 				..Default::default()
 			};
 
-			// Try strategic merge patch first, fall back to merge patch for CRDs
+			// Try strategic merge patch first, fall back to merge patch for
+			// custom resources
 			let result = api
 				.patch(&name, &patch_params, &Patch::Strategic(&manifest))
 				.await;
@@ -139,27 +140,31 @@ impl ApplyEngine {
 			match result {
 				Ok(_) => {}
 				Err(kube::Error::Api(ref err)) if err.code == 415 => {
-					// UnsupportedMediaType - CRD doesn't support strategic merge
-					api.patch(&name, &patch_params, &Patch::Merge(manifest))
+					// Custom resources reject strategic merge during content-type
+					// negotiation, before the object lookup, so a missing object
+					// surfaces as 404 only on the merge patch retry. That must
+					// create, same as built-in types.
+					match api
+						.patch(&name, &patch_params, &Patch::Merge(manifest.clone()))
 						.await
-						.map_err(|e| ApplyError::ApplyFailed {
-							kind: gvk.kind.clone(),
-							name: name.clone(),
-							source: Box::new(e),
-						})?;
+					{
+						Ok(_) => {}
+						Err(kube::Error::Api(ref err)) if err.code == 404 => {
+							self.create_object(&api, &gvk.kind, &name, &manifest)
+								.await?;
+						}
+						Err(e) => {
+							return Err(ApplyError::ApplyFailed {
+								kind: gvk.kind,
+								name,
+								source: Box::new(e),
+							});
+						}
+					}
 				}
 				Err(kube::Error::Api(ref err)) if err.code == 404 => {
-					// Resource doesn't exist, create it
-					let obj: DynamicObject = serde_json::from_value(manifest.clone())
-						.map_err(ApplyError::ManifestConversion)?;
-
-					api.create(&Default::default(), &obj).await.map_err(|e| {
-						ApplyError::ApplyFailed {
-							kind: gvk.kind.clone(),
-							name: name.clone(),
-							source: Box::new(e),
-						}
-					})?;
+					self.create_object(&api, &gvk.kind, &name, &manifest)
+						.await?;
 				}
 				Err(e) => {
 					return Err(ApplyError::ApplyFailed {
@@ -171,6 +176,25 @@ impl ApplyEngine {
 			}
 		}
 
+		Ok(())
+	}
+
+	async fn create_object(
+		&self,
+		api: &Api<DynamicObject>,
+		kind: &str,
+		name: &str,
+		manifest: &serde_json::Value,
+	) -> Result<(), ApplyError> {
+		let obj: DynamicObject =
+			serde_json::from_value(manifest.clone()).map_err(ApplyError::ManifestConversion)?;
+		api.create(&Default::default(), &obj)
+			.await
+			.map_err(|e| ApplyError::ApplyFailed {
+				kind: kind.to_string(),
+				name: name.to_string(),
+				source: Box::new(e),
+			})?;
 		Ok(())
 	}
 

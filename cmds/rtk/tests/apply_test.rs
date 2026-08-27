@@ -7,6 +7,8 @@
 #[path = "test_utils.rs"]
 mod test_utils;
 
+use std::path::Path;
+
 use k8s_mock::DiscoveryMode;
 use rtk::{
 	commands::{
@@ -249,5 +251,64 @@ mod tests {
 	async fn apply_failure_preserves_kube_api_error() {
 		let test_dir = test_utils::diff_fixture_dir("configmap_modified");
 		run_apply_failure_preserves_api_error(&test_dir).await;
+	}
+
+	/// The CRD is registered but the object is not. Strategic merge patch returns
+	/// 415 for custom resources, so the missing object only 404s on the merge
+	/// patch retry, and apply must create it there.
+	#[tokio::test]
+	async fn apply_creates_missing_custom_resource() {
+		let test_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("tests/testdata/apply")
+			.join("scaledobject_create");
+		let env_dir = test_dir.join("environment");
+		let cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		let (_server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			true,
+		)
+		.await;
+
+		let mut output = Vec::new();
+		let opts = ApplyOpts {
+			auto_approve: AutoApprove::Always,
+			color: ColorMode::Never,
+			..Default::default()
+		};
+
+		apply_environment(
+			env_dir.as_path(),
+			Some(connection.clone()),
+			GlobalEvaluatorOptions::default(),
+			EvaluatorOptions::default(),
+			opts,
+			&mut output,
+		)
+		.await
+		.expect("creating a missing ScaledObject should succeed");
+
+		output.clear();
+		let opts = ApplyOpts {
+			auto_approve: AutoApprove::Always,
+			color: ColorMode::Never,
+			..Default::default()
+		};
+		let diffs = apply_environment(
+			env_dir.as_path(),
+			Some(connection),
+			GlobalEvaluatorOptions::default(),
+			EvaluatorOptions::default(),
+			opts,
+			&mut output,
+		)
+		.await
+		.expect("second apply should succeed");
+
+		let has_changes = diffs.iter().any(|d| d.has_changes());
+		assert!(
+			!has_changes,
+			"expected no changes after creating the ScaledObject"
+		);
 	}
 }
