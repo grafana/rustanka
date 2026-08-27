@@ -129,10 +129,48 @@ impl LoadedEnvironment {
 		&self.environment
 	}
 
+	/// Refuse to act on an environment that asked for a different Tanka.
+	///
+	/// tk compares the version it was built with against
+	/// `spec.expectVersions.tanka` and refuses when it does not satisfy it. rtk
+	/// answers for the Tanka it implements rather than for its own version:
+	/// comparing `0.5.x` against a constraint like `>=0.20` would fail every
+	/// real environment, and the question being asked is which Tanka's
+	/// behaviour is on offer.
+	fn check_expected_tanka_version(&self) -> Result<(), Error> {
+		let Some(constraint) = self
+			.environment()
+			.and_then(|environment| environment.spec.expect_versions.as_ref())
+			.and_then(|versions| versions.tanka.as_deref())
+			.filter(|constraint| !constraint.is_empty())
+		else {
+			return Ok(());
+		};
+
+		let constraints = rtk_masterminds::Constraints::parse(constraint).map_err(|source| {
+			Error::UnreadableTankaConstraint {
+				reason: source.to_string(),
+			}
+		})?;
+
+		if constraints.matches(&tanka_version()) {
+			return Ok(());
+		}
+
+		Err(Error::UnsatisfiedTankaVersion {
+			constraint: constraint.to_owned(),
+		})
+	}
+
 	fn processed_manifests(
 		&self,
 		targets: &process::Targets,
 	) -> Result<Vec<serde_json::Value>, Error> {
+		// tk checks this in `LoadManifests`, which is what export, show, diff,
+		// apply and prune all go through and what `eval` and `env list` do not —
+		// so this is the one place it belongs.
+		self.check_expected_tanka_version()?;
+
 		let Some(data) = self.data() else {
 			return Ok(Vec::new());
 		};
@@ -152,6 +190,12 @@ impl LoadedEnvironment {
 
 		Ok(manifests)
 	}
+}
+
+/// The version [`crate::TANKA_COMPATIBLE_VERSION`] names, ready to compare.
+fn tanka_version() -> semver::Version {
+	semver::Version::parse(crate::TANKA_COMPATIBLE_VERSION.trim_start_matches('v'))
+		.expect("the compatible Tanka version is a semantic version")
 }
 
 /// Options for both kinds of export.
@@ -478,6 +522,15 @@ pub enum Error {
 
 	#[error("skipped after an earlier fatal error")]
 	Skipped,
+
+	#[error("parsing version constraint: '{reason}'. Please check 'spec.expectVersions.tanka'")]
+	UnreadableTankaConstraint { reason: String },
+
+	#[error(
+		"current version '{}' does not satisfy the version required by the environment: '{constraint}'. You likely need to use another version of Tanka",
+		crate::TANKA_COMPATIBLE_VERSION
+	)]
+	UnsatisfiedTankaVersion { constraint: String },
 }
 
 impl Error {

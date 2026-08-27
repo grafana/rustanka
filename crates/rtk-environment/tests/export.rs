@@ -213,6 +213,92 @@ fn a_nested_environment_is_refused_for_everything_but_export() {
 	);
 }
 
+/// A static environment naming the Tanka it needs, with the constraint written
+/// the way Masterminds reads it.
+fn environment_expecting_tanka(project: &Project, name: &str, constraint: &str) {
+	static_environment(
+		project,
+		name,
+		&format!(
+			r#"{{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{{}},"spec":{{"namespace":"demo","expectVersions":{{"tanka":"{constraint}"}}}}}}"#
+		),
+		&format!("{{ config: {CONFIG_MAP} }}"),
+	);
+}
+
+/// Word for word tk's message, including the `v` prefix it carries from
+/// `git describe --tags`.
+#[test]
+fn an_environment_demanding_a_newer_tanka_is_refused() {
+	let project = Project::new();
+	environment_expecting_tanka(&project, "environments/demo", ">=0.99.0");
+	let engine = engine();
+	let loaded = engine
+		.load_single(&project.path().join("environments/demo"), None)
+		.expect("the environment loads; only manifesting checks the version");
+
+	let error = engine
+		.manifests(&loaded, &[])
+		.expect_err("this Tanka is too old for it");
+	assert_eq!(
+		error.to_string(),
+		format!(
+			"current version '{}' does not satisfy the version required by the environment: '>=0.99.0'. You likely need to use another version of Tanka",
+			rtk_environments::TANKA_COMPATIBLE_VERSION
+		)
+	);
+}
+
+#[test]
+fn a_constraint_masterminds_cannot_read_is_refused() {
+	let project = Project::new();
+	environment_expecting_tanka(&project, "environments/demo", "nonsense");
+	let engine = engine();
+	let loaded = engine
+		.load_single(&project.path().join("environments/demo"), None)
+		.expect("the environment loads");
+
+	assert_eq!(
+		engine
+			.manifests(&loaded, &[])
+			.expect_err("the constraint is not a constraint")
+			.to_string(),
+		"parsing version constraint: 'improper constraint: nonsense'. Please check 'spec.expectVersions.tanka'"
+	);
+}
+
+/// Including the syntax that is the reason this does not go through the `semver`
+/// crate: `||` alternatives, and a caret that is major-only.
+#[test]
+fn a_constraint_this_tanka_satisfies_is_accepted() {
+	for constraint in [">=0.30.0", ">= 0.0.0 || < 0.0.0", "^0.1.2", "0.38.x", ""] {
+		let project = Project::new();
+		environment_expecting_tanka(&project, "environments/demo", constraint);
+		let engine = engine();
+		let loaded = engine
+			.load_single(&project.path().join("environments/demo"), None)
+			.expect("the environment loads");
+
+		let manifests = engine
+			.manifests(&loaded, &[])
+			.unwrap_or_else(|error| panic!("{constraint:?} should be satisfied: {error}"));
+		assert_eq!(manifests.len(), 1, "for {constraint:?}");
+	}
+}
+
+/// tk checks the version in `LoadManifests`, which `Eval` does not go through,
+/// so an environment demanding another Tanka still evaluates.
+#[test]
+fn eval_does_not_check_the_expected_tanka_version() {
+	let project = Project::new();
+	environment_expecting_tanka(&project, "environments/demo", ">=0.99.0");
+
+	let value = engine()
+		.eval(&project.path().join("environments/demo"), None)
+		.expect("eval does not check the version");
+	assert!(value.get("config").is_some(), "{value}");
+}
+
 #[test]
 fn loads_a_bare_jsonnet_entrypoint() {
 	let project = Project::new();
