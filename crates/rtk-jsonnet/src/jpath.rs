@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::env;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;
 
@@ -40,6 +40,11 @@ pub struct JPath {
 }
 
 impl JPath {
+	/// Tanka searches JSONNET_PATH last-to-first.
+	pub fn jsonnet_path(&self) -> Vec<PathBuf> {
+		self.import_paths.iter().rev().cloned().collect()
+	}
+
 	/// Default entrypoint filename for environments
 	pub const DEFAULT_ENTRYPOINT: &str = "main.jsonnet";
 
@@ -60,6 +65,7 @@ impl JPath {
 		P: AsRef<Path>,
 	{
 		let abs_path = JPath::make_absolute(Cow::Borrowed(path.as_ref()))?;
+		let abs_path = normalize_path(&abs_path);
 
 		let (root_directory, rc) = JPath::find_root_directory_and_rc(&abs_path)?;
 		let base_directory = JPath::find_base_directory(&abs_path, &root_directory)?;
@@ -256,6 +262,29 @@ impl JPath {
 			Ok(Cow::Owned(env::current_dir()?.join(path_ref)))
 		}
 	}
+}
+
+/// Lexically clean `.` and `..` (Go `filepath.Clean` / `filepath.Abs`).
+/// Does not pop past the path root (`/` or a Windows prefix).
+pub fn normalize_path(path: &Path) -> PathBuf {
+	let mut out = PathBuf::new();
+	for c in path.components() {
+		match c {
+			Component::CurDir => {}
+			Component::ParentDir => match out.components().next_back() {
+				Some(Component::Normal(_)) => {
+					let _ = out.pop();
+				}
+				Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+				Some(_) | None => out.push(c.as_os_str()),
+			},
+			other => out.push(other.as_os_str()),
+		}
+	}
+	if out.as_os_str().is_empty() {
+		out.push(Component::CurDir.as_os_str());
+	}
+	out
 }
 
 #[cfg(test)]
