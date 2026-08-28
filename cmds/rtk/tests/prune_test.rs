@@ -153,4 +153,103 @@ mod tests {
 				.collect::<Vec<_>>()
 		);
 	}
+
+	#[tokio::test]
+	async fn prune_namespace_only_finds_resources_in_selected_namespace() {
+		let test_dir = fixture_dir("resource_deleted");
+		let env_dir = test_dir.join("environment");
+		let mut cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		let mut other_namespace = cluster_state
+			.iter()
+			.find(|resource| resource["metadata"]["name"] == "delete-this")
+			.unwrap()
+			.clone();
+		other_namespace["metadata"]["name"] = "delete-other".into();
+		other_namespace["metadata"]["namespace"] = "other".into();
+		cluster_state.push(other_namespace);
+
+		let (server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			false,
+		)
+		.await;
+		let mut opts = default_prune_opts();
+		opts.namespace = Some("other".to_string());
+		opts.dry_run = Some("client".to_string());
+
+		let diffs = run_prune(&env_dir, connection, opts)
+			.await
+			.expect("namespace-scoped prune should succeed");
+		assert_eq!(diffs.len(), 1);
+		assert_eq!(diffs[0].name, "delete-other");
+		assert_eq!(diffs[0].namespace.as_deref(), Some("other"));
+
+		let prune_list_requests: Vec<_> = server
+			.http_exchanges()
+			.into_iter()
+			.filter(|exchange| {
+				exchange.method == "GET"
+					&& exchange
+						.query
+						.as_deref()
+						.is_some_and(|query| query.contains("labelSelector"))
+			})
+			.collect();
+		assert!(!prune_list_requests.is_empty());
+		assert!(
+			prune_list_requests
+				.iter()
+				.all(|exchange| exchange.path.contains("/namespaces/other/")),
+			"unexpected prune list paths: {:?}",
+			prune_list_requests
+				.iter()
+				.map(|exchange| &exchange.path)
+				.collect::<Vec<_>>()
+		);
+	}
+
+	#[tokio::test]
+	async fn prune_target_limits_api_lists_and_filters_orphans_by_name() {
+		let test_dir = fixture_dir("resource_deleted");
+		let env_dir = test_dir.join("environment");
+		let mut cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		let mut second_orphan = cluster_state
+			.iter()
+			.find(|resource| resource["metadata"]["name"] == "delete-this")
+			.unwrap()
+			.clone();
+		second_orphan["metadata"]["name"] = "delete-other".into();
+		cluster_state.push(second_orphan);
+
+		let (server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			false,
+		)
+		.await;
+		let mut opts = default_prune_opts();
+		opts.target = vec!["ConfigMap/delete-this".to_string()];
+		opts.dry_run = Some("client".to_string());
+
+		let diffs = run_prune(&env_dir, connection, opts)
+			.await
+			.expect("targeted prune should succeed");
+		assert_eq!(diffs.len(), 1);
+		assert_eq!(diffs[0].name, "delete-this");
+
+		let prune_list_paths: Vec<_> = server
+			.http_exchanges()
+			.into_iter()
+			.filter(|exchange| {
+				exchange.method == "GET"
+					&& exchange
+						.query
+						.as_deref()
+						.is_some_and(|query| query.contains("labelSelector"))
+			})
+			.map(|exchange| exchange.path)
+			.collect();
+		assert_eq!(prune_list_paths, vec!["/api/v1/configmaps"]);
+	}
 }

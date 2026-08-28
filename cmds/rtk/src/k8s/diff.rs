@@ -22,7 +22,10 @@ use super::{
 	redacted_object::{RedactedObject, UnredactedObject},
 	ResourceScope,
 };
-use crate::spec::DiffStrategy;
+use crate::{
+	environments::{keep_target, target_kind_hints, TargetMatcher},
+	spec::DiffStrategy,
+};
 
 /// Errors that can occur during diff operations.
 #[derive(Debug, Error)]
@@ -125,6 +128,15 @@ pub enum DiffStatus {
 
 	/// Namespace doesn't exist yet, so resource comparison is deferred.
 	SoonAdded,
+}
+
+/// Restrictions applied while discovering resources eligible for pruning.
+#[derive(Clone, Copy, Default)]
+pub struct PruneDetectionOptions<'a> {
+	/// Limit discovery to namespaced resources in this namespace.
+	pub namespace: Option<&'a str>,
+	/// Apply the same kind/name target expressions used for local manifests.
+	pub target_matchers: &'a [TargetMatcher],
 }
 
 impl DiffStatus {
@@ -474,6 +486,26 @@ impl DiffEngine {
 		env_label: Option<&str>,
 		inject_labels: bool,
 	) -> Result<Vec<ResourceDiff>, DiffError> {
+		self.diff_all_with_prune_options(
+			manifests,
+			with_prune,
+			env_label,
+			inject_labels,
+			PruneDetectionOptions::default(),
+		)
+		.await
+	}
+
+	/// Diff all manifests with restrictions on prune candidate discovery.
+	#[instrument(skip(self, manifests, prune_options), fields(manifest_count = manifests.len()))]
+	pub async fn diff_all_with_prune_options(
+		&self,
+		manifests: &[serde_json::Value],
+		with_prune: bool,
+		env_label: Option<&str>,
+		inject_labels: bool,
+		prune_options: PruneDetectionOptions<'_>,
+	) -> Result<Vec<ResourceDiff>, DiffError> {
 		// Validate prune requirements early
 		let do_prune = if with_prune {
 			if !inject_labels {
@@ -518,6 +550,7 @@ impl DiffEngine {
 				&manifests,
 				label,
 				&self.api_cache,
+				prune_options,
 			);
 		}
 
@@ -617,6 +650,7 @@ impl DiffEngine {
 		manifests: &[Arc<serde_json::Value>],
 		env_label: &str,
 		api_cache: &ApiResourceCache,
+		options: PruneDetectionOptions<'_>,
 	) {
 		let manifest_keys = Arc::new(Self::build_manifest_keys(
 			manifests,
@@ -624,12 +658,27 @@ impl DiffEngine {
 			&engine.default_namespace,
 		));
 		let label = env_label.to_string();
+		let namespace = options
+			.namespace
+			.filter(|namespace| !namespace.is_empty())
+			.map(str::to_string);
+		let target_matchers = Arc::new(options.target_matchers.to_vec());
+		let kind_hints = target_kind_hints(options.target_matchers);
 
 		for (gvk, discovered) in api_cache.iter() {
 			// Skip resources that don't support list operation
 			if !discovered
 				.capabilities
 				.supports_operation(kube::discovery::verbs::LIST)
+			{
+				continue;
+			}
+			if namespace.is_some() && discovered.scope != ResourceScope::Namespaced {
+				continue;
+			}
+			if kind_hints
+				.as_ref()
+				.is_some_and(|hints| !hints.contains(&gvk.kind.to_lowercase()))
 			{
 				continue;
 			}
@@ -640,6 +689,8 @@ impl DiffEngine {
 			let discovered = discovered.clone();
 			let manifest_keys = manifest_keys.clone();
 			let label = label.clone();
+			let namespace = namespace.clone();
+			let target_matchers = target_matchers.clone();
 
 			join_set.spawn(async move {
 				let _permit = match sem.acquire().await {
@@ -647,7 +698,14 @@ impl DiffEngine {
 					Err(_) => return DiffTaskResult::Prune(Err(DiffError::SemaphoreClosed)),
 				};
 				let result = engine
-					.find_deleted_for_type(&gvk, &discovered, &manifest_keys, &label)
+					.find_deleted_for_type(
+						&gvk,
+						&discovered,
+						&manifest_keys,
+						&label,
+						namespace.as_deref(),
+						&target_matchers,
+					)
 					.await;
 				DiffTaskResult::Prune(result)
 			});
@@ -662,11 +720,18 @@ impl DiffEngine {
 		discovered: &DiscoveredResource,
 		manifest_keys: &HashSet<(String, String, Option<String>, String)>,
 		env_label: &str,
+		namespace_filter: Option<&str>,
+		target_matchers: &[TargetMatcher],
 	) -> Result<Vec<ResourceDiff>, DiffError> {
 		let label_selector = format!("tanka.dev/environment={}", env_label);
 		let list_params = ListParams::default().labels(&label_selector);
 
-		let api: Api<DynamicObject> = Api::all_with(self.client.clone(), &discovered.api_resource);
+		let api: Api<DynamicObject> = match namespace_filter {
+			Some(namespace) => {
+				Api::namespaced_with(self.client.clone(), namespace, &discovered.api_resource)
+			}
+			None => Api::all_with(self.client.clone(), &discovered.api_resource),
+		};
 
 		let resources = match api.list(&list_params).await {
 			Ok(list) => list,
@@ -684,6 +749,11 @@ impl DiffEngine {
 				continue;
 			};
 			let namespace = resource.metadata.namespace.clone();
+			if !target_matchers.is_empty()
+				&& !keep_target(&format!("{}/{}", gvk.kind, name), target_matchers)
+			{
+				continue;
+			}
 
 			let resource_key = (
 				gvk.api_version(),
