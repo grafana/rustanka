@@ -35,9 +35,9 @@ Faster in every case, up to:
 
 | Command | Up to | Notes |
 | --- | --- | --- |
-| `eval` | 41× faster | |
-| `export` (full) | 25× faster | Uses jrsonnet directly, which is much faster than go-jsonnet |
-| `export` (replace) | 32× faster | Uses jrsonnet directly, which is much faster than go-jsonnet |
+| `eval` | 41× faster | Uses jrsonnet directly, which is much faster than go-jsonnet |
+| `export` (full) | 25× faster | |
+| `export` (replace) | 32× faster | |
 | `diff` | 51× faster | kubectl operations have been replaced with native Kubernetes API calls |
 | `tool importers` | 8× faster | |
 
