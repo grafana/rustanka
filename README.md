@@ -33,12 +33,13 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 `rtk` vs `tk` on Grafana Labs' CI benchmarks ([sample run](https://github.com/grafana/rustanka/pull/38)).
 Faster in every case, up to:
 
-| Command | Up to |
-| --- | --- |
-| `eval` | 41× faster |
-| `export` (full) | 25× faster |
-| `export` (replace) | 32× faster |
-| `tool importers` | 8× faster |
+| Command | Up to | Notes |
+| --- | --- | --- |
+| `eval` | 41× faster | |
+| `export` (full) | 25× faster | Uses jrsonnet directly, which is much faster than go-jsonnet |
+| `export` (replace) | 32× faster | Uses jrsonnet directly, which is much faster than go-jsonnet |
+| `diff` | 51× faster | kubectl operations have been replaced with native Kubernetes API calls |
+| `tool importers` | 8× faster | |
 
 ## Feature compatibility with Tanka
 
