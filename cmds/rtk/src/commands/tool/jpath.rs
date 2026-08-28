@@ -163,7 +163,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_jpath_cleans_missing_parent_segment() {
+	fn jpath_cleans_missing_parent_dir() {
 		let env = testdata("valid/environments/default");
 		let messy = env.join("does-not-exist").join("..");
 		let out = run_stdout(&messy, false).expect("jpath should clean missing/.. like tk");
