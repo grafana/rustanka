@@ -5,6 +5,7 @@
 //! - Post-evaluation helpers: `extract_manifests`, `process_manifests`, filtering
 
 use std::{
+	collections::HashSet,
 	fs,
 	io::{BufWriter, Write},
 	path::{Path, PathBuf},
@@ -711,6 +712,37 @@ pub fn compile_target_matchers(patterns: &[String]) -> Result<Vec<TargetMatcher>
 			Ok(TargetMatcher { re, negate })
 		})
 		.collect()
+}
+
+/// Return lowercased literal kinds when every positive target has a literal kind.
+///
+/// Callers can use these hints to avoid listing unrelated Kubernetes resource types.
+/// Negative-only or regex-kind filters return `None` because they require checking all kinds.
+pub(crate) fn target_kind_hints(matchers: &[TargetMatcher]) -> Option<HashSet<String>> {
+	let mut kinds = HashSet::new();
+	let mut has_positive = false;
+
+	for matcher in matchers.iter().filter(|matcher| !matcher.negate) {
+		has_positive = true;
+		let pattern = matcher
+			.re
+			.as_str()
+			.strip_prefix('^')
+			.and_then(|pattern| pattern.strip_suffix('$'))?;
+		let kind = pattern.split_once('/').map_or(pattern, |(kind, _)| kind);
+
+		if kind.chars().any(|c| {
+			matches!(
+				c,
+				'.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\' | '^' | '$'
+			)
+		}) {
+			return None;
+		}
+		kinds.insert(kind.to_lowercase());
+	}
+
+	has_positive.then_some(kinds)
 }
 
 /// Return true if `kind_name` (the manifest's `kind/name`) survives the matcher
@@ -1771,6 +1803,34 @@ mod tests {
 			manifests.is_empty(),
 			"bare 'Deployment' should not match 'Deployment/grafana' once anchored, got {manifests:?}",
 		);
+	}
+
+	#[test]
+	fn test_target_kind_hints_for_literal_positive_targets() {
+		let matchers = compile_target_matchers(&[
+			"Deployment/.*".to_string(),
+			"service/frontend".to_string(),
+			"!Service/ignored".to_string(),
+		])
+		.unwrap();
+
+		let hints = target_kind_hints(&matchers).unwrap();
+		assert_eq!(
+			hints,
+			HashSet::from(["deployment".to_string(), "service".to_string()])
+		);
+	}
+
+	#[test]
+	fn test_target_kind_hints_require_literal_positive_kinds() {
+		for filters in [
+			vec![".*ment/grafana".to_string()],
+			vec!["Deploy(ment|mentConfig)/.*".to_string()],
+			vec!["!Deployment/ignored".to_string()],
+		] {
+			let matchers = compile_target_matchers(&filters).unwrap();
+			assert_eq!(target_kind_hints(&matchers), None, "filters: {filters:?}");
+		}
 	}
 
 	// -----------------------------------------------------------------------

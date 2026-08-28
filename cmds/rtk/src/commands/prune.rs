@@ -21,12 +21,12 @@ use super::diff::ColorMode;
 // Re-export AutoApprove for backwards compatibility
 pub use super::common::AutoApprove;
 use crate::{
-	environments::{extract_manifests, process_manifests},
+	environments::{compile_target_matchers, extract_manifests, process_manifests},
 	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
-		diff::{DiffStatus, ResourceDiff},
+		diff::{DiffStatus, PruneDetectionOptions, ResourceDiff},
 		output::DiffOutput,
 	},
 	spec::DiffStrategy,
@@ -61,6 +61,10 @@ pub struct PruneArgs {
 	#[arg(long)]
 	pub name: Option<String>,
 
+	/// Limit pruning to a single namespace
+	#[arg(long)]
+	pub namespace: Option<String>,
+
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -94,6 +98,8 @@ pub struct PruneOpts {
 	pub target: Vec<String>,
 	/// Filter environments by name.
 	pub name: Option<String>,
+	/// Limit pruning to a single namespace.
+	pub namespace: Option<String>,
 }
 
 /// Prune orphaned resources from the cluster.
@@ -127,6 +133,7 @@ pub async fn prune_environment<W: Write>(
 
 	// Extract manifests from environment data
 	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
+	let target_matchers = compile_target_matchers(&opts.target)?;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests");
 
 	process_manifests(&mut manifests, &env_spec);
@@ -154,7 +161,16 @@ pub async fn prune_environment<W: Write>(
 	// Compute diffs with prune
 	tracing::debug!("computing differences with prune detection");
 	let diffs = diff_engine
-		.diff_all(&manifests, true, env_label.as_deref(), true)
+		.diff_all_with_prune_options(
+			&manifests,
+			true,
+			env_label.as_deref(),
+			true,
+			PruneDetectionOptions {
+				namespace: opts.namespace.as_deref(),
+				target_matchers: &target_matchers,
+			},
+		)
 		.await
 		.context("computing diffs")?;
 
@@ -264,8 +280,28 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		color: args.color,
 		target: args.target,
 		name: args.name,
+		namespace: args.namespace,
 	};
 
 	prune_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::*;
+
+	#[derive(Parser)]
+	struct TestCli {
+		#[command(flatten)]
+		args: PruneArgs,
+	}
+
+	#[test]
+	fn parses_namespace_flag() {
+		let cli = TestCli::parse_from(["rtk-prune", ".", "--namespace", "monitoring"]);
+		assert_eq!(cli.args.namespace.as_deref(), Some("monitoring"));
+	}
 }
