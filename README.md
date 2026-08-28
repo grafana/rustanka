@@ -30,7 +30,8 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 
 ## Performance vs Tanka
 
-`rtk` vs `tk` on Grafana Labs' CI benchmarks ([sample run](https://github.com/grafana/rustanka/pull/38)):
+`rtk` vs `tk` on Grafana Labs' CI benchmarks ([sample run](https://github.com/grafana/rustanka/pull/38)).
+Faster in every case, up to:
 
 | Command | Up to |
 | --- | --- |
