@@ -163,7 +163,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_jpath_cleans_missing_parent_segment() {
+	fn jpath_cleans_missing_parent_dir() {
 		let env = testdata("valid/environments/default");
 		let messy = env.join("does-not-exist").join("..");
 		let out = run_stdout(&messy, false).expect("jpath should clean missing/.. like tk");
@@ -346,8 +346,12 @@ mod tests {
 		use rtk_jsonnet::{Engine, Options};
 
 		let path = testdata("precedence/environments/default/main.jsonnet");
-		let result = Engine::new(Options::default())
-			.create_evaluator()
+		let engine = Engine::new(Options::default());
+		let mut evaluator = engine.create_evaluator();
+		evaluator
+			.with_import_paths(JPath::resolve(&path).unwrap().import_paths)
+			.unwrap();
+		let result = evaluator
 			.evaluate_file(&path)
 			.expect("precedence env should evaluate");
 
