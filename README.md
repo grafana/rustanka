@@ -72,7 +72,7 @@ Status is relative to [Tanka](https://github.com/grafana/tanka) (`tk`). ✅ impl
 | `tool imports --check` | ✅ | ❌ | Tracking: [#17](https://github.com/grafana/rustanka/issues/17) |
 | `tool importers` | ✅ | ✅ | |
 | `tool charts` (`init`, `add`, `add-repo`, `vendor`, `config`, `version-check`) | ✅ | ✅ | |
-| `tool jpath` | ✅ | ❌ | Tracking: [#16](https://github.com/grafana/rustanka/issues/16) |
+| `tool jpath` | ✅ | ✅ | |
 | `tool importers-count` | ✅ | ✅ | |
 
 ### Jsonnet natives and related features

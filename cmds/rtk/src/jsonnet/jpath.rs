@@ -3,7 +3,7 @@
 //! This module handles finding the project root, environment base directory,
 //! and constructing the import paths needed by the jsonnet evaluator.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Result};
 
@@ -18,7 +18,6 @@ const ROOT_MARKERS: &[&str] = &["tkrc.yaml", "jsonnetfile.json"];
 pub struct JpathResult {
 	/// The project root directory (contains jsonnetfile.json or tkrc.yaml)
 	/// Used by export command for output path calculation
-	#[allow(dead_code)]
 	pub root: PathBuf,
 	/// The environment base directory (contains main.jsonnet)
 	pub base: PathBuf,
@@ -26,6 +25,15 @@ pub struct JpathResult {
 	pub entrypoint: PathBuf,
 	/// Import paths for jsonnet evaluation (in order: base, lib, base/vendor, root/vendor)
 	pub import_paths: Vec<PathBuf>,
+}
+
+impl JpathResult {
+	/// Tanka `Resolve` order: root/vendor, base/vendor, root/lib, base.
+	/// `tk tool jpath` prints these colon-separated as `JSONNET_PATH`.
+	/// This is `import_paths` reversed: jrsonnet searches `import_paths` first-to-last.
+	pub fn jsonnet_path(&self) -> Vec<PathBuf> {
+		self.import_paths.iter().rev().cloned().collect()
+	}
 }
 
 /// Resolve jpath for the given path (file or directory)
@@ -44,6 +52,7 @@ where
 	} else {
 		std::env::current_dir()?.join(path)
 	};
+	let abs_path = normalize_path(&abs_path);
 
 	// Find the project root
 	let root = find_root(&abs_path)?;
@@ -55,10 +64,8 @@ where
 	let filename = get_filename(&abs_path)?;
 	let entrypoint = base.join(&filename);
 
-	// Build import paths (order matters - jrsonnet searches in reverse order from the list,
-	// so we put higher priority paths at the end)
-	// Tanka Go uses: [vendor, base/vendor, lib, base] searched in reverse
-	// So we provide: [base, lib, base/vendor, root/vendor]
+	// jrsonnet FileImportResolver searches first-to-last (first hit wins).
+	// Tanka Resolve() returns the reverse because go-jsonnet searches JSONNET_PATH last-to-first.
 	let import_paths = vec![
 		base.clone(),
 		root.join("lib"),
@@ -116,6 +123,29 @@ fn get_filename(path: &Path) -> Result<String> {
 		.and_then(|n| n.to_str())
 		.map(|s| s.to_string())
 		.ok_or_else(|| anyhow::anyhow!("invalid path: {}", path.display()))
+}
+
+/// Lexically clean `.` and `..` (Go `filepath.Clean` / `filepath.Abs`).
+/// Does not pop past the path root (`/` or a Windows prefix).
+pub(crate) fn normalize_path(path: &Path) -> PathBuf {
+	let mut out = PathBuf::new();
+	for c in path.components() {
+		match c {
+			Component::CurDir => {}
+			Component::ParentDir => match out.components().next_back() {
+				Some(Component::Normal(_)) => {
+					let _ = out.pop();
+				}
+				Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+				Some(_) | None => out.push(c.as_os_str()),
+			},
+			other => out.push(other.as_os_str()),
+		}
+	}
+	if out.as_os_str().is_empty() {
+		out.push(Component::CurDir.as_os_str());
+	}
+	out
 }
 
 /// Get the directory for a path (if path is file, returns parent; if dir, returns itself)
@@ -238,6 +268,15 @@ mod tests {
 		assert_eq!(result.import_paths[1], root.join("lib"));
 		assert_eq!(result.import_paths[2], root.join("env/vendor"));
 		assert_eq!(result.import_paths[3], root.join("vendor"));
+		assert_eq!(
+			result.jsonnet_path(),
+			vec![
+				root.join("vendor"),
+				root.join("env/vendor"),
+				root.join("lib"),
+				root.join("env"),
+			]
+		);
 	}
 
 	#[test]
@@ -345,5 +384,155 @@ mod tests {
 			.unwrap_err()
 			.to_string()
 			.contains("could not find environment base"));
+	}
+
+	fn testdata(name: &str) -> PathBuf {
+		PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+			.join("testdata/jpath")
+			.join(name)
+	}
+
+	#[test]
+	fn test_normalize_path_does_not_escape_unix_root() {
+		assert_eq!(
+			normalize_path(Path::new("/foo/../../../etc")),
+			PathBuf::from("/etc")
+		);
+		assert_eq!(normalize_path(Path::new("foo/..")), PathBuf::from("."));
+	}
+
+	// Ported from grafana/tanka pkg/jsonnet/jpath/dirs_test.go TestDirs
+	#[test]
+	fn test_dirs_no_base_empty() {
+		let err = resolve(testdata("noBase/environments/empty")).unwrap_err();
+		assert!(err.to_string().contains("could not find environment base"));
+	}
+
+	#[test]
+	fn test_dirs_no_base_filename() {
+		let err = resolve(testdata("noBase/environments/filename")).unwrap_err();
+		assert!(err.to_string().contains("could not find environment base"));
+	}
+
+	#[test]
+	fn test_dirs_no_base_no_main() {
+		let err = resolve(testdata("noBase/environments/noMain")).unwrap_err();
+		assert!(err.to_string().contains("could not find environment base"));
+	}
+
+	#[test]
+	fn test_dirs_no_root() {
+		let temp = TempDir::new().unwrap();
+		fs::create_dir_all(temp.path().join("environments/default")).unwrap();
+		fs::write(temp.path().join("environments/default/main.jsonnet"), "{}").unwrap();
+		let err = resolve(temp.path().join("environments/default")).unwrap_err();
+		assert!(err.to_string().contains("could not find project root"));
+	}
+
+	#[test]
+	fn test_dirs_valid() {
+		let data = testdata("valid");
+		let result = resolve(data.join("environments/default")).unwrap();
+		assert_eq!(result.root, data);
+		assert_eq!(result.base, data.join("environments/default"));
+	}
+
+	#[test]
+	fn test_dirs_valid_nested() {
+		let data = testdata("valid");
+		let result = resolve(data.join("environments/default/nestedDir")).unwrap();
+		assert_eq!(result.root, data);
+		assert_eq!(result.base, data.join("environments/default"));
+	}
+
+	#[test]
+	fn test_dirs_valid_parent_from_nested() {
+		let data = testdata("valid");
+		let result = resolve(data.join("environments/default/nestedDir").join("..")).unwrap();
+		assert_eq!(result.root, data);
+		assert_eq!(result.base, data.join("environments/default"));
+	}
+
+	// Ported from grafana/tanka pkg/jsonnet/jpath/dirs_test.go TestFindRoot
+	#[test]
+	fn test_find_root_pointer_jsonnetfile() {
+		let temp = TempDir::new().unwrap();
+		fs::write(temp.path().join("jsonnetfile.json"), "{}").unwrap();
+		fs::create_dir_all(temp.path().join("environments/default")).unwrap();
+		fs::write(temp.path().join("environments/default/main.jsonnet"), "{}").unwrap();
+
+		let result = resolve(temp.path().join("environments/default")).unwrap();
+		assert_eq!(result.root, temp.path());
+		assert_eq!(result.base, temp.path().join("environments/default"));
+	}
+
+	#[test]
+	fn test_find_root_pointer_tkrc() {
+		let temp = TempDir::new().unwrap();
+		fs::write(temp.path().join("tkrc.yaml"), "").unwrap();
+		fs::create_dir_all(temp.path().join("environments/default")).unwrap();
+		fs::write(temp.path().join("environments/default/main.jsonnet"), "{}").unwrap();
+
+		let result = resolve(temp.path().join("environments/default")).unwrap();
+		assert_eq!(result.root, temp.path());
+		assert_eq!(result.base, temp.path().join("environments/default"));
+	}
+
+	#[test]
+	fn test_local_vendor_without_tkrc_root_equals_base() {
+		let temp = TempDir::new().unwrap();
+		fs::write(temp.path().join("jsonnetfile.json"), "{}").unwrap();
+		fs::create_dir_all(temp.path().join("environments/default")).unwrap();
+		fs::write(temp.path().join("environments/default/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			temp.path().join("environments/default/jsonnetfile.json"),
+			"{}",
+		)
+		.unwrap();
+
+		let result = resolve(temp.path().join("environments/default")).unwrap();
+		assert_eq!(result.root, temp.path().join("environments/default"));
+		assert_eq!(result.base, temp.path().join("environments/default"));
+	}
+
+	#[test]
+	fn test_local_vendor_with_tkrc_keeps_project_root() {
+		let temp = TempDir::new().unwrap();
+		fs::write(temp.path().join("jsonnetfile.json"), "{}").unwrap();
+		fs::write(temp.path().join("tkrc.yaml"), "").unwrap();
+		fs::create_dir_all(temp.path().join("environments/default")).unwrap();
+		fs::write(temp.path().join("environments/default/main.jsonnet"), "{}").unwrap();
+		fs::write(
+			temp.path().join("environments/default/jsonnetfile.json"),
+			"{}",
+		)
+		.unwrap();
+
+		let result = resolve(temp.path().join("environments/default")).unwrap();
+		assert_eq!(result.root, temp.path());
+		assert_eq!(result.base, temp.path().join("environments/default"));
+	}
+
+	// Ported from grafana/tanka pkg/jsonnet/jpath/jpath_test.go TestResolvePrecedence
+	#[test]
+	fn test_resolve_precedence() {
+		use crate::jsonnet::evaluator::{
+			Evaluator, EvaluatorOptions, GlobalEvaluatorOptions, JrsonnetEvaluator,
+		};
+
+		let path = testdata("precedence/environments/default/main.jsonnet");
+		let result = JrsonnetEvaluator::new(GlobalEvaluatorOptions::default())
+			.eval_file(&path, &EvaluatorOptions::default())
+			.expect("precedence env should evaluate");
+
+		assert_eq!(
+			result.value,
+			serde_json::json!({
+				"baseDir": "baseDir",
+				"lib": "/lib",
+				"baseDir-vendor": "baseDir-vendor",
+				"vendor": "/vendor",
+			})
+		);
 	}
 }
