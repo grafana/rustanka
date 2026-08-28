@@ -28,6 +28,17 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 - **🎯 Confidence**: Stop guessing and use `rtk diff` to see what exactly will happen.
 - **🔭 Helm**: Vendor in, modify, and export [Helm charts reproducibly](https://tanka.dev/helm#helm-support).
 
+## Performance vs Tanka
+
+`rtk` vs `tk` on Grafana Labs' CI benchmarks ([sample run](https://github.com/grafana/rustanka/pull/38)):
+
+| Command | Up to |
+| --- | --- |
+| `eval` | 41× faster |
+| `export` (full) | 25× faster |
+| `export` (replace) | 32× faster |
+| `tool importers` | 8× faster |
+
 ## Feature compatibility with Tanka
 
 Status is relative to [Tanka](https://github.com/grafana/tanka) (`tk`). ✅ implemented,
