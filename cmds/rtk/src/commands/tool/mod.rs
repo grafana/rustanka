@@ -38,14 +38,24 @@ pub enum ToolCommands {
 }
 
 /// Run the tool command.
-pub fn run<W: Write>(args: ToolArgs, writer: W) -> Result<()> {
+pub fn run<W: Write>(args: ToolArgs, writer: W) -> Result<bool> {
 	match args.command {
-		ToolCommands::Jpath(jpath_args) => jpath::run(jpath_args, writer),
-		ToolCommands::Imports(imports_args) => imports::run(imports_args, writer),
-		ToolCommands::Importers(importers_args) => importers::run(importers_args, writer),
-		ToolCommands::ImportersCount(importers_count_args) => {
-			importers_count::run(importers_count_args, writer)
+		ToolCommands::Jpath(jpath_args) => {
+			jpath::run(jpath_args, writer)?;
+			Ok(false)
 		}
-		ToolCommands::Charts(charts_args) => charts::run(charts_args, writer),
+		ToolCommands::Imports(imports_args) => imports::run(imports_args, writer),
+		ToolCommands::Importers(importers_args) => {
+			importers::run(importers_args, writer)?;
+			Ok(false)
+		}
+		ToolCommands::ImportersCount(importers_count_args) => {
+			importers_count::run(importers_count_args, writer)?;
+			Ok(false)
+		}
+		ToolCommands::Charts(charts_args) => {
+			charts::run(charts_args, writer)?;
+			Ok(false)
+		}
 	}
 }
