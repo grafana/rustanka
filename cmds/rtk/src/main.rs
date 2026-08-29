@@ -117,7 +117,12 @@ fn main() -> Result<()> {
 			commands::eval::run(args.path.as_ref(), global_opts, eval_opts, stdout)
 		}
 		Commands::Init(args) => commands::init::run(args, stdout),
-		Commands::Tool(args) => commands::tool::run(args, stdout),
+		Commands::Tool(args) => {
+			if commands::tool::run(args, stdout)? {
+				std::process::exit(commands::tool::imports::EXIT_CODE_REBUILD_REQUIRED);
+			}
+			Ok(())
+		}
 		Commands::Validate(args) => commands::validate::run(args, stdout),
 		Commands::Complete(args) => commands::complete::run(args, stdout),
 	}
