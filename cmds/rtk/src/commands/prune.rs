@@ -25,10 +25,11 @@ use crate::{
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
-		diff::{DiffStatus, ResourceDiff},
+		diff::{DiffStatus, PruneDetectionOptions, ResourceDiff},
 		output::DiffOutput,
 	},
 };
+use rtk_environments::export::Targets;
 
 #[derive(Args)]
 pub struct PruneArgs {
@@ -60,6 +61,10 @@ pub struct PruneArgs {
 	/// String that only a single inline environment contains in its name
 	#[arg(long)]
 	pub name: Option<String>,
+
+	/// Limit pruning to a single namespace
+	#[arg(long)]
+	pub namespace: Option<String>,
 
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
@@ -94,6 +99,8 @@ pub struct PruneOpts {
 	pub target: Vec<String>,
 	/// Filter environments by name.
 	pub name: Option<String>,
+	/// Limit pruning to a single namespace.
+	pub namespace: Option<String>,
 }
 
 /// Prune orphaned resources from the cluster.
@@ -122,6 +129,10 @@ pub async fn prune_environment<W: Write>(
 	}
 
 	let manifests = evaluated.manifests;
+	// The same expressions that chose these manifests decide which of the
+	// cluster's resources count as orphans. `evaluate_manifests` has already
+	// applied them here; this is for the other side of the comparison.
+	let targets = Targets::compile(&opts.target)?;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests");
 
 	let connection = get_or_create_connection(connection, spec).await?;
@@ -145,11 +156,15 @@ pub async fn prune_environment<W: Write>(
 	// Compute diffs with prune
 	tracing::debug!("computing differences with prune detection");
 	let diffs = diff_engine
-		.diff_all(
+		.diff_all_with_prune_options(
 			&manifests,
 			true,
 			evaluated.environment_label.as_deref(),
 			true,
+			PruneDetectionOptions {
+				namespace: opts.namespace.as_deref(),
+				targets: Some(&targets),
+			},
 		)
 		.await
 		.context("computing diffs")?;
@@ -263,8 +278,28 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		color: args.color,
 		target: args.target,
 		name: args.name,
+		namespace: args.namespace,
 	};
 
 	prune_environment(&args.path, None, jsonnet, opts, writer).await?;
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::*;
+
+	#[derive(Parser)]
+	struct TestCli {
+		#[command(flatten)]
+		args: PruneArgs,
+	}
+
+	#[test]
+	fn parses_namespace_flag() {
+		let cli = TestCli::parse_from(["rtk-prune", ".", "--namespace", "monitoring"]);
+		assert_eq!(cli.args.namespace.as_deref(), Some("monitoring"));
+	}
 }
