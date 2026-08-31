@@ -1,0 +1,18 @@
+apiVersion: v1
+data:
+  namespace: default
+  wholeSpec: |-
+    {
+      "apiServer": "https://cluster.example:6443",
+      "expectVersions": {
+
+      },
+      "namespace": "default",
+      "resourceDefaults": {
+
+      }
+    }
+kind: ConfigMap
+metadata:
+  name: namespace-defaulting
+  namespace: default

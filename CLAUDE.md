@@ -7,6 +7,14 @@ Project-specific context for AI agents working on rustanka (rtk).
 - **Never run git commands** unless explicitly requested by the user
 - **Always run `make fmt`** after making changes
 
+## Code Organization
+
+- Prefer private methods when behavior naturally belongs to an existing type. A helper that takes that type as its primary state, mutates it, or consumes it should normally be an inherent method.
+- Functions that construct a domain type should generally be private associated constructors on that type.
+- Introduce a small private state type when several related values are repeatedly passed together through an operation or recursive traversal.
+- Keep free functions for genuinely stateless algorithms, parser primitives, externally prescribed callbacks, command entry points, and transformations without a natural owner.
+- Do not use free functions merely as substitutes for private methods.
+
 ## Project Overview
 
 rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Tanka](https://github.com/grafana/tanka) (tk). The primary goal is **exact output compatibility with Tanka**.
@@ -51,6 +59,365 @@ The rtk export should produce **byte-for-byte identical output** to Tanka where 
 - The condition also requires `!spaces` (previous char was not a space)
 - This affects flow-style quoted scalars in YAML output
 
+## Where Exporting Lives
+
+`rtk export` is a thin wrapper (`cmds/rtk/src/commands/export.rs`) over the
+exporter in `crates/rtk-environment` (package `rtk-environments`), which
+evaluates through `crates/rtk-jsonnet`. The command translates arguments,
+renders failures and picks an exit code; everything else — discovery,
+evaluation, manifest processing, filenames, `manifest.json`, writing — belongs
+to the crate, and so do the tests for it.
+
+`cmds/rtk` no longer has an exporter, a Jsonnet evaluator or spec types of its
+own: `show`, `diff`, `apply`, `prune`, `env` and `validate` all load through
+`rtk_environments::Engine`, so a fix to evaluation or manifest processing
+reaches every command at once. What is left in the command crate is the
+Kubernetes client (`cmds/rtk/src/k8s/`) and the YAML serializer the diff bodies
+still use (`cmds/rtk/src/yaml.rs`).
+
+### Where an Environment Lives
+
+`JPath` resolves the **nearest** project root, as Tanka's `FindParentFile`
+does — an environment carrying its own `jsonnetfile.json` is its own project.
+The one way an outer directory wins is marker precedence: a `tkrc.yaml`
+anywhere above beats a `jsonnetfile.json` sitting beside the entrypoint, which
+is how Tanka documents per-environment vendoring. There is no `tkrc.yml`.
+
+Exporting then resolves each environment a second time, because tk does:
+`parallelLoadEnvironments` keeps only an environment's name and namespace and
+reloads it from `Join(FindRoot(namespace), namespace)`. A namespace is relative
+to its own project root while `FindRoot` resolves against the working
+directory, so the round trip is the identity for ordinary layouts and lands
+somewhere else for an environment that vendors for itself inside another
+project. `Options::working_directory` names the directory this resolves
+against, defaulting to the process working directory; the golden harness sets
+it so a staged fixture can be exported without `chdir`.
+
+This is why `rtk show` and `rtk export` can disagree about a nested project,
+and tk disagrees with itself in the same way and for the same reason. The
+`nested_project_root_env` fixture pins it.
+
+Where the re-resolution lands somewhere that declares no matching environment,
+tk fails the whole export; rtk keeps the environment discovery actually found.
+Reproducing that failure would mean aborting an export over a layout rtk can
+resolve perfectly well, so this one is a deliberate divergence.
+
+### Finding Environments
+
+Discovery answers two different questions, and `Search` says which:
+
+- `Search::Environment` takes the path as the environment, as tk's `Peek`
+  does. It is what a non-recursive export and `load_single` want.
+- `Search::Tree` walks everything below the path, as tk's `FindFiles` does. It
+  is what `--recursive`, `env list` and `diff` want.
+
+tk chooses on the command rather than on what the path turns out to hold, so
+rtk does too. The case that tells them apart is a project whose root is an
+entrypoint in its own right: walking has to descend past it, or every
+environment underneath disappears. tk stopped at the first valid environment
+until v0.27.0, and the docstring in `find.go` still says it does.
+
+An entrypoint is imported by its **absolute** path, as tk imports
+`jpath.Entrypoint`. A relative name is resolved against the importing file
+first, and the generated snippet has no file, so the process working directory
+would decide — which quietly loaded the wrong entrypoint for exactly the layout
+above.
+
+Naming a file names the entrypoint, whatever it is called, as `jpath.Filename`
+does. Walking is the exception and keeps only `main.jsonnet`, because
+`FindFiles` does: a custom entrypoint is reachable by naming it and by nothing
+else, and naming one recursively finds nothing at all.
+
+### Selecting by Name
+
+`--name` means two different things in tk, chosen by command:
+
+- `--recursive` compares `metadata.name` exactly, so part of a name selects
+  nothing rather than everything containing it.
+- Everything else loads one environment through a loader. The inline loader
+  matches a substring, because `SingleEnvEvalScript` asks `std.member`, and
+  prefers a full match among what survives; the static loader ignores the
+  filter entirely, a static environment being named after where it lives.
+
+What survives can still be several environments, and that is refused with tk's
+own wording. tk never compares the name against a filesystem path.
+
+A recursive export that matches nothing is not an error: `--name` and
+`--selector` are a filter over what was walked, and tk exports what survived
+and exits zero. Asking for one environment and not finding it still fails.
+
+### What an Environment Can Read About Itself
+
+`std.extVar('tanka.dev/environment')` is bound for every command that
+evaluates, `eval` included — tk's `StaticLoader.Eval` hands the environment over
+exactly as its `Load` does, so `eval` and `export` evaluate the same program.
+Which environment is offered is decided the way tk's `DetectLoader` decides it,
+on whether a `spec.json` sits beside the entrypoint and not on what evaluating
+it turns out to declare, so the spec is read straight from the file and nothing
+is evaluated twice.
+
+An inline environment cannot be handed its own spec, since evaluating it is how
+the spec becomes known. tk binds the variable to an `error` explaining that,
+which costs nothing until something reads it, and rtk binds the same one.
+
+`resourceDefaults` and `expectVersions` are always serialized. Go declares them
+as plain structs rather than pointers, so `encoding/json` marshals them whatever
+they hold and an absent one appears as `{}` — in the extVar, in `env list
+--json` and in a written `spec.json` alike. Deserialization still treats them as
+optional.
+
+### Target Filtering
+
+`-t/--target` expressions are compiled once, by
+`rtk_environments::export::Targets`, and answer two different questions with the
+same rule: which of an environment's own manifests to act on, and — when
+pruning — which of the cluster's resources count as orphans. The second lives
+with the Kubernetes client, which is why `Targets` is public; tk has one
+`process.Filter` and so does rtk.
+
+`Targets::kind_hints` lets prune leave whole resource types unasked for, but
+only when every positive target names a kind outright. A pattern, or a
+negative-only filter, withholds the answer: narrowing on a guess would hide
+resources that should have been pruned.
+
+### What Counts as a Manifest
+
+Extraction mirrors tk's `walkJSON`. Anything carrying an `apiVersion` and a
+`kind` — both present, both strings, both non-empty — is a manifest and is taken
+whole. Anything else is a container to walk into, and **reaching a value that
+cannot be walked fails the export**, as tk does: a manifest whose `kind` was
+misspelled would otherwise leave the export in silence, which is what rtk used
+to do while exiting zero.
+
+Three details are load-bearing and each is pinned by a test:
+
+- Fields are walked in **sorted** order, because which failure gets reported
+  depends on it. `{metadata: …, data: …}` blames `.data`.
+- A `null` field is skipped rather than treated as unwalkable, or every `if`
+  without an `else` in a Tanka library would fail the export.
+- `__ksonnet` is dropped before anything is decided, so it neither blocks the
+  walk nor reaches the output.
+
+The reported path is the *containing object's*, while the reason is the innermost
+enclosing object's — which is why a bad value inside a list reports the list's
+parent and the reason of the object above it. Two things are deliberately not
+reproduced: tk appends a YAML dump of the offending object, and where nothing
+encloses the value at all tk prints its nil error as `%!s(<nil>)`.
+
+A nested `Environment` is refused by `Engine::manifests` and kept by `export`,
+which is tk's own split: `Load` filters `(?i)^Environment/.*$` after processing
+and refuses, so `show`, `diff` and `apply` reject one, while exporting writes it.
+
+### Creating an Environment
+
+`env add` writes what tk writes, byte for byte. Both files are pinned by tests
+because every part of them was wrong once: `spec.json` gets only
+`metadata.name` (the namespace is the entrypoint discovery derives, not a stored
+field), the namespace tk defaults in `v1alpha1.New()` before any flag applies,
+and the trailing newline `writeJSON` appends.
+
+An inline environment is the same marshalled `Environment` passed through
+go-jsonnet's formatter, which rewrites JSON's syntax without reflowing it. So
+the layout is the JSON's — one member per line, trailing commas, empty objects
+inline — and rendering the spec from its own serialization is what keeps its
+fields and their order those of `spec.json`. Quoting follows the formatter:
+single, switching to double as soon as the text holds a single quote.
+
+Two divergences are deliberate. `tk env set` mutates the spec, prints what it
+changed, then tries to reach the cluster and exits 1 **without writing**,
+whichever flag was given — so on a machine with no matching context it never
+persists anything; rtk writes and exits 0. `tk env add` does the same for
+`--server-from-context` and `--context-name`, the only two flags that make it
+call `Connect()`. Reproducing either would make the commands useless without a
+live cluster. `rtk init` is a stub that exits 1; completing it means vendoring.
+
+### Helm Cache
+
+`--helm-cache` persists successful `helmTemplate` results under each Tanka
+project's `target/helm/v1/` directory. Entries are individual CBOR files named
+by a SHA-256 digest of the release, render options, complete chart contents and
+Helm version. The cache is shared by all environments rooted in that project;
+an export spanning several projects uses each project's own target directory.
+
+The engine is shared for the whole of a command, so the in-memory half of the
+cache spans every environment it touches: a chart twenty environments share is
+rendered once. `diff --list-modified-envs` used to build an engine per
+environment and so rendered it twenty times. `--helm-cache` is declared on the
+shared Jsonnet arguments rather than on `export`, so a diff or a show reuses a
+chart it rendered on a previous run exactly as an export does.
+
+Cache reads and writes are best-effort. Missing, corrupt or incompatible entries
+are misses, and write failures never replace a successful Helm render with an
+export failure. Writes use temporary files and an atomic persist so parallel rtk
+processes cannot expose partial entries. As with the in-memory cache, charts that
+deliberately generate random or time-dependent output are frozen by the cache.
+
+**What the key covers, and why so little of the environment.** helm reads a
+great deal of it, and almost none can change what `helm template` writes for a
+chart already on disk: repository and registry configuration is never consulted
+for a local path, a plugin cannot claim `--values=-` or a filesystem chart, and
+rtk never passes `--validate`, so no request is made and nothing about kube
+transport, authentication or the kubeconfig matters. `PATH` reaches nothing
+without an explicit `--post-renderer`.
+
+What is left is the clock and the namespace. `TZ` is read by any chart calling
+sprig's `now` or `date`. A namespace the caller names reaches helm as a
+client-go override, and an override short-circuits the resolution chain, so in
+that case — which is every real caller — nothing else can decide
+`.Release.Namespace`. Where none is named, `helm env HELM_NAMESPACE` reports the
+same `settings.Namespace()` that rendering asks, so helm answers for itself
+rather than rtk reimplementing client-go's precedence.
+
+Entries are also keyed on the build that filled them: `build.rs` supplies the
+commit and whether the tree is dirty, because the stored value is the
+*post-processed* render and a change here has to invalidate it. A dirty tree
+shares one identity, so use `RTK_HELM_DISABLE_MEMOIZATION` while iterating on
+that crate. A disk hit logs at debug level, which is the first thing to look at
+when a cache appears not to be working.
+
+Only abandoned temporaries are swept, and only once they are old enough to be
+nobody's — a concurrent rtk process holds a live one. Entries themselves are
+never evicted: they are bounded by how many distinct renders a project has, and
+they live under `target`.
+
+Note that the `helm_*` golden fixtures render with whatever helm the CI runner
+image provides, so an image bump that changes helm's output breaks them.
+
+### rtkMemoize
+
+`std.native('rtkMemoize')` cannot use the serde-based native-function ABI:
+deserializing its second argument would evaluate it even on a cache hit. Each
+Jsonnet implementation therefore registers this native manually and stores its
+own native value type.
+
+**It exists to cross evaluations.** Jsonnet already memoizes within one — a
+thunk is computed once, and an object caches its fields — so a cache scoped to
+a single evaluation would do nothing at all. What it saves is the work a worker
+would otherwise repeat for every environment it exports, which is why the cache
+outlives the evaluator that filled it.
+
+So a memoized value must not depend on *which* environment computed it.
+Anything that varies per environment belongs in the key, the way a caller
+already writes `per_cluster-<hash of the labels>`. Two things make that concrete,
+and both are pinned by tests:
+
+- The value keeps the external variables, native functions and YAML formatting
+  of the environment that computed it, so one reading `std.extVar` reports that
+  environment's answer to every later one.
+- An `import` inside it is resolved when the value is *forced*, so it resolves
+  against whichever evaluation forces it, with that evaluation's import paths.
+  Float formatting and the stack limit follow the same rule.
+
+There is deliberately no evaluator fingerprint in the key. Environments differ
+in their import paths by construction, so a key that accounted for them would
+never hit, leaving only what Jsonnet does for free.
+
+The jrsonnet implementation caches `Val` directly for the lifetime of the OS
+thread. This preserves object identity, lazy fields, functions and assertions;
+it also means separate evaluator instances on one worker share entries, while
+different workers do not, so an N-worker export computes each key up to N
+times. Nothing is ever evicted: entries are bounded by how many distinct keys
+are used, and the process is a short-lived CLI. Its TLS cache must initialize
+jrsonnet's thread-local GC object space before itself so cached values are
+dropped before that object space during thread teardown.
+
+## Version Expectations
+
+### Which Tanka rtk answers for
+
+`rtk_masterminds::TANKA_COMPATIBLE_VERSION` names it, `v0.38.0`, spelled the way
+tk spells its own — tk builds its version in with `git describe --tags` and
+quotes the string verbatim in its messages. rtk answers for the Tanka it
+implements rather than for its own version: comparing rtk's `0.5.x` against a
+constraint like `>=0.20` would fail every real environment, and the question
+`expectVersions.tanka` asks is which Tanka's behaviour is on offer.
+
+It deliberately carries no prerelease. Masterminds treats a prerelease version
+as unsatisfying any constraint that did not ask for one, so a `-pre` would fail
+nearly everything an environment could write.
+
+### Constraints are Masterminds', not the semver crate's
+
+tk links `github.com/Masterminds/semver` v1.5.0, whose syntax the `semver` crate
+does not implement. `rtk-masterminds` is a port, not a translation, because the
+differences change answers: a bare `1.2.3` is *equality* there and a caret to the
+`semver` crate; `^` is major-only, so `^0.1.2` admits `0.38.0` where the `semver`
+crate and npm both stop at `0.2.0`; and `||` and `x` are not syntax the `semver`
+crate can parse at all.
+
+It is checked against a table generated by the Go library itself
+(`crates/rtk-masterminds/testdata/`, with the generator beside it). That table
+caught four divergences a reading of the documentation would have shipped, so
+regenerate it rather than trusting the docs if tk ever changes library version.
+
+### Where each expectation is checked
+
+- An environment's `spec.expectVersions.tanka` is checked in
+  `processed_manifests`, which is tk's `LoadManifests` boundary: export, show,
+  diff, apply and prune reach it, and `eval` and `env list` do not. Both of tk's
+  messages are reproduced verbatim. **A dev build of tk skips this check
+  entirely**, so verifying parity needs a tk built with
+  `-ldflags -X …CurrentVersion=v0.38.0`.
+- A project's `tkrc.yaml` is rtk's own; tk only uses the file to mark where a
+  project starts and never reads it. Its `expectVersions.tanka` is checked as
+  soon as the file is read, so every command that evaluates anything honours it.
+- `expectVersions.helm` compares major versions only, and is checked **only when
+  a project declared one** — helm has to be run to be asked, and nothing should
+  pay for a check it did not ask for.
+- `expectVersions.kubectl` and `expectVersions.binaries` are accepted and inert.
+  rtk runs no kubectl at all, and the only binaries it executes are helm and
+  kustomize.
+
+### Reading tkrc.yaml
+
+Nothing loaded the file until this landed, so all four of its settings were
+inert. Reading it activates `disableNativeFunctions`, `maxStackDepth` and
+`jsonnetImplementation` as well as the version expectations.
+
+Only `spec` is read, so `apiVersion`, `kind` and `metadata` may be omitted —
+deserializing `Rc` directly demanded a `metadata` it has no use for. And
+`--max-stack` lost its default of 500: a default was passed on every run and so
+always beat the depth a project asked for, which is why `maxStackDepth` could
+never take effect. Unset, the project's depth applies; failing that, the same 500
+tk uses.
+
+## Performance and Memory
+
+### Benchmarking
+
+`rtk-benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
+runs the same comparisons CI does. The jobs validate that rtk's output still
+matches tk's, but nothing gates on timing, so a regression lands green.
+
+**Point `TMPDIR` at a real disk.** The fixtures land in a temporary directory,
+and on most machines `/tmp` is tmpfs, where `fsync` is a no-op. An export that
+had gained a disk flush measured 1.00 locally and 1.37 in CI until `TMPDIR` was
+moved onto a real filesystem, where it measured 1.68. Anything touching how
+files reach disk is invisible by default.
+
+Compare against a binary built from the commit before the change rather than
+against the PR base: the ratio CI prints is against the base, so a regression
+introduced mid-branch is diluted by everything else on it.
+
+### The evaluation GC, and why export pays for it
+
+`Drop for Evaluation` runs a full `collect_thread_cycles()`
+(`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Measured on a 200-environment
+recursive export, that collection costs **17% of wall time** (130 ms against
+111 ms without it) and saves **32% of peak RSS** (23 MB against 30 MB).
+
+**Memory is the deliberate choice here**, so the collection stays. Do not
+"optimize" it away without a decision about the memory budget; the speed is
+already accounted for and was not judged worth the resident set.
+
+It also explains why `eval` costs about 18% more than it did before it started
+binding `tanka.dev/environment` and materializing through `process::materialize`.
+`materialize` forces and caches the whole object graph before that single
+collection runs, so the collection has the largest possible graph to traverse;
+the previous serde round-trip left much less behind. `materialize`'s own logic is
+only 5% of eval's runtime, so there is nothing to win by micro-optimizing it —
+the cost is the collection, and it is being paid on purpose.
+
 ## Testing
 
 ### Test Priority
@@ -91,13 +458,96 @@ make test
 
 In tk's `spec.json`, `exportJsonnetImplementation: binary:/usr/local/bin/jrsonnet` configures tk to use jrsonnet for Jsonnet evaluation instead of go-jsonnet. tk still handles manifest exporting.
 
-**This is a no-op in rtk** - not implemented and won't be. rtk always uses its built-in jrsonnet evaluator.
+**rtk does not hand over to another implementation, but it does imitate one.** It always evaluates with its own jrsonnet, and when an environment asks for a jrsonnet binary it formats the result the way that binary would have:
+
+- `std.manifestYamlDoc` quotes values only when it quotes keys, rather than always
+- `std.manifestYamlStream` renders an empty stream as `...` rather than `---`
+- floats render as the shortest representation rather than Go's `%.17g`
+- **Tanka's native functions are not registered at all**, since the binary being imitated has never heard of them; an environment may probe for them with `std.native('…') != null` and take another path
+
+An environment is recognised as asking for this when the implementation is `jrsonnet`, or a `binary:` path *ending* in `jrsonnet`. It is applied per environment, so one inline environment can ask for it while its neighbour does not. There is no way to ask for the individual formatting choices on their own: an environment either asks for a jrsonnet binary or it does not.
+
+Two golden fixtures depend on all of this: `yaml_output_env_jrsonnet` and `inline_env_export_impl_mixed`.
 
 ## Common Issues
 
 ### Config hash differences in comparisons
 
 When comparing rtk vs tk output, config hash differences (e.g., `mimir-config-exporter-hash`, `envoy-hash`) can generally be ignored. These are derived hashes of other resources (typically ConfigMaps), so they differ only because the underlying ConfigMap content differs.
+
+### An export that finds no environments
+
+Discovery walks with `walkdir`'s `filter_entry`, which skips dotted
+directories — including the directory the walk *starts* from. Pointing an export
+at `/tmp/.tmpXYZ` (which is what `tempfile` produces) or at any path under a
+dotted directory therefore finds nothing at all. tk's own behaviour here is
+unconfirmed, so this is left as it is rather than fixed.
+
+Finding nothing is otherwise indistinguishable from exporting an environment
+that produces nothing: no output directory is created, no `manifest.json` is
+written, the exit code is zero. The command logs a warning; the library does not.
+
+### An export interrupted part way through
+
+A `--recursive` export streams discovery through the worker pool, so that
+evaluating one environment overlaps with discovering the next. tk discovers
+everything up front instead, in `FindEnvsFromPaths`, and only then writes
+anything. So an entrypoint that cannot even be discovered — an inline one whose
+Jsonnet fails; a static one is only read, and fails later as itself — lands
+differently:
+
+- tk writes nothing at all, having failed before `ExportEnvironments`.
+- rtk has already exported the environments discovered before it.
+
+Both exit 1. rtk keeps the streaming and makes the outcome coherent instead:
+whatever was written is recorded, so `manifest.json` describes the directory
+rather than the export that was meant to happen. Leaving files behind that the
+index does not mention is what breaks the *next* export — `fail-on-conflicts`
+cannot protect a file it has no owner for, and `replace-envs` will not prune it.
+
+Discovery failing stops the export: nothing after it is evaluated or written,
+and those environments are reported as skipped. Which failure is reported is
+decided on results put back into discovery order, not by whichever worker
+recorded one first.
+
+**The index describes the directory, whatever happened.** Everything that
+reached disk is recorded, including what a failed environment wrote before it
+failed and what was written before a conflict was found — a conflict is only
+detectable once every environment has been exported, so refusing to write the
+index then left files owned by nobody. Nothing is pruned on the strength of a
+run that did not finish, and only what pruning actually deleted is forgotten.
+
+The index is written in place, with no temporary and no flush. Making it durable
+while the manifests it describes go out through a plain `fs::write` would be
+theatre — a crash loses the files as readily as their owners, and an index that
+survives to describe missing files is worth nothing. It cost a disk flush on
+every export, which is 2-3 ms of a 5 ms one.
+
+**How many environments were skipped depends on the run.** It is however many
+workers had not yet started when the export was stopped, which is a fact about
+scheduling rather than about the environments, so only `successful + skipped` is
+fixed for a given input. What is stable is what matters: exactly the
+environments that genuinely failed are counted as failures, the first failure in
+discovery order is the one reported, and the exit code follows. Relabelling
+environments that did export would make the count look steady while
+contradicting `manifest.json`.
+
+tk detects two environments writing the same file with a `stat` immediately
+before each write, which two workers can both pass: at its default parallelism
+it misses the collision rtk catches, and only reports it reliably at
+`--parallel 1` or `2`. rtk checks after the fact, so it always finds it.
+
+### Conflicting filenames are reported differently from tk
+
+When two resources want the same file, both tools write what they have so far
+and then abort, but they say different things:
+
+- tk: `file '<absolute path>' already exists. Aborting`
+- rtk: `file '<name relative to the output dir>' written by multiple environments: '<entrypoint>' and '<entrypoint>'`
+
+rtk names the same entrypoint twice when the two resources come from one
+environment, which reads oddly but is accurate. Long-standing in both rtk
+exporters, and not something the golden fixtures cover.
 
 ### Two versions of serde-saphyr compiling
 

@@ -13,8 +13,6 @@ use clap::Args;
 use regex::Regex;
 use walkdir::WalkDir;
 
-use crate::{jsonnet::importers as importers_impl, jsonnet::jpath::DEFAULT_ENTRYPOINT};
-
 #[derive(Args)]
 pub struct ImportersCountArgs {
 	/// Directory to scan for files
@@ -57,7 +55,7 @@ pub fn run<W: Write>(args: ImportersCountArgs, mut writer: W) -> Result<()> {
 	let files = collect_files(&args.dir, args.recursive, &filename_regex)?;
 
 	// Count importers for all files at once (builds context only once)
-	let importers_map = importers_impl::find_importers_batch(&root_str, files)?;
+	let importers_map = rtk_jsonnet::importers::find_importers_batch(&root_str, files)?;
 
 	// Convert to counts
 	let mut counts: Vec<ImporterCount> = importers_map
@@ -108,7 +106,9 @@ fn collect_files(dir: &Path, recursive: bool, filename_regex: &Regex) -> Result<
 		}
 
 		// Skip main.jsonnet files (they are environments, not libraries)
-		if path.file_name().and_then(|n| n.to_str()) == Some(DEFAULT_ENTRYPOINT) {
+		if path.file_name().and_then(|n| n.to_str())
+			== Some(rtk_jsonnet::jpath::JPath::DEFAULT_ENTRYPOINT)
+		{
 			continue;
 		}
 

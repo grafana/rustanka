@@ -1,0 +1,4 @@
+{
+    "default/ConfigMap-json-config.yaml": "main.jsonnet",
+    "default/Deployment-json-app.yaml": "main.jsonnet"
+}

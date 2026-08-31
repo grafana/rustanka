@@ -67,6 +67,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
+name = "annotate-snippets"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f211a51805bc641f3ad5b7664c77d2547af685cc33b4cd8d31964027a46f13f1"
+dependencies = [
+ "anstyle",
+ "memchr",
+ "unicode-width",
+]
+
+[[package]]
 name = "annotated-string"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -990,9 +1001,12 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.15.0"
+version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "encode_unicode"
@@ -2277,6 +2291,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
+dependencies = [
+ "arraydeque",
+ "smallvec 1.15.1",
+]
+
+[[package]]
 name = "gtmpl"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2381,6 +2405,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32069d97bb81e38fa67eab65e3393bf804bb85969f2bc06bf13f64aef5aba248"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2565,7 +2598,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
 ]
 
 [[package]]
@@ -3210,7 +3242,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 0.0.11",
  "serde_json",
  "serde_yaml_with_quirks",
  "sha1 0.11.0",
@@ -3319,9 +3351,9 @@ dependencies = [
 
 [[package]]
 name = "k8s-openapi"
-version = "0.27.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b326f5219dd55872a72c1b6ddd1b830b8334996c667449c29391d657d78d5e"
+checksum = "d9c6922f6afe80418dd6019818af5d0d34584c371780ff09b9752370c25b4abb"
 dependencies = [
  "base64 0.22.1",
  "jiff",
@@ -3350,9 +3382,9 @@ dependencies = [
 
 [[package]]
 name = "kube"
-version = "3.0.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f96b537b4c4f61fc183594edbecbbefa3037e403feac0701bb24e6eff78e0034"
+checksum = "208d7fe1380066abb194812a8a8e303cb896a33bb3d7b3177b71bd03ff39bf18"
 dependencies = [
  "k8s-openapi",
  "kube-client",
@@ -3363,9 +3395,9 @@ dependencies = [
 
 [[package]]
 name = "kube-client"
-version = "3.0.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af97b8b696eb737e5694f087c498ca725b172c2a5bc3a6916328d160225537ee"
+checksum = "31e940a73033a7c5c7918b5ece7851d84571b58be25e937198da37fa13f116d3"
 dependencies = [
  "base64 0.22.1",
  "bytes 1.11.1",
@@ -3384,10 +3416,11 @@ dependencies = [
  "kube-core",
  "pem",
  "rustls",
+ "rustls-platform-verifier",
  "secrecy",
  "serde",
+ "serde-saphyr 0.0.29",
  "serde_json",
- "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -3398,9 +3431,9 @@ dependencies = [
 
 [[package]]
 name = "kube-core"
-version = "3.0.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7aeade7d2e9f165f96b3c1749ff01a8e2dc7ea954bd333bcfcecc37d5226bdd"
+checksum = "a9d2353c118cf3462c352ee0b5bd5b0cf17990af456dfd8662d136ff9812eeb4"
 dependencies = [
  "derive_more",
  "form_urlencoded",
@@ -3417,9 +3450,9 @@ dependencies = [
 
 [[package]]
 name = "kube-derive"
-version = "3.0.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c98f59f4e68864624a0b993a1cc2424439ab7238eaede5c299e89943e2a093ff"
+checksum = "92141c19e1fa83bf91633c1234c66b03375c29aa8ca5486331ddb47e3a3da9c0"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3431,9 +3464,9 @@ dependencies = [
 
 [[package]]
 name = "kube-runtime"
-version = "3.0.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc158473d6d86ec22692874bd5ddccf07474eab5c6bb41f226c522e945da5244"
+checksum = "3eb064ef71c7bea55e934a443960da9e9ec31fbb2ba63e47e4aeca32603d5cc7"
 dependencies = [
  "ahash",
  "async-broadcast",
@@ -3658,9 +3691,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.1.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a69bcab0ad47271a0234d9422b131806bf3968021e5dc9328caf2d4cd58557fc"
+checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
  "libc",
  "wasi",
@@ -3674,8 +3707,6 @@ dependencies = [
  "anyhow",
  "clap",
  "k8s-mock",
- "k8s-openapi",
- "kube",
  "nix 0.29.0",
  "serde",
  "serde_json",
@@ -3916,6 +3947,15 @@ name = "ordered-float"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ordered-float"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
 dependencies = [
  "num-traits",
 ]
@@ -4674,10 +4714,7 @@ dependencies = [
  "bon",
  "bytes 1.11.1",
  "clap",
- "criterion 0.7.0",
  "dirs",
- "either",
- "gtmpl",
  "http 1.4.0",
  "http-body-util",
  "hyper",
@@ -4686,8 +4723,6 @@ dependencies = [
  "jrsonnet-gcmodule",
  "jrsonnet-ir",
  "jrsonnet-lint",
- "jrsonnet-macros",
- "jrsonnet-stdlib",
  "k8s",
  "k8s-mock",
  "k8s-openapi",
@@ -4702,14 +4737,15 @@ dependencies = [
  "regex",
  "rstest",
  "rtk-diff",
+ "rtk-environments",
+ "rtk-jsonnet",
+ "rtk-spec",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 0.0.11",
  "serde_json",
  "serde_yaml",
  "serde_yaml_with_quirks",
- "sha2 0.10.9",
- "stats_alloc",
  "tabwriter",
  "tempfile",
  "thiserror 2.0.18",
@@ -4734,6 +4770,163 @@ dependencies = [
  "serde_json",
  "similar",
  "syntect",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rtk-environments"
+version = "0.5.0-pre99"
+dependencies = [
+ "anyhow",
+ "criterion 0.7.0",
+ "either",
+ "gtmpl",
+ "k8s-openapi",
+ "kube-core",
+ "rayon",
+ "regex",
+ "rtk-jsonnet",
+ "rtk-jsonnet-core",
+ "rtk-masterminds",
+ "rtk-spec",
+ "rustc-hash 2.1.1",
+ "saphyr",
+ "semver",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "sha2 0.11.0",
+ "stats_alloc",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "rtk-jsonnet"
+version = "0.5.0-pre99"
+dependencies = [
+ "clap",
+ "rayon",
+ "regex",
+ "rtk-jsonnet-core",
+ "rtk-jsonnet-helm",
+ "rtk-jsonnet-jrsonnet",
+ "rtk-jsonnet-kustomize",
+ "rtk-jsonnet-native-functions",
+ "rtk-jsonnet-regex",
+ "rtk-masterminds",
+ "rtk-spec",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "rtk-jsonnet-core"
+version = "0.5.0-pre99"
+dependencies = [
+ "rtk-spec",
+ "serde",
+]
+
+[[package]]
+name = "rtk-jsonnet-helm"
+version = "0.5.0-pre99"
+dependencies = [
+ "ciborium",
+ "hex",
+ "rtk-jsonnet-core",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "rtk-jsonnet-jrsonnet"
+version = "0.5.0-pre99"
+dependencies = [
+ "jrsonnet-evaluator",
+ "jrsonnet-gcmodule",
+ "jrsonnet-macros",
+ "jrsonnet-stdlib",
+ "rtk-jsonnet-core",
+ "rtk-spec",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "rtk-jsonnet-kustomize"
+version = "0.5.0-pre99"
+dependencies = [
+ "rtk-jsonnet-core",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rtk-jsonnet-native-functions"
+version = "0.5.0-pre99"
+dependencies = [
+ "hex",
+ "rtk-jsonnet-core",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
+name = "rtk-jsonnet-regex"
+version = "0.5.0-pre99"
+dependencies = [
+ "regex",
+ "rtk-jsonnet-core",
+ "serde",
+]
+
+[[package]]
+name = "rtk-masterminds"
+version = "0.5.0-pre99"
+dependencies = [
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rtk-spec"
+version = "0.5.0-pre99"
+dependencies = [
+ "k8s-openapi",
+ "kube",
+ "rustc-hash 2.1.1",
+ "schemars",
+ "semver",
+ "serde",
+ "serde-saphyr 0.0.11",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -4869,9 +5062,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "saphyr"
+version = "0.0.11"
+source = "git+https://github.com/grafana/saphyr?rev=0d26c036f086f61207282671c802643037cd5f0e#0d26c036f086f61207282671c802643037cd5f0e"
+dependencies = [
+ "encoding_rs",
+ "hashlink",
+ "ordered-float 5.3.0",
+ "saphyr-parser",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "saphyr-parser"
-version = "0.0.6"
-source = "git+https://github.com/grafana/saphyr?branch=master#bd64ba34832792080dc7ad5f70df16e13be77a2f"
+version = "0.0.11"
+source = "git+https://github.com/grafana/saphyr?rev=0d26c036f086f61207282671c802643037cd5f0e#0d26c036f086f61207282671c802643037cd5f0e"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.18",
@@ -4897,6 +5102,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]
@@ -4951,9 +5157,13 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"
@@ -4968,7 +5178,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437"
+source = "git+https://github.com/grafana/serde-saphyr?rev=0feecc80245a415ae6f7760d07fc6124a682c949#0feecc80245a415ae6f7760d07fc6124a682c949"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -4983,12 +5193,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-saphyr"
+version = "0.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
+dependencies = [
+ "ahash",
+ "annotate-snippets",
+ "base64 0.22.1",
+ "encoding_rs_io",
+ "getrandom 0.3.4",
+ "granit-parser",
+ "nohash-hasher",
+ "num-traits",
+ "serde_core",
+ "smallvec 1.15.1",
+ "zmij",
+]
+
+[[package]]
 name = "serde-value"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
- "ordered-float",
+ "ordered-float 2.10.1",
  "serde",
 ]
 
@@ -5513,7 +5742,6 @@ dependencies = [
  "indicatif",
  "indoc",
  "k8s-mock",
- "k8s-openapi",
  "regex",
  "rstest",
  "rtk-diff",
@@ -5530,9 +5758,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.50.0"
+version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
  "bytes 1.11.1",
  "libc",
@@ -5546,9 +5774,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.6.1"
+version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
+checksum = "6328af13490e73a9b4694030fafd93f8c8c6a9dede33e821c3fc63eddf8042ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5979,6 +6207,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
@@ -6180,15 +6409,6 @@ name = "webpki-root-certs"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "1.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
 dependencies = [
  "rustls-pki-types",
 ]

@@ -1,0 +1,15 @@
+name: "Helm Template (Warm Disk Cache)"
+id: "helm-template-cache"
+description: "Benchmarking an export whose Helm render is already persisted in the project target directory."
+
+fixtures_dir: "rtk-benchmarks/helm-template"
+skip_tk: true
+
+# Populate target/helm once, then clear only exported manifests between runs.
+setup: "export {export_dir} {env_dir} --recursive --helm-cache --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Warm Disk Cache"
+    description: "Exporting 60 inline environments without running `helm template`."
+    command: "export {export_dir} {env_dir} --recursive --helm-cache --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"

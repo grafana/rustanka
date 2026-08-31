@@ -16,3 +16,8 @@ jsonnet-cpp
 jsonnet-sjsonnet
 benchmarks
 __pycache__/
+
+# Written into the working directory by rtk-benchmarks/run-benchmark.py, and
+# uploaded as a CI artifact rather than kept in the tree.
+benchmark-summary.json
+benchmark-results.md

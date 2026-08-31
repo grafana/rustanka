@@ -4,6 +4,6 @@ data:
 kind: ConfigMap
 metadata:
   labels:
-    tanka.dev/environment: de7243f17de3c2620651c9b9c0990a099fabaf084a7a6915
+    tanka.dev/environment: 613d07283e03d97108e81cc97678e363a248cea4a3e6eff7
   name: labeled-config
   namespace: default

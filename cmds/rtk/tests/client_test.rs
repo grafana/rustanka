@@ -3,10 +3,8 @@
 use assert_matches::assert_matches;
 use k8s_mock::{discovery::DiscoveryMode, http::HttpMockK8sServer};
 use k8s_openapi::apimachinery::pkg::version::Info;
-use rtk::{
-	k8s::client::{ClusterConnection, ConnectionError},
-	spec::Spec,
-};
+use rtk::k8s::client::{ClusterConnection, ConnectionError};
+use rtk_spec::canonical::EnvironmentSpec;
 
 async fn test_connect_with_api_server_impl(discovery_mode: DiscoveryMode) {
 	let server = HttpMockK8sServer::builder()
@@ -15,10 +13,8 @@ async fn test_connect_with_api_server_impl(discovery_mode: DiscoveryMode) {
 		.start()
 		.await;
 
-	let spec = Spec {
-		api_server: Some(server.uri()),
-		..Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.api_server = Some(server.uri().into());
 
 	let conn = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 		.await
@@ -36,6 +32,7 @@ async fn test_connect_with_api_server_impl(discovery_mode: DiscoveryMode) {
 			go_version: "go1.21.0".to_string(),
 			compiler: "gc".to_string(),
 			platform: "linux/amd64".to_string(),
+			..Default::default()
 		}
 	);
 }
@@ -54,10 +51,8 @@ async fn test_connect_with_api_server_legacy() {
 async fn test_connect_with_context_names() {
 	let server = HttpMockK8sServer::builder().build().start().await;
 
-	let spec = Spec {
-		context_names: Some(vec!["mock-context".to_string()]),
-		..Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["mock-context".into()];
 
 	let conn = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 		.await
@@ -75,6 +70,7 @@ async fn test_connect_with_context_names() {
 			go_version: "go1.21.0".to_string(),
 			compiler: "gc".to_string(),
 			platform: "linux/amd64".to_string(),
+			..Default::default()
 		}
 	);
 }
@@ -83,10 +79,8 @@ async fn test_connect_with_context_names() {
 async fn test_connect_context_not_found() {
 	let server = HttpMockK8sServer::builder().build().start().await;
 
-	let spec = Spec {
-		context_names: Some(vec!["nonexistent-context".to_string()]),
-		..Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["nonexistent-context".into()];
 
 	let result = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig()).await;
 	assert_matches!(
@@ -99,10 +93,8 @@ async fn test_connect_context_not_found() {
 async fn test_connect_api_server_not_found() {
 	let server = HttpMockK8sServer::builder().build().start().await;
 
-	let spec = Spec {
-		api_server: Some("https://not-in-kubeconfig:6443".to_string()),
-		..Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.api_server = Some("https://not-in-kubeconfig:6443".into());
 
 	let result = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig()).await;
 	assert_matches!(

@@ -1,12 +1,13 @@
 //! Export command handler.
 
-use std::{io::Write, path::PathBuf, sync::Arc};
+use std::{io::Write, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
+use rtk_environments::export::{Exported, MergeStrategy, Options};
+use rtk_environments::Engine;
 
 use super::common::UnimplementedArgs;
-use crate::environments::export::{self as export_impl, ExportMergeStrategy, ExportOpts};
 
 #[derive(Args)]
 pub struct ExportArgs {
@@ -68,11 +69,6 @@ pub struct ExportArgs {
 	#[arg(long)]
 	pub skip_manifest: bool,
 
-	/// Experimental: maintain a `helm-cache/` directory in the output dir to
-	/// cache helmTemplate results across runs and environments.
-	#[arg(long)]
-	pub helm_cache: bool,
-
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -81,8 +77,71 @@ pub struct ExportArgs {
 	pub jsonnet: super::JsonnetArgs,
 }
 
+impl ExportArgs {
+	fn into_export_options(self) -> Result<(Vec<PathBuf>, Options, rtk_jsonnet::Options)> {
+		let ExportArgs {
+			output_dir,
+			paths,
+			extension,
+			format,
+			merge_deleted_envs,
+			merge_strategy,
+			name,
+			parallel,
+			recursive,
+			selector,
+			skip_manifest,
+			target,
+			jsonnet,
+			cache_envs: _,
+			cache_path: _,
+			mem_ballast_size_bytes: _,
+		} = self;
+
+		let merge_strategy = merge_strategy
+			.as_deref()
+			.unwrap_or_default()
+			.parse::<MergeStrategy>()?;
+
+		let jsonnet = jsonnet.into_options();
+
+		let options = Options {
+			output_dir,
+			extension,
+			format,
+			targets: target,
+			merge_strategy,
+			merge_deleted_environments: merge_deleted_envs,
+			skip_manifest,
+			timing: false,
+			// Asking for fewer than one environment at a time is asking for one.
+			parallelism: parallel.max(1) as usize,
+			name,
+			selector,
+			recursive,
+			working_directory: None,
+		};
+
+		Ok((paths, options, jsonnet))
+	}
+}
+
 /// Run the export command.
-pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
+pub fn run<W: Write>(args: ExportArgs, writer: W) -> Result<()> {
+	run_in(args, writer, None)
+}
+
+/// Run the export command, resolving environments against a named directory.
+///
+/// Exporting re-resolves each environment against the working directory, the
+/// way tk does. The golden harness exports a fixture staged into a temporary
+/// directory and has to say so, since `chdir` is process-wide and the tests run
+/// in parallel.
+pub fn run_in<W: Write>(
+	args: ExportArgs,
+	mut writer: W,
+	working_directory: Option<PathBuf>,
+) -> Result<()> {
 	UnimplementedArgs {
 		jsonnet_implementation: None,
 		cache_envs: Some(&args.cache_envs),
@@ -91,91 +150,103 @@ pub fn run<W: Write>(args: ExportArgs, mut writer: W) -> Result<()> {
 	}
 	.warn_if_set();
 
-	let (paths, opts) = build_export_opts(args)?;
-	let result = export_impl::export(&paths, opts)?;
+	let (paths, mut options, jsonnet) = args.into_export_options()?;
+	options.working_directory = working_directory;
 
-	// Match tk behavior: silent on success, errors reported via the provided writer
-	// But report fatal errors prominently and summarize skipped ones
-	let mut fatal_error: Option<(Arc<PathBuf>, String)> = None;
-	let mut env_errors = Vec::new();
-	let mut skipped_count = 0;
+	let engine = Engine::new(rtk_jsonnet::Engine::new(jsonnet));
+	let exported = engine
+		.export_bulk(paths, &options)
+		.map_err(|error| anyhow::anyhow!("{}", error.report()))?;
 
-	for env_result in &result.results {
-		if let Some(ref error) = env_result.error {
-			if error.starts_with("FATAL:") && fatal_error.is_none() {
-				// Capture the first fatal error
-				fatal_error = Some((env_result.env_path.clone(), error.clone()));
-			} else if error == "Skipped due to earlier fatal error" {
-				skipped_count += 1;
-			} else {
-				// Regular environment error
-				env_errors.push((env_result.env_path.clone(), error.clone()));
-			}
-		}
+	// tk says nothing here, and neither does the export itself. Finding no
+	// environments at all is indistinguishable from a successful export of
+	// nothing, though, and pointing at the wrong directory is an easy mistake.
+	if exported.reports.is_empty() {
+		tracing::warn!("no environments found; nothing was exported");
 	}
 
-	// Report fatal error first if present
-	if let Some((path, error)) = fatal_error {
-		writeln!(writer, "\n{}", "=".repeat(80))?;
-		writeln!(writer, "FATAL ERROR during export:")?;
-		writeln!(writer, "{}", "=".repeat(80))?;
-		writeln!(writer, "  Environment: {:?}", path)?;
-		writeln!(
-			writer,
-			"  Error: {}",
-			error.strip_prefix("FATAL: ").unwrap_or(&error)
-		)?;
-		writeln!(writer, "{}", "=".repeat(80))?;
-		writeln!(writer)?;
-	}
+	report(&exported, &mut writer)?;
 
-	// Report individual environment errors
-	for (path, error) in &env_errors {
-		writeln!(writer, "  ✗ {:?}: {}", path, error)?;
-	}
-
-	// Summarize skipped environments
-	if skipped_count > 0 {
-		writeln!(
-			writer,
-			"\nSkipped {} environments due to earlier fatal error",
-			skipped_count
-		)?;
-	}
-
-	if result.failed > 0 {
-		anyhow::bail!("{} environments failed to export", result.failed);
+	let failed = exported.failed();
+	if failed > 0 {
+		anyhow::bail!("{failed} environments failed to export");
 	}
 
 	Ok(())
 }
 
-fn build_export_opts(args: ExportArgs) -> Result<(Vec<PathBuf>, ExportOpts)> {
-	let eval_opts = args.jsonnet.into_global_evaluator_options();
+/// Report what failed, tk-style: nothing at all when everything worked.
+fn report<W: Write>(exported: &Exported, writer: &mut W) -> Result<()> {
+	// One failure can be the reason for every other, in which case it is the one
+	// worth reading and the rest would bury it.
+	let fatal = exported
+		.reports
+		.iter()
+		.position(|report| report.error.as_ref().is_some_and(|error| error.fatal()));
 
-	// Parse merge strategy
-	let merge_strategy = if let Some(ref strategy) = args.merge_strategy {
-		strategy.parse::<ExportMergeStrategy>()?
-	} else {
-		ExportMergeStrategy::default()
-	};
+	if let Some(report) = fatal.map(|fatal| &exported.reports[fatal]) {
+		let error = report.error.as_ref().expect("a fatal error");
 
-	let paths = args.paths;
-	let opts = ExportOpts {
-		output_dir: args.output_dir,
-		extension: args.extension,
-		format: args.format,
-		parallelism: args.parallel as usize,
-		eval_opts,
-		name: args.name,
-		recursive: args.recursive,
-		selector: args.selector,
-		skip_manifest: args.skip_manifest,
-		target: args.target,
-		merge_strategy,
-		merge_deleted_envs: args.merge_deleted_envs,
-		show_timing: false,
-		helm_cache: args.helm_cache,
-	};
-	Ok((paths, opts))
+		writeln!(writer, "\n{}", "=".repeat(80))?;
+		writeln!(writer, "FATAL ERROR during export:")?;
+		writeln!(writer, "{}", "=".repeat(80))?;
+		writeln!(writer, "  Environment: {:?}", report.source)?;
+		writeln!(writer, "  Error: {}", error.report())?;
+		writeln!(writer, "{}", "=".repeat(80))?;
+		writeln!(writer)?;
+	}
+
+	let mut skipped = 0;
+	for (index, report) in exported.reports.iter().enumerate() {
+		let Some(error) = &report.error else {
+			continue;
+		};
+
+		if Some(index) == fatal {
+			continue;
+		}
+
+		// An environment that never got its turn has nothing of its own to say.
+		if error.skipped() {
+			skipped += 1;
+			continue;
+		}
+
+		writeln!(writer, "  ✗ {:?}: {}", report.source, error.report())?;
+	}
+
+	if skipped > 0 {
+		writeln!(
+			writer,
+			"\nSkipped {skipped} environments due to earlier fatal error"
+		)?;
+	}
+
+	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::ExportArgs;
+
+	#[derive(Parser)]
+	struct TestCli {
+		#[command(flatten)]
+		export: ExportArgs,
+	}
+
+	/// The flag lives on the shared Jsonnet arguments now, so every command that
+	/// evaluates has it; this checks it still reaches the engine from export.
+	#[test]
+	fn passes_helm_cache_to_the_jsonnet_engine() {
+		let args = TestCli::parse_from(["rtk", "out", "environment", "--helm-cache"]);
+		let (_, _, jsonnet) = args.export.into_export_options().unwrap();
+		assert!(jsonnet.helm_cache);
+
+		let args = TestCli::parse_from(["rtk", "out", "environment"]);
+		let (_, _, jsonnet) = args.export.into_export_options().unwrap();
+		assert!(!jsonnet.helm_cache, "off unless asked for");
+	}
 }

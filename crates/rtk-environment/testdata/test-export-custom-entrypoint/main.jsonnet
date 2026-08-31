@@ -1,0 +1,7 @@
+{
+  configMap: {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: 'from-main' },
+  },
+}

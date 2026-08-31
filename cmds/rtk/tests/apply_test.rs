@@ -10,13 +10,11 @@ mod test_utils;
 use std::path::Path;
 
 use k8s_mock::DiscoveryMode;
-use rtk::{
-	commands::{
-		apply::{apply_environment, ApplyOpts, AutoApprove},
-		diff::ColorMode,
-	},
-	jsonnet::evaluator::{EvaluatorOptions, GlobalEvaluatorOptions},
+use rtk::commands::{
+	apply::{apply_environment, ApplyOpts, AutoApprove},
+	diff::ColorMode,
 };
+use rtk_spec::canonical::EnvironmentSpec;
 
 /// Run an apply test.
 ///
@@ -52,8 +50,7 @@ async fn run_apply_test(test_dir: &std::path::Path, discovery_mode: DiscoveryMod
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection.clone()),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -73,8 +70,7 @@ async fn run_apply_test(test_dir: &std::path::Path, discovery_mode: DiscoveryMod
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -122,10 +118,8 @@ async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
 		.start()
 		.await;
 
-	let spec = rtk::spec::Spec {
-		context_names: Some(vec!["mock-context".to_string()]),
-		..rtk::spec::Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["mock-context".into()];
 	let connection =
 		rtk::k8s::client::ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
@@ -141,8 +135,7 @@ async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
 	let err = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -184,8 +177,7 @@ async fn run_apply_no_changes_test(test_dir: &std::path::Path, discovery_mode: D
 	let result = apply_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -280,8 +272,7 @@ mod tests {
 		apply_environment(
 			env_dir.as_path(),
 			Some(connection.clone()),
-			GlobalEvaluatorOptions::default(),
-			EvaluatorOptions::default(),
+			rtk_jsonnet::Options::default(),
 			opts,
 			&mut output,
 		)
@@ -297,8 +288,7 @@ mod tests {
 		let diffs = apply_environment(
 			env_dir.as_path(),
 			Some(connection),
-			GlobalEvaluatorOptions::default(),
-			EvaluatorOptions::default(),
+			rtk_jsonnet::Options::default(),
 			opts,
 			&mut output,
 		)

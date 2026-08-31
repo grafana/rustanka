@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use k8s_mock::{extract_crd_metadata, DiscoveryMode, HttpMockK8sServer, RunningHttpMockK8sServer};
-use rtk::{k8s::client::ClusterConnection, spec::Spec};
+use rtk::k8s::client::ClusterConnection;
+use rtk_spec::canonical::EnvironmentSpec;
 
 /// Load manifests from YAML files in a directory.
 pub fn load_manifests_from_dir(dir: &Path) -> Vec<serde_json::Value> {
@@ -62,10 +63,8 @@ pub async fn setup_connection_from_cluster_state(
 			.await
 	};
 
-	let spec = Spec {
-		context_names: Some(vec!["mock-context".to_string()]),
-		..Spec::default()
-	};
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["mock-context".into()];
 	let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 		.await
 		.expect("failed to create connection");

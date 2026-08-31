@@ -1,0 +1,25 @@
+[package]
+name = "rtk-jsonnet-jrsonnet"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jrsonnet-evaluator.workspace = true
+jrsonnet-gcmodule.workspace = true
+jrsonnet-macros.workspace = true
+jrsonnet-stdlib.workspace = true
+rtk-jsonnet-core.workspace = true
+rtk-spec.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

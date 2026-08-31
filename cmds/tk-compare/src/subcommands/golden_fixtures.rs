@@ -90,6 +90,14 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			&basename,
 		)
 		.with_context(|| format!("failed to load fixture args for {}", fixture_dir.display()))?;
+		let export_paths = config::load_fixture_specific_command_args(
+			&fixtures_root,
+			&fixture_dir,
+			"export-paths",
+			&testcase,
+			&basename,
+		)
+		.with_context(|| format!("failed to load fixture paths for {}", fixture_dir.display()))?;
 		export_args.extend(["--parallel".to_string(), "1".to_string()]);
 
 		let staged = prepare_fixture_for_export(&fixture_dir, jrsonnet_path.as_deref())
@@ -102,6 +110,7 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			&tk_exec_path,
 			staged.working_dir(),
 			&generated_dir,
+			&export_paths,
 			&export_args,
 		);
 
@@ -109,8 +118,8 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 			Ok(()) => {
 				let golden_dir = fixture_dir.join("golden");
 				if cli.dry_run {
-					let differences = differences_without_manifest(&golden_dir, &generated_dir)
-						.with_context(|| {
+					let differences =
+						differences(&golden_dir, &generated_dir).with_context(|| {
 							format!("failed comparing fixture {}", fixture_dir.display())
 						})?;
 					if !differences.is_empty() {
@@ -218,13 +227,18 @@ fn run_tk_export(
 	tk_exec: &Path,
 	working_dir: &Path,
 	destination: &Path,
+	export_paths: &[String],
 	export_args: &[String],
 ) -> Result<()> {
 	let mut argv = vec![
 		"export".to_string(),
 		destination.to_string_lossy().to_string(),
-		".".to_string(),
 	];
+	if export_paths.is_empty() {
+		argv.push(".".to_string());
+	} else {
+		argv.extend(export_paths.iter().cloned());
+	}
 	argv.extend(export_args.iter().cloned());
 
 	let mut cmd = ProcessCommand::new(tk_exec);
@@ -255,7 +269,11 @@ fn run_tk_export(
 	);
 }
 
-fn differences_without_manifest(expected: &Path, actual: &Path) -> Result<Vec<String>> {
+/// Compare a committed golden directory against a freshly generated one.
+///
+/// `manifest.json` is included: it is what a later export reads to know which
+/// environment owns a file, so leaving it out hid an index that had drifted.
+fn differences(expected: &Path, actual: &Path) -> Result<Vec<String>> {
 	if !expected.exists() {
 		return Ok(vec![format!(
 			"golden directory missing: {}",
@@ -269,16 +287,9 @@ fn differences_without_manifest(expected: &Path, actual: &Path) -> Result<Vec<St
 		)]);
 	}
 
-	let expected_filtered =
-		TempDir::create("tk-compare-golden-expected").context("failed creating temp dir")?;
-	let actual_filtered =
-		TempDir::create("tk-compare-golden-actual").context("failed creating temp dir")?;
-	copy_without_manifest(expected, expected_filtered.path())?;
-	copy_without_manifest(actual, actual_filtered.path())?;
-
 	let cmp = compare_directories_detailed(
-		expected_filtered.path().to_string_lossy().as_ref(),
-		actual_filtered.path().to_string_lossy().as_ref(),
+		expected.to_string_lossy().as_ref(),
+		actual.to_string_lossy().as_ref(),
 	)?;
 	if cmp.matched {
 		return Ok(Vec::new());
@@ -307,30 +318,6 @@ fn replace_directory_contents(target_dir: &Path, source_dir: &Path) -> Result<()
 			.with_context(|| format!("failed to remove {}", target_dir.display()))?;
 	}
 	copy_dir_recursive(source_dir, target_dir)
-}
-
-fn copy_without_manifest(src: &Path, dst: &Path) -> Result<()> {
-	std::fs::create_dir_all(dst)?;
-	for entry in std::fs::read_dir(src)? {
-		let entry = entry?;
-		let src_path = entry.path();
-		let dst_path = dst.join(entry.file_name());
-		if src_path.is_dir() {
-			copy_without_manifest(&src_path, &dst_path)?;
-			continue;
-		}
-		if dst_path == dst.join("manifest.json") {
-			continue;
-		}
-		std::fs::copy(&src_path, &dst_path).with_context(|| {
-			format!(
-				"failed copying {} -> {}",
-				src_path.display(),
-				dst_path.display()
-			)
-		})?;
-	}
-	Ok(())
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {

@@ -15,18 +15,16 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, get_or_create_connection, setup_diff_engine, DiffEngineConfig,
+	create_tokio_runtime, engine, evaluate_manifests, get_or_create_connection, setup_diff_engine,
+	DiffEngineConfig,
 };
 use crate::{
-	environments::discover::{Discover, Discovered},
-	environments::{extract_manifests, process_manifests},
-	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
+	k8s::diff::DiffStrategy,
 	k8s::{
 		client::ClusterConnection,
 		diff::{DiffEngine, DiffStatus, ResourceDiff},
 		output::DiffOutput,
 	},
-	spec::DiffStrategy,
 };
 
 /// Color output mode for diff display.
@@ -78,8 +76,10 @@ pub struct DiffArgs {
 	pub color: ColorMode,
 
 	/// Force the diff-strategy to use. Automatically chosen if not set.
-	#[arg(long, value_enum)]
-	pub diff_strategy: Option<DiffStrategy>,
+	/// One of `native`, `server`, `subset` or `validate`. Checked here so an
+	/// unknown name is refused in tk's words.
+	#[arg(long, value_name = "DIFF_STRATEGY")]
+	pub diff_strategy: Option<String>,
 
 	/// Exit with 0 even when differences are found
 	#[arg(short = 'z', long)]
@@ -166,20 +166,13 @@ pub struct DiffOpts {
 pub async fn diff_environment<W: Write>(
 	path: &Path,
 	connection: Option<ClusterConnection>,
-	global_opts: GlobalEvaluatorOptions,
-	eval_opts: EvaluatorOptions,
+	jsonnet: rtk_jsonnet::Options,
 	opts: DiffOpts,
 	writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
-	let env_spec = env_data.spec;
-
-	// Get the spec for cluster connection and strategy selection
-	let spec = env_spec.as_ref().map(|e| &e.spec);
-
-	// Extract manifests from environment data
-	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
+	let engine = engine(jsonnet);
+	let evaluated = evaluate_manifests(&engine, path, opts.name.as_deref(), &opts.target)?;
+	let manifests = evaluated.manifests;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests to diff");
 
 	if manifests.is_empty() {
@@ -187,11 +180,17 @@ pub async fn diff_environment<W: Write>(
 		return Ok(Vec::new());
 	}
 
-	process_manifests(&mut manifests, &env_spec);
+	let connection = get_or_create_connection(connection, evaluated.spec.as_ref()).await?;
 
-	let connection = get_or_create_connection(connection, spec).await?;
-
-	diff_manifests(manifests, connection, env_spec.as_ref(), opts, writer).await
+	diff_manifests(
+		manifests,
+		connection,
+		evaluated.spec.as_ref(),
+		evaluated.environment_label.as_deref(),
+		opts,
+		writer,
+	)
+	.await
 }
 
 /// Run diff on manifests against cluster state.
@@ -202,12 +201,11 @@ pub async fn diff_environment<W: Write>(
 pub async fn diff_manifests<W: Write>(
 	manifests: Vec<serde_json::Value>,
 	connection: ClusterConnection,
-	env_spec: Option<&crate::spec::Environment>,
+	spec: Option<&rtk_spec::canonical::EnvironmentSpec>,
+	environment_label: Option<&str>,
 	opts: DiffOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let spec = env_spec.map(|e| &e.spec);
-
 	// Set up diff engine
 	let setup = setup_diff_engine(DiffEngineConfig {
 		connection: &connection,
@@ -215,22 +213,26 @@ pub async fn diff_manifests<W: Write>(
 		manifests: &manifests,
 		with_prune: opts.with_prune,
 		diff_strategy_override: opts.strategy,
+		// Diffing on its own, with no apply to take a lead from.
+		apply_strategy: None,
 	})
 	.await?;
 	let engine = setup.engine;
 	let strategy = setup.strategy;
 
 	// Get environment label for prune detection (SHA256 hash of name:namespace)
-	let env_label_owned = env_spec.map(crate::spec::generate_environment_label);
-	let env_label = env_label_owned.as_deref();
-
 	// Check if inject_labels is enabled (required for prune detection)
-	let inject_labels = env_spec.and_then(|e| e.spec.inject_labels).unwrap_or(false);
+	let inject_labels = spec.is_some_and(|spec| spec.inject_labels);
 
 	// Compute diffs
 	tracing::debug!("computing differences");
 	let diffs = engine
-		.diff_all(&manifests, opts.with_prune, env_label, inject_labels)
+		.diff_all(
+			&manifests,
+			opts.with_prune,
+			environment_label,
+			inject_labels,
+		)
 		.await
 		.context("computing diffs")?;
 
@@ -257,16 +259,19 @@ pub async fn diff_manifests<W: Write>(
 
 /// Async implementation of the diff command.
 #[instrument(skip_all, fields(path = %args.path.display()))]
-async fn run_async<W: Write>(args: DiffArgs, writer: W) -> Result<DiffResult> {
+async fn run_async<W: Write>(args: DiffArgs, mut writer: W) -> Result<DiffResult> {
 	// Handle --list-modified-envs mode: find all environments and check each for changes
 	if args.list_modified_envs {
-		return list_modified_environments(&args, &mut std::io::sink()).await;
+		return args.list_modified_environments(&mut writer).await;
 	}
 
-	let global_opts = args.jsonnet.into_global_evaluator_options();
-	let eval_opts = EvaluatorOptions::default();
+	let jsonnet = args.jsonnet.into_options();
 	let opts = DiffOpts {
-		strategy: args.diff_strategy,
+		strategy: args
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?,
 		with_prune: args.with_prune,
 		color: args.color,
 		summarize: args.summarize,
@@ -274,142 +279,137 @@ async fn run_async<W: Write>(args: DiffArgs, writer: W) -> Result<DiffResult> {
 		name: args.name,
 	};
 
-	let diffs = diff_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
+	let diffs = diff_environment(&args.path, None, jsonnet, opts, writer).await?;
 	let has_changes = diffs.iter().any(|d| d.has_changes());
 
 	Ok(DiffResult { has_changes })
 }
 
-/// List environments that have changes.
-///
-/// Discovers all environments in the path, checks each for changes in parallel,
-/// and prints the names of environments with differences.
-#[instrument(skip_all, fields(path = %args.path.display()))]
-async fn list_modified_environments<W: Write>(
-	args: &DiffArgs,
-	writer: &mut W,
-) -> Result<DiffResult> {
-	// Discover all environments in the path
-	tracing::debug!(path = %args.path.display(), "discovering environments");
-	let evaluator = DefaultEvaluator::new(GlobalEvaluatorOptions::default());
-	let envs: Vec<Discovered> = Discover::new(evaluator, vec![args.path.clone()])
-		.collect::<Result<Vec<_>>>()
-		.context("discovering environments")?;
+impl DiffArgs {
+	/// List environments that have changes.
+	///
+	/// Discovers all environments in the path, checks each for changes in
+	/// parallel, and prints the names of environments with differences.
+	#[instrument(skip_all, fields(path = %self.path.display()))]
+	async fn list_modified_environments<W: Write>(&self, writer: &mut W) -> Result<DiffResult> {
+		// Resolved once, before any environment is looked at, so an unknown
+		// strategy is refused rather than reported per environment.
+		let strategy = self
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?;
 
-	// Filter environments by --name if specified
-	let envs: Vec<_> = if let Some(ref target_name) = args.name {
-		// First try exact match on env_name
-		let exact: Vec<_> = envs
-			.iter()
-			.filter(|e| e.env_name.as_deref() == Some(target_name.as_str()))
-			.cloned()
-			.collect();
+		// Discover all environments in the path
+		tracing::debug!(path = %self.path.display(), "discovering environments");
+		let jsonnet = self.jsonnet.options();
+		let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet.clone()));
+		let envs: Vec<rtk_environments::Discovered> = engine
+			.discover_all(vec![self.path.clone()])
+			.map_err(|error| anyhow::anyhow!("discovering environments: {error}"))?;
 
-		if !exact.is_empty() {
-			exact
+		// Filter environments by --name if specified, preferring an exact match
+		let envs: Vec<_> = if let Some(ref target_name) = self.name {
+			let name_of = |env: &rtk_environments::Discovered| {
+				env.environment.metadata.name.clone().unwrap_or_default()
+			};
+
+			let exact: Vec<_> = envs
+				.iter()
+				.filter(|e| name_of(e) == *target_name)
+				.cloned()
+				.collect();
+
+			if exact.is_empty() {
+				envs.into_iter()
+					.filter(|e| name_of(e).contains(target_name))
+					.collect()
+			} else {
+				exact
+			}
 		} else {
-			// Fall back to substring match
-			envs.into_iter()
-				.filter(|e| {
-					e.env_name
-						.as_ref()
-						.map(|n| n.contains(target_name))
-						.unwrap_or(false)
-				})
-				.collect()
-		}
-	} else {
-		envs
-	};
-
-	if envs.is_empty() {
-		eprintln!("No environments with changes.");
-		return Ok(DiffResult { has_changes: false });
-	}
-
-	tracing::debug!(env_count = envs.len(), "found environments");
-
-	// Build shared global eval options from args
-	let ext_str = &args.jsonnet.ext_str;
-	let ext_code = &args.jsonnet.ext_code;
-	let tla_str = &args.jsonnet.tla_str;
-	let tla_code = &args.jsonnet.tla_code;
-	let max_stack = args.jsonnet.max_stack;
-
-	// Check all environments in parallel using JoinSet with concurrency limit
-	const MAX_PARALLEL: usize = 8;
-	let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_PARALLEL));
-	let target = std::sync::Arc::new(args.target.clone());
-	let mut join_set = tokio::task::JoinSet::new();
-
-	for env in &envs {
-		let env_path = env.path.to_string_lossy().to_string();
-		let display_name = env
-			.env_name
-			.as_ref()
-			.map(|n| n.to_string())
-			.unwrap_or_else(|| env_path.clone());
-
-		let global_opts = GlobalEvaluatorOptions::builder()
-			.ext_strs(ext_str.clone())
-			.ext_codes(ext_code.clone())
-			.tla_strs(tla_str.clone())
-			.tla_codes(tla_code.clone())
-			.max_stack(max_stack)
-			.build();
-		let eval_opts = EvaluatorOptions {
-			env_name: env.env_name.clone(),
-			..Default::default()
+			envs
 		};
 
-		let diff_strategy = args.diff_strategy;
-		let with_prune = args.with_prune;
-		let target = Arc::clone(&target);
-		let sem = semaphore.clone();
+		if envs.is_empty() {
+			eprintln!("No environments with changes.");
+			return Ok(DiffResult { has_changes: false });
+		}
 
-		join_set.spawn(async move {
-			let _permit = sem.acquire().await.expect("semaphore closed");
-			tracing::debug!(env_path = %env_path, "checking environment");
-			match check_environment_for_changes(
-				env_path.clone(),
-				global_opts,
-				eval_opts,
-				diff_strategy,
-				with_prune,
-				target,
-			)
-			.await
-			{
-				Ok(true) => Some(display_name),
-				Ok(false) => {
-					tracing::debug!(env_path = %env_path, "no changes");
-					None
+		tracing::debug!(env_count = envs.len(), "found environments");
+
+		// Check all environments in parallel using JoinSet with concurrency limit
+		const MAX_PARALLEL: usize = 8;
+		let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_PARALLEL));
+		let target = std::sync::Arc::new(self.target.clone());
+		let mut join_set = tokio::task::JoinSet::new();
+
+		for env in &envs {
+			// Loaded by its entrypoint rather than its directory, so that an
+			// environment named by a file other than main.jsonnet is the one
+			// evaluated.
+			let env_path = env.entrypoint.to_string_lossy().to_string();
+			let display_name = env
+				.environment
+				.metadata
+				.name
+				.clone()
+				.unwrap_or_else(|| env.path.to_string_lossy().to_string());
+
+			let selected_name = env.selected_by().map(str::to_owned);
+			// The engine discovery was done through, so every environment shares
+			// one Helm render cache rather than rendering the same chart again.
+			let engine = engine.clone();
+
+			let diff_strategy = strategy;
+			let with_prune = self.with_prune;
+			let target = Arc::clone(&target);
+			let sem = semaphore.clone();
+
+			join_set.spawn(async move {
+				let _permit = sem.acquire().await.expect("semaphore closed");
+				tracing::debug!(env_path = %env_path, "checking environment");
+				match check_environment_for_changes(
+					env_path.clone(),
+					engine,
+					selected_name,
+					diff_strategy,
+					with_prune,
+					target,
+				)
+				.await
+				{
+					Ok(true) => Some(display_name),
+					Ok(false) => {
+						tracing::debug!(env_path = %env_path, "no changes");
+						None
+					}
+					Err(e) => {
+						tracing::warn!(env_path = %env_path, error = %e, "failed to check environment");
+						None
+					}
 				}
-				Err(e) => {
-					tracing::warn!(env_path = %env_path, error = %e, "failed to check environment");
-					None
-				}
+			});
+		}
+
+		let mut changed_envs = Vec::new();
+		while let Some(result) = join_set.join_next().await {
+			if let Ok(Some(name)) = result {
+				changed_envs.push(name);
 			}
-		});
-	}
-
-	let mut changed_envs = Vec::new();
-	while let Some(result) = join_set.join_next().await {
-		if let Ok(Some(name)) = result {
-			changed_envs.push(name);
 		}
-	}
 
-	// Print results
-	if changed_envs.is_empty() {
-		eprintln!("No environments with changes.");
-		Ok(DiffResult { has_changes: false })
-	} else {
-		changed_envs.sort();
-		for name in &changed_envs {
-			writeln!(writer, "{}", name)?;
+		// Print results
+		if changed_envs.is_empty() {
+			eprintln!("No environments with changes.");
+			Ok(DiffResult { has_changes: false })
+		} else {
+			changed_envs.sort();
+			for name in &changed_envs {
+				writeln!(writer, "{}", name)?;
+			}
+			Ok(DiffResult { has_changes: true })
 		}
-		Ok(DiffResult { has_changes: true })
 	}
 }
 
@@ -417,44 +417,38 @@ async fn list_modified_environments<W: Write>(
 #[instrument(skip_all, fields(path = %path))]
 async fn check_environment_for_changes(
 	path: String,
-	global_opts: GlobalEvaluatorOptions,
-	eval_opts: EvaluatorOptions,
+	engine: rtk_environments::Engine,
+	name: Option<String>,
 	diff_strategy: Option<DiffStrategy>,
 	with_prune: bool,
 	target: Arc<Vec<String>>,
 ) -> Result<bool> {
-	// Evaluate the environment
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let eval_result = evaluator
-		.eval_file(&path, &eval_opts)
+	let evaluated = evaluate_manifests(&engine, Path::new(&path), name.as_deref(), target.as_ref())
 		.context("evaluating environment")?;
-
-	let spec = eval_result.spec.as_ref().map(|e| &e.spec);
-
-	// Extract manifests
-	let mut manifests = extract_manifests(&eval_result.value, &target)?;
+	let manifests = evaluated.manifests;
 	if manifests.is_empty() {
 		return Ok(false);
 	}
 
-	process_manifests(&mut manifests, &eval_result.spec);
-
 	// Connect to the cluster
-	let spec_for_connection = spec.cloned().unwrap_or_default();
+	let spec_for_connection = evaluated.spec.clone().unwrap_or_default();
 	let connection = ClusterConnection::from_spec(&spec_for_connection).await?;
 
-	// Determine diff strategy
-	let strategy = diff_strategy.unwrap_or_else(|| {
-		if let Some(s) = spec {
-			DiffStrategy::from_spec(s, connection.server_version())
-		} else {
-			DiffStrategy::Native
-		}
-	});
+	// Determine diff strategy. No apply strategy is in play here: this is a
+	// diff, so nothing resolves one.
+	let strategy = match diff_strategy {
+		Some(strategy) => strategy,
+		None => match evaluated.spec.as_ref() {
+			Some(spec) => DiffStrategy::from_spec(spec, connection.server_version(), None)?,
+			None => DiffStrategy::Native,
+		},
+	};
 
 	// Get default namespace
-	let default_namespace = spec
-		.map(|s| s.namespace.clone())
+	let default_namespace = evaluated
+		.spec
+		.as_ref()
+		.map(|spec| spec.namespace().to_owned())
 		.unwrap_or_else(|| connection.default_namespace().to_string());
 
 	// Create diff engine
@@ -468,21 +462,19 @@ async fn check_environment_for_changes(
 	.await?;
 
 	// Get environment label for prune detection
-	let env_label_owned = eval_result
+	let inject_labels = evaluated
 		.spec
 		.as_ref()
-		.map(crate::spec::generate_environment_label);
-	let env_label = env_label_owned.as_deref();
-
-	let inject_labels = eval_result
-		.spec
-		.as_ref()
-		.and_then(|e| e.spec.inject_labels)
-		.unwrap_or(false);
+		.is_some_and(|spec| spec.inject_labels);
 
 	// Compute diffs
 	let diffs = engine
-		.diff_all(&manifests, with_prune, env_label, inject_labels)
+		.diff_all(
+			&manifests,
+			with_prune,
+			evaluated.environment_label.as_deref(),
+			inject_labels,
+		)
 		.await?;
 
 	// Check if any resource has changes
@@ -494,137 +486,9 @@ mod tests {
 
 	use super::*;
 
-	/// Helper to extract (kind, name) pairs from manifests for structural comparison.
-	fn manifest_ids(manifests: &[serde_json::Value]) -> Vec<(&str, &str)> {
-		let mut ids: Vec<_> = manifests
-			.iter()
-			.map(|m| {
-				let kind = m.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-				let name = m
-					.pointer("/metadata/name")
-					.and_then(|v| v.as_str())
-					.unwrap_or("");
-				(kind, name)
-			})
-			.collect();
-		ids.sort();
-		ids
-	}
-
-	#[test]
-	fn test_extract_manifests_single() {
-		let value = serde_json::json!({
-			"apiVersion": "v1",
-			"kind": "ConfigMap",
-			"metadata": {
-				"name": "test"
-			}
-		});
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(manifest_ids(&manifests), vec![("ConfigMap", "test")]);
-	}
-
-	#[test]
-	fn test_extract_manifests_array() {
-		let value = serde_json::json!([
-			{
-				"apiVersion": "v1",
-				"kind": "ConfigMap",
-				"metadata": { "name": "cm1" }
-			},
-			{
-				"apiVersion": "v1",
-				"kind": "Secret",
-				"metadata": { "name": "secret1" }
-			}
-		]);
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(
-			manifest_ids(&manifests),
-			vec![("ConfigMap", "cm1"), ("Secret", "secret1")]
-		);
-	}
-
-	#[test]
-	fn test_extract_manifests_nested() {
-		let value = serde_json::json!({
-			"configs": {
-				"apiVersion": "v1",
-				"kind": "ConfigMap",
-				"metadata": { "name": "nested" }
-			},
-			"deployments": {
-				"apiVersion": "apps/v1",
-				"kind": "Deployment",
-				"metadata": { "name": "deploy" }
-			}
-		});
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(
-			manifest_ids(&manifests),
-			vec![("ConfigMap", "nested"), ("Deployment", "deploy")]
-		);
-	}
-
-	#[test]
-	fn test_extract_manifests_list() {
-		let value = serde_json::json!({
-			"apiVersion": "v1",
-			"kind": "List",
-			"items": [
-				{
-					"apiVersion": "v1",
-					"kind": "ConfigMap",
-					"metadata": { "name": "cm1" }
-				},
-				{
-					"apiVersion": "v1",
-					"kind": "ConfigMap",
-					"metadata": { "name": "cm2" }
-				}
-			]
-		});
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(
-			manifest_ids(&manifests),
-			vec![("ConfigMap", "cm1"), ("ConfigMap", "cm2")]
-		);
-	}
-
-	#[test]
-	fn test_extract_manifests_with_filter() {
-		let value = serde_json::json!([
-			{
-				"apiVersion": "v1",
-				"kind": "ConfigMap",
-				"metadata": { "name": "cm1" }
-			},
-			{
-				"apiVersion": "v1",
-				"kind": "Secret",
-				"metadata": { "name": "secret1" }
-			},
-			{
-				"apiVersion": "v1",
-				"kind": "ConfigMap",
-				"metadata": { "name": "cm2" }
-			}
-		]);
-
-		let manifests = extract_manifests(&value, &["ConfigMap/.*".to_string()]).unwrap();
-		assert_eq!(
-			manifest_ids(&manifests),
-			vec![("ConfigMap", "cm1"), ("ConfigMap", "cm2")]
-		);
-	}
-
 	#[test]
 	fn test_build_eval_opts() {
-		use crate::jsonnet::evaluator::EvaluatorImplementation;
+		use crate::commands::common::EvaluatorImplementation;
 
 		let args = DiffArgs {
 			path: PathBuf::from("test"),
@@ -633,10 +497,11 @@ mod tests {
 			exit_zero: false,
 			name: Some("my-env".to_string()),
 			jsonnet: crate::commands::JsonnetArgs {
+				helm_cache: false,
 				ext_code: vec![("code1".into(), "{}".into())],
 				ext_str: vec![("str1".into(), "value1".into())],
 				implementation: EvaluatorImplementation::default(),
-				max_stack: 500,
+				max_stack: Some(500),
 				tla_code: vec![("tla1".into(), "true".into())],
 				tla_str: vec![("tla2".into(), "hello".into())],
 			},
@@ -646,12 +511,14 @@ mod tests {
 			list_modified_envs: false,
 		};
 
-		// into_global_evaluator_options handles jsonnet args
-		let opts = args.jsonnet.into_global_evaluator_options();
-		assert_eq!(opts.ext_str.get("str1").map(|v| &**v), Some("value1"));
+		let opts = args.jsonnet.into_options();
+		assert_eq!(opts.ext_variables.get("str1").map(|v| &**v), Some("value1"));
 		assert_eq!(opts.ext_code.get("code1").map(|v| &**v), Some("{}"));
-		assert_eq!(opts.tla_str.get("tla2").map(|v| &**v), Some("hello"));
-		assert_eq!(opts.tla_code.get("tla1").map(|v| &**v), Some("true"));
-		assert_eq!(opts.max_stack, 500);
+		assert_eq!(
+			opts.top_level_arguments.get("tla2").map(|v| &**v),
+			Some("hello")
+		);
+		assert_eq!(opts.top_level_code.get("tla1").map(|v| &**v), Some("true"));
+		assert_eq!(opts.max_stack, Some(500));
 	}
 }

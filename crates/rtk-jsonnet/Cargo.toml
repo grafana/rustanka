@@ -1,0 +1,33 @@
+[package]
+name = "rtk-jsonnet"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+clap.workspace = true
+rayon.workspace = true
+regex.workspace = true
+rtk-jsonnet-core.workspace = true
+rtk-jsonnet-helm.workspace = true
+rtk-jsonnet-jrsonnet.workspace = true
+rtk-jsonnet-kustomize.workspace = true
+rtk-jsonnet-native-functions.workspace = true
+rtk-jsonnet-regex.workspace = true
+rtk-masterminds.workspace = true
+rtk-spec.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+url.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
