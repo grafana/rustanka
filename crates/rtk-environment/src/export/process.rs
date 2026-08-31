@@ -4,6 +4,8 @@
 //! environment's `data`, filtered by `--target`, then have namespaces, labels
 //! and resource defaults injected before being serialized.
 
+use rustc_hash::FxHashSet;
+
 use rtk_jsonnet::{EvaluationValue, Hidden};
 use rtk_spec::canonical::Environment;
 use rtk_spec::v1alpha1::EnvironmentData;
@@ -465,12 +467,18 @@ fn validate_manifest(manifest: &serde_json::Value, path: &str) -> Result<(), Err
 }
 
 /// Compiled `-t/--target` expressions.
+///
+/// Public because the same expressions decide two different things: which of an
+/// environment's own manifests to act on, and which of the cluster's resources
+/// count as orphans when pruning. The second lives with the Kubernetes client,
+/// so it needs to ask this rather than compile its own — Tanka has one
+/// `process.Filter`, and so does rtk.
 #[derive(Clone, Debug)]
-pub(crate) struct Targets(Vec<TargetMatcher>);
+pub struct Targets(Vec<TargetMatcher>);
 
 impl Targets {
 	/// Compile raw `-t` arguments. Mirrors Tanka's `process.StrExps`.
-	pub(crate) fn compile<I, S>(patterns: I) -> Result<Targets, Error>
+	pub fn compile<I, S>(patterns: I) -> Result<Targets, Error>
 	where
 		I: IntoIterator<Item = S>,
 		S: AsRef<str>,
@@ -483,28 +491,73 @@ impl Targets {
 	}
 
 	/// Whether a manifest survives these matchers.
+	pub(crate) fn keeps(&self, manifest: &serde_json::Value) -> bool {
+		self.keeps_kind_name(&kind_name(manifest))
+	}
+
+	/// Whether a `kind/name` survives these matchers.
 	///
 	/// Mirrors Tanka's `process.Filter`: keep it if at least one matcher matches
 	/// and no negative matcher does. A negative matcher always satisfies the
 	/// "matches at least one" gate (Tanka's `NegMatcher.MatchString` is
 	/// unconditionally true), so a query of only `!…` patterns keeps everything
 	/// but the exclusions.
-	pub(crate) fn keeps(&self, manifest: &serde_json::Value) -> bool {
+	///
+	/// Takes the name rather than a manifest, because a resource discovered in
+	/// the cluster is not one: pruning asks about things this environment never
+	/// produced.
+	#[must_use]
+	pub fn keeps_kind_name(&self, kind_name: &str) -> bool {
 		if self.0.is_empty() {
 			return true;
 		}
 
-		let kind_name = kind_name(manifest);
 		let matched = self
 			.0
 			.iter()
-			.any(|matcher| matcher.negate || matcher.regex.is_match(&kind_name));
+			.any(|matcher| matcher.negate || matcher.regex.is_match(kind_name));
 		let excluded = self
 			.0
 			.iter()
-			.any(|matcher| matcher.negate && matcher.regex.is_match(&kind_name));
+			.any(|matcher| matcher.negate && matcher.regex.is_match(kind_name));
 
 		matched && !excluded
+	}
+
+	/// The kinds these targets can possibly keep, lowercased, if that is knowable.
+	///
+	/// A caller listing the cluster can use this to leave whole resource types
+	/// unasked for. [`None`] means every kind has to be considered: either
+	/// nothing positive was named, or a kind was named as a pattern rather than
+	/// as a literal, and narrowing on a guess would hide resources that should
+	/// have been pruned.
+	#[must_use]
+	pub fn kind_hints(&self) -> Option<FxHashSet<String>> {
+		/// Anything that makes a kind a pattern rather than a name.
+		const META: [char; 13] = [
+			'.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '|', '\\', '$',
+		];
+
+		let mut kinds = FxHashSet::default();
+		let mut named_one = false;
+
+		for matcher in self.0.iter().filter(|matcher| !matcher.negate) {
+			named_one = true;
+			// Compiled as `^…$`, so the anchors come back off to read the kind.
+			let pattern = matcher
+				.regex
+				.as_str()
+				.strip_prefix('^')
+				.and_then(|pattern| pattern.strip_suffix('$'))?;
+			let kind = pattern.split_once('/').map_or(pattern, |(kind, _)| kind);
+
+			if kind.is_empty() || kind.contains(META) || kind.contains('^') {
+				return None;
+			}
+			kinds.insert(kind.to_lowercase());
+		}
+
+		named_one.then_some(kinds)
 	}
 }
 
@@ -737,6 +790,70 @@ fn materialize_number(number: f64) -> Result<serde_json::Number, Error> {
 
 #[cfg(test)]
 mod tests {
+	/// The same expressions decide an environment's own manifests and, when
+	/// pruning, which of the cluster's resources count as orphans — so a
+	/// `kind/name` has to be answerable without a manifest to read it from.
+	#[test]
+	fn targets_match_a_kind_and_name_without_a_manifest() {
+		let targets = Targets::compile(["Deployment/.*", "service/frontend"]).expect("valid");
+
+		assert!(targets.keeps_kind_name("Deployment/anything"));
+		assert!(targets.keeps_kind_name("Service/frontend"));
+		assert!(!targets.keeps_kind_name("Service/other"));
+		assert!(!targets.keeps_kind_name("ConfigMap/settings"));
+
+		// And it agrees with the manifest-shaped question, being the same rule.
+		assert!(targets.keeps(&json!({
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": { "name": "anything" },
+		})));
+	}
+
+	/// Naming no targets keeps everything, as tk's empty filter does.
+	#[test]
+	fn no_targets_keep_everything() {
+		let targets = Targets::compile(Vec::<String>::new()).expect("valid");
+		assert!(targets.keeps_kind_name("ConfigMap/anything"));
+		assert_eq!(targets.kind_hints(), None, "nothing to narrow on");
+	}
+
+	/// A caller listing the cluster can skip whole resource types, but only when
+	/// every positive target names a kind outright.
+	#[test]
+	fn kind_hints_are_given_only_for_literal_kinds() {
+		let targets = Targets::compile(["Deployment/.*", "service/frontend", "!Service/ignored"])
+			.expect("valid");
+		let hints = targets.kind_hints().expect("both kinds are literal");
+		assert_eq!(
+			hints.into_iter().collect::<std::collections::BTreeSet<_>>(),
+			["deployment".to_owned(), "service".to_owned()]
+				.into_iter()
+				.collect::<std::collections::BTreeSet<_>>()
+		);
+	}
+
+	/// Narrowing on a guess would hide resources that should have been pruned,
+	/// so anything less than a literal kind means every kind must be considered.
+	#[test]
+	fn kind_hints_are_withheld_when_a_kind_is_a_pattern() {
+		for patterns in [
+			vec![".*/name"],
+			vec!["Deploy.*/name"],
+			vec!["(Deployment|Service)/name"],
+			vec!["Deployment/name", "Serv.*/other"],
+			// Negative-only: nothing was asked for, so nothing can be skipped.
+			vec!["!Service/ignored"],
+		] {
+			let targets = Targets::compile(&patterns).expect("valid");
+			assert_eq!(
+				targets.kind_hints(),
+				None,
+				"{patterns:?} should not narrow the kinds listed"
+			);
+		}
+	}
+
 	use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 	use rtk_spec::canonical::{Environment, EnvironmentSpec, ResourceDefaults};
 	use serde_json::Value;

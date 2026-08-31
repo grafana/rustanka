@@ -45,6 +45,7 @@ mod writer;
 pub use crate::export::data::OptionalData;
 pub use crate::export::manifest::{InvalidMergeStrategy, MergeStrategy};
 pub use crate::export::template::DEFAULT_FORMAT;
+pub use process::Targets;
 
 /// A Kubernetes label selector used to filter discovered environments.
 pub struct LabelSelector(Selector);
