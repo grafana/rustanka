@@ -166,6 +166,20 @@ they hold and an absent one appears as `{}` — in the extVar, in `env list
 --json` and in a written `spec.json` alike. Deserialization still treats them as
 optional.
 
+### Target Filtering
+
+`-t/--target` expressions are compiled once, by
+`rtk_environments::export::Targets`, and answer two different questions with the
+same rule: which of an environment's own manifests to act on, and — when
+pruning — which of the cluster's resources count as orphans. The second lives
+with the Kubernetes client, which is why `Targets` is public; tk has one
+`process.Filter` and so does rtk.
+
+`Targets::kind_hints` lets prune leave whole resource types unasked for, but
+only when every positive target names a kind outright. A pattern, or a
+negative-only filter, withholds the answer: narrowing on a guess would hide
+resources that should have been pruned.
+
 ### What Counts as a Manifest
 
 Extraction mirrors tk's `walkJSON`. Anything carrying an `apiVersion` and a
