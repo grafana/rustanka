@@ -48,7 +48,7 @@ impl FilenameTemplate {
 	pub(crate) fn new(format: &str) -> Result<FilenameTemplate, Error> {
 		let mut placeholder = [0u8; 4];
 		let template = FilenameTemplate {
-			format: replace_outside_actions(
+			format: Self::replace_outside_actions(
 				format,
 				"/",
 				SEPARATOR_PLACEHOLDER.encode_utf8(&mut placeholder),
@@ -135,6 +135,27 @@ impl FilenameTemplate {
 
 		Ok(())
 	}
+
+	/// Replace `old` with `new`, but only outside `{{ … }}` actions. Mirrors Tanka's
+	/// `replaceTmplText`.
+	fn replace_outside_actions(template: &str, old: &str, new: &str) -> String {
+		let mut replaced = String::with_capacity(template.len());
+		let mut remaining = template;
+
+		while let Some(start) = remaining.find("{{") {
+			let Some(end) = remaining[start..].find("}}").map(|end| start + end + 2) else {
+				// An unterminated action is all text as far as tk is concerned.
+				break;
+			};
+
+			replaced.push_str(&remaining[..start].replace(old, new));
+			replaced.push_str(&remaining[start..end]);
+			remaining = &remaining[end..];
+		}
+
+		replaced.push_str(&remaining.replace(old, new));
+		replaced
+	}
 }
 
 /// A [`FilenameTemplate`] with one environment's values baked in.
@@ -145,7 +166,7 @@ pub(crate) struct SpecializedTemplate {
 impl SpecializedTemplate {
 	/// Render `manifest`'s filename, without its extension.
 	pub(crate) fn render(&self, manifest: &Value) -> Result<String, Error> {
-		let context = Context::from(TemplateValue::Map(template_context(manifest)));
+		let context = Context::from(TemplateValue::Map(Self::context(manifest)));
 		self.render_context(context)
 	}
 
@@ -212,32 +233,32 @@ impl SpecializedTemplate {
 			.replace('/', "-")
 			.replace(SEPARATOR_PLACEHOLDER, "/"))
 	}
-}
 
-fn template_context(manifest: &Value) -> HashMap<String, TemplateValue> {
-	let mut context = HashMap::with_capacity(3);
+	fn context(manifest: &Value) -> HashMap<String, TemplateValue> {
+		let mut context = HashMap::with_capacity(3);
 
-	for field in ["kind", "apiVersion"] {
-		if let Some(value) = manifest.get(field) {
-			context.insert(field.to_owned(), json_to_template(value));
+		for field in ["kind", "apiVersion"] {
+			if let Some(value) = manifest.get(field) {
+				context.insert(field.to_owned(), json_to_template(value));
+			}
 		}
-	}
 
-	let metadata = manifest.get("metadata").and_then(Value::as_object);
-	let mut mapped = HashMap::with_capacity(metadata.map_or(1, |metadata| metadata.len() + 1));
-	if let Some(metadata) = metadata {
-		for (field, value) in metadata {
-			mapped.insert(field.clone(), json_to_template(value));
+		let metadata = manifest.get("metadata").and_then(Value::as_object);
+		let mut mapped = HashMap::with_capacity(metadata.map_or(1, |metadata| metadata.len() + 1));
+		if let Some(metadata) = metadata {
+			for (field, value) in metadata {
+				mapped.insert(field.clone(), json_to_template(value));
+			}
 		}
-	}
-	// Templates commonly index `.metadata.labels`, which has to exist for that
-	// to render rather than fail.
-	mapped
-		.entry("labels".to_owned())
-		.or_insert_with(|| TemplateValue::Map(HashMap::new()));
-	context.insert("metadata".to_owned(), TemplateValue::Map(mapped));
+		// Templates commonly index `.metadata.labels`, which has to exist for that
+		// to render rather than fail.
+		mapped
+			.entry("labels".to_owned())
+			.or_insert_with(|| TemplateValue::Map(HashMap::new()));
+		context.insert("metadata".to_owned(), TemplateValue::Map(mapped));
 
-	context
+		context
+	}
 }
 
 fn json_to_template(value: &Value) -> TemplateValue {
@@ -293,27 +314,6 @@ fn is_empty(value: &TemplateValue) -> bool {
 		TemplateValue::Object(object) => object.is_empty(),
 		TemplateValue::Function(_) => false,
 	}
-}
-
-/// Replace `old` with `new`, but only outside `{{ … }}` actions. Mirrors Tanka's
-/// `replaceTmplText`.
-fn replace_outside_actions(template: &str, old: &str, new: &str) -> String {
-	let mut replaced = String::with_capacity(template.len());
-	let mut remaining = template;
-
-	while let Some(start) = remaining.find("{{") {
-		let Some(end) = remaining[start..].find("}}").map(|end| start + end + 2) else {
-			// An unterminated action is all text as far as tk is concerned.
-			break;
-		};
-
-		replaced.push_str(&remaining[..start].replace(old, new));
-		replaced.push_str(&remaining[start..end]);
-		remaining = &remaining[end..];
-	}
-
-	replaced.push_str(&remaining.replace(old, new));
-	replaced
 }
 
 /// Replace anything that has no business in a path component.
@@ -528,13 +528,19 @@ mod tests {
 
 	#[test]
 	fn replaces_text_outside_actions_only() {
-		assert_eq!(replace_outside_actions("a/b", "/", "!"), "a!b");
 		assert_eq!(
-			replace_outside_actions("{{ .a/b }}/c", "/", "!"),
+			FilenameTemplate::replace_outside_actions("a/b", "/", "!"),
+			"a!b"
+		);
+		assert_eq!(
+			FilenameTemplate::replace_outside_actions("{{ .a/b }}/c", "/", "!"),
 			"{{ .a/b }}!c"
 		);
 		// An unterminated action is all text, as tk treats it.
-		assert_eq!(replace_outside_actions("a/{{ .b", "/", "!"), "a!{{ .b");
+		assert_eq!(
+			FilenameTemplate::replace_outside_actions("a/{{ .b", "/", "!"),
+			"a!{{ .b"
+		);
 	}
 
 	#[test]

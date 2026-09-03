@@ -51,10 +51,6 @@ pub use process::Targets;
 pub struct LabelSelector(Selector);
 
 impl LabelSelector {
-	pub fn parse(input: &str) -> Result<LabelSelector, Error> {
-		selector::parse(input).map(LabelSelector)
-	}
-
 	pub fn matches<'a, D>(&self, environment: &Environment<'a, D>) -> bool
 	where
 		D: rtk_spec::v1alpha1::EnvironmentData<'a>,
@@ -378,6 +374,50 @@ impl Exported {
 			.count()
 	}
 
+	/// Work out which environment owns each written file, and what that conflicts
+	/// with.
+	///
+	/// Every report that wrote something is considered, failed or not: the files
+	/// are on disk either way, so they need an owner and they can still collide.
+	///
+	/// Claimed files are removed from `superseded`, which is left partly reduced
+	/// when a conflict stops the walk — which is why the caller must not prune on
+	/// the strength of it.
+	fn claim_files(&self, index: &Manifest, superseded: &mut FxHashSet<String>) -> Option<Error> {
+		let mut owners: FxHashMap<String, &str> = FxHashMap::default();
+
+		for report in &self.reports {
+			for file in &report.files {
+				let file = Manifest::relative_key(file);
+
+				if let Some(first) = owners.get(&file) {
+					return Some(Error::DuplicateFile {
+						file,
+						first: (*first).to_owned(),
+						second: report.identifier.clone(),
+					});
+				}
+
+				// A file in the index that no exported environment is replacing
+				// belongs to somebody else.
+				if !superseded.contains(&file)
+					&& let Some(owner) = index.owner(&file)
+					&& owner != report.identifier
+				{
+					return Some(Error::ForeignFile {
+						file,
+						owner: owner.to_owned(),
+					});
+				}
+
+				superseded.remove(&file);
+				owners.insert(file, &report.identifier);
+			}
+		}
+
+		None
+	}
+
 	/// Every file the export wrote, relative to the output directory.
 	pub fn files(&self) -> impl Iterator<Item = &Path> {
 		self.reports
@@ -559,15 +599,28 @@ impl Error {
 	/// Most of what goes wrong here goes wrong underneath something: a failed
 	/// write knows the path it was writing, but the reason it failed belongs to
 	/// the error beneath it. Displaying one of these on its own leaves that out.
+	/// Render an error and its causes, the way a user wants to read them.
+	fn render(error: &(dyn std::error::Error + 'static)) -> String {
+		use std::fmt::Write as _;
+
+		let mut rendered = error.to_string();
+		let mut source = error.source();
+		while let Some(cause) = source {
+			let _ = write!(&mut rendered, "\n  caused by: {cause}");
+			source = cause.source();
+		}
+		rendered
+	}
+
 	pub fn report(&self) -> String {
-		render(self)
+		Self::render(self)
 	}
 }
 
 impl From<rtk_jsonnet::Error> for Error {
 	fn from(error: rtk_jsonnet::Error) -> Self {
 		Error::Evaluate {
-			message: render(&error),
+			message: Error::render(&error),
 		}
 	}
 }
@@ -576,22 +629,9 @@ impl From<crate::Error> for Error {
 	fn from(error: crate::Error) -> Self {
 		match error {
 			crate::Error::Evaluation(error) => error.into(),
-			error => Error::Discover(Box::new(render(&error))),
+			error => Error::Discover(Box::new(Error::render(&error))),
 		}
 	}
-}
-
-/// Render an error and its causes, the way a user wants to read them.
-fn render(error: &(dyn std::error::Error + 'static)) -> String {
-	use std::fmt::Write as _;
-
-	let mut rendered = error.to_string();
-	let mut source = error.source();
-	while let Some(cause) = source {
-		let _ = write!(&mut rendered, "\n  caused by: {cause}");
-		source = cause.source();
-	}
-	rendered
 }
 
 /// Everything a worker reports has to be able to leave the worker's thread, and
@@ -685,54 +725,6 @@ struct Plan {
 	manifests: Vec<serde_json::Value>,
 	/// How to name each manifest. Absent only when there is nothing to export.
 	template: Option<SpecializedTemplate>,
-}
-
-/// Work out which environment owns each written file, and what that conflicts
-/// with.
-///
-/// Every report that wrote something is considered, failed or not: the files are
-/// on disk either way, so they need an owner and they can still collide.
-///
-/// Claimed files are removed from `superseded`, which is left partly reduced
-/// when a conflict stops the walk — which is why the caller must not prune on
-/// the strength of it.
-fn claim_files(
-	exported: &Exported,
-	index: &Manifest,
-	superseded: &mut FxHashSet<String>,
-) -> Option<Error> {
-	let mut owners: FxHashMap<String, &str> = FxHashMap::default();
-
-	for report in &exported.reports {
-		for file in &report.files {
-			let file = manifest::relative_key(file);
-
-			if let Some(first) = owners.get(&file) {
-				return Some(Error::DuplicateFile {
-					file,
-					first: (*first).to_owned(),
-					second: report.identifier.clone(),
-				});
-			}
-
-			// A file in the index that no exported environment is replacing
-			// belongs to somebody else.
-			if !superseded.contains(&file)
-				&& let Some(owner) = index.owner(&file)
-				&& owner != report.identifier
-			{
-				return Some(Error::ForeignFile {
-					file,
-					owner: owner.to_owned(),
-				});
-			}
-
-			superseded.remove(&file);
-			owners.insert(file, &report.identifier);
-		}
-	}
-
-	None
 }
 
 /// Whether a manifest is a Tanka `Environment` rather than a Kubernetes resource.
@@ -867,7 +859,7 @@ impl Engine {
 			selector: options
 				.selector
 				.as_deref()
-				.map(selector::parse)
+				.map(LabelSelector::parse)
 				.transpose()?,
 			recursive: options.recursive,
 		};
@@ -985,7 +977,7 @@ struct Matching {
 	/// tk's `ErrMultipleEnvs` does.
 	path: String,
 	name: Option<String>,
-	selector: Option<Selector>,
+	selector: Option<LabelSelector>,
 	recursive: bool,
 }
 
@@ -1028,11 +1020,10 @@ impl Matching {
 			return false;
 		}
 
-		if let Some(selector) = self.selector.as_ref() {
-			let labels = discovered.environment.metadata.labels.as_ref();
-			if !selector.matches(labels.unwrap_or(&NO_LABELS)) {
-				return false;
-			}
+		if let Some(selector) = self.selector.as_ref()
+			&& !selector.matches(&discovered.environment)
+		{
+			return false;
 		}
 
 		true
@@ -1209,7 +1200,7 @@ impl Export {
 		let output_dir = &self.options.output_dir;
 
 		if self.options.merge_strategy == MergeStrategy::None
-			&& !manifest::is_empty_dir(output_dir)?
+			&& !Manifest::is_empty_dir(output_dir)?
 		{
 			return Err(Error::OutputDirNotEmpty {
 				output_dir: output_dir.clone(),
@@ -1246,7 +1237,7 @@ impl Export {
 		};
 		superseded.extend(index.files_of(&options.merge_deleted_environments));
 
-		let conflict = claim_files(exported, &index, &mut superseded);
+		let conflict = exported.claim_files(&index, &mut superseded);
 
 		// A conflict is only found once everything has been written, so the files
 		// are already on disk. Nothing is deleted on the strength of a run that
@@ -1256,7 +1247,7 @@ impl Export {
 		let removed = if conflict.is_none() {
 			// Only what actually went may be forgotten. Pruning is best effort,
 			// and a file it could not delete is still there and still owned.
-			manifest::prune(&options.output_dir, &superseded)
+			Manifest::prune(&options.output_dir, &superseded)
 		} else {
 			FxHashSet::default()
 		};

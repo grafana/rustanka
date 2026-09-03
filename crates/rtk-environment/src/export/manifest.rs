@@ -134,7 +134,7 @@ impl Manifest {
 	{
 		for file in files {
 			self.files
-				.insert(relative_key(file), environment.to_owned());
+				.insert(Self::relative_key(file), environment.to_owned());
 		}
 	}
 
@@ -166,65 +166,65 @@ impl Manifest {
 			source,
 		})
 	}
-}
 
-/// A relative path as `manifest.json` spells it: `/`-separated on every
-/// platform.
-pub(crate) fn relative_key(path: &Path) -> String {
-	path.components()
-		.map(|component| component.as_os_str().to_string_lossy())
-		.collect::<Vec<_>>()
-		.join("/")
-}
-
-/// Whether a directory holds nothing (or does not exist).
-pub(crate) fn is_empty_dir(directory: &Path) -> Result<bool, Error> {
-	match std::fs::read_dir(directory) {
-		Ok(mut entries) => Ok(entries.next().is_none()),
-		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-		Err(source) => Err(Error::Write {
-			path: directory.into(),
-			source,
-		}),
+	/// A relative path as `manifest.json` spells it: `/`-separated on every
+	/// platform.
+	pub(crate) fn relative_key(path: &Path) -> String {
+		path.components()
+			.map(|component| component.as_os_str().to_string_lossy())
+			.collect::<Vec<_>>()
+			.join("/")
 	}
-}
 
-/// Delete files a re-export no longer produces, and any directory that leaves
-/// empty.
-/// Returns the files that are actually gone, which is what the index may forget.
-///
-/// A file that could not be deleted is still there and still belongs to whoever
-/// wrote it, so forgetting it would leave it on disk owned by nobody — the very
-/// drift pruning exists to avoid.
-pub(crate) fn prune<I, S>(output_dir: &Path, files: I) -> FxHashSet<String>
-where
-	I: IntoIterator<Item = S>,
-	S: AsRef<str>,
-{
-	let mut removed = FxHashSet::default();
-
-	for file in files {
-		let path = output_dir.join(file.as_ref());
-		// Best effort: a file that is already gone needs no deleting, and one
-		// that cannot be deleted is not worth failing an otherwise good export.
-		if let Err(error) = std::fs::remove_file(&path)
-			&& error.kind() != std::io::ErrorKind::NotFound
-		{
-			tracing::warn!(path = ?path, "could not delete {}: {error}", path.display());
-			continue;
-		}
-		removed.insert(file.as_ref().to_owned());
-
-		if let Some(parent) = path.parent()
-			&& parent != output_dir
-		{
-			// Only succeeds while the directory is empty, which is exactly when
-			// it should go.
-			drop(std::fs::remove_dir(parent));
+	/// Whether a directory holds nothing (or does not exist).
+	pub(crate) fn is_empty_dir(directory: &Path) -> Result<bool, Error> {
+		match std::fs::read_dir(directory) {
+			Ok(mut entries) => Ok(entries.next().is_none()),
+			Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+			Err(source) => Err(Error::Write {
+				path: directory.into(),
+				source,
+			}),
 		}
 	}
 
-	removed
+	/// Delete files a re-export no longer produces, and any directory that leaves
+	/// empty.
+	/// Returns the files that are actually gone, which is what the index may forget.
+	///
+	/// A file that could not be deleted is still there and still belongs to whoever
+	/// wrote it, so forgetting it would leave it on disk owned by nobody — the very
+	/// drift pruning exists to avoid.
+	pub(crate) fn prune<I, S>(output_dir: &Path, files: I) -> FxHashSet<String>
+	where
+		I: IntoIterator<Item = S>,
+		S: AsRef<str>,
+	{
+		let mut removed = FxHashSet::default();
+
+		for file in files {
+			let path = output_dir.join(file.as_ref());
+			// Best effort: a file that is already gone needs no deleting, and one
+			// that cannot be deleted is not worth failing an otherwise good export.
+			if let Err(error) = std::fs::remove_file(&path)
+				&& error.kind() != std::io::ErrorKind::NotFound
+			{
+				tracing::warn!(path = ?path, "could not delete {}: {error}", path.display());
+				continue;
+			}
+			removed.insert(file.as_ref().to_owned());
+
+			if let Some(parent) = path.parent()
+				&& parent != output_dir
+			{
+				// Only succeeds while the directory is empty, which is exactly when
+				// it should go.
+				drop(std::fs::remove_dir(parent));
+			}
+		}
+
+		removed
+	}
 }
 
 #[cfg(test)]
@@ -333,7 +333,7 @@ mod tests {
 		std::fs::write(nested.join("gone.yaml"), "{}").expect("the file");
 		std::fs::write(directory.path().join("kept.yaml"), "{}").expect("the file");
 
-		prune(directory.path(), ["nested/gone.yaml", "never-existed.yaml"]);
+		Manifest::prune(directory.path(), ["nested/gone.yaml", "never-existed.yaml"]);
 
 		assert!(!nested.exists(), "an emptied directory should go too");
 		assert!(directory.path().join("kept.yaml").exists());
@@ -342,10 +342,10 @@ mod tests {
 	#[test]
 	fn reports_empty_directories() {
 		let directory = tempfile::tempdir().expect("a temporary directory");
-		assert!(is_empty_dir(directory.path()).unwrap());
-		assert!(is_empty_dir(&directory.path().join("absent")).unwrap());
+		assert!(Manifest::is_empty_dir(directory.path()).unwrap());
+		assert!(Manifest::is_empty_dir(&directory.path().join("absent")).unwrap());
 
 		std::fs::write(directory.path().join("file"), "").expect("the file");
-		assert!(!is_empty_dir(directory.path()).unwrap());
+		assert!(!Manifest::is_empty_dir(directory.path()).unwrap());
 	}
 }
