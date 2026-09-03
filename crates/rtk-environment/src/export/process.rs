@@ -277,16 +277,7 @@ pub(crate) fn collect_manifests(
 	path: &str,
 	manifests: &mut Vec<serde_json::Value>,
 ) -> Result<(), Error> {
-	walk(value, path, manifests).map_err(|interrupted| match interrupted {
-		// Nothing enclosed the value, so there is no object to blame — tk
-		// formats its nil error as `%!s(<nil>)` here, which is an artifact
-		// rather than a message worth reproducing.
-		Interrupted::Primitive { path } => Error::InvalidManifest {
-			path,
-			reason: "not a Kubernetes object".to_owned(),
-		},
-		Interrupted::Failed(error) => error,
-	})
+	Walk { manifests }.collect(value, path)
 }
 
 /// A walk that ended early.
@@ -308,161 +299,183 @@ impl From<Error> for Interrupted {
 	}
 }
 
-fn walk(
-	value: serde_json::Value,
-	path: &str,
-	manifests: &mut Vec<serde_json::Value>,
-) -> Result<(), Interrupted> {
-	match value {
-		serde_json::Value::Array(items) => {
-			for (index, item) in items.into_iter().enumerate() {
-				walk(item, &format!("{path}[{index}]"), manifests)?;
-			}
-			Ok(())
-		}
-		serde_json::Value::Object(object) => walk_object(object, path, manifests),
-		// The path of the object that should have explained this value, which is
-		// this one with its last step removed, as tk's `trace.Base` does.
-		_ => Err(Interrupted::Primitive {
-			path: parent_path(path),
-		}),
-	}
+/// One walk of an evaluated document, collecting the manifests it holds.
+///
+/// The accumulator travels with the recursion rather than being threaded through
+/// every frame of it, which is the whole of why this type exists.
+struct Walk<'m> {
+	manifests: &'m mut Vec<serde_json::Value>,
 }
 
-fn walk_object(
-	mut object: serde_json::Map<String, serde_json::Value>,
-	path: &str,
-	manifests: &mut Vec<serde_json::Value>,
-) -> Result<(), Interrupted> {
-	// ksonnet's private field, which tk drops before deciding anything and so
-	// never exports either.
-	object.remove("__ksonnet");
-
-	let defect = match manifest_defect(&object) {
-		None => {
-			if object.get("kind").and_then(serde_json::Value::as_str) == Some("List") {
-				if let Some(serde_json::Value::Array(items)) = object.remove("items") {
-					for (index, item) in items.into_iter().enumerate() {
-						walk(item, &format!("{path}.items[{index}]"), manifests)?;
-					}
-				}
-			} else {
-				let manifest = serde_json::Value::Object(object);
-				validate_manifest(&manifest, path)?;
-				manifests.push(manifest);
-			}
-			return Ok(());
-		}
-		Some(defect) => defect,
-	};
-
-	// Sorted, because which failure is reported depends on it and tk sorts.
-	let mut fields = object.into_iter().collect::<Vec<_>>();
-	fields.sort_by(|(one, _), (other, _)| one.cmp(other));
-
-	for (field, value) in fields {
-		// A field left unset by a false condition in Jsonnet, which tk skips
-		// rather than treating as a value that cannot be walked.
-		if value.is_null() {
-			continue;
-		}
-		walk(value, &format!("{path}.{field}"), manifests).map_err(|interrupted| {
-			match interrupted {
-				// The innermost object to see this is the one that has to
-				// explain it, so it becomes an ordinary failure here and outer
-				// frames leave it alone.
+impl Walk<'_> {
+	/// Walk `value`, reporting the failure a caller wants to read.
+	fn collect(mut self, value: serde_json::Value, path: &str) -> Result<(), Error> {
+		self.walk(value, path)
+			.map_err(|interrupted| match interrupted {
+				// Nothing enclosed the value, so there is no object to blame — tk
+				// formats its nil error as `%!s(<nil>)` here, which is an artifact
+				// rather than a message worth reproducing.
 				Interrupted::Primitive { path } => Error::InvalidManifest {
 					path,
-					reason: defect.clone(),
+					reason: "not a Kubernetes object".to_owned(),
+				},
+				Interrupted::Failed(error) => error,
+			})
+	}
+
+	fn walk(&mut self, value: serde_json::Value, path: &str) -> Result<(), Interrupted> {
+		match value {
+			serde_json::Value::Array(items) => {
+				for (index, item) in items.into_iter().enumerate() {
+					self.walk(item, &format!("{path}[{index}]"))?;
 				}
-				.into(),
-				failed @ Interrupted::Failed(_) => failed,
+				Ok(())
 			}
-		})?;
+			serde_json::Value::Object(object) => self.walk_object(object, path),
+			// The path of the object that should have explained this value, which is
+			// this one with its last step removed, as tk's `trace.Base` does.
+			_ => Err(Interrupted::Primitive {
+				path: Self::parent_path(path),
+			}),
+		}
 	}
 
-	Ok(())
-}
+	fn walk_object(
+		&mut self,
+		mut object: serde_json::Map<String, serde_json::Value>,
+		path: &str,
+	) -> Result<(), Interrupted> {
+		// ksonnet's private field, which tk drops before deciding anything and so
+		// never exports either.
+		object.remove("__ksonnet");
 
-/// A JSON path with its last step removed. Tanka's `trace.Base`.
-fn parent_path(path: &str) -> String {
-	let base = match path.rfind(['.', '[']) {
-		Some(0) | None => "",
-		Some(index) => &path[..index],
-	};
-	if base.is_empty() {
-		".".to_owned()
-	} else {
-		base.to_owned()
-	}
-}
-
-/// Why an object is not a Kubernetes manifest, or `None` if it is one.
-///
-/// Tanka's `isKubernetesManifest`: `apiVersion` and `kind` must both be present,
-/// be strings, and be non-empty. Checking only that they exist let rtk treat
-/// `kind: 42` as a manifest.
-fn manifest_defect(object: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-	for attribute in ["apiVersion", "kind"] {
-		let defect = match object.get(attribute) {
-			None | Some(serde_json::Value::Null) => format!("missing attribute {attribute:?}"),
-			Some(serde_json::Value::String(text)) if text.is_empty() => {
-				format!("attribute {attribute:?} is empty")
+		let defect = match Self::manifest_defect(&object) {
+			None => {
+				if object.get("kind").and_then(serde_json::Value::as_str) == Some("List") {
+					if let Some(serde_json::Value::Array(items)) = object.remove("items") {
+						for (index, item) in items.into_iter().enumerate() {
+							self.walk(item, &format!("{path}.items[{index}]"))?;
+						}
+					}
+				} else {
+					let manifest = serde_json::Value::Object(object);
+					Self::validate_manifest(&manifest, path)?;
+					self.manifests.push(manifest);
+				}
+				return Ok(());
 			}
-			Some(serde_json::Value::String(_)) => continue,
-			Some(other) => format!(
-				"attribute {attribute:?} is not a string, it is a {}",
-				go_type_name(other)
-			),
+			Some(defect) => defect,
 		};
-		return Some(defect);
-	}
-	None
-}
 
-/// Go's name for the dynamic type behind a JSON value, which tk reports.
-fn go_type_name(value: &serde_json::Value) -> &'static str {
-	match value {
-		serde_json::Value::Null => "<nil>",
-		serde_json::Value::Bool(_) => "bool",
-		serde_json::Value::Number(_) => "float64",
-		serde_json::Value::String(_) => "string",
-		serde_json::Value::Array(_) => "[]interface {}",
-		serde_json::Value::Object(_) => "map[string]interface {}",
-	}
-}
+		// Sorted, because which failure is reported depends on it and tk sorts.
+		let mut fields = object.into_iter().collect::<Vec<_>>();
+		fields.sort_by(|(one, _), (other, _)| one.cmp(other));
 
-fn validate_manifest(manifest: &serde_json::Value, path: &str) -> Result<(), Error> {
-	let metadata = manifest
-		.get("metadata")
-		.and_then(serde_json::Value::as_object);
-	let mut problems = Vec::new();
-	if metadata.is_none() {
-		problems.push("metadata: missing or not an object");
-	}
-	let has_name = metadata.is_some_and(|metadata| {
-		metadata
-			.get("name")
-			.is_some_and(serde_json::Value::is_string)
-			|| metadata
-				.get("generateName")
-				.is_some_and(serde_json::Value::is_string)
-	});
-	if !has_name {
-		problems.push("metadata.name: missing or not of string type");
-	}
+		for (field, value) in fields {
+			// A field left unset by a false condition in Jsonnet, which tk skips
+			// rather than treating as a value that cannot be walked.
+			if value.is_null() {
+				continue;
+			}
+			self.walk(value, &format!("{path}.{field}"))
+				.map_err(|interrupted| {
+					match interrupted {
+						// The innermost object to see this is the one that has to
+						// explain it, so it becomes an ordinary failure here and outer
+						// frames leave it alone.
+						Interrupted::Primitive { path } => Error::InvalidManifest {
+							path,
+							reason: defect.clone(),
+						}
+						.into(),
+						failed @ Interrupted::Failed(_) => failed,
+					}
+				})?;
+		}
 
-	if problems.is_empty() {
 		Ok(())
-	} else {
-		Err(Error::InvalidManifest {
-			path: if path.is_empty() {
-				".".into()
-			} else {
-				path.into()
-			},
-			reason: problems.join("; "),
-		})
+	}
+
+	/// A JSON path with its last step removed. Tanka's `trace.Base`.
+	fn parent_path(path: &str) -> String {
+		let base = match path.rfind(['.', '[']) {
+			Some(0) | None => "",
+			Some(index) => &path[..index],
+		};
+		if base.is_empty() {
+			".".to_owned()
+		} else {
+			base.to_owned()
+		}
+	}
+
+	/// Why an object is not a Kubernetes manifest, or `None` if it is one.
+	///
+	/// Tanka's `isKubernetesManifest`: `apiVersion` and `kind` must both be present,
+	/// be strings, and be non-empty. Checking only that they exist let rtk treat
+	/// `kind: 42` as a manifest.
+	fn manifest_defect(object: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+		for attribute in ["apiVersion", "kind"] {
+			let defect = match object.get(attribute) {
+				None | Some(serde_json::Value::Null) => format!("missing attribute {attribute:?}"),
+				Some(serde_json::Value::String(text)) if text.is_empty() => {
+					format!("attribute {attribute:?} is empty")
+				}
+				Some(serde_json::Value::String(_)) => continue,
+				Some(other) => format!(
+					"attribute {attribute:?} is not a string, it is a {}",
+					Self::go_type_name(other)
+				),
+			};
+			return Some(defect);
+		}
+		None
+	}
+
+	/// Go's name for the dynamic type behind a JSON value, which tk reports.
+	fn go_type_name(value: &serde_json::Value) -> &'static str {
+		match value {
+			serde_json::Value::Null => "<nil>",
+			serde_json::Value::Bool(_) => "bool",
+			serde_json::Value::Number(_) => "float64",
+			serde_json::Value::String(_) => "string",
+			serde_json::Value::Array(_) => "[]interface {}",
+			serde_json::Value::Object(_) => "map[string]interface {}",
+		}
+	}
+
+	fn validate_manifest(manifest: &serde_json::Value, path: &str) -> Result<(), Error> {
+		let metadata = manifest
+			.get("metadata")
+			.and_then(serde_json::Value::as_object);
+		let mut problems = Vec::new();
+		if metadata.is_none() {
+			problems.push("metadata: missing or not an object");
+		}
+		let has_name = metadata.is_some_and(|metadata| {
+			metadata
+				.get("name")
+				.is_some_and(serde_json::Value::is_string)
+				|| metadata
+					.get("generateName")
+					.is_some_and(serde_json::Value::is_string)
+		});
+		if !has_name {
+			problems.push("metadata.name: missing or not of string type");
+		}
+
+		if problems.is_empty() {
+			Ok(())
+		} else {
+			Err(Error::InvalidManifest {
+				path: if path.is_empty() {
+					".".into()
+				} else {
+					path.into()
+				},
+				reason: problems.join("; "),
+			})
+		}
 	}
 }
 
