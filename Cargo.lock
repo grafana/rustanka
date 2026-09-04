@@ -4980,7 +4980,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "1.2.0"
-source = "git+https://github.com/grafana/serde-saphyr?branch=julienduchesne%2Fsync-upstream-1.2.0#1f2135ab32239399c341ef4de49fc201c3b9baed"
+source = "git+https://github.com/grafana/serde-saphyr?branch=julienduchesne%2Fsync-upstream-1.2.0#a26710c8e7ff5b0fa1f15131436d9917fe175313"
 dependencies = [
  "annotate-snippets",
  "base64 0.22.1",
