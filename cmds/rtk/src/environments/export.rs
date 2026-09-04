@@ -1060,7 +1060,7 @@ fn export_single_env(
 				// Use serializer options to match Go's yaml.v2 output (used by tk for manifest export)
 				let options = crate::yaml::yaml_serializer_options();
 				let mut content = String::new();
-				serde_saphyr_legacy::to_fmt_writer_with_options(
+				serde_saphyr::tanka::to_fmt_writer_with_options(
 					&mut content,
 					&sorted_manifest,
 					options,

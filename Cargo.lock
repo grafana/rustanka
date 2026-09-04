@@ -1382,7 +1382,7 @@ dependencies = [
  "parking_lot",
  "regex",
  "signal-hook",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1422,7 +1422,7 @@ dependencies = [
  "gix-quote",
  "gix-trace",
  "kstring",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "unicode-bom",
 ]
@@ -1452,7 +1452,7 @@ dependencies = [
  "gix-trace",
  "gix-traverse",
  "gix-worktree",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1505,7 +1505,7 @@ dependencies = [
  "gix-path",
  "gix-ref",
  "gix-sec",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "unicode-bom",
 ]
@@ -1660,7 +1660,7 @@ dependencies = [
  "gix-quote",
  "gix-trace",
  "gix-utils",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1760,7 +1760,7 @@ dependencies = [
  "libc",
  "memmap2",
  "rustix",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1842,7 +1842,7 @@ dependencies = [
  "gix-utils",
  "gix-validate",
  "itoa",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1884,7 +1884,7 @@ dependencies = [
  "gix-tempfile",
  "memmap2",
  "parking_lot",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "uluru",
 ]
@@ -2010,7 +2010,7 @@ dependencies = [
  "gix-hash",
  "gix-revision",
  "gix-validate",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2045,7 +2045,7 @@ dependencies = [
  "gix-hash",
  "gix-hashtable",
  "gix-object",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2165,7 +2165,7 @@ dependencies = [
  "gix-hashtable",
  "gix-object",
  "gix-revwalk",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2294,7 +2294,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ec0d45986cd51c847c75c5b69a00852c4fc84d0e5e79f041173f73437d0cdf"
 dependencies = [
  "arraydeque",
- "smallvec 1.15.1",
+ "smallvec",
 ]
 
 [[package]]
@@ -2451,7 +2451,7 @@ dependencies = [
  "rand",
  "random_color",
  "range-map",
- "smallvec 1.15.1",
+ "smallvec",
  "unicode-box-drawing",
 ]
 
@@ -2565,7 +2565,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "pin-utils",
- "smallvec 1.15.1",
+ "smallvec",
  "tokio",
  "want",
 ]
@@ -2685,7 +2685,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.1",
+ "smallvec",
  "zerovec",
 ]
 
@@ -2749,7 +2749,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.1",
+ "smallvec",
  "utf8_iter",
 ]
 
@@ -3047,7 +3047,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustversion",
  "serde",
- "smallvec 1.15.1",
+ "smallvec",
  "stacker",
  "static_assertions",
  "strip-ansi-escapes",
@@ -3231,7 +3231,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr",
  "serde_json",
  "serde_yaml_with_quirks",
  "sha1 0.11.0",
@@ -4000,7 +4000,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall",
- "smallvec 1.15.1",
+ "smallvec",
  "windows-link",
 ]
 
@@ -4725,8 +4725,7 @@ dependencies = [
  "rtk-diff",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 0.0.11",
- "serde-saphyr 1.2.0",
+ "serde-saphyr",
  "serde_json",
  "serde_yaml",
  "serde_yaml_with_quirks",
@@ -4891,15 +4890,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "saphyr-parser"
-version = "0.0.6"
-source = "git+https://github.com/grafana/saphyr?branch=master#bd64ba34832792080dc7ad5f70df16e13be77a2f"
-dependencies = [
- "arraydeque",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4989,25 +4979,8 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?rev=9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437#9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437"
-dependencies = [
- "ahash",
- "base64 0.22.1",
- "encoding_rs_io",
- "nohash-hasher",
- "num-traits",
- "ryu",
- "saphyr-parser",
- "serde",
- "serde_json",
- "smallvec 2.0.0-alpha.13",
-]
-
-[[package]]
-name = "serde-saphyr"
 version = "1.2.0"
-source = "git+https://github.com/grafana/serde-saphyr?branch=julienduchesne%2Fsync-upstream-1.2.0#34272349646f1c50e26c1c957661a8f16e939ab7"
+source = "git+https://github.com/grafana/serde-saphyr?branch=julienduchesne%2Fsync-upstream-1.2.0#1f2135ab32239399c341ef4de49fc201c3b9baed"
 dependencies = [
  "annotate-snippets",
  "base64 0.22.1",
@@ -5016,7 +4989,7 @@ dependencies = [
  "nohash-hasher",
  "num-traits",
  "serde_core",
- "smallvec 1.15.1",
+ "smallvec",
  "zmij",
 ]
 
@@ -5272,12 +5245,6 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
-
-[[package]]
-name = "smallvec"
-version = "2.0.0-alpha.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce56585dbefaf71c9723e9a269fa65227bdcdbb6fd2f3ef50d264c65e067c648"
 
 [[package]]
 name = "socket2"
@@ -5865,7 +5832,7 @@ checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
 dependencies = [
  "js-sys",
  "opentelemetry",
- "smallvec 1.15.1",
+ "smallvec",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -5896,7 +5863,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sharded-slab",
- "smallvec 1.15.1",
+ "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",

@@ -47,7 +47,7 @@ fn test_configmap_with_nested_dashboard() {
 	let sorted_manifest = sort_json_keys(configmap);
 
 	// Use the same options as export.rs
-	let options = serde_saphyr_legacy::SerializerOptions {
+	let options = serde_saphyr::tanka::SerializerOptions {
 		indent_step: 2,
 		indent_array: Some(0),
 		prefer_block_scalars: true,
@@ -60,7 +60,7 @@ fn test_configmap_with_nested_dashboard() {
 	};
 
 	let mut output = String::new();
-	serde_saphyr_legacy::to_fmt_writer_with_options(&mut output, &sorted_manifest, options)
+	serde_saphyr::tanka::to_fmt_writer_with_options(&mut output, &sorted_manifest, options)
 		.unwrap();
 
 	// Find the gridPos section and check if y is quoted

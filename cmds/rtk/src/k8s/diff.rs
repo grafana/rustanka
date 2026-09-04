@@ -108,7 +108,7 @@ pub enum DiffError {
 	JsonSerialization(#[source] serde_json::Error),
 
 	#[error("converting resource to YAML")]
-	YamlConversion(#[source] serde_saphyr_legacy::ser_error::Error),
+	YamlConversion(#[source] serde_saphyr::tanka::error::Error),
 }
 
 /// Status of a single resource comparison.
