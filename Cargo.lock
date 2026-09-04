@@ -67,6 +67,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
+name = "annotate-snippets"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f211a51805bc641f3ad5b7664c77d2547af685cc33b4cd8d31964027a46f13f1"
+dependencies = [
+ "anstyle",
+ "memchr",
+ "unicode-width",
+]
+
+[[package]]
 name = "annotated-string"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2277,6 +2288,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "granit-parser"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65ec0d45986cd51c847c75c5b69a00852c4fc84d0e5e79f041173f73437d0cdf"
+dependencies = [
+ "arraydeque",
+ "smallvec 1.15.1",
+]
+
+[[package]]
 name = "gtmpl"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3210,7 +3231,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "serde_yaml_with_quirks",
  "sha1 0.11.0",
@@ -4704,7 +4725,8 @@ dependencies = [
  "rtk-diff",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr",
+ "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "serde_yaml",
  "serde_yaml_with_quirks",
@@ -4968,7 +4990,7 @@ dependencies = [
 [[package]]
 name = "serde-saphyr"
 version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?branch=master#9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437"
+source = "git+https://github.com/grafana/serde-saphyr?rev=9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437#9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -4979,7 +5001,23 @@ dependencies = [
  "saphyr-parser",
  "serde",
  "serde_json",
- "smallvec 2.0.0-alpha.12",
+ "smallvec 2.0.0-alpha.13",
+]
+
+[[package]]
+name = "serde-saphyr"
+version = "1.2.0"
+source = "git+https://github.com/grafana/serde-saphyr?branch=julienduchesne%2Fsync-upstream-1.2.0#34272349646f1c50e26c1c957661a8f16e939ab7"
+dependencies = [
+ "annotate-snippets",
+ "base64 0.22.1",
+ "encoding_rs_io",
+ "granit-parser",
+ "nohash-hasher",
+ "num-traits",
+ "serde_core",
+ "smallvec 1.15.1",
+ "zmij",
 ]
 
 [[package]]
@@ -5237,9 +5275,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smallvec"
-version = "2.0.0-alpha.12"
+version = "2.0.0-alpha.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef784004ca8777809dcdad6ac37629f0a97caee4c685fcea805278d81dd8b857"
+checksum = "ce56585dbefaf71c9723e9a269fa65227bdcdbb6fd2f3ef50d264c65e067c648"
 
 [[package]]
 name = "socket2"

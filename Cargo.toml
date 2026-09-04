@@ -58,7 +58,9 @@ serde_json = { version = "1.0.149", features = ["preserve_order"] }
 # Note on serde_yaml_with_quirks: This is a fork of serde-yaml with legacy yaml 1.1 support:
 # https://github.com/dtolnay/serde-yaml/pull/225
 serde_yaml_with_quirks = "0.8.24"
-serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "master" }
+serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "julienduchesne/sync-upstream-1.2.0" }
+# Keep Tanka-compatible serialization until upstream exposes equivalent formatting controls.
+serde-saphyr-legacy = { package = "serde-saphyr", git = "https://github.com/grafana/serde-saphyr", rev = "9d2f7c411a42f7f989d5cfb4c72f5be6e9ea2437" }
 
 # Error handling
 anyhow = "1.0.101"

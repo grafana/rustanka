@@ -9,7 +9,7 @@ fn test_dashboard_y_key_quoted() {
 	.unwrap();
 	let data: serde_json::Value = serde_json::from_str(&dashboard_json).unwrap();
 
-	let options = serde_saphyr::SerializerOptions {
+	let options = serde_saphyr_legacy::SerializerOptions {
 		indent_step: 2,
 		indent_array: Some(0),
 		prefer_block_scalars: true,
@@ -22,7 +22,7 @@ fn test_dashboard_y_key_quoted() {
 	};
 
 	let mut output = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut output, &data, options).unwrap();
+	serde_saphyr_legacy::to_fmt_writer_with_options(&mut output, &data, options).unwrap();
 
 	// Find the gridPos section and check if y is quoted
 	let lines: Vec<&str> = output.lines().collect();

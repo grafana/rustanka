@@ -104,7 +104,7 @@ impl std::fmt::Debug for RedactedObject {
 
 impl RedactedObject {
 	/// Convert this object to a YAML string.
-	pub fn to_yaml(&self) -> Result<String, serde_saphyr::ser_error::Error> {
+	pub fn to_yaml(&self) -> Result<String, serde_saphyr_legacy::ser_error::Error> {
 		crate::yaml::to_yaml(&self.value)
 	}
 

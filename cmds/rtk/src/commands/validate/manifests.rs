@@ -774,10 +774,9 @@ fn is_document_boundary_line(line: &str) -> bool {
 /// Parser options for manifest YAML. Use the same permissive options as helm/kustomize
 /// parsing so CRDs and other Kubernetes YAML (valid per Go yaml / kubectl) parse correctly.
 fn manifest_yaml_options() -> serde_saphyr::Options {
-	serde_saphyr::Options {
+	serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None,
-		..Default::default()
 	}
 }
 

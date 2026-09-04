@@ -9,18 +9,14 @@ pub fn builtin_parse_json(str: IStr) -> Result<Val> {
 #[builtin]
 pub fn builtin_parse_yaml(str: IStr) -> Result<Val> {
 	let needs_synthetic_null = str.trim_end().ends_with("\n---");
+	let mut options = serde_saphyr::Options::default();
+	// Golang/C++ compatibility requires legacy leading-zero octal numbers.
+	options.legacy_octal_numbers = true;
+	// Jsonnet inputs are trusted, so parsing should not impose resource budgets.
+	options.budget = None;
 
-	let mut out = serde_saphyr::from_multiple_with_options::<Val>(
-		&str,
-		serde_saphyr::Options {
-			// Golang/C++ compat
-			legacy_octal_numbers: true,
-			// Disable budget limits - we trust the YAML input
-			budget: None,
-			..Default::default()
-		},
-	)
-	.map_err(|e| error!("failed to parse yaml: {e}"))?;
+	let mut out = serde_saphyr::from_multiple_with_options::<Val>(&str, options)
+		.map_err(|e| error!("failed to parse yaml: {e}"))?;
 
 	// saphyr and other yaml implementations disagree on how to handle an empty document in multi-document stream.
 	// Saphyr only considers document started after anything is emitted after the document delimiter

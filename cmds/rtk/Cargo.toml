@@ -17,6 +17,7 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-saphyr.workspace = true
+serde-saphyr-legacy.workspace = true
 serde_yaml_with_quirks.workspace = true
 tabwriter = "1.4"
 rayon = "1.10"

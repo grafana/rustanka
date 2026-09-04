@@ -397,13 +397,14 @@ fn parse_helm_yaml_output(yaml_content: &str, name_format: Option<&str>) -> Resu
 	// Use serde-saphyr which properly handles YAML 1.1 features including:
 	// - Multiple merge keys (<<) in the same mapping
 	// - Octal numbers (0755 -> 493)
-	let options = serde_saphyr::Options {
+	let options = serde_saphyr_legacy::Options {
 		legacy_octal_numbers: true,
 		budget: None, // Disable budget limits - we trust the YAML input
 		..Default::default()
 	};
-	let documents: Vec<Val> = serde_saphyr::from_multiple_with_options(yaml_content, options)
-		.map_err(|e| RuntimeError(format!("failed to parse helm output: {e}").into()))?;
+	let documents: Vec<Val> =
+		serde_saphyr_legacy::from_multiple_with_options(yaml_content, options)
+			.map_err(|e| RuntimeError(format!("failed to parse helm output: {e}").into()))?;
 	let mut seen_keys = HashMap::new();
 
 	for val in documents {
@@ -556,10 +557,9 @@ pub fn parse_yaml(yaml: String) -> Result<Val> {
 	// Use serde-saphyr which properly handles YAML 1.1 features including:
 	// - Multiple merge keys (<<) in the same mapping
 	// - Octal numbers (0755 -> 493)
-	let options = serde_saphyr::Options {
+	let options = serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None, // Disable budget limits - we trust the YAML input
-		..Default::default()
 	};
 	let documents: Vec<Val> = serde_saphyr::from_multiple_with_options(&yaml, options)
 		.map_err(|e| RuntimeError(format!("failed to parse yaml: {e}").into()))?;
@@ -709,7 +709,7 @@ pub fn manifest_yaml_from_json(json: String) -> Result<String> {
 	// Use serde-saphyr with Go yaml.v3 compatible settings
 	// This matches tk's manifestYamlFromJson which uses go-yaml v3
 	// Go yaml.v3's yaml.Marshal() defaults to best_width = 2^31-1 (no wrapping)
-	let options = serde_saphyr::SerializerOptions {
+	let options = serde_saphyr_legacy::SerializerOptions {
 		indent_step: 4,     // go-yaml v3 uses 4-space indentation
 		indent_array: None, // use indent_step for arrays too
 		prefer_block_scalars: true,
@@ -723,7 +723,7 @@ pub fn manifest_yaml_from_json(json: String) -> Result<String> {
 		..Default::default()
 	};
 	let mut output = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut output, &sorted, options)
+	serde_saphyr_legacy::to_fmt_writer_with_options(&mut output, &sorted, options)
 		.map_err(|e| RuntimeError(format!("failed to serialize yaml: {e}").into()))?;
 
 	// Add trailing newline to match Go's yaml.v3 behavior
@@ -1169,10 +1169,9 @@ pub fn kustomize_build(path: String, opts: ObjValue) -> Result<Val> {
 		.map_err(|e| RuntimeError(format!("failed to read kustomize output: {e}").into()))?;
 
 	// Use serde-saphyr which properly handles YAML 1.1 features
-	let options = serde_saphyr::Options {
+	let options = serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None, // Disable budget limits - we trust the YAML input
-		..Default::default()
 	};
 	let documents: Vec<Val> = serde_saphyr::from_multiple_with_options(&yaml_content, options)
 		.map_err(|e| RuntimeError(format!("failed to parse kustomize output: {e}").into()))?;
