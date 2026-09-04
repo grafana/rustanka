@@ -2,7 +2,7 @@ use serde_json::json;
 
 #[test]
 fn test_quote_y_key() {
-	let options = serde_saphyr::SerializerOptions {
+	let options = serde_saphyr::tanka::SerializerOptions {
 		quote_ambiguous_keys: true,
 		..Default::default()
 	};
@@ -17,7 +17,7 @@ fn test_quote_y_key() {
 	});
 
 	let mut output = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut output, &data, options).unwrap();
+	serde_saphyr::tanka::to_fmt_writer_with_options(&mut output, &data, options).unwrap();
 
 	println!("Output:\n{}", output);
 
