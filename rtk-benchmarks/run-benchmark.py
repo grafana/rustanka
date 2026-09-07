@@ -77,18 +77,6 @@ class BenchmarkConfig:
     # When true, the benchmark has no tk equivalent: tk is not built, not run,
     # outputs are not validated against tk, and the summary reports "-" for vs_tk.
     skip_tk: bool = False
-    # Environment variables for the benchmarked processes, layered over the
-    # caller's environment and applied to every binary the benchmark times.
-    #
-    # rtk reads some of these for presence rather than for a value:
-    # RTK_HELM_DISABLE_MEMOIZATION=0 disables the Helm cache exactly as =1 does.
-    # So a variable is turned off by being absent here, never by being falsy.
-    env: dict[str, str] = field(default_factory=dict)
-    # Exact number of timed runs, for benchmarks where hyperfine's automatic
-    # count is too expensive. Applies to every command in the comparison:
-    # hyperfine's --runs is per-invocation, so tk, rtk and rtk-base each get
-    # exactly this many and cannot diverge.
-    runs: int | None = None
 
     @classmethod
     def from_yaml(cls, path: Path, repo_root: Path) -> "BenchmarkConfig":
@@ -127,8 +115,6 @@ class BenchmarkConfig:
             setup=data.get("setup"),
             prepare=data.get("prepare"),
             skip_tk=data.get("skip_tk", False),
-            env=data.get("env", {}),
-            runs=data.get("runs"),
         )
 
 
@@ -413,24 +399,6 @@ class BenchmarkRunner:
             cwd=self.fixtures_dir,
         )
 
-    def runs_args(self) -> list[str]:
-        """`--runs` for the config's cap, unless the caller asked for its own.
-
-        hyperfine rejects a repeated `--runs` outright, so passing both the
-        config's value and one from `--` would abort the run rather than let
-        the more specific win.
-        """
-        if not self.config.runs:
-            return []
-        if any(a in ("-r", "--runs") or a.startswith("--runs=")
-               for a in self.hyperfine_args):
-            return []
-        return ["--runs", str(self.config.runs)]
-
-    def child_env(self) -> dict[str, str]:
-        """The environment for processes this benchmark times."""
-        return {**os.environ, **self.config.env}
-
     def _clear_export_dir(self, export_dir: Path) -> None:
         if export_dir.exists():
             shutil.rmtree(export_dir)
@@ -602,7 +570,6 @@ class BenchmarkRunner:
         args = [
             "hyperfine", "-N",
             "--show-output",
-            *self.runs_args(),
             *self.hyperfine_args,
             *prepare_args,
             "--export-markdown", str(temp_md),
@@ -625,10 +592,7 @@ class BenchmarkRunner:
                 ["-n", "rtk-base", f"sh -c {shlex.quote(rtk_base_inner)}"])
 
         try:
-            # hyperfine does not scrub its children's environment, so this
-            # reaches each `sh -c` and the binary underneath it.
-            subprocess.run(args, check=True, capture_output=True, text=True,
-                           env=self.child_env())
+            subprocess.run(args, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             # Only print the output on failure
             print("### STDOUT")
@@ -706,7 +670,6 @@ class BenchmarkRunner:
 
             args = [
                 "hyperfine", "-N",
-                *self.runs_args(),
                 *self.hyperfine_args,
                 "--export-markdown", str(temp_md),
                 "--export-json", str(temp_json),
@@ -722,8 +685,7 @@ class BenchmarkRunner:
                     args.extend(
                         ["-n", "rtk-base diff", f"sh -c '{rtk_base_cmd}'"])
 
-            subprocess.run(args, check=True, stdout=subprocess.DEVNULL,
-                           env=self.child_env())
+            subprocess.run(args, check=True, stdout=subprocess.DEVNULL)
 
             with open(temp_md) as f:
                 print(f.read())
