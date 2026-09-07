@@ -29,8 +29,6 @@ pub struct TestDefinition {
 	pub fixture_cluster_dir: Option<String>,
 	#[serde(default)]
 	pub expect_error: bool,
-	#[serde(default)]
-	pub rtk_config: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -70,6 +68,10 @@ impl FixtureConfig {
 		}
 		args
 	}
+
+	fn specific_args_for_command(&self, command: &str) -> Vec<String> {
+		self.args.get(command).cloned().unwrap_or_default()
+	}
 }
 
 fn default_workspace() -> bool {
@@ -84,8 +86,6 @@ pub struct Command {
 	pub name: Option<String>,
 	#[serde(default)]
 	pub expect_error: bool,
-	#[serde(default)]
-	pub rtk_config: Option<String>,
 	#[serde(default)]
 	pub cluster_dir: Option<String>,
 }
@@ -206,7 +206,6 @@ impl Config {
 					compare: compare_argv(&test.compare),
 					name: Some(format!("{}: {}", fixture_name_prefix, basename)),
 					expect_error: test.expect_error,
-					rtk_config: test.rtk_config.clone(),
 					cluster_dir,
 				};
 
@@ -268,6 +267,22 @@ pub fn load_fixture_command_args(
 ) -> Result<Vec<String>> {
 	let args = load_fixture_args(suite_path, fixture_path).map(|cfg| {
 		cfg.args_for_command(Some(command))
+			.into_iter()
+			.map(|arg| render_tokens(&arg, testcase, basename))
+			.collect::<Vec<_>>()
+	})?;
+	Ok(args)
+}
+
+pub fn load_fixture_specific_command_args(
+	suite_path: &std::path::Path,
+	fixture_path: &std::path::Path,
+	command: &str,
+	testcase: &str,
+	basename: &str,
+) -> Result<Vec<String>> {
+	let args = load_fixture_args(suite_path, fixture_path).map(|cfg| {
+		cfg.specific_args_for_command(command)
 			.into_iter()
 			.map(|arg| render_tokens(&arg, testcase, basename))
 			.collect::<Vec<_>>()
@@ -359,8 +374,6 @@ fn expand_env_vars(s: &str) -> String {
 	new_result
 }
 
-pub const RTK_CONFIG_FILENAME: &str = ".rtk-config.yaml";
-
 impl Command {
 	pub fn as_string(&self) -> String {
 		self.args.join(" ")
@@ -414,30 +427,6 @@ impl Command {
 			})
 			.collect()
 	}
-
-	pub fn write_rtk_config(&self, working_dir: Option<&str>) -> Option<std::path::PathBuf> {
-		let config_content = self.rtk_config.as_ref()?;
-		let dir = working_dir?;
-		let config_path = std::path::Path::new(dir).join(RTK_CONFIG_FILENAME);
-		if std::fs::write(&config_path, config_content).is_ok() {
-			Some(config_path)
-		} else {
-			eprintln!(
-				"Warning: Failed to write rtk config to {}",
-				config_path.display()
-			);
-			None
-		}
-	}
-
-	pub fn cleanup_rtk_config(working_dir: Option<&str>) {
-		if let Some(dir) = working_dir {
-			let config_path = std::path::Path::new(dir).join(RTK_CONFIG_FILENAME);
-			if config_path.exists() {
-				let _ = std::fs::remove_file(&config_path);
-			}
-		}
-	}
 }
 
 #[cfg(test)]
@@ -457,7 +446,6 @@ mod tests {
 			compare: vec![],
 			name: None,
 			expect_error: false,
-			rtk_config: None,
 			cluster_dir: None,
 		};
 
@@ -490,7 +478,6 @@ mod tests {
 			],
 			name: None,
 			expect_error: false,
-			rtk_config: None,
 			cluster_dir: None,
 		};
 

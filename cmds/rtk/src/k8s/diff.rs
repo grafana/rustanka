@@ -5,12 +5,14 @@
 
 use std::{collections::HashSet, fmt, sync::Arc};
 
+use clap::ValueEnum;
 use k8s::strategicpatch::CombinedSchemaLookup;
 use kube::{
 	api::{Api, DynamicObject, ListParams, Patch, PatchParams, PostParams},
 	core::GroupVersionKind,
 	Client,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{sync::Semaphore, task::JoinSet};
 use tracing::instrument;
@@ -22,10 +24,96 @@ use super::{
 	redacted_object::{RedactedObject, UnredactedObject},
 	ResourceScope,
 };
-use crate::{
-	environments::{keep_target, target_kind_hints, TargetMatcher},
-	spec::DiffStrategy,
-};
+use rtk_environments::export::Targets;
+use rtk_spec::canonical::EnvironmentSpec;
+
+/// Strategy used to compare local manifests with cluster state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffStrategy {
+	#[default]
+	Native,
+	Server,
+	Validate,
+	Subset,
+}
+
+impl fmt::Display for DiffStrategy {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			DiffStrategy::Native => write!(f, "native"),
+			DiffStrategy::Server => write!(f, "server"),
+			DiffStrategy::Validate => write!(f, "validate"),
+			DiffStrategy::Subset => write!(f, "subset"),
+		}
+	}
+}
+
+impl DiffStrategy {
+	/// Every strategy that can be named, in the order this reports them.
+	///
+	/// tk builds its list by iterating a Go map, so the order it prints is
+	/// whatever the runtime felt like; sorted is the only reproducible choice.
+	const NAMES: [&'static str; 4] = ["native", "server", "subset", "validate"];
+
+	/// The strategy an environment asked for, or the one its cluster deserves.
+	///
+	/// A strategy that does not exist is refused rather than warned about: tk's
+	/// `differ` looks the name up in a map and fails when it is absent, so
+	/// falling back to automatic selection meant rtk quietly diffed a different
+	/// way than the environment asked for.
+	pub fn from_spec(
+		spec: &EnvironmentSpec,
+		server_version: &k8s_openapi::apimachinery::pkg::version::Info,
+		apply_strategy: Option<&str>,
+	) -> Result<Self, UnknownDiffStrategy> {
+		if let Some(strategy) = spec.diff_strategy.as_deref() {
+			return Self::named(strategy);
+		}
+
+		// tk defaults the diff to server-side when the apply is, which it
+		// decides from the resolved strategy rather than from the spec alone —
+		// so `--apply-strategy server` reaches this too.
+		if apply_strategy == Some("server") {
+			return Ok(DiffStrategy::Server);
+		}
+
+		let major: u32 = server_version.major.parse().unwrap_or(1);
+		let minor: u32 = server_version
+			.minor
+			.trim_end_matches('+')
+			.parse()
+			.unwrap_or(0);
+		Ok(if major >= 1 && minor >= 13 {
+			DiffStrategy::Native
+		} else {
+			DiffStrategy::Subset
+		})
+	}
+
+	/// The strategy of this name, or [`UnknownDiffStrategy`].
+	pub fn named(strategy: &str) -> Result<Self, UnknownDiffStrategy> {
+		match strategy {
+			"native" => Ok(DiffStrategy::Native),
+			"server" => Ok(DiffStrategy::Server),
+			"validate" => Ok(DiffStrategy::Validate),
+			"subset" => Ok(DiffStrategy::Subset),
+			_ => Err(UnknownDiffStrategy {
+				requested: strategy.to_owned(),
+			}),
+		}
+	}
+}
+
+/// A diff strategy nobody implements.
+#[derive(Debug, Error)]
+#[error(
+	"diff strategy `{requested}` does not exist. Pick one of: [{}]",
+	DiffStrategy::NAMES.join(" ")
+)]
+pub struct UnknownDiffStrategy {
+	requested: String,
+}
 
 /// Errors that can occur during diff operations.
 #[derive(Debug, Error)]
@@ -108,7 +196,7 @@ pub enum DiffError {
 	JsonSerialization(#[source] serde_json::Error),
 
 	#[error("converting resource to YAML")]
-	YamlConversion(#[source] serde_saphyr::ser_error::Error),
+	YamlConversion(#[source] rtk_environments::export::Error),
 }
 
 /// Status of a single resource comparison.
@@ -136,7 +224,10 @@ pub struct PruneDetectionOptions<'a> {
 	/// Limit discovery to namespaced resources in this namespace.
 	pub namespace: Option<&'a str>,
 	/// Apply the same kind/name target expressions used for local manifests.
-	pub target_matchers: &'a [TargetMatcher],
+	///
+	/// The crate's own compiled targets, so a resource in the cluster is judged
+	/// by exactly the rule an environment's own manifests are.
+	pub targets: Option<&'a Targets>,
 }
 
 impl DiffStatus {
@@ -662,8 +753,10 @@ impl DiffEngine {
 			.namespace
 			.filter(|namespace| !namespace.is_empty())
 			.map(str::to_string);
-		let target_matchers = Arc::new(options.target_matchers.to_vec());
-		let kind_hints = target_kind_hints(options.target_matchers);
+		let targets = options.targets.cloned().map(Arc::new);
+		// Whole resource types can be left unasked for when every target names a
+		// kind outright; anything less and every kind has to be considered.
+		let kind_hints = options.targets.and_then(Targets::kind_hints);
 
 		for (gvk, discovered) in api_cache.iter() {
 			// Skip resources that don't support list operation
@@ -690,7 +783,7 @@ impl DiffEngine {
 			let manifest_keys = manifest_keys.clone();
 			let label = label.clone();
 			let namespace = namespace.clone();
-			let target_matchers = target_matchers.clone();
+			let targets = targets.clone();
 
 			join_set.spawn(async move {
 				let _permit = match sem.acquire().await {
@@ -704,7 +797,7 @@ impl DiffEngine {
 						&manifest_keys,
 						&label,
 						namespace.as_deref(),
-						&target_matchers,
+						targets.as_deref(),
 					)
 					.await;
 				DiffTaskResult::Prune(result)
@@ -721,7 +814,7 @@ impl DiffEngine {
 		manifest_keys: &HashSet<(String, String, Option<String>, String)>,
 		env_label: &str,
 		namespace_filter: Option<&str>,
-		target_matchers: &[TargetMatcher],
+		targets: Option<&Targets>,
 	) -> Result<Vec<ResourceDiff>, DiffError> {
 		let label_selector = format!("tanka.dev/environment={}", env_label);
 		let list_params = ListParams::default().labels(&label_selector);
@@ -749,8 +842,8 @@ impl DiffEngine {
 				continue;
 			};
 			let namespace = resource.metadata.namespace.clone();
-			if !target_matchers.is_empty()
-				&& !keep_target(&format!("{}/{}", gvk.kind, name), target_matchers)
+			if targets
+				.is_some_and(|targets| !targets.keeps_kind_name(&format!("{}/{}", gvk.kind, name)))
 			{
 				continue;
 			}
@@ -1457,6 +1550,83 @@ fn filter_to_manifest_fields(
 
 #[cfg(test)]
 mod tests {
+	/// tk's `differ` looks the name up in a map and fails when it is absent, so
+	/// a strategy that does not exist is refused rather than quietly replaced.
+	#[test]
+	fn an_unknown_diff_strategy_is_refused_in_tks_words() {
+		let error = DiffStrategy::named("nonsense").expect_err("no such strategy");
+		assert_eq!(
+			error.to_string(),
+			"diff strategy `nonsense` does not exist. Pick one of: [native server subset validate]"
+		);
+		// tk prints its list in Go map order, which is not an order at all; this
+		// one is sorted so that the message is reproducible.
+		assert_eq!(DiffStrategy::named("native").unwrap(), DiffStrategy::Native);
+		assert_eq!(DiffStrategy::named("server").unwrap(), DiffStrategy::Server);
+		assert_eq!(
+			DiffStrategy::named("validate").unwrap(),
+			DiffStrategy::Validate
+		);
+		assert_eq!(DiffStrategy::named("subset").unwrap(), DiffStrategy::Subset);
+	}
+
+	/// `none` is an apply-only spelling; tk's diff rejects it through the same
+	/// map lookup as any other unknown name.
+	#[test]
+	fn none_is_not_a_diff_strategy() {
+		assert!(DiffStrategy::named("none").is_err());
+	}
+
+	fn server_version(minor: &str) -> k8s_openapi::apimachinery::pkg::version::Info {
+		k8s_openapi::apimachinery::pkg::version::Info {
+			major: "1".to_owned(),
+			minor: minor.to_owned(),
+			..Default::default()
+		}
+	}
+
+	fn spec(diff: Option<&str>) -> EnvironmentSpec {
+		let mut spec = EnvironmentSpec::default();
+		spec.diff_strategy = diff.map(Into::into);
+		spec
+	}
+
+	#[test]
+	fn a_named_strategy_wins_over_the_automatic_one() {
+		let strategy = DiffStrategy::from_spec(&spec(Some("subset")), &server_version("30"), None)
+			.expect("a known strategy");
+		assert_eq!(strategy, DiffStrategy::Subset);
+	}
+
+	/// tk defaults the diff to server-side whenever the apply is, and decides it
+	/// from the strategy it resolved — so a `--apply-strategy server` flag
+	/// reaches here even when the spec says nothing.
+	#[test]
+	fn a_server_side_apply_defaults_the_diff_to_server_side() {
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("30"), Some("server"))
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Server);
+
+		// And a client-side apply leaves the automatic choice alone.
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("30"), Some("client"))
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Native);
+	}
+
+	#[test]
+	fn an_old_cluster_still_gets_the_subset_diff() {
+		let strategy = DiffStrategy::from_spec(&spec(None), &server_version("12"), None)
+			.expect("no strategy to reject");
+		assert_eq!(strategy, DiffStrategy::Subset);
+	}
+
+	#[test]
+	fn an_unknown_strategy_in_the_spec_fails_the_operation() {
+		let error = DiffStrategy::from_spec(&spec(Some("nonsense")), &server_version("30"), None)
+			.expect_err("the spec names no such strategy");
+		assert!(error.to_string().contains("does not exist"), "{error}");
+	}
+
 	use indoc::indoc;
 
 	use super::*;
@@ -1570,7 +1740,8 @@ mod tests {
 
 	#[test]
 	fn test_unified_diff_added_secret_uses_null_marker() {
-		let current_yaml = crate::yaml::to_yaml(&serde_json::Value::Null).unwrap();
+		let current_yaml =
+			rtk_environments::export::serialize_manifest(&serde_json::Value::Null).unwrap();
 		let resource_diff = ResourceDiff {
 			gvk: GroupVersionKind::gvk("", "v1", "Secret"),
 			namespace: Some("default".to_string()),

@@ -3,20 +3,97 @@
 use std::{
 	fmt,
 	io::{self, ErrorKind, Write},
-	path::PathBuf,
+	path::{Path, PathBuf},
+	str::FromStr,
 };
 
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
+use rtk_environments::export::Error as EnvironmentError;
+use rtk_spec::canonical::EnvironmentSpec;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::jsonnet::evaluator::{EvaluatorImplementation, GlobalEvaluatorOptions};
-
-use crate::{
-	k8s::{client::ClusterConnection, diff::DiffEngine},
-	spec::{DiffStrategy, Spec},
+use crate::k8s::{
+	client::ClusterConnection,
+	diff::{DiffEngine, DiffStrategy},
 };
+
+#[derive(Clone, Debug, Default)]
+pub enum EvaluatorImplementation {
+	#[default]
+	Jrsonnet,
+	Binary(String),
+}
+
+impl fmt::Display for EvaluatorImplementation {
+	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			EvaluatorImplementation::Jrsonnet => formatter.write_str("jrsonnet"),
+			EvaluatorImplementation::Binary(path) => write!(formatter, "binary:{path}"),
+		}
+	}
+}
+
+impl FromStr for EvaluatorImplementation {
+	type Err = anyhow::Error;
+
+	fn from_str(value: &str) -> Result<Self, Self::Err> {
+		match value {
+			"jrsonnet" => Ok(Self::Jrsonnet),
+			value if value.starts_with("binary:") && value.ends_with("jrsonnet") => {
+				tracing::warn!("Treating {value} as the local jrsonnet implementation");
+				Ok(Self::Jrsonnet)
+			}
+			value if value.starts_with("binary:") => {
+				Ok(Self::Binary(value["binary:".len()..].to_owned()))
+			}
+			_ => anyhow::bail!("invalid value '{value}': expected 'jrsonnet' or 'binary:<path>'"),
+		}
+	}
+}
+
+pub struct EvaluatedManifests {
+	pub spec: Option<EnvironmentSpec>,
+	pub environment_label: Option<String>,
+	pub manifests: Vec<serde_json::Value>,
+}
+
+/// Evaluate and fully process manifests before they cross into async Kubernetes
+/// work. Evaluated Jsonnet values are dropped in this function.
+///
+/// Takes the engine rather than building one, so that a command looking at
+/// several environments looks at them through the same one. The engine carries
+/// the Helm render cache, and building one per environment meant a chart shared
+/// by twenty environments was rendered twenty times.
+pub fn evaluate_manifests(
+	engine: &rtk_environments::Engine,
+	path: &Path,
+	name: Option<&str>,
+	targets: &[String],
+) -> Result<EvaluatedManifests> {
+	let environment = engine.load_single(path, name).map_err(environment_error)?;
+	let manifests = engine
+		.manifests(&environment, targets)
+		.map_err(environment_error)?;
+	Ok(EvaluatedManifests {
+		spec: environment.spec().cloned(),
+		environment_label: environment.environment_label(),
+		manifests,
+	})
+}
+
+/// The engine a command evaluates through.
+///
+/// One per process: the Helm render cache lives on it, so everything a command
+/// evaluates should go through the same one.
+pub fn engine(jsonnet: rtk_jsonnet::Options) -> rtk_environments::Engine {
+	rtk_environments::Engine::new(rtk_jsonnet::Engine::new(jsonnet))
+}
+
+pub(crate) fn environment_error(error: EnvironmentError) -> anyhow::Error {
+	anyhow::anyhow!(error.report())
+}
 
 /// Common Jsonnet evaluator arguments shared across commands.
 #[derive(Args)]
@@ -33,9 +110,22 @@ pub struct JsonnetArgs {
 	#[arg(long = "jsonnet-implementation", default_value_t)]
 	pub implementation: EvaluatorImplementation,
 
+	/// Cache helmTemplate results across runs in each project's `target/helm` directory
+	///
+	/// Declared here rather than on one command, so that anything which
+	/// evaluates Jsonnet can reuse a chart it already rendered — a diff or a show
+	/// benefits from it exactly as an export does.
+	#[arg(long)]
+	pub helm_cache: bool,
+
 	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
-	#[arg(long, default_value = "500")]
-	pub max_stack: usize,
+	///
+	/// Deliberately without a default. A default here would be passed on every
+	/// run and would always beat the depth a project's `tkrc.yaml` asks for,
+	/// which is the more general setting of the two. Left unset, the project's
+	/// depth applies, and failing that the same 500 tk uses.
+	#[arg(long)]
+	pub max_stack: Option<usize>,
 
 	/// Set code value of top level function (Format: key=<code>)
 	#[arg(long, value_parser = JsonnetArgs::parse_key_value)]
@@ -47,14 +137,20 @@ pub struct JsonnetArgs {
 }
 
 impl JsonnetArgs {
-	pub fn into_global_evaluator_options(self) -> GlobalEvaluatorOptions {
-		GlobalEvaluatorOptions {
-			ext_str: self.ext_str.into_iter().collect(),
-			ext_code: self.ext_code.into_iter().collect(),
-			tla_str: self.tla_str.into_iter().collect(),
-			tla_code: self.tla_code.into_iter().collect(),
+	/// The options for the Jsonnet engine the exporter evaluates with.
+	pub fn into_options(self) -> rtk_jsonnet::Options {
+		self.options()
+	}
+
+	pub fn options(&self) -> rtk_jsonnet::Options {
+		rtk_jsonnet::Options {
+			ext_code: self.ext_code.iter().cloned().collect(),
+			ext_variables: self.ext_str.iter().cloned().collect(),
+			top_level_arguments: self.tla_str.iter().cloned().collect(),
+			top_level_code: self.tla_code.iter().cloned().collect(),
+			helm_cache: self.helm_cache,
 			max_stack: self.max_stack,
-			implementation: self.implementation,
+			..rtk_jsonnet::Options::default()
 		}
 	}
 }
@@ -194,7 +290,7 @@ impl fmt::Display for AutoApprove {
 /// a new connection from the spec.
 pub async fn get_or_create_connection(
 	connection: Option<ClusterConnection>,
-	spec: Option<&Spec>,
+	spec: Option<&EnvironmentSpec>,
 ) -> Result<ClusterConnection> {
 	match connection {
 		Some(conn) => Ok(conn),
@@ -242,13 +338,18 @@ pub struct DiffEngineConfig<'a> {
 	/// Connection to the Kubernetes cluster.
 	pub connection: &'a ClusterConnection,
 	/// Optional spec for strategy selection.
-	pub spec: Option<&'a Spec>,
+	pub spec: Option<&'a EnvironmentSpec>,
 	/// Manifests to diff against.
 	pub manifests: &'a [serde_json::Value],
 	/// Whether to enable prune detection.
 	pub with_prune: bool,
 	/// Optional override for diff strategy.
 	pub diff_strategy_override: Option<DiffStrategy>,
+	/// The apply strategy in force, when this diff precedes an apply.
+	///
+	/// tk defaults the diff to server-side whenever the apply is, and decides
+	/// that from the strategy it resolved rather than from the spec alone.
+	pub apply_strategy: Option<&'a str>,
 }
 
 /// Result of setting up a diff engine.
@@ -269,19 +370,23 @@ pub struct DiffEngineSetup {
 /// 3. Creating the diff engine
 pub async fn setup_diff_engine(config: DiffEngineConfig<'_>) -> Result<DiffEngineSetup> {
 	// Determine diff strategy
-	let strategy = config.diff_strategy_override.unwrap_or_else(|| {
-		if let Some(s) = config.spec {
-			DiffStrategy::from_spec(s, config.connection.server_version())
-		} else {
-			DiffStrategy::Native
-		}
-	});
+	let strategy = match config.diff_strategy_override {
+		Some(strategy) => strategy,
+		None => match config.spec {
+			Some(spec) => DiffStrategy::from_spec(
+				spec,
+				config.connection.server_version(),
+				config.apply_strategy,
+			)?,
+			None => DiffStrategy::Native,
+		},
+	};
 	tracing::debug!(strategy = %strategy, "using diff strategy");
 
 	// Get default namespace from spec or connection
 	let default_namespace = config
 		.spec
-		.map(|s| s.namespace.clone())
+		.map(|s| s.namespace().to_owned())
 		.unwrap_or_else(|| config.connection.default_namespace().to_string());
 
 	// Create diff engine

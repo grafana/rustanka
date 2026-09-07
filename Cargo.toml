@@ -55,10 +55,18 @@ clap_complete = "4.5"
 # Parsing, manifestification is implemented manually everywhere
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
+ciborium = "0.2.2"
 # Note on serde_yaml_with_quirks: This is a fork of serde-yaml with legacy yaml 1.1 support:
 # https://github.com/dtolnay/serde-yaml/pull/225
 serde_yaml_with_quirks = "0.8.24"
-serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", branch = "master" }
+# Pinned by rev rather than tracked by branch: these decide how every exported
+# byte is written, and a blanket `cargo update` should not be able to move them.
+# Bumping one means looking up the new commit and editing it here, which is the
+# point — it shows up in the manifest rather than only in the lock.
+# Tip of grafana/serde-saphyr `jj/fix/go-scientific-notation`.
+serde-saphyr = { git = "https://github.com/grafana/serde-saphyr", rev = "0feecc80245a415ae6f7760d07fc6124a682c949" }
+# Tip of grafana/saphyr `jj/live-key-ordering`.
+saphyr = { git = "https://github.com/grafana/saphyr", rev = "0d26c036f086f61207282671c802643037cd5f0e" }
 
 # Error handling
 anyhow = "1.0.101"
@@ -71,7 +79,7 @@ dprint-core = "0.67.4"
 stacker = "0.1.23"
 smallvec = "1.15.1"
 educe = { version = "0.6.0", default-features = false }
-url = "2.5.8"
+url = { version = "2.5.8", features = ["serde"] }
 rustversion = "1.0.22"
 
 # Stdlib hashing functions
@@ -137,6 +145,36 @@ directories = "6.0.0"
 gix = { version = "0.83.0", features = ["blocking-network-client"] }
 camino = { version = "1.2.2", features = ["serde1"] }
 rustls = { version = "0.23", default-features = false }
+
+# Rustanka
+rtk-environments = { path = "./crates/rtk-environment", version = "0.5.0-pre99" }
+rtk-jsonnet = { path = "./crates/rtk-jsonnet", version = "0.5.0-pre99" }
+rtk-masterminds = { path = "./crates/rtk-masterminds", version = "0.5.0-pre99" }
+rtk-jsonnet-core = { path = "./crates/rtk-jsonnet-core", version = "0.5.0-pre99" }
+rtk-jsonnet-helm = { path = "./crates/rtk-jsonnet-helm", version = "0.5.0-pre99" }
+rtk-jsonnet-jrsonnet = { path = "./crates/rtk-jsonnet-jrsonnet", version = "0.5.0-pre99" }
+rtk-jsonnet-kustomize = { path = "./crates/rtk-jsonnet-kustomize", version = "0.5.0-pre99" }
+rtk-jsonnet-native-functions = { path = "./crates/rtk-jsonnet-native-functions", version = "0.5.0-pre99" }
+rtk-jsonnet-regex = { path = "./crates/rtk-jsonnet-regex", version = "0.5.0-pre99" }
+rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
+
+either = { version = "1.15.0", features = [ "serde" ] }
+rayon = "1.10"
+kube = { version = "4.2.0", features = ["runtime", "derive", "client"] }
+# Client-less kube types. Pinned to the same version `kube` depends on, so the
+# `Selector`/`ObjectMeta` types stay identical across the workspace.
+kube-core = { version = "4.2.0", default-features = false }
+k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
+tokio = { version = "1.49.0", features = [
+  "fs",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+] }
+schemars = { version = "1.2.1", features = ["url2"] }
+semver = { version = "1.0.28", features = ["serde"] }
+walkdir = "2.5"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

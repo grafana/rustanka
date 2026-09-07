@@ -4,7 +4,7 @@
     "kind": "Environment",
     "metadata": {
       "name": "native-in-labels",
-      "namespace": "golden_envs/native_in_labels_env/main.jsonnet",
+      "namespace": "main.jsonnet",
       "labels": {
         "inline": "true",
         "region_match": "true"

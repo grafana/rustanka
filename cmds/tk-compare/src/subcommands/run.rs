@@ -15,7 +15,7 @@ use crate::{
 		build_test_globs, cleanup_export_dirs, command_selected, find_output_dir_in_args,
 		run_process_output_with_timeout,
 	},
-	config::{self, Config},
+	config::Config,
 	constants::{COMMAND_TIMEOUT, COMPARE_TIMEOUT, RTK_EXEC_NAME, TK_EXEC_NAME},
 	env, execution,
 	mock_k8s::MockCluster,
@@ -281,7 +281,6 @@ pub async fn execute(cli: RunCli, global: &GlobalOptions) -> Result<()> {
 						COMMAND_TIMEOUT,
 					)?;
 
-					let rtk_config_written = command.write_rtk_config(cmd_working_dir);
 					let result2 = execution::run_command_with_env(
 						&rtk_exec_str,
 						&args2,
@@ -290,9 +289,6 @@ pub async fn execute(cli: RunCli, global: &GlobalOptions) -> Result<()> {
 						env_vars.as_ref(),
 						COMMAND_TIMEOUT,
 					)?;
-					if rtk_config_written.is_some() {
-						config::Command::cleanup_rtk_config(cmd_working_dir);
-					}
 
 					let run_artifacts = run_tempdir
 						.as_path()

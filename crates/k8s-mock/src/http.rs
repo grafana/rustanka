@@ -191,6 +191,7 @@ impl RunningHttpMockK8sServer {
 					insecure_skip_tls_verify: Some(true),
 					..Default::default()
 				}),
+				..Default::default()
 			}],
 			contexts: vec![NamedContext {
 				name: context_name.to_string(),
@@ -200,10 +201,12 @@ impl RunningHttpMockK8sServer {
 					namespace: Some("default".to_string()),
 					..Default::default()
 				}),
+				..Default::default()
 			}],
 			auth_infos: vec![NamedAuthInfo {
 				name: user_name.to_string(),
 				auth_info: Some(AuthInfo::default()),
+				..Default::default()
 			}],
 			current_context: Some(context_name.to_string()),
 			..Default::default()

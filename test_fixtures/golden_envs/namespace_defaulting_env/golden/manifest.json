@@ -1,0 +1,3 @@
+{
+    "default/ConfigMap-namespace-defaulting.golden": "main.jsonnet"
+}

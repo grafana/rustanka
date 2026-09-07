@@ -5,7 +5,7 @@ use std::{io::Write, path::PathBuf};
 use anyhow::Result;
 use clap::Args;
 
-use crate::environments::env_remove;
+use super::shared;
 
 #[derive(Args)]
 pub struct RemoveArgs {
@@ -15,5 +15,5 @@ pub struct RemoveArgs {
 
 /// Run the env remove subcommand.
 pub fn run<W: Write>(args: RemoveArgs, _writer: W) -> Result<()> {
-	env_remove(&args.paths)
+	shared::remove(&args.paths)
 }

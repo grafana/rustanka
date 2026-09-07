@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use rtk::{commands, environments};
+use rtk::commands;
 use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
@@ -53,7 +53,7 @@ enum GoldenCommand {
 	Export(commands::export::ExportArgs),
 }
 
-fn load_fixture_export_args(suite_path: &Path, env_path: &Path) -> Vec<String> {
+fn load_fixture_export_config(suite_path: &Path, env_path: &Path) -> (Vec<String>, Vec<String>) {
 	let mut config = FixtureConfig::default();
 
 	// Load suite-level config first (defaults), then fixture-specific overrides
@@ -74,7 +74,8 @@ fn load_fixture_export_args(suite_path: &Path, env_path: &Path) -> Vec<String> {
 		config.merge_layer(layer);
 	}
 
-	config.args_for_command("export")
+	let export_paths = config.args.get("export-paths").cloned().unwrap_or_default();
+	(export_paths, config.args_for_command("export"))
 }
 
 /// Helper function to get absolute path to test_fixtures
@@ -88,26 +89,28 @@ fn fixtures_path(subpath: &str) -> PathBuf {
 		.join(subpath)
 }
 
-fn copy_golden_without_manifest(src: &Path, dst: &Path) {
+fn stage_fixture(src: &Path, dst: &Path) {
 	for entry in walkdir::WalkDir::new(src) {
 		let entry = entry.expect("walkdir entry");
 		let path = entry.path();
-		if !entry.file_type().is_file() {
+		let relative = path.strip_prefix(src).expect("strip fixture prefix");
+		if relative
+			.components()
+			.next()
+			.is_some_and(|component| component.as_os_str() == "golden")
+		{
 			continue;
 		}
-		let rel_path = path
-			.strip_prefix(src)
-			.expect("strip prefix")
-			.to_string_lossy()
-			.to_string();
-		if rel_path == "manifest.json" {
-			continue;
+
+		let target = dst.join(relative);
+		if entry.file_type().is_dir() {
+			fs::create_dir_all(&target).expect("create staged fixture directory");
+		} else if entry.file_type().is_file() {
+			if let Some(parent) = target.parent() {
+				fs::create_dir_all(parent).expect("create staged fixture parent");
+			}
+			fs::copy(path, target).expect("copy staged fixture file");
 		}
-		let target = dst.join(&rel_path);
-		if let Some(parent) = target.parent() {
-			fs::create_dir_all(parent).expect("create parent");
-		}
-		fs::copy(path, &target).expect("copy file");
 	}
 }
 
@@ -139,20 +142,36 @@ fn discover_golden_envs() -> Vec<(String, PathBuf)> {
 	envs
 }
 
-fn run_rtk_export(env_path: &Path, output_dir: &Path, extra_args: &[String]) {
+fn run_rtk_export(
+	env_path: &Path,
+	output_dir: &Path,
+	export_paths: &[String],
+	extra_args: &[String],
+) {
 	let mut argv = vec![
 		"rtk".to_string(),
 		"export".to_string(),
 		output_dir.to_string_lossy().to_string(),
-		env_path.to_string_lossy().to_string(),
 	];
+	if export_paths.is_empty() {
+		argv.push(env_path.to_string_lossy().to_string());
+	} else {
+		argv.extend(
+			export_paths
+				.iter()
+				.map(|path| env_path.join(path).to_string_lossy().to_string()),
+		);
+	}
 	argv.extend(extra_args.iter().cloned());
 
 	let cli = GoldenCli::try_parse_from(&argv)
 		.unwrap_or_else(|e| panic!("failed to parse argv {:?}: {}", argv, e));
 	let GoldenCommand::Export(args) = cli.command;
 	let mut output = Vec::new();
-	commands::export::run(args, &mut output).unwrap_or_else(|e| {
+	// tk-compare runs tk from the fixture root, and exporting resolves each
+	// environment against the working directory, so rtk has to be told the same
+	// root rather than inheriting the test runner's.
+	commands::export::run_in(args, &mut output, Some(env_path.to_path_buf())).unwrap_or_else(|e| {
 		panic!(
 			"rtk export failed for argv {:?}\nstderr:\n{}error:\n{}",
 			argv,
@@ -166,6 +185,9 @@ fn run_rtk_export(env_path: &Path, output_dir: &Path, extra_args: &[String]) {
 fn run_golden_test(env_path: &Path) {
 	let temp_dir = tempfile::TempDir::new().unwrap();
 	let output_dir = temp_dir.path();
+	let staged = tempfile::TempDir::new().unwrap();
+	let staged_env_path = staged.path().join("fixture");
+	stage_fixture(env_path, &staged_env_path);
 
 	let golden_dir = env_path.join("golden");
 
@@ -176,18 +198,15 @@ fn run_golden_test(env_path: &Path) {
 	);
 
 	let suite_path = env_path.parent().expect("env_path should have a parent");
-	let mut extra_args = load_fixture_export_args(suite_path, env_path);
-	extra_args.extend([
-		"--skip-manifest".to_string(),
-		"--parallel".to_string(),
-		"1".to_string(),
-	]);
-	run_rtk_export(env_path, output_dir, &extra_args);
+	let (export_paths, mut extra_args) = load_fixture_export_config(suite_path, env_path);
+	extra_args.extend(["--parallel".to_string(), "1".to_string()]);
+	run_rtk_export(&staged_env_path, output_dir, &export_paths, &extra_args);
 
-	let filtered_golden_dir = tempfile::TempDir::new().unwrap();
-	copy_golden_without_manifest(&golden_dir, filtered_golden_dir.path());
+	// `manifest.json` is compared along with everything else: it is what a later
+	// export reads to know which environment owns a file, so a golden that
+	// leaves it out cannot catch an index that has drifted from the directory.
 	let comparison = rtk_diff::directory::compare_directories_detailed(
-		filtered_golden_dir.path().to_string_lossy().as_ref(),
+		golden_dir.to_string_lossy().as_ref(),
 		output_dir.to_string_lossy().as_ref(),
 	)
 	.unwrap();
@@ -214,8 +233,22 @@ fn run_golden_test(env_path: &Path) {
 /// the contents of `golden_path`.
 fn run_env_list_golden_test(env_path: &Path, golden_path: &Path) {
 	let mut output = Vec::new();
-	environments::list_envs_to_writer(Some(env_path), true, &mut output)
-		.unwrap_or_else(|e| panic!("rtk env list failed for {}: {}", env_path.display(), e));
+	commands::env::list::run(
+		commands::env::list::ListArgs {
+			path: Some(env_path.to_string_lossy().into_owned()),
+			ext_code: Vec::new(),
+			ext_str: Vec::new(),
+			json: true,
+			jsonnet_implementation: "go".to_owned(),
+			max_stack: Some(500),
+			names: false,
+			selector: None,
+			tla_code: Vec::new(),
+			tla_str: Vec::new(),
+		},
+		&mut output,
+	)
+	.unwrap_or_else(|e| panic!("rtk env list failed for {}: {}", env_path.display(), e));
 
 	let actual: serde_json::Value = serde_json::from_slice(&output).unwrap_or_else(|e| {
 		panic!(

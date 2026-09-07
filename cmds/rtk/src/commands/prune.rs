@@ -13,24 +13,23 @@ use clap::Args;
 use tracing::instrument;
 
 use super::common::{
-	create_tokio_runtime, get_or_create_connection, prompt_confirmation, setup_diff_engine,
-	validate_dry_run, DiffEngineConfig,
+	create_tokio_runtime, engine, evaluate_manifests, get_or_create_connection,
+	prompt_confirmation, setup_diff_engine, validate_dry_run, DiffEngineConfig,
 };
 use super::diff::ColorMode;
 
 // Re-export AutoApprove for backwards compatibility
 pub use super::common::AutoApprove;
 use crate::{
-	environments::{compile_target_matchers, extract_manifests, process_manifests},
-	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
+	k8s::diff::DiffStrategy,
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
 		diff::{DiffStatus, PruneDetectionOptions, ResourceDiff},
 		output::DiffOutput,
 	},
-	spec::DiffStrategy,
 };
+use rtk_environments::export::Targets;
 
 #[derive(Args)]
 pub struct PruneArgs {
@@ -46,8 +45,10 @@ pub struct PruneArgs {
 	pub color: ColorMode,
 
 	/// Force the diff-strategy to use. Automatically chosen if not set.
-	#[arg(long, value_enum)]
-	pub diff_strategy: Option<DiffStrategy>,
+	/// One of `native`, `server`, `subset` or `validate`. Checked here so an
+	/// unknown name is refused in tk's words.
+	#[arg(long, value_name = "DIFF_STRATEGY")]
+	pub diff_strategy: Option<String>,
 
 	/// --dry-run parameter to pass down to kubectl, must be "none", "server", or "client"
 	#[arg(long)]
@@ -109,20 +110,16 @@ pub struct PruneOpts {
 pub async fn prune_environment<W: Write>(
 	path: &Path,
 	connection: Option<ClusterConnection>,
-	global_opts: GlobalEvaluatorOptions,
-	eval_opts: EvaluatorOptions,
+	jsonnet: rtk_jsonnet::Options,
 	opts: PruneOpts,
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
-	let env_spec = env_data.spec;
-
-	// Get the spec for cluster connection and strategy selection
-	let spec = env_spec.as_ref().map(|e| &e.spec);
+	let engine = engine(jsonnet);
+	let evaluated = evaluate_manifests(&engine, path, opts.name.as_deref(), &opts.target)?;
+	let spec = evaluated.spec.as_ref();
 
 	// Prune requires injectLabels to be enabled
-	let inject_labels = spec.and_then(|s| s.inject_labels).unwrap_or(false);
+	let inject_labels = spec.is_some_and(|spec| spec.inject_labels);
 	if !inject_labels {
 		anyhow::bail!(
 			"spec.injectLabels is set to false in your spec.json. Tanka needs to add \
@@ -131,12 +128,12 @@ pub async fn prune_environment<W: Write>(
 		);
 	}
 
-	// Extract manifests from environment data
-	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
-	let target_matchers = compile_target_matchers(&opts.target)?;
+	let manifests = evaluated.manifests;
+	// The same expressions that chose these manifests decide which of the
+	// cluster's resources count as orphans. `evaluate_manifests` has already
+	// applied them here; this is for the other side of the comparison.
+	let targets = Targets::compile(&opts.target)?;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests");
-
-	process_manifests(&mut manifests, &env_spec);
 
 	let connection = get_or_create_connection(connection, spec).await?;
 
@@ -147,6 +144,8 @@ pub async fn prune_environment<W: Write>(
 		manifests: &manifests,
 		with_prune: true,
 		diff_strategy_override: opts.diff_strategy,
+		// Diffing on its own, with no apply to take a lead from.
+		apply_strategy: None,
 	})
 	.await?;
 	let diff_engine = setup.engine;
@@ -154,21 +153,17 @@ pub async fn prune_environment<W: Write>(
 	let default_namespace = setup.default_namespace;
 
 	// Get environment label for prune detection
-	let env_label = env_spec
-		.as_ref()
-		.map(crate::spec::generate_environment_label);
-
 	// Compute diffs with prune
 	tracing::debug!("computing differences with prune detection");
 	let diffs = diff_engine
 		.diff_all_with_prune_options(
 			&manifests,
 			true,
-			env_label.as_deref(),
+			evaluated.environment_label.as_deref(),
 			true,
 			PruneDetectionOptions {
 				namespace: opts.namespace.as_deref(),
-				target_matchers: &target_matchers,
+				targets: Some(&targets),
 			},
 		)
 		.await
@@ -270,10 +265,13 @@ pub async fn prune_environment<W: Write>(
 /// Async implementation of the prune command.
 #[instrument(skip_all, fields(path = %args.path.display()))]
 async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
-	let global_opts = args.jsonnet.into_global_evaluator_options();
-	let eval_opts = EvaluatorOptions::default();
+	let jsonnet = args.jsonnet.into_options();
 	let opts = PruneOpts {
-		diff_strategy: args.diff_strategy,
+		diff_strategy: args
+			.diff_strategy
+			.as_deref()
+			.map(DiffStrategy::named)
+			.transpose()?,
 		auto_approve: args.auto_approve.unwrap_or_default(),
 		dry_run: args.dry_run,
 		force: args.force,
@@ -283,7 +281,7 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		namespace: args.namespace,
 	};
 
-	prune_environment(&args.path, None, global_opts, eval_opts, opts, writer).await?;
+	prune_environment(&args.path, None, jsonnet, opts, writer).await?;
 	Ok(())
 }
 

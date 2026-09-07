@@ -1,0 +1,3 @@
+{
+    "outer/ConfigMap-outer-root.golden": "main.jsonnet"
+}

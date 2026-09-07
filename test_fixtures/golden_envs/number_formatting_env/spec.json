@@ -1,0 +1,10 @@
+{
+    "apiVersion": "tanka.dev/v1alpha1",
+    "kind": "Environment",
+    "metadata": {
+        "name": "number-formatting-test"
+    },
+    "spec": {
+        "namespace": "default"
+    }
+}

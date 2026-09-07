@@ -1,0 +1,14 @@
+apiVersion: tanka.dev/v1alpha1
+data:
+  config:
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: must-not-export
+kind: Environment
+metadata:
+  name: inline-inside-static
+  namespace: default
+spec:
+  apiServer: https://cluster.example
+  namespace: default

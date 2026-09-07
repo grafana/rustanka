@@ -19,7 +19,6 @@ serde_yaml = "0.9.34"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 rtk-diff = { path = "../../crates/diff" }
 k8s-mock = { version = "0.1.0", path = "../../crates/k8s-mock" }
-k8s-openapi = { version = "0.27.0", features = ["v1_31"] }
 bon = "3.8.2"
 which = "8.0.0"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

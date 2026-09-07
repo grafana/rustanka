@@ -10,12 +10,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::Args;
+use rtk_environments::export::{serialize_manifest, Error as EnvironmentError};
+use rtk_environments::Engine;
+use rtk_jsonnet::Options as JsonnetOptions;
 use tracing::instrument;
-
-use crate::{
-	environments::{extract_manifests, process_manifests},
-	jsonnet::evaluator::{DefaultEvaluator, Evaluator, EvaluatorOptions, GlobalEvaluatorOptions},
-};
 
 #[derive(Args)]
 pub struct ShowArgs {
@@ -69,12 +67,12 @@ to bypass this check."
 		return Ok(());
 	}
 
-	let global_opts = args.jsonnet.into_global_evaluator_options();
+	let jsonnet = args.jsonnet.into_options();
 	let opts = ShowOpts {
 		target: args.target,
 		name: args.name,
 	};
-	let output = show_environment(&args.path, global_opts, opts)?;
+	let output = show_environment(&args.path, jsonnet, opts)?;
 
 	write!(writer, "{}", output)?;
 	Ok(())
@@ -82,41 +80,32 @@ to bypass this check."
 
 /// Show an environment and return the YAML output.
 #[instrument(skip_all, fields(path = %path.display()))]
-pub fn show_environment(
-	path: &Path,
-	global_opts: GlobalEvaluatorOptions,
-	opts: ShowOpts,
-) -> Result<String> {
-	let evaluator = DefaultEvaluator::new(global_opts);
-	let eval_opts = EvaluatorOptions::default();
-	let env_data = evaluator.eval_environment(path, &eval_opts, opts.name.as_deref())?;
-
-	// Extract manifests from environment data
-	let mut manifests = extract_manifests(&env_data.data, &opts.target)?;
+pub fn show_environment(path: &Path, jsonnet: JsonnetOptions, opts: ShowOpts) -> Result<String> {
+	let engine = Engine::new(rtk_jsonnet::Engine::new(jsonnet));
+	let environment = engine
+		.load_single(path, opts.name.as_deref())
+		.map_err(environment_error)?;
+	let manifests = engine
+		.manifests(&environment, &opts.target)
+		.map_err(environment_error)?;
 	tracing::debug!(manifest_count = manifests.len(), "found manifests to show");
-
-	process_manifests(&mut manifests, &env_data.spec);
-
-	// Serialize all manifests to YAML (consuming to avoid clones)
 	manifests_to_yaml(manifests)
 }
 
-/// Convert manifests to a YAML stream, consuming the input to avoid cloning.
+fn environment_error(error: EnvironmentError) -> anyhow::Error {
+	anyhow::anyhow!(error.report())
+}
+
+/// Convert processed manifests into a YAML stream.
 fn manifests_to_yaml(manifests: Vec<serde_json::Value>) -> Result<String> {
-	use crate::yaml::into_yaml;
-
 	let mut output = String::new();
-
-	for (i, manifest) in manifests.into_iter().enumerate() {
-		// Add document separator for subsequent documents
+	for (i, manifest) in manifests.iter().enumerate() {
 		if i > 0 {
 			output.push_str("---\n");
 		}
-
-		let yaml = into_yaml(manifest).context("serializing manifest to YAML")?;
+		let yaml = serialize_manifest(manifest).context("serializing manifest to YAML")?;
 		output.push_str(&yaml);
 	}
-
 	Ok(output)
 }
 
@@ -149,12 +138,8 @@ mod tests {
 			}"#,
 		);
 
-		let output = show_environment(
-			&env_path,
-			GlobalEvaluatorOptions::default(),
-			ShowOpts::default(),
-		)
-		.unwrap();
+		let output =
+			show_environment(&env_path, JsonnetOptions::default(), ShowOpts::default()).unwrap();
 
 		assert!(output.contains("apiVersion: v1"));
 		assert!(output.contains("kind: ConfigMap"));
@@ -180,12 +165,8 @@ mod tests {
 			}"#,
 		);
 
-		let output = show_environment(
-			&env_path,
-			GlobalEvaluatorOptions::default(),
-			ShowOpts::default(),
-		)
-		.unwrap();
+		let output =
+			show_environment(&env_path, JsonnetOptions::default(), ShowOpts::default()).unwrap();
 
 		// Should have document separator between manifests
 		assert!(output.contains("---"));
@@ -214,7 +195,7 @@ mod tests {
 
 		let output = show_environment(
 			&env_path,
-			GlobalEvaluatorOptions::default(),
+			JsonnetOptions::default(),
 			ShowOpts {
 				target: vec!["ConfigMap/.*".to_string()],
 				..Default::default()
@@ -246,57 +227,11 @@ mod tests {
 			}"#,
 		);
 
-		let output = show_environment(
-			&env_path,
-			GlobalEvaluatorOptions::default(),
-			ShowOpts::default(),
-		)
-		.unwrap();
+		let output =
+			show_environment(&env_path, JsonnetOptions::default(), ShowOpts::default()).unwrap();
 
 		assert!(output.contains("kind: ConfigMap"));
 		assert!(output.contains("name: inline-cm"));
-	}
-
-	#[test]
-	fn test_extract_manifests_from_array() {
-		let value = serde_json::json!([
-			{
-				"apiVersion": "v1",
-				"kind": "ConfigMap",
-				"metadata": { "name": "cm1" }
-			},
-			{
-				"apiVersion": "v1",
-				"kind": "Secret",
-				"metadata": { "name": "secret1" }
-			}
-		]);
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(manifests.len(), 2);
-	}
-
-	#[test]
-	fn test_extract_manifests_from_list() {
-		let value = serde_json::json!({
-			"apiVersion": "v1",
-			"kind": "List",
-			"items": [
-				{
-					"apiVersion": "v1",
-					"kind": "ConfigMap",
-					"metadata": { "name": "cm1" }
-				},
-				{
-					"apiVersion": "v1",
-					"kind": "ConfigMap",
-					"metadata": { "name": "cm2" }
-				}
-			]
-		});
-
-		let manifests = extract_manifests(&value, &[]).unwrap();
-		assert_eq!(manifests.len(), 2);
 	}
 
 	#[test]
@@ -328,7 +263,7 @@ mod tests {
 
 		let output = show_environment(
 			&root.join("env"),
-			GlobalEvaluatorOptions::default(),
+			JsonnetOptions::default(),
 			ShowOpts::default(),
 		)
 		.unwrap();

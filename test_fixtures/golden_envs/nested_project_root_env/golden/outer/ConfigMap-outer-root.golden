@@ -1,0 +1,7 @@
+apiVersion: v1
+data:
+  entrypoint: outer
+kind: ConfigMap
+metadata:
+  name: outer-root
+  namespace: outer

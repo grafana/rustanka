@@ -5,7 +5,7 @@ use std::{io::Write, path::PathBuf};
 use anyhow::Result;
 use clap::Args;
 
-use crate::environments::{env_add, EnvSpecOptions};
+use super::shared::{self, EnvSpecOptions};
 
 #[derive(Args)]
 pub struct AddArgs {
@@ -51,5 +51,5 @@ pub fn run<W: Write>(args: AddArgs, _writer: W) -> Result<()> {
 		diff_strategy: args.diff_strategy,
 		inject_labels: Some(args.inject_labels),
 	};
-	env_add(&args.path, args.inline, &opts)
+	shared::add(&args.path, args.inline, &opts)
 }

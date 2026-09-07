@@ -1,0 +1,75 @@
+[package]
+name = "rtk-environments"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+either.workspace = true
+gtmpl = "0.7.1"
+k8s-openapi.workspace = true
+kube-core.workspace = true
+rayon.workspace = true
+regex.workspace = true
+rtk-jsonnet.workspace = true
+rtk-masterminds.workspace = true
+semver.workspace = true
+rtk-jsonnet-core.workspace = true
+rtk-spec.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
+saphyr.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+criterion = "0.7"
+serde_json.workspace = true
+stats_alloc = "0.1.10"
+tempfile.workspace = true
+# Exporting needs no runtime of its own; the tests check that it works inside one.
+tokio.workspace = true
+
+[features]
+# Exposes the filename machinery for the benchmarks to measure.
+benchmarking = []
+
+[[bench]]
+name = "specialize_template"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_segment"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "specialize_template_memory"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "render_filename_memory"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "sanitize_segment_memory"
+harness = false
+required-features = ["benchmarking"]
+
+[lints]
+workspace = true

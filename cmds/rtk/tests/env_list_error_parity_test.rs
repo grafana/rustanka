@@ -16,7 +16,7 @@ use std::{
 	process::{Command, Stdio},
 };
 
-use rtk::environments;
+use rtk::commands::env::list::{self, ListArgs};
 
 fn fixtures_path(subpath: &str) -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -76,7 +76,19 @@ fn run_tk_env_list(env_path: &PathBuf) -> Result<String, String> {
 
 fn run_rtk_env_list(env_path: &PathBuf) -> Result<String, String> {
 	let mut buf = Vec::new();
-	match environments::list_envs_to_writer(Some(env_path), true, &mut buf) {
+	let args = ListArgs {
+		path: Some(env_path.to_string_lossy().into_owned()),
+		ext_code: Vec::new(),
+		ext_str: Vec::new(),
+		json: true,
+		jsonnet_implementation: "go".to_owned(),
+		max_stack: Some(500),
+		names: false,
+		selector: None,
+		tla_code: Vec::new(),
+		tla_str: Vec::new(),
+	};
+	match list::run(args, &mut buf) {
 		Ok(()) => Ok(String::from_utf8_lossy(&buf).to_string()),
 		Err(e) => Err(e.to_string()),
 	}

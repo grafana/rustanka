@@ -5,8 +5,6 @@ use std::{io::Write, path::PathBuf};
 use anyhow::Result;
 use clap::Args;
 
-use crate::jsonnet::importers as importers_impl;
-
 #[derive(Args)]
 pub struct ImportersArgs {
 	/// Files to check
@@ -19,7 +17,7 @@ pub struct ImportersArgs {
 
 /// Run the importers subcommand.
 pub fn run<W: Write>(args: ImportersArgs, mut writer: W) -> Result<()> {
-	let envs = importers_impl::find_importers(&args.root.to_string_lossy(), args.files)?;
+	let envs = rtk_jsonnet::importers::find_importers(&args.root.to_string_lossy(), args.files)?;
 	if envs.is_empty() {
 		writeln!(writer)?;
 	} else {

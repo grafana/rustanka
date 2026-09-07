@@ -1,0 +1,2 @@
+[args]
+export-paths = ["environments/demo"]

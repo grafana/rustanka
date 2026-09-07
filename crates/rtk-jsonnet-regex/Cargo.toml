@@ -1,0 +1,15 @@
+[package]
+name = "rtk-jsonnet-regex"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+regex.workspace = true
+rtk-jsonnet-core.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

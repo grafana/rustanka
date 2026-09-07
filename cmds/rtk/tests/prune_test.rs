@@ -16,7 +16,6 @@ use rtk::{
 		diff::ColorMode,
 		prune::{prune_environment, AutoApprove, PruneOpts},
 	},
-	jsonnet::evaluator::{EvaluatorOptions, GlobalEvaluatorOptions},
 	k8s::{client::ClusterConnection, diff::ResourceDiff},
 };
 
@@ -39,10 +38,9 @@ async fn run_prune(
 ) -> anyhow::Result<Vec<ResourceDiff>> {
 	let mut output = Vec::new();
 	prune_environment(
-		env_dir.as_ref(),
+		env_dir,
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)

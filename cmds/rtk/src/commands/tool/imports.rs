@@ -8,8 +8,6 @@ use anyhow::Result;
 use clap::Args;
 use serde_json;
 
-use crate::jsonnet::imports as imports_impl;
-
 #[derive(Args)]
 pub struct ImportsArgs {
 	/// Path to the environment (directory or main.jsonnet file)
@@ -29,7 +27,7 @@ pub fn run<W: Write>(args: ImportsArgs, mut writer: W) -> Result<()> {
 		anyhow::bail!("--check flag is not implemented");
 	}
 
-	let imports = imports_impl::transitive_imports(&args.path.to_string_lossy())?;
+	let imports = rtk_jsonnet::imports::transitive_imports(&args.path)?;
 
 	// Output as JSON array (matching tk's output format)
 	let json = serde_json::to_string(&imports)?;

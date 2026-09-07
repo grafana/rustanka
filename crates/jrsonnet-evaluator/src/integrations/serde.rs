@@ -632,3 +632,12 @@ impl serde::ser::Error for JrError {
 		error!("serde: {msg}")
 	}
 }
+
+impl serde::de::Error for JrError {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: std::fmt::Display,
+	{
+		error!("serde: {msg}")
+	}
+}

@@ -9,6 +9,7 @@ pub mod add;
 pub mod list;
 pub mod remove;
 pub mod set;
+mod shared;
 
 #[derive(Args)]
 pub struct EnvArgs {

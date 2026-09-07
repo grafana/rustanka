@@ -10,10 +10,15 @@ mod test_utils;
 use k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use rtk::{
 	commands::diff::{diff_environment, ColorMode, DiffOpts},
-	jsonnet::evaluator::{EvaluatorOptions, GlobalEvaluatorOptions},
-	k8s::client::ClusterConnection,
-	spec::{DiffStrategy, Spec},
+	k8s::{client::ClusterConnection, diff::DiffStrategy},
 };
+use rtk_spec::canonical::EnvironmentSpec;
+
+fn mock_spec() -> EnvironmentSpec {
+	let mut spec = EnvironmentSpec::default();
+	spec.context_names = vec!["mock-context".into()];
+	spec
+}
 
 /// Run a diff test with custom options.
 ///
@@ -50,8 +55,7 @@ async fn run_diff_test_with_opts(
 	diff_environment(
 		env_dir.as_path(),
 		Some(connection),
-		GlobalEvaluatorOptions::default(),
-		EvaluatorOptions::default(),
+		rtk_jsonnet::Options::default(),
 		opts,
 		&mut output,
 	)
@@ -93,10 +97,7 @@ mod error_tests {
 			.start()
 			.await;
 
-		let spec = Spec {
-			context_names: Some(vec!["mock-context".to_string()]),
-			..Spec::default()
-		};
+		let spec = mock_spec();
 		let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
 			.expect("failed to create connection");
@@ -129,10 +130,7 @@ mod error_tests {
 			.start()
 			.await;
 
-		let spec = Spec {
-			context_names: Some(vec!["mock-context".to_string()]),
-			..Spec::default()
-		};
+		let spec = mock_spec();
 		let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
 			.expect("failed to create connection");
@@ -166,10 +164,7 @@ mod error_tests {
 			.start()
 			.await;
 
-		let spec = Spec {
-			context_names: Some(vec!["mock-context".to_string()]),
-			..Spec::default()
-		};
+		let spec = mock_spec();
 		let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
 			.expect("failed to create connection");
@@ -215,10 +210,7 @@ mod error_tests {
 			.start()
 			.await;
 
-		let spec = Spec {
-			context_names: Some(vec!["mock-context".to_string()]),
-			..Spec::default()
-		};
+		let spec = mock_spec();
 		let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
 			.expect("failed to create connection");
@@ -347,9 +339,9 @@ mod crd_tests {
 
 	use indoc::indoc;
 	use k8s_mock::{DiscoveryMode, HttpMockK8sServer, MockApiResource, MockDiscovery};
-	use rtk::{
-		k8s::{client::ClusterConnection, diff::DiffEngine},
-		spec::{DiffStrategy, Spec},
+	use rtk::k8s::{
+		client::ClusterConnection,
+		diff::{DiffEngine, DiffStrategy},
 	};
 
 	/// Test that CRD merge keys from OpenAPI schemas are respected during diff.
@@ -433,10 +425,7 @@ mod crd_tests {
 			.start()
 			.await;
 
-		let spec = Spec {
-			context_names: Some(vec!["mock-context".to_string()]),
-			..Spec::default()
-		};
+		let spec = super::mock_spec();
 		let connection = ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
 			.await
 			.expect("failed to create connection");

@@ -5,7 +5,7 @@ use std::io::Write;
 use rtk_diff::output::{ColorMode as SharedColorMode, OutputError, SectionTone};
 
 use super::diff::{DiffStatus, ResourceDiff};
-use crate::{commands::diff::ColorMode, spec::DiffStrategy};
+use crate::{commands::diff::ColorMode, k8s::diff::DiffStrategy};
 
 impl From<ColorMode> for SharedColorMode {
 	fn from(value: ColorMode) -> Self {
