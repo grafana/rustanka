@@ -26,7 +26,7 @@ impl Specialized {
 
 /// Make a path segment safe to write, as exporting does.
 pub fn sanitize(segment: &str) -> Cow<'_, str> {
-	template::sanitize(segment)
+	template::FilenameTemplate::sanitize(segment)
 }
 
 /// Compile `format` and bake in the values of an environment with `labels`

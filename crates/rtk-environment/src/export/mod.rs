@@ -119,7 +119,7 @@ impl LoadedEnvironment {
 	/// Tanka's stable label for this configured environment.
 	pub fn environment_label(&self) -> Option<String> {
 		self.environment()
-			.map(|environment| process::environment_label(&environment.metadata))
+			.map(|environment| process::Processing::environment_label(&environment.metadata))
 	}
 
 	fn inner(&self) -> &Environment<'static, OptionalData> {
@@ -173,7 +173,7 @@ impl LoadedEnvironment {
 		};
 
 		let mut manifests = Vec::new();
-		process::collect_manifests(data.clone(), "", &mut manifests)?;
+		process::Walk::collect(data.clone(), "", &mut manifests)?;
 		manifests.retain(|manifest| targets.keeps(manifest));
 
 		// Namespaces, labels and resource defaults are what the spec says this
@@ -712,7 +712,7 @@ impl Export {
 			.map(|manifest| {
 				Ok(File {
 					path: template.render_path(manifest, &self.options.extension)?,
-					contents: process::serialize(manifest)?,
+					contents: process::ExportValue::to_yaml(manifest)?,
 				})
 			})
 			.collect()
@@ -725,17 +725,6 @@ struct Plan {
 	manifests: Vec<serde_json::Value>,
 	/// How to name each manifest. Absent only when there is nothing to export.
 	template: Option<SpecializedTemplate>,
-}
-
-/// Whether a manifest is a Tanka `Environment` rather than a Kubernetes resource.
-///
-/// tk filters with `(?i)^Environment/.*$` against `<kind>/<name>`, so the kind is
-/// compared without regard to case and the name is not compared at all.
-fn is_environment_resource(manifest: &serde_json::Value) -> bool {
-	manifest
-		.get("kind")
-		.and_then(serde_json::Value::as_str)
-		.is_some_and(|kind| kind.eq_ignore_ascii_case("Environment"))
 }
 
 impl Plan {
@@ -766,7 +755,7 @@ impl Engine {
 		// every command that reaches a cluster rejects one — and so does `show`,
 		// which previews what those commands would send. Exporting keeps them,
 		// which is why this belongs here rather than in `plan`.
-		if manifests.iter().any(is_environment_resource) {
+		if manifests.iter().any(Self::is_environment_resource) {
 			return Err(Error::EnvironmentResource);
 		}
 
@@ -968,6 +957,17 @@ impl Engine {
 			None => Ok(exported),
 		}
 	}
+
+	/// Whether a manifest is a Tanka `Environment` rather than a Kubernetes resource.
+	///
+	/// tk filters with `(?i)^Environment/.*$` against `<kind>/<name>`, so the kind is
+	/// compared without regard to case and the name is not compared at all.
+	fn is_environment_resource(manifest: &serde_json::Value) -> bool {
+		manifest
+			.get("kind")
+			.and_then(serde_json::Value::as_str)
+			.is_some_and(|kind| kind.eq_ignore_ascii_case("Environment"))
+	}
 }
 
 /// Discovery, filtered by `--name` and `--selector`.
@@ -1100,7 +1100,7 @@ impl Iterator for Matching {
 
 /// Serialize one processed manifest using Tanka's YAML formatting.
 pub fn serialize_manifest(manifest: &serde_json::Value) -> Result<String, Error> {
-	process::serialize(manifest)
+	process::ExportValue::to_yaml(manifest)
 }
 
 impl Export {

@@ -16,7 +16,6 @@ use rtk_spec::v1alpha1::EnvironmentData;
 use serde_json::Value;
 
 use crate::export::Error;
-use crate::export::process;
 
 /// Stands in for a `/` that the template asked for, while `/` from rendered
 /// values is replaced. Tanka uses the same BEL character.
@@ -102,7 +101,7 @@ impl FilenameTemplate {
 		);
 
 		let mut template = Template::default();
-		template.add_func("default", template_default);
+		template.add_func("default", Self::template_default);
 		template
 			.parse(specialized.as_ref())
 			.map_err(|source| Error::InvalidFormat {
@@ -156,6 +155,70 @@ impl FilenameTemplate {
 		replaced.push_str(&remaining.replace(old, new));
 		replaced
 	}
+
+	/// Replace anything that has no business in a path component.
+	///
+	/// Borrows when there is nothing to replace, which is the common case on a path
+	/// that runs once per exported manifest.
+	pub(crate) fn sanitize(segment: &str) -> Cow<'_, str> {
+		// tk writes this verbatim for cluster-scoped resources.
+		if segment == "<no value>" {
+			return Cow::Borrowed(segment);
+		}
+
+		if segment.chars().all(Self::is_safe) {
+			return Cow::Borrowed(segment);
+		}
+
+		Cow::Owned(
+			segment
+				.chars()
+				.map(|character| {
+					if Self::is_safe(character) {
+						character
+					} else {
+						'-'
+					}
+				})
+				.collect(),
+		)
+	}
+
+	#[inline]
+	fn is_safe(character: char) -> bool {
+		character.is_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+	}
+
+	/// Sprig's `default`: the first non-empty argument.
+	///
+	/// Piped values arrive last (`{{ .value | default "fallback" }}` calls this with
+	/// `["fallback", .value]`), so arguments are searched back to front.
+	#[expect(
+		clippy::unnecessary_wraps,
+		reason = "the signature is gtmpl's, which allows a function to fail"
+	)]
+	fn template_default(arguments: &[TemplateValue]) -> Result<TemplateValue, FuncError> {
+		for argument in arguments.iter().rev() {
+			if !Self::is_empty(argument) {
+				return Ok(argument.clone());
+			}
+		}
+
+		Ok(arguments.first().cloned().unwrap_or(TemplateValue::NoValue))
+	}
+
+	fn is_empty(value: &TemplateValue) -> bool {
+		match value {
+			TemplateValue::NoValue | TemplateValue::Nil => true,
+			TemplateValue::Bool(boolean) => !boolean,
+			TemplateValue::String(string) => string.is_empty(),
+			TemplateValue::Number(number) => number.as_f64().is_some_and(|number| number == 0.0),
+			TemplateValue::Array(array) => array.is_empty(),
+			TemplateValue::Map(map) => map.is_empty(),
+			TemplateValue::Object(object) => object.is_empty(),
+			TemplateValue::Function(_) => false,
+		}
+	}
 }
 
 /// A [`FilenameTemplate`] with one environment's values baked in.
@@ -193,13 +256,13 @@ impl SpecializedTemplate {
 			.split('/')
 			.map(str::trim)
 			.filter(|segment| !segment.is_empty())
-			.map(sanitize)
+			.map(FilenameTemplate::sanitize)
 			.filter(|segment| !segment.is_empty())
 			.collect();
 
 		let Some((file, directories)) = segments.split_last() else {
 			return Err(Error::EmptyFilename {
-				manifest: process::describe(manifest),
+				manifest: Error::describe(manifest),
 			});
 		};
 
@@ -239,7 +302,7 @@ impl SpecializedTemplate {
 
 		for field in ["kind", "apiVersion"] {
 			if let Some(value) = manifest.get(field) {
-				context.insert(field.to_owned(), json_to_template(value));
+				context.insert(field.to_owned(), Self::json_to_template(value));
 			}
 		}
 
@@ -247,7 +310,7 @@ impl SpecializedTemplate {
 		let mut mapped = HashMap::with_capacity(metadata.map_or(1, |metadata| metadata.len() + 1));
 		if let Some(metadata) = metadata {
 			for (field, value) in metadata {
-				mapped.insert(field.clone(), json_to_template(value));
+				mapped.insert(field.clone(), Self::json_to_template(value));
 			}
 		}
 		// Templates commonly index `.metadata.labels`, which has to exist for that
@@ -259,88 +322,32 @@ impl SpecializedTemplate {
 
 		context
 	}
-}
 
-fn json_to_template(value: &Value) -> TemplateValue {
-	match value {
-		Value::Null => TemplateValue::Nil,
-		Value::Bool(boolean) => TemplateValue::Bool(*boolean),
-		Value::Number(number) => number
-			.as_i64()
-			.map(|number| TemplateValue::Number(number.into()))
-			.or_else(|| {
-				number
-					.as_f64()
-					.map(|number| TemplateValue::Number(number.into()))
-			})
-			.unwrap_or(TemplateValue::Nil),
-		Value::String(string) => TemplateValue::String(string.clone()),
-		Value::Array(array) => TemplateValue::Array(array.iter().map(json_to_template).collect()),
-		Value::Object(object) => TemplateValue::Map(
-			object
-				.iter()
-				.map(|(field, value)| (field.clone(), json_to_template(value)))
-				.collect(),
-		),
-	}
-}
-
-/// Sprig's `default`: the first non-empty argument.
-///
-/// Piped values arrive last (`{{ .value | default "fallback" }}` calls this with
-/// `["fallback", .value]`), so arguments are searched back to front.
-#[expect(
-	clippy::unnecessary_wraps,
-	reason = "the signature is gtmpl's, which allows a function to fail"
-)]
-fn template_default(arguments: &[TemplateValue]) -> Result<TemplateValue, FuncError> {
-	for argument in arguments.iter().rev() {
-		if !is_empty(argument) {
-			return Ok(argument.clone());
+	fn json_to_template(value: &Value) -> TemplateValue {
+		match value {
+			Value::Null => TemplateValue::Nil,
+			Value::Bool(boolean) => TemplateValue::Bool(*boolean),
+			Value::Number(number) => number
+				.as_i64()
+				.map(|number| TemplateValue::Number(number.into()))
+				.or_else(|| {
+					number
+						.as_f64()
+						.map(|number| TemplateValue::Number(number.into()))
+				})
+				.unwrap_or(TemplateValue::Nil),
+			Value::String(string) => TemplateValue::String(string.clone()),
+			Value::Array(array) => {
+				TemplateValue::Array(array.iter().map(Self::json_to_template).collect())
+			}
+			Value::Object(object) => TemplateValue::Map(
+				object
+					.iter()
+					.map(|(field, value)| (field.clone(), Self::json_to_template(value)))
+					.collect(),
+			),
 		}
 	}
-
-	Ok(arguments.first().cloned().unwrap_or(TemplateValue::NoValue))
-}
-
-fn is_empty(value: &TemplateValue) -> bool {
-	match value {
-		TemplateValue::NoValue | TemplateValue::Nil => true,
-		TemplateValue::Bool(boolean) => !boolean,
-		TemplateValue::String(string) => string.is_empty(),
-		TemplateValue::Number(number) => number.as_f64().is_some_and(|number| number == 0.0),
-		TemplateValue::Array(array) => array.is_empty(),
-		TemplateValue::Map(map) => map.is_empty(),
-		TemplateValue::Object(object) => object.is_empty(),
-		TemplateValue::Function(_) => false,
-	}
-}
-
-/// Replace anything that has no business in a path component.
-///
-/// Borrows when there is nothing to replace, which is the common case on a path
-/// that runs once per exported manifest.
-pub(crate) fn sanitize(segment: &str) -> Cow<'_, str> {
-	// tk writes this verbatim for cluster-scoped resources.
-	if segment == "<no value>" {
-		return Cow::Borrowed(segment);
-	}
-
-	if segment.chars().all(is_safe) {
-		return Cow::Borrowed(segment);
-	}
-
-	Cow::Owned(
-		segment
-			.chars()
-			.map(|character| if is_safe(character) { character } else { '-' })
-			.collect(),
-	)
-}
-
-#[inline]
-fn is_safe(character: char) -> bool {
-	character.is_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
 }
 
 #[cfg(test)]
@@ -515,15 +522,21 @@ mod tests {
 	#[test]
 	fn sanitizes_path_segments() {
 		// Nothing to do: borrowed, not rebuilt.
-		assert!(matches!(sanitize("plain-name_1.2:3"), Cow::Borrowed(_)));
+		assert!(matches!(
+			FilenameTemplate::sanitize("plain-name_1.2:3"),
+			Cow::Borrowed(_)
+		));
 		// tk writes this verbatim for cluster-scoped resources.
-		assert!(matches!(sanitize("<no value>"), Cow::Borrowed(_)));
-		assert_eq!(sanitize("with spaces"), "with-spaces");
+		assert!(matches!(
+			FilenameTemplate::sanitize("<no value>"),
+			Cow::Borrowed(_)
+		));
+		assert_eq!(FilenameTemplate::sanitize("with spaces"), "with-spaces");
 		// Separators never reach here (segments are split on them first), but
 		// nothing that could escape the output directory survives anyway.
-		assert_eq!(sanitize("../escape"), "..-escape");
-		assert_eq!(sanitize("unicode-ü"), "unicode-ü");
-		assert_eq!(sanitize("emoji-🙂"), "emoji--");
+		assert_eq!(FilenameTemplate::sanitize("../escape"), "..-escape");
+		assert_eq!(FilenameTemplate::sanitize("unicode-ü"), "unicode-ü");
+		assert_eq!(FilenameTemplate::sanitize("emoji-🙂"), "emoji--");
 	}
 
 	#[test]

@@ -90,7 +90,7 @@ impl Processing {
 			environment_label: environment
 				.spec
 				.inject_labels
-				.then(|| environment_label(&environment.metadata)),
+				.then(|| Self::environment_label(&environment.metadata)),
 			annotations: sorted(defaults.map(|defaults| &defaults.annotations)),
 			labels: sorted(defaults.map(|defaults| &defaults.labels)),
 		}
@@ -105,7 +105,7 @@ impl Processing {
 		self.inject_namespace(manifest);
 		self.inject_environment_label(manifest);
 		self.inject_resource_defaults(manifest);
-		strip_empty_metadata_maps(manifest);
+		Self::strip_empty_metadata_maps(manifest);
 	}
 
 	/// Give a namespaced resource the environment's namespace, unless it named
@@ -114,13 +114,13 @@ impl Processing {
 	/// Whether a resource is namespaced is decided by its kind, and overridden by
 	/// a `tanka.dev/namespaced` annotation — a string, as tk reads it.
 	fn inject_namespace(&self, manifest: &mut serde_json::Value) {
-		let Some(kind) = manifest.get("kind").map(json_kind) else {
+		let Some(kind) = manifest.get("kind").map(Self::json_kind) else {
 			return;
 		};
 
 		// Created whether or not anything is put in it: tk exports a `metadata`
 		// key even for a resource that declared none.
-		let Some(metadata) = metadata_mut(manifest) else {
+		let Some(metadata) = Self::metadata_mut(manifest) else {
 			return;
 		};
 
@@ -151,10 +151,10 @@ impl Processing {
 		let Some(label) = self.environment_label.as_deref() else {
 			return;
 		};
-		let Some(metadata) = metadata_mut(manifest) else {
+		let Some(metadata) = Self::metadata_mut(manifest) else {
 			return;
 		};
-		let Some(labels) = string_map_mut(metadata, "labels") else {
+		let Some(labels) = Self::string_map_mut(metadata, "labels") else {
 			return;
 		};
 
@@ -172,7 +172,7 @@ impl Processing {
 		if self.annotations.is_empty() && self.labels.is_empty() {
 			return;
 		}
-		let Some(metadata) = metadata_mut(manifest) else {
+		let Some(metadata) = Self::metadata_mut(manifest) else {
 			return;
 		};
 
@@ -180,7 +180,7 @@ impl Processing {
 			if defaults.is_empty() {
 				continue;
 			}
-			let Some(existing) = string_map_mut(metadata, field) else {
+			let Some(existing) = Self::string_map_mut(metadata, field) else {
 				continue;
 			};
 			for (key, value) in defaults {
@@ -190,94 +190,99 @@ impl Processing {
 			}
 		}
 	}
-}
 
-/// A manifest's `kind`, as a string. A `kind` that is not one is not a kind
-/// Tanka knows, and is treated as unnamed rather than as cluster-wide.
-fn json_kind(kind: &serde_json::Value) -> String {
-	kind.as_str().unwrap_or_default().to_owned()
-}
+	/// A manifest's `kind`, as a string. A `kind` that is not one is not a kind
+	/// Tanka knows, and is treated as unnamed rather than as cluster-wide.
+	fn json_kind(kind: &serde_json::Value) -> String {
+		kind.as_str().unwrap_or_default().to_owned()
+	}
 
-/// A manifest's `metadata`, creating it when absent.
-///
-/// Absent means absent: a `metadata` that is there but is not an object belongs
-/// to the manifest, and is left exactly as it is.
-fn metadata_mut(
-	manifest: &mut serde_json::Value,
-) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
-	let manifest = manifest.as_object_mut()?;
-	manifest
-		.entry("metadata")
-		.or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-	manifest.get_mut("metadata")?.as_object_mut()
-}
+	/// A manifest's `metadata`, creating it when absent.
+	///
+	/// Absent means absent: a `metadata` that is there but is not an object belongs
+	/// to the manifest, and is left exactly as it is.
+	fn metadata_mut(
+		manifest: &mut serde_json::Value,
+	) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+		let manifest = manifest.as_object_mut()?;
+		manifest
+			.entry("metadata")
+			.or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+		manifest.get_mut("metadata")?.as_object_mut()
+	}
 
-/// A metadata field holding a map of strings, creating it when absent or null.
-fn string_map_mut<'a>(
-	metadata: &'a mut serde_json::Map<String, serde_json::Value>,
-	field: &str,
-) -> Option<&'a mut serde_json::Map<String, serde_json::Value>> {
-	if !metadata
-		.get(field)
-		.is_some_and(serde_json::Value::is_object)
-	{
-		if metadata
+	/// A metadata field holding a map of strings, creating it when absent or null.
+	fn string_map_mut<'a>(
+		metadata: &'a mut serde_json::Map<String, serde_json::Value>,
+		field: &str,
+	) -> Option<&'a mut serde_json::Map<String, serde_json::Value>> {
+		if !metadata
 			.get(field)
-			.is_some_and(|value| !value.is_null() && !value.is_object())
+			.is_some_and(serde_json::Value::is_object)
 		{
-			// Something the manifest meant, whatever it is. Left alone.
-			return None;
+			if metadata
+				.get(field)
+				.is_some_and(|value| !value.is_null() && !value.is_object())
+			{
+				// Something the manifest meant, whatever it is. Left alone.
+				return None;
+			}
+			metadata.insert(
+				field.to_owned(),
+				serde_json::Value::Object(serde_json::Map::new()),
+			);
 		}
-		metadata.insert(
-			field.to_owned(),
-			serde_json::Value::Object(serde_json::Map::new()),
-		);
+		metadata.get_mut(field)?.as_object_mut()
 	}
-	metadata.get_mut(field)?.as_object_mut()
-}
 
-/// Drop `annotations` and `labels` that ended up empty, as tk does, so that a
-/// manifest which asked for neither does not gain them.
-fn strip_empty_metadata_maps(manifest: &mut serde_json::Value) {
-	let Some(metadata) = manifest
-		.get_mut("metadata")
-		.and_then(serde_json::Value::as_object_mut)
-	else {
-		return;
-	};
-
-	for field in ["annotations", "labels"] {
-		let empty = match metadata.get(field) {
-			Some(serde_json::Value::Null) => true,
-			Some(serde_json::Value::Object(map)) => map.is_empty(),
-			// A field the manifest meant, whatever it is, or none at all.
-			None | Some(_) => false,
+	/// Drop `annotations` and `labels` that ended up empty, as tk does, so that a
+	/// manifest which asked for neither does not gain them.
+	fn strip_empty_metadata_maps(manifest: &mut serde_json::Value) {
+		let Some(metadata) = manifest
+			.get_mut("metadata")
+			.and_then(serde_json::Value::as_object_mut)
+		else {
+			return;
 		};
-		if empty {
-			metadata.remove(field);
+
+		for field in ["annotations", "labels"] {
+			let empty = match metadata.get(field) {
+				Some(serde_json::Value::Null) => true,
+				Some(serde_json::Value::Object(map)) => map.is_empty(),
+				// A field the manifest meant, whatever it is, or none at all.
+				None | Some(_) => false,
+			};
+			if empty {
+				metadata.remove(field);
+			}
 		}
 	}
-}
 
-/// Collect the Kubernetes manifests below `data`.
-///
-/// Mirrors Tanka's `process.Extract`/`walkJSON`. Anything carrying an
-/// `apiVersion` and a `kind` is taken whole; anything else is a container to
-/// walk into, and reaching a value that cannot be walked at all means the
-/// Jsonnet produced something that was never a Kubernetes object. tk refuses
-/// the whole export in that case, and so does this: a manifest whose `kind` was
-/// misspelled would otherwise leave the export without a word.
-///
-/// `List` objects are expanded into their items. An `Environment` is an object
-/// like any other here: tk exports a nested one rather than unwrapping it.
-///
-/// `path` is the JSON path walked so far, used for error messages.
-pub(crate) fn collect_manifests(
-	value: serde_json::Value,
-	path: &str,
-	manifests: &mut Vec<serde_json::Value>,
-) -> Result<(), Error> {
-	Walk { manifests }.collect(value, path)
+	/// The `tanka.dev/environment` label value: Tanka's `NameLabel()`, the first 48
+	/// characters of the SHA256 of `<name>:<namespace>`.
+	pub(crate) fn environment_label(
+		metadata: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+	) -> String {
+		use std::fmt::Write as _;
+
+		use sha2::{Digest, Sha256};
+
+		let mut hasher = Sha256::new();
+		hasher.update(metadata.name.as_deref().unwrap_or_default().as_bytes());
+		hasher.update(b":");
+		hasher.update(metadata.namespace.as_deref().unwrap_or_default().as_bytes());
+
+		let digest = hasher.finalize();
+		let mut label = String::with_capacity(48);
+		for byte in digest {
+			if label.len() >= 48 {
+				break;
+			}
+			let _ = write!(&mut label, "{byte:02x}");
+		}
+		label.truncate(48);
+		label
+	}
 }
 
 /// A walk that ended early.
@@ -299,17 +304,39 @@ impl From<Error> for Interrupted {
 	}
 }
 
+/// Collect the Kubernetes manifests below `data`.
+///
+/// Mirrors Tanka's `process.Extract`/`walkJSON`. Anything carrying an
+/// `apiVersion` and a `kind` is taken whole; anything else is a container to
+/// walk into, and reaching a value that cannot be walked at all means the
+/// Jsonnet produced something that was never a Kubernetes object. tk refuses
+/// the whole export in that case, and so does this: a manifest whose `kind` was
+/// misspelled would otherwise leave the export without a word.
+///
+/// `List` objects are expanded into their items. An `Environment` is an object
+/// like any other here: tk exports a nested one rather than unwrapping it.
+///
+/// `path` is the JSON path walked so far, used for error messages.
+///
 /// One walk of an evaluated document, collecting the manifests it holds.
 ///
 /// The accumulator travels with the recursion rather than being threaded through
 /// every frame of it, which is the whole of why this type exists.
-struct Walk<'m> {
+pub(crate) struct Walk<'m> {
 	manifests: &'m mut Vec<serde_json::Value>,
 }
 
 impl Walk<'_> {
 	/// Walk `value`, reporting the failure a caller wants to read.
-	fn collect(mut self, value: serde_json::Value, path: &str) -> Result<(), Error> {
+	pub(crate) fn collect(
+		value: serde_json::Value,
+		path: &str,
+		manifests: &mut Vec<serde_json::Value>,
+	) -> Result<(), Error> {
+		Walk { manifests }.drive(value, path)
+	}
+
+	fn drive(mut self, value: serde_json::Value, path: &str) -> Result<(), Error> {
 		self.walk(value, path)
 			.map_err(|interrupted| match interrupted {
 				// Nothing enclosed the value, so there is no object to blame — tk
@@ -505,7 +532,7 @@ impl Targets {
 
 	/// Whether a manifest survives these matchers.
 	pub(crate) fn keeps(&self, manifest: &serde_json::Value) -> bool {
-		self.keeps_kind_name(&kind_name(manifest))
+		self.keeps_kind_name(&Self::kind_name(manifest))
 	}
 
 	/// Whether a `kind/name` survives these matchers.
@@ -572,6 +599,23 @@ impl Targets {
 
 		named_one.then_some(kinds)
 	}
+
+	/// `kind/name` for matcher input. Missing fields become empty strings, matching
+	/// Tanka's behavior on unidentified manifests.
+	fn kind_name(manifest: &serde_json::Value) -> String {
+		if !manifest.is_object() {
+			return "/".into();
+		}
+		let kind = manifest
+			.get("kind")
+			.and_then(serde_json::Value::as_str)
+			.unwrap_or_default();
+		let name = manifest
+			.pointer("/metadata/name")
+			.and_then(serde_json::Value::as_str)
+			.unwrap_or_default();
+		format!("{kind}/{name}")
+	}
 }
 
 /// One compiled target expression. Patterns are anchored with `^…$`,
@@ -600,71 +644,39 @@ impl TargetMatcher {
 	}
 }
 
-/// Identify a manifest in a diagnostic, without dumping the whole thing.
-pub(crate) fn describe(manifest: &serde_json::Value) -> String {
-	let kind_name = kind_name(manifest);
-	if kind_name == "/" {
-		// Nothing identifying at all: a truncated dump beats saying nothing.
-		let mut dumped = manifest.to_string();
-		dumped.truncate(200);
-		return dumped;
-	}
-
-	match manifest
-		.get("apiVersion")
-		.and_then(serde_json::Value::as_str)
-	{
-		Some(api_version) => format!("{api_version} {kind_name}"),
-		None => kind_name,
-	}
-}
-
-/// `kind/name` for matcher input. Missing fields become empty strings, matching
-/// Tanka's behavior on unidentified manifests.
-fn kind_name(manifest: &serde_json::Value) -> String {
-	if !manifest.is_object() {
-		return "/".into();
-	}
-	let kind = manifest
-		.get("kind")
-		.and_then(serde_json::Value::as_str)
-		.unwrap_or_default();
-	let name = manifest
-		.pointer("/metadata/name")
-		.and_then(serde_json::Value::as_str)
-		.unwrap_or_default();
-	format!("{kind}/{name}")
-}
-
-/// The `tanka.dev/environment` label value: Tanka's `NameLabel()`, the first 48
-/// characters of the SHA256 of `<name>:<namespace>`.
-pub(crate) fn environment_label(
-	metadata: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-) -> String {
-	use std::fmt::Write as _;
-
-	use sha2::{Digest, Sha256};
-
-	let mut hasher = Sha256::new();
-	hasher.update(metadata.name.as_deref().unwrap_or_default().as_bytes());
-	hasher.update(b":");
-	hasher.update(metadata.namespace.as_deref().unwrap_or_default().as_bytes());
-
-	let digest = hasher.finalize();
-	let mut label = String::with_capacity(48);
-	for byte in digest {
-		if label.len() >= 48 {
-			break;
-		}
-		let _ = write!(&mut label, "{byte:02x}");
-	}
-	label.truncate(48);
-	label
-}
-
 /// Serializes a manifest the way tk writes it out: keys in go-yaml's order, and
 /// negative zero kept as a float.
-struct ExportValue<'a>(&'a serde_json::Value);
+pub(crate) struct ExportValue<'a>(pub(crate) &'a serde_json::Value);
+
+impl ExportValue<'_> {
+	/// Serialize a manifest as tk does: go-yaml v2 formatting, keys sorted like
+	/// go-yaml v3 sorts them.
+	pub(crate) fn to_yaml(manifest: &serde_json::Value) -> Result<String, Error> {
+		let options = serde_saphyr::SerializerOptions {
+			indent_step: 2,
+			indent_array: Some(0),
+			prefer_block_scalars: true,
+			empty_map_as_braces: true,
+			empty_array_as_brackets: true,
+			line_width: Some(80),
+			// 1 million, and small floats like 0.00001, become exponents.
+			scientific_notation_threshold: Some(1_000_000),
+			scientific_notation_small_threshold: Some(0.0001),
+			// `y`, `n`, `yes`, `no`, `12`, `12.5` and friends stay quoted, as
+			// go-yaml v3 quotes them.
+			quote_ambiguous_keys: true,
+			quote_numeric_strings: true,
+			// A negative zero has to stay a float, and go-yaml writes one as `-0`.
+			go_style_negative_zero: true,
+			..Default::default()
+		};
+
+		let mut serialized = String::new();
+		serde_saphyr::to_fmt_writer_with_options(&mut serialized, &ExportValue(manifest), options)
+			.map_err(|source| Error::Serialize(source.into()))?;
+		Ok(serialized)
+	}
+}
 
 impl Serialize for ExportValue<'_> {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -696,109 +708,106 @@ impl Serialize for ExportValue<'_> {
 	}
 }
 
-/// Serialize a manifest as tk does: go-yaml v2 formatting, keys sorted like
-/// go-yaml v3 sorts them.
-pub(crate) fn serialize(manifest: &serde_json::Value) -> Result<String, Error> {
-	let options = serde_saphyr::SerializerOptions {
-		indent_step: 2,
-		indent_array: Some(0),
-		prefer_block_scalars: true,
-		empty_map_as_braces: true,
-		empty_array_as_brackets: true,
-		line_width: Some(80),
-		// 1 million, and small floats like 0.00001, become exponents.
-		scientific_notation_threshold: Some(1_000_000),
-		scientific_notation_small_threshold: Some(0.0001),
-		// `y`, `n`, `yes`, `no`, `12`, `12.5` and friends stay quoted, as
-		// go-yaml v3 quotes them.
-		quote_ambiguous_keys: true,
-		quote_numeric_strings: true,
-		// A negative zero has to stay a float, and go-yaml writes one as `-0`.
-		go_style_negative_zero: true,
-		..Default::default()
-	};
+impl crate::Engine {
+	/// Materialize an evaluated value as owned JSON.
+	///
+	/// This is the one place the evaluation is read: everything downstream works on
+	/// the result, which is owned and can cross threads. Whole numbers are spelled
+	/// as integers where they fit, as canonical JSON does, so that the YAML
+	/// formatting applied later is the same formatting tk gets from manifesting
+	/// through JSON text.
+	pub(crate) fn materialize(value: &EvaluationValue) -> Result<serde_json::Value, Error> {
+		if value.is_null() {
+			return Ok(serde_json::Value::Null);
+		}
+		if let Some(boolean) = value.as_bool() {
+			return Ok(boolean.into());
+		}
+		if let Some(number) = value.as_number() {
+			return Ok(serde_json::Value::Number(Self::materialize_number(number)?));
+		}
+		if let Some(string) = value.as_str() {
+			return Ok(serde_json::Value::String(string.to_string()));
+		}
+		if let Some(array) = value.as_array() {
+			let mut values = Vec::new();
+			for value in array.into_values() {
+				values.push(Self::materialize(&value?)?);
+			}
+			return Ok(serde_json::Value::Array(values));
+		}
+		if let Some(object) = value.as_object() {
+			// An object's assertions hold whether or not anything reads the fields
+			// they guard, so they are run rather than waited for.
+			object.run_assertions()?;
 
-	let mut serialized = String::new();
-	serde_saphyr::to_fmt_writer_with_options(&mut serialized, &ExportValue(manifest), options)
-		.map_err(|source| Error::Serialize(source.into()))?;
-	Ok(serialized)
+			let fields = object.field_names(Hidden::Skip);
+			let mut values = serde_json::Map::with_capacity(fields.len());
+			for field in fields {
+				let value = object.get_or_bail(&field, Hidden::Skip)?;
+				values.insert(field.to_string(), Self::materialize(&value)?);
+			}
+			return Ok(serde_json::Value::Object(values));
+		}
+
+		// Produce the evaluator's normal function diagnostic.
+		value.manifest()?;
+		unreachable!("every Jsonnet value kind handled")
+	}
+
+	/// Spell a Jsonnet number the way canonical JSON does.
+	///
+	/// Every Jsonnet number is a float64. Whole ones are written as integers where
+	/// they fit, which is what decides whether the YAML formatting applied later
+	/// spells them with a decimal point or an exponent.
+	#[expect(
+		clippy::cast_possible_truncation,
+		clippy::cast_sign_loss,
+		reason = "each cast is guarded by the range check above it"
+	)]
+	fn materialize_number(number: f64) -> Result<serde_json::Number, Error> {
+		// Negative zero is a float and has to stay one: spelled as an integer it
+		// would lose its sign, and tk writes it out as `-0.0`.
+		if number == 0.0 && number.is_sign_negative() {
+			return serde_json::Number::from_f64(number)
+				.ok_or_else(|| Error::Serialize(anyhow::anyhow!("non-finite Jsonnet number")));
+		}
+		if !number.is_sign_negative()
+			&& number.fract() == 0.0
+			&& number < 18_446_744_073_709_551_616.0
+		{
+			return Ok(serde_json::Number::from(number as u64));
+		}
+		if number.fract() == 0.0
+			&& (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&number)
+		{
+			return Ok(serde_json::Number::from(number as i64));
+		}
+
+		serde_json::Number::from_f64(number)
+			.ok_or_else(|| Error::Serialize(anyhow::anyhow!("non-finite Jsonnet number")))
+	}
 }
 
-/// Materialize an evaluated value as owned JSON.
-///
-/// This is the one place the evaluation is read: everything downstream works on
-/// the result, which is owned and can cross threads. Whole numbers are spelled
-/// as integers where they fit, as canonical JSON does, so that the YAML
-/// formatting applied later is the same formatting tk gets from manifesting
-/// through JSON text.
-pub(crate) fn materialize(value: &EvaluationValue) -> Result<serde_json::Value, Error> {
-	if value.is_null() {
-		return Ok(serde_json::Value::Null);
-	}
-	if let Some(boolean) = value.as_bool() {
-		return Ok(boolean.into());
-	}
-	if let Some(number) = value.as_number() {
-		return Ok(serde_json::Value::Number(materialize_number(number)?));
-	}
-	if let Some(string) = value.as_str() {
-		return Ok(serde_json::Value::String(string.to_string()));
-	}
-	if let Some(array) = value.as_array() {
-		let mut values = Vec::new();
-		for value in array.into_values() {
-			values.push(materialize(&value?)?);
+impl Error {
+	/// Identify a manifest in a diagnostic, without dumping the whole thing.
+	pub(crate) fn describe(manifest: &serde_json::Value) -> String {
+		let kind_name = Targets::kind_name(manifest);
+		if kind_name == "/" {
+			// Nothing identifying at all: a truncated dump beats saying nothing.
+			let mut dumped = manifest.to_string();
+			dumped.truncate(200);
+			return dumped;
 		}
-		return Ok(serde_json::Value::Array(values));
-	}
-	if let Some(object) = value.as_object() {
-		// An object's assertions hold whether or not anything reads the fields
-		// they guard, so they are run rather than waited for.
-		object.run_assertions()?;
 
-		let fields = object.field_names(Hidden::Skip);
-		let mut values = serde_json::Map::with_capacity(fields.len());
-		for field in fields {
-			let value = object.get_or_bail(&field, Hidden::Skip)?;
-			values.insert(field.to_string(), materialize(&value)?);
+		match manifest
+			.get("apiVersion")
+			.and_then(serde_json::Value::as_str)
+		{
+			Some(api_version) => format!("{api_version} {kind_name}"),
+			None => kind_name,
 		}
-		return Ok(serde_json::Value::Object(values));
 	}
-
-	// Produce the evaluator's normal function diagnostic.
-	value.manifest()?;
-	unreachable!("every Jsonnet value kind handled")
-}
-
-/// Spell a Jsonnet number the way canonical JSON does.
-///
-/// Every Jsonnet number is a float64. Whole ones are written as integers where
-/// they fit, which is what decides whether the YAML formatting applied later
-/// spells them with a decimal point or an exponent.
-#[expect(
-	clippy::cast_possible_truncation,
-	clippy::cast_sign_loss,
-	reason = "each cast is guarded by the range check above it"
-)]
-fn materialize_number(number: f64) -> Result<serde_json::Number, Error> {
-	// Negative zero is a float and has to stay one: spelled as an integer it
-	// would lose its sign, and tk writes it out as `-0.0`.
-	if number == 0.0 && number.is_sign_negative() {
-		return serde_json::Number::from_f64(number)
-			.ok_or_else(|| Error::Serialize(anyhow::anyhow!("non-finite Jsonnet number")));
-	}
-	if !number.is_sign_negative() && number.fract() == 0.0 && number < 18_446_744_073_709_551_616.0
-	{
-		return Ok(serde_json::Number::from(number as u64));
-	}
-	if number.fract() == 0.0
-		&& (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&number)
-	{
-		return Ok(serde_json::Number::from(number as i64));
-	}
-
-	serde_json::Number::from_f64(number)
-		.ok_or_else(|| Error::Serialize(anyhow::anyhow!("non-finite Jsonnet number")))
 }
 
 #[cfg(test)]
@@ -877,7 +886,7 @@ mod tests {
 	/// Collect from a document, reporting the message a caller would see.
 	fn collect(value: Value) -> Result<Vec<Value>, String> {
 		let mut manifests = Vec::new();
-		collect_manifests(value, "", &mut manifests)
+		Walk::collect(value, "", &mut manifests)
 			.map(|()| manifests)
 			.map_err(|error| error.to_string())
 	}
@@ -1112,7 +1121,7 @@ mod tests {
 		assert_eq!(label.len(), 48);
 		assert_eq!(
 			label,
-			&environment_label(&ObjectMeta {
+			&Processing::environment_label(&ObjectMeta {
 				name: Some("environments/demo".to_owned()),
 				namespace: Some("environments/demo/main.jsonnet".to_owned()),
 				..ObjectMeta::default()
@@ -1177,7 +1186,7 @@ mod tests {
 			.expect("valid Jsonnet")
 			.into_value();
 		let manifest = processed(
-			materialize(&value).expect("materializable"),
+			crate::Engine::materialize(&value).expect("materializable"),
 			&environment(|_| {}),
 		);
 
@@ -1226,7 +1235,7 @@ mod tests {
 			"nested": { "z": 1, "y": 2 },
 		});
 		assert_eq!(
-			serialize(&value).expect("serializable"),
+			ExportValue::to_yaml(&value).expect("serializable"),
 			"_x: 5\nA: 6\na: 2\na2: 4\na10: 3\nb: 1\nnested:\n  \"y\": 2\n  z: 1\n"
 		);
 	}
@@ -1234,7 +1243,7 @@ mod tests {
 	#[test]
 	fn describes_manifests_for_diagnostics() {
 		assert_eq!(
-			describe(&json!({
+			Error::describe(&json!({
 				"apiVersion": "v1",
 				"kind": "ConfigMap",
 				"metadata": { "name": "a" },
@@ -1242,7 +1251,7 @@ mod tests {
 			"v1 ConfigMap/a"
 		);
 		assert_eq!(
-			describe(&json!({ "unidentified": true })),
+			Error::describe(&json!({ "unidentified": true })),
 			r#"{"unidentified":true}"#
 		);
 	}

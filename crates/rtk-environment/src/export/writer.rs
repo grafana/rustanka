@@ -41,7 +41,7 @@ impl File {
 			// happens if something removed it in the meantime.
 			Err(error) if error.kind() == ErrorKind::NotFound => {
 				if let Some(parent) = path.parent() {
-					create_dir_all(parent)?;
+					Directories::create_dir_all(parent)?;
 				}
 				std::fs::write(&path, &self.contents).map_err(|source| Error::Write {
 					path: path.clone(),
@@ -106,24 +106,24 @@ impl Directories {
 			return Ok(());
 		}
 
-		create_dir_all(parent)?;
+		Directories::create_dir_all(parent)?;
 		self.0.insert(parent.into());
 		Ok(())
 	}
-}
 
-/// Create `directory` and its parents, tolerating one that is already there.
-///
-/// `create_dir_all` reports success for existing directories, but it can still
-/// lose a race against another environment creating the same one.
-fn create_dir_all(directory: &Path) -> Result<(), Error> {
-	match std::fs::create_dir_all(directory) {
-		Ok(()) => Ok(()),
-		Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
-		Err(source) => Err(Error::Write {
-			path: directory.into(),
-			source,
-		}),
+	/// Create `directory` and its parents, tolerating one that is already there.
+	///
+	/// `create_dir_all` reports success for existing directories, but it can still
+	/// lose a race against another environment creating the same one.
+	fn create_dir_all(directory: &Path) -> Result<(), Error> {
+		match std::fs::create_dir_all(directory) {
+			Ok(()) => Ok(()),
+			Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
+			Err(source) => Err(Error::Write {
+				path: directory.into(),
+				source,
+			}),
+		}
 	}
 }
 

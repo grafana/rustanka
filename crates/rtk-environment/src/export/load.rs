@@ -13,7 +13,7 @@ use rtk_spec::canonical::Environment;
 use serde::Deserialize as _;
 
 use crate::discover::Candidate;
-use crate::export::{Error, LoadedEnvironment, OptionalData, process};
+use crate::export::{Error, LoadedEnvironment, OptionalData};
 use crate::{Discovered, Engine, Search};
 
 /// External variable Tanka exposes an environment's own spec through.
@@ -208,7 +208,7 @@ impl Engine {
 			None => evaluator.evaluate_file(jpath.entrypoint)?,
 		};
 
-		process::materialize(&evaluation.into_value())
+		Engine::materialize(&evaluation.into_value())
 	}
 
 	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
@@ -293,7 +293,7 @@ impl Engine {
 		let evaluation =
 			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, "main"))?;
 
-		let data = process::materialize(&evaluation.into_value())?;
+		let data = Engine::materialize(&evaluation.into_value())?;
 		LoadedEnvironment::bare(data)
 	}
 
@@ -333,7 +333,7 @@ impl Engine {
 		let evaluation =
 			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, &script))?;
 
-		process::materialize(&evaluation.into_value())
+		Engine::materialize(&evaluation.into_value())
 	}
 }
 
