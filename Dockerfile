@@ -1,4 +1,4 @@
-# Runtime stage - distroless/cc-debian12.
+# Runtime stage - distroless/cc-debian13.
 #
 # The rtk/jrsonnet binaries are built for *-unknown-linux-gnu and are
 # dynamically linked against glibc and libgcc_s.so.1 (verified via readelf:
@@ -10,7 +10,7 @@
 # Compared to the previous ubuntu:24.04 base this drops the shell, package
 # manager, and the rest of the OS userland, and pins the base by digest.
 # The :nonroot tag runs as UID/GID 65532 and ships ca-certificates.
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:bd2899c12b335c827750ccf2359879eab09c09b206023dcebea408947d54127c
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
 
 # Copy the pre-built binaries (copied to docker-bin/ by the workflow)
 COPY docker-bin/rtk /usr/local/bin/rtk
