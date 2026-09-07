@@ -4,14 +4,34 @@ description: "Comparing rtk with tk for exporting an environment that renders a 
 
 # Static mode: a pre-existing fixtures directory with explicit export commands
 # (no mock Kubernetes server). The fixture defines 60 inline environments that
-# each render the same local chart, so rtk's in-memory helm cache collapses them
-# to a single helm invocation.
+# each render the same local chart.
 fixtures_dir: "rtk-benchmarks/helm-template"
+
+# Measure rendering, not the deduplication of it.
+#
+# Every call in the fixture shares one cache key, so with the cache on this
+# times a single render plus cache hits — and then reports changes in how well
+# duplicate renders are coalesced as though rendering itself had got faster.
+# That is not hypothetical: rtk renders this fixture once per export where
+# v0.5.x rendered it once per worker, which read as a 4.19x improvement while
+# both did identical work (111 renders each) once the cache was taken away.
+#
+# Disabled, every environment invokes helm, as tk's renders already do.
+#
+# This bypasses the on-disk cache too: both layers sit behind the one branch
+# this variable takes. Presence is what counts, so the cache comes back only by
+# removing the variable; setting it to 0 would still disable it.
+env:
+  RTK_HELM_DISABLE_MEMOIZATION: "1"
+
+# ~110 real helm renders per run, so hyperfine's 10-run minimum would make this
+# one benchmark dominate CI. Applies to every command in the comparison.
+runs: 3
 
 # Clear the export dir before each benchmark iteration.
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
 
 tests:
   - name: "Full Export"
-    description: "Exporting 60 inline environments that each render the same local Helm chart."
+    description: "Exporting 60 inline environments that each invoke helm to render the same local Helm chart."
     command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"
