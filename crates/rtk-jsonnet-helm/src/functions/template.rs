@@ -373,13 +373,23 @@ fn parse_helm_yaml_output(
 	yaml_content: &str,
 	name_format: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-	let parse_options = serde_saphyr::Options {
+	let parse_options = serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None,
-		..Default::default()
 	};
 	let documents =
 		serde_saphyr::from_multiple_with_options::<serde_json::Value>(yaml_content, parse_options)
+			.or_else(|error| {
+				// Some Helm CRDs contain quoted continuations that Go accepts at the key's indentation.
+				let normalized = normalize_helm_multiline_quotes(yaml_content);
+				if normalized == yaml_content {
+					return Err(error);
+				}
+				serde_saphyr::from_multiple_with_options(
+					&normalized,
+					serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
+				)
+			})
 			.map_err(|error| format!("failed to parse helm output: {error}"))?;
 
 	let mut output = serde_json::Map::with_capacity(documents.len());
@@ -401,6 +411,67 @@ fn parse_helm_yaml_output(
 	}
 
 	Ok(serde_json::Value::Object(output))
+}
+
+fn normalize_helm_multiline_quotes(input: &str) -> String {
+	fn quote_is_open(value: &str, quote: u8) -> bool {
+		let bytes = value.as_bytes();
+		let mut index = 0;
+		while index < bytes.len() {
+			if bytes[index] == quote {
+				if quote == b'\'' && bytes.get(index + 1) == Some(&quote) {
+					index += 2;
+					continue;
+				}
+				let escaped = quote == b'"'
+					&& bytes[..index]
+						.iter()
+						.rev()
+						.take_while(|byte| **byte == b'\\')
+						.count() % 2 == 1;
+				if escaped {
+					index += 1;
+					continue;
+				}
+				return false;
+			}
+			index += 1;
+		}
+		true
+	}
+
+	fn opening_quote(line: &str) -> Option<(usize, u8)> {
+		for (colon, _) in line.match_indices(':') {
+			let tail = &line[colon + 1..];
+			let value = tail.trim_start();
+			let quote = *value.as_bytes().first()?;
+			if matches!(quote, b'\'' | b'"') && quote_is_open(&value[1..], quote) {
+				let quote_column = colon + 1 + tail.len() - value.len();
+				return Some((quote_column + 1, quote));
+			}
+		}
+		None
+	}
+
+	let mut output = String::with_capacity(input.len());
+	let mut open_quote = None;
+	for line in input.split_inclusive('\n') {
+		let content = line.strip_suffix('\n').unwrap_or(line);
+		if let Some((required_indent, quote)) = open_quote {
+			let line_indent = content.bytes().take_while(|byte| *byte == b' ').count();
+			if !content.trim().is_empty() && line_indent < required_indent {
+				output.extend(std::iter::repeat_n(' ', required_indent - line_indent));
+			}
+			output.push_str(line);
+			if !quote_is_open(content, quote) {
+				open_quote = None;
+			}
+		} else {
+			output.push_str(line);
+			open_quote = opening_quote(content);
+		}
+	}
+	output
 }
 
 fn manifest_key(
@@ -485,6 +556,7 @@ fn to_snake_case(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
 	use std::fs;
 	use std::path::{Path, PathBuf};
 	use std::sync::Arc;
@@ -493,8 +565,23 @@ mod tests {
 	use serde_json::json;
 	use tempfile::tempdir;
 
-	use super::{Function, Options, parse_helm_yaml_output, relative_chart_path};
+	use super::{
+		Function, Options, normalize_helm_multiline_quotes, parse_helm_yaml_output,
+		relative_chart_path,
+	};
 	use crate::State;
+
+	#[test]
+	fn normalizes_helm_multiline_quoted_scalars() {
+		let yaml = "spec:\n  description: 'first line\n  second line'\n  type: string\n";
+		let normalized = normalize_helm_multiline_quotes(yaml);
+		assert_eq!(
+			normalized,
+			"spec:\n  description: 'first line\n                second line'\n  type: string\n"
+		);
+		let parsed: serde_json::Value = serde_saphyr::from_str(&normalized).unwrap();
+		assert_eq!(parsed["spec"]["description"], "first line second line");
+	}
 
 	fn cache_directory(called_from: &Path) -> Option<PathBuf> {
 		Some(called_from.parent()?.join("target/helm"))

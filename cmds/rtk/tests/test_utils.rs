@@ -25,7 +25,7 @@ pub fn load_manifests_from_dir(dir: &Path) -> Vec<serde_json::Value> {
 	entries
 		.into_iter()
 		.map(|entry| std::fs::read_to_string(entry.path()).expect("failed to read file"))
-		.map(|content| serde_yaml::from_str(&content).expect("failed to parse YAML"))
+		.map(|content| serde_saphyr::from_str(&content).expect("failed to parse YAML"))
 		.collect()
 }
 

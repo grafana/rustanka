@@ -46,7 +46,6 @@ base64.workspace = true
 # std.parseJson
 serde_json.workspace = true
 # std.parseYaml, custom library fork is used for C++/golang compatibility
-serde_yaml_with_quirks.workspace = true
 # std.parseYaml
 serde-saphyr.workspace = true
 

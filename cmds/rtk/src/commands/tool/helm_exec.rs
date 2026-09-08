@@ -186,7 +186,7 @@ pub fn read_chart_version(chart_path: &Path) -> Result<String> {
 	let data = std::fs::read_to_string(chart_path.join("Chart.yaml"))
 		.map_err(|e| anyhow!("read Chart.yaml: {}", e))?;
 	let c: ChartYaml =
-		serde_yaml_with_quirks::from_str(&data).map_err(|e| anyhow!("parse Chart.yaml: {}", e))?;
+		serde_saphyr::from_str(&data).map_err(|e| anyhow!("parse Chart.yaml: {}", e))?;
 	Ok(c.version)
 }
 

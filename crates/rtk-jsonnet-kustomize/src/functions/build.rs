@@ -143,10 +143,9 @@ fn drain_output(mut child: Child) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), Stri
 }
 
 fn parse_output(yaml: &str) -> Result<serde_json::Value, String> {
-	let parse_options = serde_saphyr::Options {
+	let parse_options = serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None,
-		..Default::default()
 	};
 	let documents =
 		serde_saphyr::from_multiple_with_options::<serde_json::Value>(yaml, parse_options)

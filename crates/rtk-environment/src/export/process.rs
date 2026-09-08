@@ -652,27 +652,10 @@ impl ExportValue<'_> {
 	/// Serialize a manifest as tk does: go-yaml v2 formatting, keys sorted like
 	/// go-yaml v3 sorts them.
 	pub(crate) fn to_yaml(manifest: &serde_json::Value) -> Result<String, Error> {
-		let options = serde_saphyr::SerializerOptions {
-			indent_step: 2,
-			indent_array: Some(0),
-			prefer_block_scalars: true,
-			empty_map_as_braces: true,
-			empty_array_as_brackets: true,
-			line_width: Some(80),
-			// 1 million, and small floats like 0.00001, become exponents.
-			scientific_notation_threshold: Some(1_000_000),
-			scientific_notation_small_threshold: Some(0.0001),
-			// `y`, `n`, `yes`, `no`, `12`, `12.5` and friends stay quoted, as
-			// go-yaml v3 quotes them.
-			quote_ambiguous_keys: true,
-			quote_numeric_strings: true,
-			// A negative zero has to stay a float, and go-yaml writes one as `-0`.
-			go_style_negative_zero: true,
-			..Default::default()
-		};
+		let options = rtk_yaml::SerializerOptions::tanka_v2();
 
 		let mut serialized = String::new();
-		serde_saphyr::to_fmt_writer_with_options(&mut serialized, &ExportValue(manifest), options)
+		rtk_yaml::to_fmt_writer_with_options(&mut serialized, &ExportValue(manifest), options)
 			.map_err(|source| Error::Serialize(source.into()))?;
 		Ok(serialized)
 	}
@@ -695,7 +678,7 @@ impl Serialize for ExportValue<'_> {
 				// Sorted here rather than by rebuilding the tree: go-yaml orders keys
 				// as it writes them, and so does this.
 				let mut keys: Vec<&String> = fields.keys().collect();
-				keys.sort_by(|left, right| saphyr::compare_string_keys(left, right));
+				keys.sort_by(|left, right| rtk_yaml::compare_string_keys(left, right));
 				let mut map = serializer.serialize_map(Some(keys.len()))?;
 				for key in keys {
 					let value = &fields[key];

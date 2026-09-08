@@ -7,6 +7,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+rtk-yaml.workspace = true
 anyhow.workspace = true
 either.workspace = true
 gtmpl = "0.7.1"
@@ -21,8 +22,6 @@ rtk-jsonnet-core.workspace = true
 rtk-spec.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
-serde-saphyr.workspace = true
-saphyr.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
