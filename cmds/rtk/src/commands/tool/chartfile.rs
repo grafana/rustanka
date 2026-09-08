@@ -188,8 +188,8 @@ pub fn load_chartfile(project_root: &Path) -> Result<Chartfile> {
 	let path = project_root.join(FILENAME);
 	let data =
 		std::fs::read_to_string(&path).map_err(|e| anyhow!("failed to read chartfile: {}", e))?;
-	let mut c: Chartfile = serde_yaml_with_quirks::from_str(&data)
-		.map_err(|e| anyhow!("failed to parse chartfile: {}", e))?;
+	let mut c: Chartfile =
+		serde_saphyr::from_str(&data).map_err(|e| anyhow!("failed to parse chartfile: {}", e))?;
 	for (i, r) in c.requires.iter().enumerate() {
 		if r.chart.is_empty() {
 			return Err(anyhow!("requirements[{}]: 'chart' must be set", i));
@@ -203,8 +203,8 @@ pub fn load_chartfile(project_root: &Path) -> Result<Chartfile> {
 
 /// Write Chartfile to path.
 pub fn write_chartfile(c: &Chartfile, path: &Path) -> Result<()> {
-	let data = serde_yaml_with_quirks::to_string(c)
-		.map_err(|e| anyhow!("failed to serialize chartfile: {}", e))?;
+	let data =
+		rtk_yaml::to_string(c).map_err(|e| anyhow!("failed to serialize chartfile: {}", e))?;
 	std::fs::write(path, data).map_err(|e| anyhow!("failed to write chartfile: {}", e))?;
 	Ok(())
 }
@@ -231,8 +231,7 @@ pub fn default_chartfile() -> Chartfile {
 pub fn load_helm_repo_config(path: &Path) -> Result<ConfigFile> {
 	let data = std::fs::read_to_string(path)
 		.map_err(|e| anyhow!("failed to read repository config: {}", e))?;
-	serde_yaml_with_quirks::from_str(&data)
-		.map_err(|e| anyhow!("failed to parse repository config: {}", e))
+	serde_saphyr::from_str(&data).map_err(|e| anyhow!("failed to parse repository config: {}", e))
 }
 
 /// Repo name validation: only \w- allowed (tanka: repoExp = `^[\w-]+$`).

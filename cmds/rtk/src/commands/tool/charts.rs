@@ -118,7 +118,7 @@ fn run_init<W: Write>(_args: ChartsInitArgs, _writer: W) -> Result<()> {
 fn run_config<W: Write>(_args: ChartsConfigArgs, mut writer: W) -> Result<()> {
 	let cwd = std::env::current_dir().map_err(|e| anyhow!("current dir: {}", e))?;
 	let c = load_chartfile(&cwd)?;
-	let data = serde_yaml_with_quirks::to_string(&c).map_err(|e| anyhow!("serialize: {}", e))?;
+	let data = rtk_yaml::to_string(&c).map_err(|e| anyhow!("serialize: {}", e))?;
 	writer.write_all(data.as_bytes())?;
 	Ok(())
 }

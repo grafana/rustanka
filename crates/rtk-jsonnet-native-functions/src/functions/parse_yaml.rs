@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 pub struct Function;
 
 fn parse(yaml: &str) -> Result<Vec<serde_json::Value>, String> {
-	let options = serde_saphyr::Options {
+	let options = serde_saphyr::options! {
 		legacy_octal_numbers: true,
 		budget: None,
-		..Default::default()
 	};
 	serde_saphyr::from_multiple_with_options(yaml, options)
 		.map_err(|error| format!("failed to parse yaml: {error}"))

@@ -177,8 +177,8 @@ fn test_config_output_matches_manifest() {
 	write_chartfile(&c, &path).unwrap();
 
 	let loaded = load_chartfile(dir.path()).unwrap();
-	let serialized = serde_yaml_with_quirks::to_string(&loaded).unwrap();
-	let parsed: Chartfile = serde_yaml_with_quirks::from_str(&serialized).unwrap();
+	let serialized = rtk_yaml::to_string(&loaded).unwrap();
+	let parsed: Chartfile = serde_saphyr::from_str(&serialized).unwrap();
 	assert_eq!(parsed.version, loaded.version);
 	assert_eq!(parsed.repositories.len(), loaded.repositories.len());
 	assert_eq!(parsed.requires.len(), loaded.requires.len());

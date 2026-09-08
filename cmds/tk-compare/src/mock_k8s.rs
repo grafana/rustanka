@@ -51,7 +51,7 @@ impl MockCluster {
 		// Generate kubeconfig
 		let kubeconfig = server.kubeconfig_with_context("mock-context");
 		let kubeconfig_yaml =
-			serde_yaml::to_string(&kubeconfig).context("failed to serialize kubeconfig")?;
+			rtk_yaml::to_string(&kubeconfig).context("failed to serialize kubeconfig")?;
 
 		// Write kubeconfig to a temporary file
 		let kubeconfig_path = format!("/tmp/tk-compare-kubeconfig-{}.yaml", std::process::id());
@@ -86,8 +86,6 @@ impl Drop for MockCluster {
 
 /// Load YAML manifests from a directory.
 fn load_manifests_from_dir(dir: &Path) -> Result<Vec<serde_json::Value>> {
-	use serde::Deserialize;
-
 	let mut manifests = Vec::new();
 
 	if !dir.exists() {
@@ -115,9 +113,9 @@ fn load_manifests_from_dir(dir: &Path) -> Result<Vec<serde_json::Value>> {
 			.with_context(|| format!("failed to read {}", path.display()))?;
 
 		// Handle multi-document YAML files
-		for doc in serde_yaml::Deserializer::from_str(&content) {
-			let value = serde_json::Value::deserialize(doc)
-				.with_context(|| format!("failed to parse YAML in {}", path.display()))?;
+		for doc in serde_saphyr::read::<_, serde_json::Value>(&mut content.as_bytes()) {
+			let value =
+				doc.with_context(|| format!("failed to parse YAML in {}", path.display()))?;
 
 			// Skip empty documents
 			if value.is_null() {

@@ -963,7 +963,7 @@ dependencies = [
  "anyhow",
  "bumpalo",
  "hashbrown 0.15.5",
- "indexmap 2.13.0",
+ "indexmap",
  "rustc-hash 2.1.1",
  "serde",
  "unicode-width",
@@ -1385,7 +1385,7 @@ dependencies = [
  "parking_lot",
  "regex",
  "signal-hook",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1425,7 +1425,7 @@ dependencies = [
  "gix-quote",
  "gix-trace",
  "kstring",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "unicode-bom",
 ]
@@ -1455,7 +1455,7 @@ dependencies = [
  "gix-trace",
  "gix-traverse",
  "gix-worktree",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1508,7 +1508,7 @@ dependencies = [
  "gix-path",
  "gix-ref",
  "gix-sec",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "unicode-bom",
 ]
@@ -1663,7 +1663,7 @@ dependencies = [
  "gix-quote",
  "gix-trace",
  "gix-utils",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1763,7 +1763,7 @@ dependencies = [
  "libc",
  "memmap2",
  "rustix",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1845,7 +1845,7 @@ dependencies = [
  "gix-utils",
  "gix-validate",
  "itoa",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -1887,7 +1887,7 @@ dependencies = [
  "gix-tempfile",
  "memmap2",
  "parking_lot",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
  "uluru",
 ]
@@ -2013,7 +2013,7 @@ dependencies = [
  "gix-hash",
  "gix-revision",
  "gix-validate",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2048,7 +2048,7 @@ dependencies = [
  "gix-hash",
  "gix-hashtable",
  "gix-object",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2168,7 +2168,7 @@ dependencies = [
  "gix-hashtable",
  "gix-object",
  "gix-revwalk",
- "smallvec 1.15.1",
+ "smallvec",
  "thiserror 2.0.18",
 ]
 
@@ -2297,7 +2297,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
 dependencies = [
  "arraydeque",
- "smallvec 1.15.1",
+ "smallvec",
+]
+
+[[package]]
+name = "granit-parser"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65ec0d45986cd51c847c75c5b69a00852c4fc84d0e5e79f041173f73437d0cdf"
+dependencies = [
+ "arraydeque",
+ "smallvec",
 ]
 
 [[package]]
@@ -2335,7 +2345,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.4.0",
- "indexmap 2.13.0",
+ "indexmap",
  "slab",
  "tokio",
  "tokio-util",
@@ -2361,12 +2371,6 @@ checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
 dependencies = [
  "byteorder",
 ]
-
-[[package]]
-name = "hashbrown"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
@@ -2405,15 +2409,6 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
-]
-
-[[package]]
-name = "hashlink"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32069d97bb81e38fa67eab65e3393bf804bb85969f2bc06bf13f64aef5aba248"
-dependencies = [
- "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -2463,7 +2458,7 @@ dependencies = [
  "rand",
  "random_color",
  "range-map",
- "smallvec 1.15.1",
+ "smallvec",
  "unicode-box-drawing",
 ]
 
@@ -2577,7 +2572,7 @@ dependencies = [
  "itoa",
  "pin-project-lite",
  "pin-utils",
- "smallvec 1.15.1",
+ "smallvec",
  "tokio",
  "want",
 ]
@@ -2696,7 +2691,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.1",
+ "smallvec",
  "zerovec",
 ]
 
@@ -2760,7 +2755,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.1",
+ "smallvec",
  "utf8_iter",
 ]
 
@@ -2772,16 +2767,6 @@ checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "indexmap"
-version = "1.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
-dependencies = [
- "autocfg",
- "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -3058,7 +3043,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustversion",
  "serde",
- "smallvec 1.15.1",
+ "smallvec",
  "stacker",
  "static_assertions",
  "strip-ansi-escapes",
@@ -3242,9 +3227,8 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
- "serde_yaml_with_quirks",
  "sha1 0.11.0",
  "sha2 0.11.0",
  "sha3",
@@ -3528,12 +3512,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "linked-hash-map"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3708,9 +3686,10 @@ dependencies = [
  "clap",
  "k8s-mock",
  "nix 0.29.0",
+ "rtk-yaml",
  "serde",
+ "serde-saphyr 1.2.0",
  "serde_json",
- "serde_yaml",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3952,15 +3931,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ordered-float"
-version = "5.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4019,7 +3989,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall",
- "smallvec 1.15.1",
+ "smallvec",
  "windows-link",
 ]
 
@@ -4740,12 +4710,11 @@ dependencies = [
  "rtk-environments",
  "rtk-jsonnet",
  "rtk-spec",
+ "rtk-yaml",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
- "serde_yaml",
- "serde_yaml_with_quirks",
  "tabwriter",
  "tempfile",
  "thiserror 2.0.18",
@@ -4790,11 +4759,10 @@ dependencies = [
  "rtk-jsonnet-core",
  "rtk-masterminds",
  "rtk-spec",
+ "rtk-yaml",
  "rustc-hash 2.1.1",
- "saphyr",
  "semver",
  "serde",
- "serde-saphyr 0.0.11",
  "serde_json",
  "sha2 0.11.0",
  "stats_alloc",
@@ -4847,7 +4815,7 @@ dependencies = [
  "rtk-jsonnet-core",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -4878,7 +4846,7 @@ version = "0.5.0-pre99"
 dependencies = [
  "rtk-jsonnet-core",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "tempfile",
 ]
@@ -4889,8 +4857,9 @@ version = "0.5.0-pre99"
 dependencies = [
  "hex",
  "rtk-jsonnet-core",
+ "rtk-yaml",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "sha2 0.11.0",
 ]
@@ -4925,10 +4894,21 @@ dependencies = [
  "schemars",
  "semver",
  "serde",
- "serde-saphyr 0.0.11",
+ "serde-saphyr 1.2.0",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rtk-yaml"
+version = "0.5.0-pre99"
+dependencies = [
+ "base64 0.22.1",
+ "nohash-hasher",
+ "ryu",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5062,27 +5042,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "saphyr"
-version = "0.0.11"
-source = "git+https://github.com/grafana/saphyr?rev=0d26c036f086f61207282671c802643037cd5f0e#0d26c036f086f61207282671c802643037cd5f0e"
-dependencies = [
- "encoding_rs",
- "hashlink",
- "ordered-float 5.3.0",
- "saphyr-parser",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "saphyr-parser"
-version = "0.0.11"
-source = "git+https://github.com/grafana/saphyr?rev=0d26c036f086f61207282671c802643037cd5f0e#0d26c036f086f61207282671c802643037cd5f0e"
-dependencies = [
- "arraydeque",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5177,23 +5136,6 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.11"
-source = "git+https://github.com/grafana/serde-saphyr?rev=0feecc80245a415ae6f7760d07fc6124a682c949#0feecc80245a415ae6f7760d07fc6124a682c949"
-dependencies = [
- "ahash",
- "base64 0.22.1",
- "encoding_rs_io",
- "nohash-hasher",
- "num-traits",
- "ryu",
- "saphyr-parser",
- "serde",
- "serde_json",
- "smallvec 2.0.0-alpha.12",
-]
-
-[[package]]
-name = "serde-saphyr"
 version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
@@ -5203,12 +5145,26 @@ dependencies = [
  "base64 0.22.1",
  "encoding_rs_io",
  "getrandom 0.3.4",
- "granit-parser",
+ "granit-parser 0.0.7",
  "nohash-hasher",
  "num-traits",
  "serde_core",
- "smallvec 1.15.1",
+ "smallvec",
  "zmij",
+]
+
+[[package]]
+name = "serde-saphyr"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3afb591f9cdb6223c88ba39269aff895620c7f0716dc42b705b5733d5c7c0823"
+dependencies = [
+ "annotate-snippets",
+ "encoding_rs_io",
+ "granit-parser 1.2.0",
+ "num-traits",
+ "serde_core",
+ "smallvec",
 ]
 
 [[package]]
@@ -5217,7 +5173,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
- "ordered-float 2.10.1",
+ "ordered-float",
  "serde",
 ]
 
@@ -5258,7 +5214,7 @@ version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
- "indexmap 2.13.0",
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -5285,31 +5241,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap 2.13.0",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
-name = "serde_yaml_with_quirks"
-version = "0.8.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47c5983eba86eae2d0058c35fb1065ccffb23af7f8965871069269088098321a"
-dependencies = [
- "indexmap 1.9.3",
- "ryu",
- "serde",
- "yaml-rust",
 ]
 
 [[package]]
@@ -5463,12 +5394,6 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
-
-[[package]]
-name = "smallvec"
-version = "2.0.0-alpha.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef784004ca8777809dcdad6ac37629f0a97caee4c685fcea805278d81dd8b857"
 
 [[package]]
 name = "socket2"
@@ -5745,9 +5670,10 @@ dependencies = [
  "regex",
  "rstest",
  "rtk-diff",
+ "rtk-yaml",
  "serde",
+ "serde-saphyr 1.2.0",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "tokio",
  "toml",
@@ -5865,7 +5791,7 @@ version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
- "indexmap 2.13.0",
+ "indexmap",
  "serde",
  "serde_spanned",
  "toml_datetime 0.6.11",
@@ -5879,7 +5805,7 @@ version = "0.25.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7193cbd0ce53dc966037f54351dbbcf0d5a642c7f0038c382ef9e677ce8c13f2"
 dependencies = [
- "indexmap 2.13.0",
+ "indexmap",
  "toml_datetime 1.0.0+spec-1.1.0",
  "toml_parser",
  "winnow",
@@ -5945,7 +5871,7 @@ checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
 dependencies = [
  "futures-core",
  "futures-util",
- "indexmap 2.13.0",
+ "indexmap",
  "pin-project-lite",
  "slab",
  "sync_wrapper",
@@ -6055,7 +5981,7 @@ checksum = "1ac28f2d093c6c477eaa76b23525478f38de514fa9aeb1285738d4b97a9552fc"
 dependencies = [
  "js-sys",
  "opentelemetry",
- "smallvec 1.15.1",
+ "smallvec",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -6086,7 +6012,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sharded-slab",
- "smallvec 1.15.1",
+ "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
@@ -6184,12 +6110,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
@@ -6367,7 +6287,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb0e353e6a2fbdc176932bbaab493762eb1255a7900fe0fea1a2f96c296cc909"
 dependencies = [
  "anyhow",
- "indexmap 2.13.0",
+ "indexmap",
  "wasm-encoder",
  "wasmparser",
 ]
@@ -6380,7 +6300,7 @@ checksum = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe"
 dependencies = [
  "bitflags 2.11.0",
  "hashbrown 0.15.5",
- "indexmap 2.13.0",
+ "indexmap",
  "semver",
 ]
 
@@ -6663,7 +6583,7 @@ checksum = "b7c566e0f4b284dd6561c786d9cb0142da491f46a9fbed79ea69cdad5db17f21"
 dependencies = [
  "anyhow",
  "heck 0.5.0",
- "indexmap 2.13.0",
+ "indexmap",
  "prettyplease",
  "syn",
  "wasm-metadata",
@@ -6694,7 +6614,7 @@ checksum = "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
- "indexmap 2.13.0",
+ "indexmap",
  "log",
  "serde",
  "serde_derive",
@@ -6713,7 +6633,7 @@ checksum = "ecc8ac4bc1dc3381b7f59c34f00b67e18f910c2c0f50015669dde7def656a736"
 dependencies = [
  "anyhow",
  "id-arena",
- "indexmap 2.13.0",
+ "indexmap",
  "log",
  "semver",
  "serde",
@@ -6750,22 +6670,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "indexmap 2.13.0",
+ "indexmap",
  "itertools 0.14.0",
  "nix 0.31.3",
  "proc-macro2",
  "quote",
  "ungrammar",
  "xshell",
-]
-
-[[package]]
-name = "yaml-rust"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
-dependencies = [
- "linked-hash-map",
 ]
 
 [[package]]
@@ -6885,7 +6796,7 @@ checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
 dependencies = [
  "crc32fast",
  "flate2",
- "indexmap 2.13.0",
+ "indexmap",
  "memchr",
  "typed-path",
  "zopfli",

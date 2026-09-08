@@ -15,7 +15,8 @@ serde_json = "1.0"
 toml = "0.8"
 colored = "2.1"
 regex = "1.10"
-serde_yaml = "0.9.34"
+serde-saphyr.workspace = true
+rtk-yaml.workspace = true
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 rtk-diff = { path = "../../crates/diff" }
 k8s-mock = { version = "0.1.0", path = "../../crates/k8s-mock" }

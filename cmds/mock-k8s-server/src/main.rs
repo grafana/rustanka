@@ -139,7 +139,7 @@ async fn async_main(cli: Cli, ready_fd: Option<OwnedFd>) -> Result<()> {
 	// Generate and write kubeconfig
 	let kubeconfig = server.kubeconfig_with_context(&cli.context_name);
 	let kubeconfig_yaml =
-		serde_yaml::to_string(&kubeconfig).context("failed to serialize kubeconfig")?;
+		rtk_yaml::to_string(&kubeconfig).context("failed to serialize kubeconfig")?;
 	fs::write(&cli.kubeconfig, &kubeconfig_yaml)
 		.with_context(|| format!("failed to write kubeconfig to {}", cli.kubeconfig.display()))?;
 	info!(path = %cli.kubeconfig.display(), "Wrote kubeconfig");
@@ -183,8 +183,6 @@ async fn async_main(cli: Cli, ready_fd: Option<OwnedFd>) -> Result<()> {
 
 /// Load YAML manifests from a directory.
 fn load_manifests_from_dir(dir: &Path) -> Result<Vec<serde_json::Value>> {
-	use serde::Deserialize;
-
 	let mut manifests = Vec::new();
 
 	if !dir.exists() {
@@ -209,9 +207,9 @@ fn load_manifests_from_dir(dir: &Path) -> Result<Vec<serde_json::Value>> {
 			.with_context(|| format!("failed to read {}", path.display()))?;
 
 		// Handle multi-document YAML files
-		for doc in serde_yaml::Deserializer::from_str(&content) {
-			let value = serde_json::Value::deserialize(doc)
-				.with_context(|| format!("failed to parse YAML in {}", path.display()))?;
+		for doc in serde_saphyr::read::<_, serde_json::Value>(&mut content.as_bytes()) {
+			let value =
+				doc.with_context(|| format!("failed to parse YAML in {}", path.display()))?;
 
 			// Skip empty documents
 			if value.is_null() {

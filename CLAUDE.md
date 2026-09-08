@@ -28,10 +28,10 @@ that must survive, and the signed-commit linearization the org requires.
 
 ## Key Dependencies
 
-### serde-saphyr (YAML Serialization)
+### YAML reading and writing
 
-- Used for YAML output generation
-- A local clone may exist alongside this repo for development - check with user if modifications are needed for Go yaml.v3 compatibility
+- Use crates.io serde-saphyr for YAML reading; do not use a custom fork
+- Tanka-compatible YAML writing belongs to `crates/rtk-yaml`
 - Workspace `Cargo.toml` is the source of truth for this dependency
 - If adding serde-saphyr to a new crate, use `serde-saphyr.workspace = true`
 
@@ -46,7 +46,7 @@ that must survive, and the signed-commit linearization the org requires.
 | **Manifest export** | gopkg.in/yaml.v2 | Main export output |
 | `std.native('helmTemplate')` | gopkg.in/yaml.v3 | |
 
-When implementing YAML serialization in serde-saphyr, **add parameters as needed** to support the different formatting behaviors required by each use case.
+When implementing YAML serialization in rtk-yaml, **add parameters as needed** to support the different formatting behaviors required by each use case.
 
 ## YAML Export Behavior
 
