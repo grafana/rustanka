@@ -2326,6 +2326,7 @@ dependencies = [
 [[package]]
 name = "gtmpl-ng"
 version = "0.7.7"
+source = "git+https://github.com/julienduchesne/gtmpl-rust?rev=f649faaac5ad9549ecc238d344b6eb1da86c92e1#f649faaac5ad9549ecc238d344b6eb1da86c92e1"
 dependencies = [
  "anyhow",
  "gtmpl_value",

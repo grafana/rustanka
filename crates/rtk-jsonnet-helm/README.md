@@ -9,8 +9,9 @@ RTK_HELM_RENDERER=rust cargo run -p rtk -- export /tmp/rtk-native-output path/to
 The normal backend remains Helm. Unset `RTK_HELM_RENDERER`, or set it to `helm`,
 to use it. Other values are errors.
 
-The Rust backend uses a vendored `gtmpl-ng` with reassignment and range fixes
-(see [patch notes](../../vendor/gtmpl-ng/RTK-PATCHES.md)) for Go template syntax, serde-saphyr for YAML
+The Rust backend pins [a fork of `gtmpl-ng`](https://github.com/julienduchesne/gtmpl-rust)
+with reassignment and range fixes ([upstream PR](https://github.com/firstdorsal/gtmpl-rust/pull/1))
+for Go template syntax, serde-saphyr for YAML
 reading, and rtk-yaml for `toYaml`. There is no Go code or Helm subprocess in
 this backend. Rendering bypasses both Helm caches, even with `--helm-cache`,
 so it cannot reuse output from another renderer or invoke Helm for cache metadata.
