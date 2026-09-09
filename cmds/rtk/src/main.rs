@@ -8,13 +8,9 @@ mod telemetry;
 #[cfg(test)]
 pub mod test_utils;
 
-#[cfg(all(
-	target_os = "linux",
-	feature = "mimalloc",
-	not(feature = "system-alloc")
-))]
+#[cfg(all(feature = "mimalloc", not(feature = "system-alloc")))]
 #[global_allocator]
-static GLOBAL: mimallocator::Mimalloc = mimallocator::Mimalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser)]
 #[command(name = "rtk")]

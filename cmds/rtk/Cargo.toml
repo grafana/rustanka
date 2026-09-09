@@ -54,9 +54,7 @@ thiserror.workspace = true
 dirs = "6.0.0"
 http = "1.4.0"
 tempfile = "3.10"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-mimallocator = { workspace = true, optional = true }
+mimalloc = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
@@ -76,7 +74,7 @@ k8s-mock = { path = "../../crates/k8s-mock" }
 
 [features]
 default = ["mimalloc"]
-# Use mimalloc as allocator (enabled by default, Linux only)
-mimalloc = ["mimallocator"]
+# Use mimalloc as allocator (enabled by default)
+mimalloc = ["dep:mimalloc"]
 # Use the system allocator instead of mimalloc
 system-alloc = []

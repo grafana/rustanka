@@ -13,7 +13,7 @@ use jrsonnet_evaluator::{
 };
 
 #[global_allocator]
-static GLOBAL: mimallocator::Mimalloc = mimallocator::Mimalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn bench_entry(c: &mut Criterion, path: &Path) {
 	let name = path
