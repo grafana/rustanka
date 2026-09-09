@@ -6,5 +6,5 @@ skip_tk: true
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
 tests:
   - name: "Large Full Export"
-    description: "64 environments, 256 applications each, and 49,152 Kubernetes objects; nested merges, closures, sorting, grouping, maps, and JSON serialization."
+    description: "192 environments, 256 applications each, and 147,456 Kubernetes objects; nested merges, closures, sorting, grouping, maps, and JSON serialization."
     command: "export {export_dir} {env_dir} --recursive --parallel 8 --format '{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}' --merge-strategy=fail-on-conflicts"

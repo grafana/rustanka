@@ -1,5 +1,5 @@
 local workload = import 'workload.libsonnet';
-local environmentCount = 64;
+local environmentCount = 192;
 local applicationsPerEnvironment = 256;
 
 {
