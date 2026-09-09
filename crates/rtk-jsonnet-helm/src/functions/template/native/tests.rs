@@ -212,12 +212,12 @@ fn loop_assignments_accumulate_and_declarations_stay_local() {
 }
 
 #[test]
-fn ranges_sort_maps_and_preserve_assignment_targets_for_empty_collections() {
+fn ranges_sort_maps_and_initialize_empty_assignment_targets() {
 	let mut template = gtmpl_ng::Template::default();
 	super::functions::install(&mut template);
 	template.parse(r"{{ range $key, $value := . }}{{ $key }}={{ $value }};{{ end }}{{ $i := 9 }}{{ range $i = until 0 }}bad{{ end }}{{ $i }}").unwrap();
 	let context = gtmpl_ng::Context::from(super::from_json(&json!({"z": 3, "a": 1, "b": 2})));
-	assert_eq!(template.render(&context).unwrap(), "a=1;b=2;z=3;9");
+	assert_eq!(template.render(&context).unwrap(), "a=1;b=2;z=3;[]");
 }
 
 #[test]

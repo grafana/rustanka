@@ -1,5 +1,4 @@
 [workspace]
-exclude = ["vendor/gtmpl-ng"]
 members = [
   "crates/*",
   "bindings/jrsonnet-web",
