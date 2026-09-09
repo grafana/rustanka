@@ -96,6 +96,9 @@ jobs:
           - name: "Helm Template"
             config: "rtk-benchmarks/helm-template.yaml"
             id: "helm-template"
+          - name: "Helm Template (Native renderer)"
+            config: "rtk-benchmarks/helm-template-native.yaml"
+            id: "helm-template-native"
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4

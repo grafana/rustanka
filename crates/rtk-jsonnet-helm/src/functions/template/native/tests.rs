@@ -197,3 +197,53 @@ fn differential_existing_charts() {
 		}
 	}
 }
+
+#[test]
+fn loop_assignments_accumulate_and_declarations_stay_local() {
+	let mut template = gtmpl_ng::Template::default();
+	super::functions::install(&mut template);
+	template.parse(r"{{ $sum := 0 }}{{ range $i := until 4 }}{{ $sum = add $sum $i }}{{ $local := $i }}{{ end }}{{ $sum }}|{{ $i := 99 }}{{ range $i = until 3 }}{{ end }}{{ $i }}|{{ range until 0 }}bad{{ else }}empty{{ end }}|{{ range until 1 }}ok{{ else }}bad{{ end }}|{{ range $i := until 0 }}bad{{ else }}{{ len $i }}{{ end }}").unwrap();
+	assert_eq!(
+		template.render(&gtmpl_ng::Context::empty()).unwrap(),
+		"6|2|empty|ok|0"
+	);
+	template.parse("{{ $missing = 1 }}").unwrap();
+	assert!(template.render(&gtmpl_ng::Context::empty()).is_err());
+}
+
+#[test]
+fn ranges_sort_maps_and_preserve_assignment_targets_for_empty_collections() {
+	let mut template = gtmpl_ng::Template::default();
+	super::functions::install(&mut template);
+	template.parse(r"{{ range $key, $value := . }}{{ $key }}={{ $value }};{{ end }}{{ $i := 9 }}{{ range $i = until 0 }}bad{{ end }}{{ $i }}").unwrap();
+	let context = gtmpl_ng::Context::from(super::from_json(&json!({"z": 3, "a": 1, "b": 2})));
+	assert_eq!(template.render(&context).unwrap(), "a=1;b=2;z=3;9");
+}
+
+#[test]
+#[ignore = "requires Helm and exercises the full CPU-heavy benchmark chart"]
+fn heavy_benchmark_chart_matches_helm() {
+	let chart = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../../rtk-benchmarks/helm-template/charts/bench-chart");
+	let output = Command::new("helm")
+		.args(["template", "bench"])
+		.arg(&chart)
+		.args(["--namespace", "bench"])
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	let expected =
+		parse_helm_yaml_output(std::str::from_utf8(&output.stdout).unwrap(), None).unwrap();
+	let options =
+		serde_json::from_value(json!({"calledFrom": "/tmp/main.jsonnet", "namespace": "bench"}))
+			.unwrap();
+	let actual = Chart::load(&chart)
+		.unwrap()
+		.render("bench", &options)
+		.unwrap();
+	assert_eq!(actual, expected);
+}

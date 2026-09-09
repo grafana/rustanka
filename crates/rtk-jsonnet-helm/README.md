@@ -9,7 +9,8 @@ RTK_HELM_RENDERER=rust cargo run -p rtk -- export /tmp/rtk-native-output path/to
 The normal backend remains Helm. Unset `RTK_HELM_RENDERER`, or set it to `helm`,
 to use it. Other values are errors.
 
-The Rust backend uses `gtmpl-ng` for Go template syntax, serde-saphyr for YAML
+The Rust backend uses a vendored `gtmpl-ng` with reassignment and range fixes
+(see [patch notes](../../vendor/gtmpl-ng/RTK-PATCHES.md)) for Go template syntax, serde-saphyr for YAML
 reading, and rtk-yaml for `toYaml`. There is no Go code or Helm subprocess in
 this backend. Rendering bypasses both Helm caches, even with `--helm-cache`,
 so it cannot reuse output from another renderer or invoke Helm for cache metadata.
@@ -23,7 +24,7 @@ No automatic fallback occurs on errors.
 - Named templates, `include`, `tpl`, conditionals, variables, pipelines and array iteration.
 - `default`, `required`, `fail`, `empty`, `quote`, `upper`, `lower`, `trim`,
   `trimSuffix`, `trunc`, `indent`, `nindent`, `toYaml`, `fromYaml`, `toJson`,
-  `fromJson`, `dict`, `list` and `sha256sum`, plus gtmpl's built-ins.
+  `fromJson`, `dict`, `list`, `sha256sum`, `int`, `until` and `add`, plus gtmpl's built-ins.
 - CRD inclusion, hook exclusion and Tanka manifest naming.
 
 Every call must provide a non-empty `namespace`. The prototype does not resolve
@@ -42,11 +43,10 @@ validation and explicit `apiVersions` are rejected. `.Capabilities`, `.Files`,
 exposed with its top-level Go-style field names; nested metadata is not fully
 modeled.
 
-The template dependency has known semantic gaps, including unordered map
-iteration and incorrect `range`/`else` behavior. Use array iteration without an
-`else` branch for this experiment. Go formatting, missing values, JSON escaping,
+Go formatting, missing values, JSON escaping,
 YAML formatting and conversion error behavior are not fully compatible. In
 particular, `fromYaml` accepts mappings only and conversion failures are errors.
+`until` is limited to one million elements.
 Manifest ordering does not reproduce Helm's kind/hook ordering; avoid resources
 that produce duplicate Tanka manifest keys. `include` and `tpl` reparse the chart
 and have a 64-call nesting limit. No performance improvement is claimed.
@@ -69,3 +69,16 @@ The differential test needs Helm and compares four existing fixture charts with
 both CRD settings and both hook settings. The CLI test uses an invalid Helm path,
 enables the disk cache, and checks byte-for-byte equality with the existing
 `helm_template_env` golden exports while requiring that no cache entries appear.
+
+## Native renderer benchmark
+
+`rtk-benchmarks/helm-template-native.yaml` runs the same heavy chart and 60 inline
+environments as the Helm Template benchmark, with `RTK_HELM_RENDERER=rust` applied
+to validation and timed commands. Older base binaries ignore the variable and
+continue using Helm; tk also continues using Helm. Native rendering currently
+bypasses memoization, while the Helm-backed rtk path reuses its in-memory render.
+
+```sh
+uv run rtk-benchmarks/run-benchmark.py rtk-benchmarks/helm-template-native.yaml \
+  --rtk-binary-path target/release/rtk --rtk-base-binary-path /path/to/base/rtk
+```
