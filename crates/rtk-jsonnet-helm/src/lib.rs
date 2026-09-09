@@ -35,6 +35,9 @@ impl Plugin {
 /// costs a process launch, so this is only called when a project actually
 /// declared an expectation — nothing pays for a check it did not ask for.
 pub fn installed_helm_major_version() -> Result<u64, Box<str>> {
+	if native_renderer()? {
+		return Err("the experimental Rust renderer cannot satisfy expectVersions.helm".into());
+	}
 	let state = State::new(None);
 	let reported = state.ask_helm(&["version", "--template", "{{ .Version }}"])?;
 	let digits = reported
@@ -46,6 +49,15 @@ pub fn installed_helm_major_version() -> Result<u64, Box<str>> {
 	digits.parse().map_err(|_| {
 		format!("could not read a major version out of helm's {reported:?}").into_boxed_str()
 	})
+}
+
+fn native_renderer() -> Result<bool, Box<str>> {
+	match env::var("RTK_HELM_RENDERER") {
+		Err(env::VarError::NotPresent) => Ok(false),
+		Ok(value) if value == "helm" => Ok(false),
+		Ok(value) if value == "rust" => Ok(true),
+		_ => Err("RTK_HELM_RENDERER must be 'helm' or 'rust'".into()),
+	}
 }
 
 impl Default for Plugin {

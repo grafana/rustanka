@@ -7,6 +7,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+gtmpl-ng = "0.7.7"
+rtk-yaml.workspace = true
 ciborium.workspace = true
 hex.workspace = true
 rtk-jsonnet-core.workspace = true
