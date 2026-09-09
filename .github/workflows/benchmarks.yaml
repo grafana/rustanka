@@ -122,6 +122,13 @@ jobs:
       - name: Make binaries executable
         run: chmod +x bin/*
 
+      - name: Install Tanka
+        if: matrix.benchmark.id != 'export-large'
+        run: |
+          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
+          chmod +x /usr/local/bin/tk
+          tk --version
+
       - name: Install Helm
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -150,7 +157,7 @@ jobs:
           set -o pipefail
 
           # Build args for benchmark script
-          ARGS="--skip-tk --rtk-binary-path bin/rtk-current"
+          ARGS="--rtk-binary-path bin/rtk-current"
           if [ -f bin/rtk-base ]; then
             ARGS="$ARGS --rtk-base-binary-path bin/rtk-base"
           fi
@@ -192,8 +199,8 @@ jobs:
           {
             echo "## Benchmark Results"
             echo ""
-            echo "| Benchmark | Test | vs rtk-base |"
-            echo "|:----------|:-----|------------:|"
+            echo "| Benchmark | Test | vs tk | vs base |"
+            echo "|:----------|:-----|------:|--------:|"
             
             # Process each benchmark summary and generate table rows.
             for dir in artifacts/benchmark-*/; do
@@ -201,7 +208,7 @@ jobs:
                 jq -r '
                   .benchmark_name as $bench |
                   .tests[] |
-                  "| \($bench) | \(.name) | \(.vs_base // "-") |"
+                  "| \($bench) | \(.name) | \(if .vs_tk == null then "-" else "\(.vs_tk)x faster" end) | \(.vs_base // "-") |"
                 ' "$dir/benchmark-summary.json"
               fi
             done
