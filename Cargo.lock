@@ -2324,6 +2324,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtmpl-ng"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e2314ffd030e6c1ba91e9f586a9d57dc6a423cf0581b48840367938be014266"
+dependencies = [
+ "anyhow",
+ "gtmpl_value",
+ "lazy_static",
+ "percent-encoding",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "gtmpl_value"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4809,9 +4822,12 @@ dependencies = [
 name = "rtk-jsonnet-helm"
 version = "0.5.0-pre99"
 dependencies = [
+ "anyhow",
  "ciborium",
+ "gtmpl-ng",
  "hex",
  "rtk-jsonnet-core",
+ "rtk-yaml",
  "rustc-hash 2.1.1",
  "serde",
  "serde-saphyr 1.2.0",

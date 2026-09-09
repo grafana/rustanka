@@ -1,0 +1,1 @@
+This text must not become a Kubernetes manifest.

@@ -1,0 +1,11 @@
+replicas: 1
+image:
+  repository: nginx
+  tag: stable
+settings:
+  enabled: true
+  removed: old
+message: 'hello {{ .Release.Name }}'
+items:
+  - one
+  - two

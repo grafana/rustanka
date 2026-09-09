@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::State;
 use crate::cache::{Key, KeyBuilder};
 
+mod native;
+
 #[derive(Debug)]
 pub struct Function {
 	state: Arc<State>,
@@ -82,7 +84,12 @@ where
 		// deduplication.
 		let cache_disabled = env::var_os("RTK_HELM_DISABLE_MEMOIZATION").is_some();
 
-		let value = if cache_disabled {
+		let value = if crate::native_renderer().map_err(E::Error::custom)? {
+			// The prototype must not consult Helm for cache identity or namespace resolution.
+			native::Chart::load(&chart_path)
+				.and_then(|chart| chart.render(&name, &options))
+				.map_err(|error| E::Error::custom(format!("native Helm renderer: {error:#}")))?
+		} else if cache_disabled {
 			self.render::<E>(&name, &chart_path, &options)?
 		} else {
 			self.cached_or_render::<E>(&name, &chart_path, &options)?
@@ -392,6 +399,13 @@ fn parse_helm_yaml_output(
 			})
 			.map_err(|error| format!("failed to parse helm output: {error}"))?;
 
+	Ok(name_documents(documents, name_format))
+}
+
+fn name_documents(
+	documents: Vec<serde_json::Value>,
+	name_format: Option<&str>,
+) -> serde_json::Value {
 	let mut output = serde_json::Map::with_capacity(documents.len());
 	let mut seen_keys = FxHashSet::with_capacity_and_hasher(documents.len(), FxBuildHasher);
 	for document in documents {
@@ -410,7 +424,7 @@ fn parse_helm_yaml_output(
 		output.insert(final_key, serde_json::Value::Object(document));
 	}
 
-	Ok(serde_json::Value::Object(output))
+	serde_json::Value::Object(output)
 }
 
 fn normalize_helm_multiline_quotes(input: &str) -> String {
