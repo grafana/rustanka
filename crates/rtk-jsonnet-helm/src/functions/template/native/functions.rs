@@ -5,6 +5,29 @@ use sha2::{Digest, Sha256};
 use super::{Scope, from_json, to_json};
 
 pub(super) fn install(template: &mut Template) {
+	template.add_func("int", |args| {
+		Ok(Arguments::new(args, 1)?.cast_integer(0).into())
+	});
+	template.add_func("until", |args| {
+		let count = Arguments::new(args, 1)?.integer(0)?;
+		if count.unsigned_abs() > 1_000_000 {
+			return Err(FuncError::Generic(
+				"until exceeds one million elements".into(),
+			));
+		}
+		let values = if count >= 0 {
+			(0..count).map(Value::from).collect()
+		} else {
+			((count + 1)..=0).rev().map(Value::from).collect()
+		};
+		Ok(Value::Array(values))
+	});
+	template.add_func("add", |args| {
+		let args = Arguments(args);
+		Ok((0..args.0.len())
+			.fold(0_i64, |sum, i| sum.wrapping_add(args.cast_integer(i)))
+			.into())
+	});
 	template.add_func("include", |args| {
 		let args = Arguments::new(args, 2)?;
 		Ok(Scope::render(args.text(0)?, args.0[1].clone(), None)?.into())
@@ -161,6 +184,19 @@ impl<'a> Arguments<'a> {
 			return Ok(number);
 		}
 		bail!("argument {} must be an integer", index + 1)
+	}
+
+	// Sprig truncates fractional values when converting to an integer.
+	#[allow(clippy::cast_possible_truncation)]
+	fn cast_integer(&self, index: usize) -> i64 {
+		match &self.0[index] {
+			Value::Number(number) => number
+				.as_i64()
+				.unwrap_or_else(|| number.as_f64().unwrap_or_default() as i64),
+			Value::Bool(value) => i64::from(*value),
+			Value::String(value) => value.parse().unwrap_or_default(),
+			_ => 0,
+		}
 	}
 
 	fn indent(&self, newline: bool) -> Result<String> {

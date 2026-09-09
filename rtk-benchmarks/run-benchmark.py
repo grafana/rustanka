@@ -76,6 +76,7 @@ class BenchmarkConfig:
     fixtures_dir: str | None = None
     # Exclude tk from timing and validation; compare against rtk-base when available.
     skip_tk: bool = False
+    env: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: Path, repo_root: Path) -> "BenchmarkConfig":
@@ -114,6 +115,7 @@ class BenchmarkConfig:
             setup=data.get("setup"),
             prepare=data.get("prepare"),
             skip_tk=data.get("skip_tk", False),
+            env=data.get("env", {}),
         )
 
 
@@ -396,6 +398,7 @@ class BenchmarkRunner:
             capture_output=True,
             text=True,
             cwd=self.fixtures_dir,
+            env=os.environ | self.config.env,
         )
 
     def _clear_export_dir(self, export_dir: Path) -> None:
@@ -629,7 +632,8 @@ class BenchmarkRunner:
                 ["-n", "rtk-base", f"sh -c {shlex.quote(rtk_base_inner)}"])
 
         try:
-            subprocess.run(args, check=True, capture_output=True, text=True)
+            subprocess.run(args, check=True, capture_output=True, text=True,
+                           env=os.environ | self.config.env)
         except subprocess.CalledProcessError as e:
             # Only print the output on failure
             print("### STDOUT")
@@ -737,7 +741,8 @@ class BenchmarkRunner:
                     args.extend(
                         ["-n", "rtk-base diff", f"sh -c '{rtk_base_cmd}'"])
 
-            subprocess.run(args, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(args, check=True, stdout=subprocess.DEVNULL,
+                           env=os.environ | self.config.env)
 
             with open(temp_md) as f:
                 print(f.read())
