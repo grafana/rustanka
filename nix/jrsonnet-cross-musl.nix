@@ -1,6 +1,7 @@
 {
   lib,
   craneLib,
+  cmake,
   muslCC,
   targetTriple,
   withExperimentalFeatures ? false,
@@ -17,9 +18,11 @@ craneLib.buildPackage {
   pname = "jrsonnet";
   version = "current${optionalString withExperimentalFeatures "-experimental"}";
   strictDeps = true;
+  nativeBuildInputs = [ cmake ];
 
-  cargoExtraArgs = "--locked --features=mimalloc${optionalString withExperimentalFeatures ",experimental"} --target=${targetTriple}";
+  cargoExtraArgs = "--locked --features=snmalloc${optionalString withExperimentalFeatures ",experimental"} --target=${targetTriple}";
 
+  "CXX_${targetEnv}" = "${muslCC}/bin/${muslCC.targetPrefix}c++";
   "CC_${targetEnv}" = "${muslCC}/bin/${muslCC.targetPrefix}cc";
   "CARGO_TARGET_${lib.toUpper targetEnv}_LINKER" = "${muslCC}/bin/${muslCC.targetPrefix}cc";
 

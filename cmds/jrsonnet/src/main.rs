@@ -11,9 +11,9 @@ use jrsonnet_evaluator::{
 	error::{Error as JrError, ErrorKind},
 };
 
-#[cfg(feature = "mimalloc")]
+#[cfg(feature = "snmalloc")]
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 #[derive(Parser)]
 enum SubOpts {

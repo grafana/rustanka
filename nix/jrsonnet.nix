@@ -1,6 +1,7 @@
 {
   lib,
   craneLib,
+  cmake,
   makeWrapper,
   withExperimentalFeatures ? false,
   forBenchmarks ? false,
@@ -25,13 +26,13 @@ craneLib.buildPackage {
   pname = "jrsonnet";
   version = "current${optionalString withExperimentalFeatures "-experimental"}";
 
-  cargoExtraArgs = "--locked --features=mimalloc${optionalString withExperimentalFeatures ",experimental"}";
+  cargoExtraArgs = "--locked --features=snmalloc${optionalString withExperimentalFeatures ",experimental"}";
   cargoTestExtraArgs = "--workspace";
 
   CPP_JSONNET_FOR_TESTS = cpp-jsonnet-for-tests;
   GO_JSONNET_FOR_TESTS = go-jsonnet-for-tests;
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ cmake makeWrapper ];
 
   # To clean-up hyperfine output
   postInstall = optionalString forBenchmarks ''

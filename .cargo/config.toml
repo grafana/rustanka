@@ -1,13 +1,6 @@
 [alias]
 xtask = "run --package xtask --bin xtask --"
 
-[env]
-# Mimalloc is linked into executables, so the OS reclaims their heaps at exit.
-# Disable Linux THP for the process and children to keep short-lived allocations small.
-# Start with smaller arenas to reduce metadata setup; mimalloc grows them as needed.
-CFLAGS = "-DMI_SKIP_COLLECT_ON_EXIT -DMI_DEFAULT_ALLOW_THP=0 -DMI_DEFAULT_ARENA_RESERVE=65536"
-CXXFLAGS = "-DMI_SKIP_COLLECT_ON_EXIT -DMI_DEFAULT_ALLOW_THP=0 -DMI_DEFAULT_ARENA_RESERVE=65536"
-
 [profile.release-with-debug]
 inherits = "release"
 debug = true
