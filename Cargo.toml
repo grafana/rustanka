@@ -89,7 +89,7 @@ ungrammar = "1.16.1"
 rowan = "0.16.1"
 
 # Avoid huge-page setup costs for short-lived CLI workers.
-mimalloc = { version = "0.1.52", features = ["v2", "no_thp"] }
+mimalloc = { version = "0.1.52", features = ["no_thp"] }
 indoc = "2.0"
 tempfile = "3.24"
 pathdiff = "0.2.3"
