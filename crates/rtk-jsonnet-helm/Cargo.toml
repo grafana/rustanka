@@ -22,5 +22,22 @@ tempfile.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 
+[dev-dependencies]
+criterion = "0.7"
+stats_alloc = "0.1.10"
+
+[features]
+benchmarking = []
+
+[[bench]]
+name = "native_render"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "native_render_memory"
+harness = false
+required-features = ["benchmarking"]
+
 [lints]
 workspace = true
