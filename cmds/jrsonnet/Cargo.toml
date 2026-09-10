@@ -24,7 +24,7 @@ experimental = [
   "exp-apply",
 ]
 # Use mimalloc as allocator
-mimalloc = ["mimallocator"]
+mimalloc = ["dep:mimalloc"]
 # Experimental feature, which allows to preserve order of object fields
 exp-preserve-order = [
   "jrsonnet-evaluator/exp-preserve-order",
@@ -49,7 +49,7 @@ jrsonnet-evaluator.workspace = true
 jrsonnet-cli.workspace = true
 jrsonnet-gcmodule.workspace = true
 
-mimallocator = { workspace = true, optional = true }
+mimalloc = { workspace = true, optional = true }
 thiserror.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap_complete.workspace = true

@@ -1,6 +1,12 @@
 [alias]
 xtask = "run --package xtask --bin xtask --"
 
+[env]
+# Skip redundant exit collection; the OS reclaims process memory.
+# Avoid huge-page overhead in short-lived CLI processes.
+CFLAGS = "-DMI_SKIP_COLLECT_ON_EXIT -DMI_DEFAULT_ALLOW_THP=0"
+CXXFLAGS = "-DMI_SKIP_COLLECT_ON_EXIT -DMI_DEFAULT_ALLOW_THP=0"
+
 [profile.release-with-debug]
 inherits = "release"
 debug = true

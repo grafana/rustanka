@@ -72,6 +72,9 @@ jobs:
           - name: "Export (Full)"
             config: "rtk-benchmarks/export-full.yaml"
             id: "export-full"
+          - name: "Export (Large)"
+            config: "rtk-benchmarks/export-large.yaml"
+            id: "export-large"
           - name: "Export (Replace)"
             config: "rtk-benchmarks/export-replace.yaml"
             id: "export-replace"
@@ -120,6 +123,7 @@ jobs:
         run: chmod +x bin/*
 
       - name: Install Tanka
+        if: matrix.benchmark.id != 'export-large'
         run: |
           curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
           chmod +x /usr/local/bin/tk
@@ -140,6 +144,10 @@ jobs:
           sudo dpkg -i hyperfine_1.18.0_amd64.deb
           # jq is pre-installed on ubuntu-latest
 
+      - name: Test benchmark runner
+        if: matrix.benchmark.id == 'export-large'
+        run: uv run --with pyyaml python -m unittest discover -s rtk-benchmarks -p 'test_run_benchmark.py'
+
       - name: Run benchmark
         env:
           BENCHMARK_MARKDOWN_OUTPUT: benchmark-results.md
@@ -154,6 +162,9 @@ jobs:
             ARGS="$ARGS --rtk-base-binary-path bin/rtk-base"
           fi
 
+          if [ "${{ matrix.benchmark.id }}" = "export-large" ]; then
+            ARGS="$ARGS -- --runs 3"
+          fi
           ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
 
       - name: Upload benchmark output
@@ -192,7 +203,6 @@ jobs:
             echo "|:----------|:-----|------:|--------:|"
             
             # Process each benchmark summary and generate table rows.
-            # vs_tk is omitted from the JSON when the benchmark has no tk equivalent (skip_tk: true).
             for dir in artifacts/benchmark-*/; do
               if [ -f "$dir/benchmark-summary.json" ]; then
                 jq -r '

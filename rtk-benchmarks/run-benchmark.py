@@ -67,15 +67,14 @@ class BenchmarkConfig:
     id: str
     description: str
     tests: list[Test]
-    mode: Literal["generated", "diff"]
+    mode: Literal["generated", "static", "diff"]
     # Generated fixtures mode
     fixtures: GeneratedFixtures | None = None
     setup: str | None = None
     prepare: str | None = None
     # Diff mode
     fixtures_dir: str | None = None
-    # When true, the benchmark has no tk equivalent: tk is not built, not run,
-    # outputs are not validated against tk, and the summary reports "-" for vs_tk.
+    # Exclude tk from timing and validation; compare against rtk-base when available.
     skip_tk: bool = False
 
     @classmethod
@@ -446,7 +445,7 @@ class BenchmarkRunner:
     def validate_test(self, test: Test) -> None:
         """Validate that tk and rtk produce matching output.
 
-        When `skip_tk` is set, only verifies rtk runs successfully.
+        When `skip_tk` is set, compare against rtk-base when available.
         """
         if self.config.prepare:
             rtk_prepare = self.expand_command(
@@ -471,7 +470,17 @@ class BenchmarkRunner:
             self._fail_validation(f"rtk command failed: {rtk_command}")
 
         if self.config.skip_tk:
-            print("OK (rtk-only)", file=sys.stderr, flush=True)
+            if self.rtk_base:
+                if self.config.prepare:
+                    prepare = self.expand_command(
+                        self.config.prepare, self.export_dir_rtk_base)
+                    subprocess.run(["sh", "-c", prepare],
+                                   cwd=self.fixtures_dir, check=True)
+                base_command = self.expand_command(test.command, self.export_dir_rtk_base)
+                base_result = self.run_command(str(self.rtk_base), base_command)
+                self._validate_base_result(test, rtk_result, base_result)
+            print("OK (rtk-base)" if self.rtk_base else "OK (rtk-only)",
+                  file=sys.stderr, flush=True)
             return
 
         tk_command = self.expand_command(test.command, self.export_dir_tk)
@@ -497,6 +506,34 @@ class BenchmarkRunner:
                     f"rtk output differs from tk for: {test.command}")
 
         print("OK", file=sys.stderr, flush=True)
+
+    def _validate_base_result(self, test: Test, result: subprocess.CompletedProcess,
+                              base: subprocess.CompletedProcess) -> None:
+        if base.returncode != 0:
+            self._fail_validation(
+                f"rtk-base failed for {test.name}: {base.stderr}")
+        if test.command.startswith("export "):
+            assert self.export_dir_rtk and self.export_dir_rtk_base
+            files = {p.relative_to(self.export_dir_rtk) for p in
+                     self.export_dir_rtk.rglob("*") if p.is_file()}
+            base_files = {p.relative_to(self.export_dir_rtk_base) for p in
+                          self.export_dir_rtk_base.rglob("*") if p.is_file()}
+            if files != base_files:
+                self._fail_validation(f"rtk exported file names differ from rtk-base for {test.name}")
+            for path in sorted(files):
+                # Compare incrementally: large exports must not inflate the runner's memory.
+                with (self.export_dir_rtk / path).open("rb") as current, \
+                        (self.export_dir_rtk_base / path).open("rb") as previous:
+                    while chunk := current.read(1024 * 1024):
+                        if chunk != previous.read(len(chunk)):
+                            self._fail_validation(f"rtk export differs from rtk-base: {path}")
+                    if previous.read(1):
+                        self._fail_validation(f"rtk export differs from rtk-base: {path}")
+        elif "--json" in test.command or test.command.startswith("eval "):
+            if not self._json_equal(result.stdout, base.stdout):
+                self._fail_validation(f"rtk JSON output differs from rtk-base for {test.name}")
+        elif result.stdout != base.stdout:
+            self._fail_validation(f"rtk output differs from rtk-base for {test.name}")
 
     def _json_equal(self, json1: str, json2: str) -> bool:
         try:
@@ -536,8 +573,8 @@ class BenchmarkRunner:
         print(description)
         print()
 
-        include_rtk_base = self.rtk_base and self.export_dir_rtk_base and self._check_rtk_base_supports_command(
-            test)
+        include_rtk_base = self.rtk_base and self.export_dir_rtk_base and (
+            self.config.skip_tk or self._check_rtk_base_supports_command(test))
 
         temp_md = output_file.with_suffix(f".{index}")
         temp_json = output_file.with_suffix(f".{index}.json")
@@ -673,11 +710,26 @@ class BenchmarkRunner:
                 *self.hyperfine_args,
                 "--export-markdown", str(temp_md),
                 "--export-json", str(temp_json),
-                "-n", "tk diff", f"sh -c '{tk_cmd}'",
-                "-n", "rtk diff", f"sh -c '{rtk_cmd}'",
             ]
+            if not self.config.skip_tk:
+                args.extend(["-n", "tk diff", f"sh -c {shlex.quote(tk_cmd)}"])
+            else:
+                # A nonzero diff exit can mean either changes or failure. Request zero
+                # for changes so validation and timing still reject real failures.
+                rtk_cmd = f"KUBECONFIG={shlex.quote(str(kubeconfig))} {shlex.quote(str(self.rtk))} diff --exit-zero {shlex.quote(str(env_dir))} </dev/null"
+                result = subprocess.run(["sh", "-c", rtk_cmd], capture_output=True,
+                                        text=True, timeout=30)
+                if result.returncode != 0:
+                    self._fail_validation(f"rtk diff failed for {test.name}: {result.stderr}")
+            args.extend(["-n", "rtk diff", f"sh -c {shlex.quote(rtk_cmd)}"])
 
-            if self.rtk_base:
+            if self.rtk_base and self.config.skip_tk:
+                base_cmd = f"KUBECONFIG={shlex.quote(str(kubeconfig))} {shlex.quote(str(self.rtk_base))} diff --exit-zero {shlex.quote(str(env_dir))} </dev/null"
+                base_result = subprocess.run(["sh", "-c", base_cmd], capture_output=True,
+                                             text=True, timeout=30)
+                self._validate_base_result(test, result, base_result)
+                args.extend(["-n", "rtk-base diff", f"sh -c {shlex.quote(base_cmd)}"])
+            elif self.rtk_base:
                 rtk_base_cmd = f"KUBECONFIG={kubeconfig} {self.rtk_base} diff {env_dir} </dev/null 2>/dev/null || true"
                 check_result = subprocess.run(
                     ["sh", "-c", rtk_base_cmd], capture_output=True, text=True, timeout=30)
@@ -895,6 +947,9 @@ def main():
     parser.add_argument("--rtk-base-binary-path", type=Path,
                         help="Path to pre-built rtk binary for baseline comparison")
 
+    parser.add_argument("--skip-tk", action="store_true",
+                        help="Skip tk; validate against rtk-base when provided")
+
     args, hyperfine_args = parser.parse_known_args()
 
     if hyperfine_args and hyperfine_args[0] == "--":
@@ -902,6 +957,7 @@ def main():
 
     repo_root = Path(__file__).parent.parent.resolve()
     config = BenchmarkConfig.from_yaml(args.config, repo_root)
+    config.skip_tk = config.skip_tk or args.skip_tk
     runner = BenchmarkRunner(
         config, repo_root, hyperfine_args,
         rtk_path=args.rtk_binary_path,

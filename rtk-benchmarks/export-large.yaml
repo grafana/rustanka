@@ -1,0 +1,10 @@
+name: "Export (Large)"
+id: "export-large"
+description: "Compare rtk with rtk-base on a large export with allocation-heavy Jsonnet evaluation."
+fixtures_dir: "rtk-benchmarks/export-large"
+skip_tk: true
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+tests:
+  - name: "Large Full Export"
+    description: "192 environments, 256 applications each, and 147,456 Kubernetes objects; nested merges, closures, sorting, grouping, maps, and JSON serialization."
+    command: "export {export_dir} {env_dir} --recursive --parallel 8 --format '{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}' --merge-strategy=fail-on-conflicts"
