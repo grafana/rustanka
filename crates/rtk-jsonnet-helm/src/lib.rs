@@ -1,3 +1,6 @@
+#[cfg(feature = "benchmarking")]
+pub use functions::template::benchmarking;
+
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

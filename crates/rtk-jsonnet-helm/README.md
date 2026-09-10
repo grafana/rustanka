@@ -13,8 +13,11 @@ The Rust backend pins [a fork of `gtmpl-ng`](https://github.com/julienduchesne/g
 with reassignment and range fixes ([upstream PR](https://github.com/firstdorsal/gtmpl-rust/pull/1))
 for Go template syntax, serde-saphyr for YAML
 reading, and rtk-yaml for `toYaml`. There is no Go code or Helm subprocess in
-this backend. Rendering bypasses both Helm caches, even with `--helm-cache`,
-so it cannot reuse output from another renderer or invoke Helm for cache metadata.
+this backend. Identical renders share the engine's in-memory cache, including
+across worker threads, under a key distinct from Helm's. Keys cover chart contents
+and render options; failed renders are not cached. Native rendering bypasses the
+disk cache even with `--helm-cache`, and never invokes Helm for cache metadata.
+Set `RTK_HELM_DISABLE_MEMOIZATION=1` to render every call again.
 No automatic fallback occurs on errors.
 
 ## Supported experiment
@@ -76,10 +79,19 @@ enables the disk cache, and checks byte-for-byte equality with the existing
 `rtk-benchmarks/helm-template-native.yaml` runs the same heavy chart and 60 inline
 environments as the Helm Template benchmark, with `RTK_HELM_RENDERER=rust` applied
 to validation and timed commands. Older base binaries ignore the variable and
-continue using Helm; tk also continues using Helm. Native rendering currently
-bypasses memoization, while the Helm-backed rtk path reuses its in-memory render.
+continue using Helm; tk also continues using Helm. Both rtk renderers now reuse
+identical renders in memory.
 
 ```sh
 uv run rtk-benchmarks/run-benchmark.py rtk-benchmarks/helm-template-native.yaml \
   --rtk-binary-path target/release/rtk --rtk-base-binary-path /path/to/base/rtk
+```
+
+Function-level timing and allocation benchmarks compare uncached and memoized
+batches, including the first cold render, using the same chart with 2,000 hash
+rounds:
+
+```sh
+cargo bench -p rtk-jsonnet-helm --features benchmarking --bench native_render
+cargo bench -p rtk-jsonnet-helm --features benchmarking --bench native_render_memory
 ```
