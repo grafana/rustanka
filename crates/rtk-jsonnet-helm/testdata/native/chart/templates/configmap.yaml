@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "prototype.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  replicas: {{ .Values.replicas | quote }}
+  image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+  fallback: {{ .Values.missing | default "fallback" | quote }}
+  message: {{ tpl .Values.message . | quote }}
+  settings: |
+{{ .Values.settings | toYaml | indent 4 }}
+  items: |
+    {{- range .Values.items }}
+    - {{ . }}
+    {{- end }}
+  configHash: {{ .Values.settings | toJson | sha256sum | quote }}
+  required: {{ required "repository required" .Values.image.repository | quote }}
+  installing: {{ if .Release.IsInstall }}"yes"{{ else }}"no"{{ end }}
