@@ -49,7 +49,20 @@ impl Key {
 		builder.string(name);
 		options.hash_cache_key(&mut builder);
 		builder.helm_environment(resolved_namespace);
-		builder.chart(chart_path, cache_directory)?;
+		builder.chart(chart_path, cache_directory, false)?;
+		Ok(builder.finish())
+	}
+
+	pub(super) fn native_render(
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+	) -> io::Result<Key> {
+		// Native rendering has no Helm executable, resolved namespace or disk entries.
+		let mut builder = KeyBuilder::new(b"rtk native helm render key v1");
+		builder.string(name);
+		options.hash_cache_key(&mut builder);
+		builder.chart(chart_path, None, true)?;
 		Ok(builder.finish())
 	}
 
@@ -407,7 +420,12 @@ impl KeyBuilder {
 		}
 	}
 
-	fn chart(&mut self, chart_path: &Path, cache_directory: Option<&Path>) -> io::Result<()> {
+	fn chart(
+		&mut self,
+		chart_path: &Path,
+		cache_directory: Option<&Path>,
+		include_directories: bool,
+	) -> io::Result<()> {
 		let chart_path = chart_path
 			.canonicalize()
 			.unwrap_or_else(|_| chart_path.to_owned());
@@ -454,7 +472,7 @@ impl KeyBuilder {
 			}
 			let file_type = entry.file_type();
 			let is_symlink = entry.path_is_symlink();
-			if file_type.is_dir() && !is_symlink {
+			if file_type.is_dir() && !is_symlink && !include_directories {
 				continue;
 			}
 			let relative = entry
@@ -475,6 +493,9 @@ impl KeyBuilder {
 						"chart symlink target is not a regular file or directory",
 					));
 				}
+			} else if file_type.is_dir() {
+				// Native validation rejects even empty subchart directories.
+				self.bytes(b"directory");
 			} else if file_type.is_file() {
 				self.bytes(b"file");
 				self.file_contents(entry.path())?;

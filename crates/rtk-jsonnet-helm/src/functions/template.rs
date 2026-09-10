@@ -17,6 +17,12 @@ use crate::cache::{Key, KeyBuilder};
 
 mod native;
 
+#[cfg(test)]
+mod native_cache_tests;
+
+#[cfg(feature = "benchmarking")]
+pub mod benchmarking;
+
 #[derive(Debug)]
 pub struct Function {
 	state: Arc<State>,
@@ -79,15 +85,12 @@ where
 		};
 
 		// Benchmarking escape hatch: when RTK_HELM_DISABLE_MEMOIZATION is set,
-		// bypass the in-memory cache entirely so every helmTemplate call invokes
-		// helm. Used to measure the true cost of helm rendering without any
-		// deduplication.
+		// bypass the in-memory cache so benchmarks can measure either renderer
+		// without deduplication.
 		let cache_disabled = env::var_os("RTK_HELM_DISABLE_MEMOIZATION").is_some();
 
 		let value = if crate::native_renderer().map_err(E::Error::custom)? {
-			// The prototype must not consult Helm for cache identity or namespace resolution.
-			native::Chart::load(&chart_path)
-				.and_then(|chart| chart.render(&name, &options))
+			self.native_render(&name, &chart_path, &options, cache_disabled)
 				.map_err(|error| E::Error::custom(format!("native Helm renderer: {error:#}")))?
 		} else if cache_disabled {
 			self.render::<E>(&name, &chart_path, &options)?
@@ -115,6 +118,56 @@ fn relative_chart_path(chart: &Path) -> Cow<'_, Path> {
 }
 
 impl Function {
+	fn native_render(
+		&self,
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+		cache_disabled: bool,
+	) -> anyhow::Result<serde_json::Value> {
+		let render = || native::Chart::load(chart_path)?.render(name, options);
+		if cache_disabled {
+			render()
+		} else {
+			self.cached_native_or_compute(name, chart_path, options, render)
+		}
+	}
+
+	fn cached_native_or_compute<T>(
+		&self,
+		name: &str,
+		chart_path: &Path,
+		options: &Options,
+		render: impl FnOnce() -> Result<serde_json::Value, T>,
+	) -> Result<serde_json::Value, T> {
+		let key = match Key::native_render(name, chart_path, options) {
+			Ok(key) => key,
+			Err(error) => {
+				tracing::warn!(chart = ?chart_path, %error, "native Helm cache key is unavailable");
+				return render();
+			}
+		};
+		if let Some(value) = self.state.cache.get(key) {
+			return Ok(value);
+		}
+
+		// Workers sharing an engine must wait for the first identical render.
+		let computation = self.state.cache.computation(key);
+		let _guard = computation
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
+		if let Some(value) = self.state.cache.get(key) {
+			return Ok(value);
+		}
+		let value = render()?;
+		if matches!(Key::native_render(name, chart_path, options), Ok(current) if current == key) {
+			self.state.cache.insert(key, value.clone());
+		} else {
+			tracing::warn!(chart = ?chart_path, "native Helm inputs changed while rendering; result was not cached");
+		}
+		Ok(value)
+	}
+
 	fn cached_or_render<E>(
 		&self,
 		name: &str,

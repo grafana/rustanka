@@ -4823,6 +4823,7 @@ version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
  "ciborium",
+ "criterion 0.7.0",
  "gtmpl-ng",
  "hex",
  "rtk-jsonnet-core",
@@ -4832,6 +4833,7 @@ dependencies = [
  "serde-saphyr 1.2.0",
  "serde_json",
  "sha2 0.11.0",
+ "stats_alloc",
  "tempfile",
  "tracing",
  "walkdir",
