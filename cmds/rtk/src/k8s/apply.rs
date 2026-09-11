@@ -206,6 +206,19 @@ impl ApplyEngine {
 		name: &str,
 		namespace: Option<&str>,
 	) -> Result<(), ApplyError> {
+		self.delete_resource_with_options(gvk, name, namespace, None, false)
+			.await
+			.map(|_| ())
+	}
+
+	pub async fn delete_resource_with_options(
+		&self,
+		gvk: &GroupVersionKind,
+		name: &str,
+		namespace: Option<&str>,
+		dry_run: Option<&str>,
+		force: bool,
+	) -> Result<Option<String>, ApplyError> {
 		// Build API cache if not already done
 		let api_cache = if let Some(ref cache) = self.api_cache {
 			cache.clone()
@@ -224,21 +237,37 @@ impl ApplyEngine {
 			})?
 			.clone();
 
+		let namespace = match discovered.scope {
+			super::ResourceScope::Namespaced => Some(namespace.unwrap_or(&self.default_namespace)),
+			super::ResourceScope::ClusterWide => None,
+		};
 		let api = self.dynamic_api(&discovered.api_resource, namespace);
 
+		if dry_run == Some("client") {
+			return Ok(None);
+		}
+
 		let delete_params = DeleteParams {
+			dry_run: dry_run == Some("server"),
+			grace_period_seconds: force.then_some(0),
 			..Default::default()
 		};
 
-		api.delete(name, &delete_params)
-			.await
-			.map_err(|e| ApplyError::DeleteFailed {
-				kind: gvk.kind.clone(),
-				name: name.to_string(),
-				source: Box::new(e),
-			})?;
+		match api.delete(name, &delete_params).await {
+			Ok(_) => {}
+			Err(kube::Error::Api(error)) if error.code == 404 => {
+				return Ok(Some(error.to_string()));
+			}
+			Err(error) => {
+				return Err(ApplyError::DeleteFailed {
+					kind: gvk.kind.clone(),
+					name: name.to_string(),
+					source: Box::new(error),
+				});
+			}
+		}
 
-		Ok(())
+		Ok(None)
 	}
 
 	/// Get the namespace for a manifest.
