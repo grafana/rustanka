@@ -52,6 +52,9 @@ pub enum ConnectionError {
 pub struct ClusterConnection {
 	client: Client,
 	server_version: Info,
+	context_name: String,
+	cluster_name: String,
+	server_url: String,
 	/// Human-readable identifier for the cluster (context name or API server URL).
 	cluster_identifier: String,
 }
@@ -84,52 +87,63 @@ impl ClusterConnection {
 		spec: &EnvironmentSpec,
 		kubeconfig: Kubeconfig,
 	) -> Result<Self, ConnectionError> {
-		let (mut config, cluster_identifier) = if let Some(api_server) = &spec.api_server {
-			// Search kubeconfig for a cluster whose server matches api_server,
-			// then find a context that uses that cluster
-			let context_name = find_context_for_api_server(&kubeconfig, api_server)?;
+		let (mut config, cluster_identifier, context_name, cluster_name) =
+			if let Some(api_server) = &spec.api_server {
+				// Search kubeconfig for a cluster whose server matches api_server,
+				// then find a context that uses that cluster
+				let (context_name, cluster_name) =
+					find_context_for_api_server(&kubeconfig, api_server)?;
 
-			tracing::debug!(
-				context = %context_name,
-				api_server = %api_server,
-				"found context for apiServer"
-			);
+				tracing::debug!(
+					context = %context_name,
+					api_server = %api_server,
+					"found context for apiServer"
+				);
 
-			let config = Config::from_custom_kubeconfig(
-				kubeconfig,
-				&KubeConfigOptions {
-					context: Some(context_name.clone()),
-					..Default::default()
-				},
-			)
-			.await?;
+				let config = Config::from_custom_kubeconfig(
+					kubeconfig,
+					&KubeConfigOptions {
+						context: Some(context_name.clone()),
+						..Default::default()
+					},
+				)
+				.await?;
 
-			(
-				config,
-				format!("{}  (context:{})", api_server, context_name),
-			)
-		} else if !spec.context_names.is_empty() {
-			// Use the first matching context name from kubeconfig
-			let context_name = find_first_matching_context(&kubeconfig, &spec.context_names)?;
+				(
+					config,
+					format!("{}  (context:{})", api_server, context_name),
+					context_name,
+					cluster_name,
+				)
+			} else if !spec.context_names.is_empty() {
+				// Use the first matching context name from kubeconfig
+				let context_name = find_first_matching_context(&kubeconfig, &spec.context_names)?;
 
-			tracing::debug!(context = %context_name, "using context from contextNames");
+				tracing::debug!(context = %context_name, "using context from contextNames");
 
-			let config = Config::from_custom_kubeconfig(
-				kubeconfig,
-				&KubeConfigOptions {
-					context: Some(context_name.clone()),
-					..Default::default()
-				},
-			)
-			.await?;
+				let cluster_name = cluster_for_context(&kubeconfig, &context_name)?;
+				let config = Config::from_custom_kubeconfig(
+					kubeconfig,
+					&KubeConfigOptions {
+						context: Some(context_name.clone()),
+						..Default::default()
+					},
+				)
+				.await?;
 
-			(config, format!("context:{}", context_name))
-		} else {
-			// Neither apiServer nor contextNames specified
-			return Err(ConnectionError::IncompleteSpec);
-		};
+				(
+					config,
+					format!("context:{}", context_name),
+					context_name,
+					cluster_name,
+				)
+			} else {
+				// Neither apiServer nor contextNames specified
+				return Err(ConnectionError::IncompleteSpec);
+			};
 
 		config.read_timeout = Some(DEFAULT_API_TIMEOUT);
+		let server_url = config.cluster_url.to_string();
 		let client = Client::try_from(config)?;
 
 		// Fetch server version for strategy selection
@@ -138,6 +152,9 @@ impl ClusterConnection {
 		Ok(Self {
 			client,
 			server_version,
+			context_name,
+			cluster_name,
+			server_url,
 			cluster_identifier,
 		})
 	}
@@ -161,6 +178,18 @@ impl ClusterConnection {
 	pub fn cluster_identifier(&self) -> &str {
 		&self.cluster_identifier
 	}
+
+	pub fn context_name(&self) -> &str {
+		&self.context_name
+	}
+
+	pub fn cluster_name(&self) -> &str {
+		&self.cluster_name
+	}
+
+	pub fn server_url(&self) -> &str {
+		&self.server_url
+	}
 }
 
 /// Find a kubeconfig context that uses a cluster with the given API server URL.
@@ -170,7 +199,7 @@ impl ClusterConnection {
 fn find_context_for_api_server(
 	kubeconfig: &Kubeconfig,
 	api_server: &str,
-) -> Result<String, ConnectionError> {
+) -> Result<(String, String), ConnectionError> {
 	// Find a cluster whose server matches the api_server
 	let matching_cluster = kubeconfig
 		.clusters
@@ -195,7 +224,23 @@ fn find_context_for_api_server(
 		})
 		.ok_or_else(|| ConnectionError::ContextNotFoundForCluster(cluster_name.clone()))?;
 
-	Ok(matching_context.name.clone())
+	Ok((matching_context.name.clone(), cluster_name.clone()))
+}
+
+fn cluster_for_context(
+	kubeconfig: &Kubeconfig,
+	context_name: &str,
+) -> Result<String, ConnectionError> {
+	let context = kubeconfig
+		.contexts
+		.iter()
+		.find(|context| context.name == context_name)
+		.ok_or_else(|| ConnectionError::ContextNotFound(vec![context_name.to_owned()]))?;
+	context
+		.context
+		.as_ref()
+		.map(|context| context.cluster.clone())
+		.ok_or_else(|| ConnectionError::ContextNotFound(vec![context_name.to_owned()]))
 }
 
 /// Find the first context from the list that exists in kubeconfig.
