@@ -57,6 +57,7 @@ impl fmt::Display for ApplyStrategy {
 #[derive(Args)]
 pub struct ApplyArgs {
 	/// Path to the Tanka environment
+	#[arg(add = clap_complete::engine::ArgValueCompleter::new(super::complete::environment_candidates))]
 	pub path: PathBuf,
 
 	/// Force the apply strategy to use. Automatically chosen if not set.

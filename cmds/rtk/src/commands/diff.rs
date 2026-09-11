@@ -69,6 +69,7 @@ pub const EXIT_CODE_DIFF_FOUND: i32 = 16;
 #[derive(Args)]
 pub struct DiffArgs {
 	/// Path to the Tanka environment
+	#[arg(add = clap_complete::engine::ArgValueCompleter::new(super::complete::environment_candidates))]
 	pub path: PathBuf,
 
 	/// Color output mode
