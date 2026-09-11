@@ -18,6 +18,7 @@ use tracing::instrument;
 #[derive(Args)]
 pub struct ShowArgs {
 	/// Path to the Tanka environment
+	#[arg(add = clap_complete::engine::ArgValueCompleter::new(super::complete::environment_candidates))]
 	pub path: PathBuf,
 
 	/// Allow redirecting output to a file or a pipe
