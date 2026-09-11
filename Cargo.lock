@@ -505,6 +505,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c757a3b7e39161a4e56f9365141ada2a6c915a8622c408ab6bb4b5d047371031"
 dependencies = [
  "clap",
+ "clap_lex",
+ "is_executable",
+ "shlex",
 ]
 
 [[package]]
@@ -2844,6 +2847,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_executable"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82cb6a9f675da968c63b6208c641b9dca58fc0133ae53375736b1767b0cab8bd"
+dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4683,6 +4695,7 @@ dependencies = [
  "bon",
  "bytes 1.11.1",
  "clap",
+ "clap_complete",
  "dirs",
  "http 1.4.0",
  "http-body-util",
