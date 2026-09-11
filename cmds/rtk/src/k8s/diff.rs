@@ -71,23 +71,18 @@ impl DiffStrategy {
 			return Self::named(strategy);
 		}
 
-		// tk defaults the diff to server-side when the apply is, which it
-		// decides from the resolved strategy rather than from the spec alone —
-		// so `--apply-strategy server` reaches this too.
-		if apply_strategy == Some("server") {
-			return Ok(DiffStrategy::Server);
-		}
-
 		let major: u32 = server_version.major.parse().unwrap_or(1);
 		let minor: u32 = server_version
 			.minor
 			.trim_end_matches('+')
 			.parse()
 			.unwrap_or(0);
-		Ok(if major >= 1 && minor >= 13 {
-			DiffStrategy::Native
-		} else {
+		Ok(if major < 1 || (major == 1 && minor < 13) {
 			DiffStrategy::Subset
+		} else if apply_strategy == Some("server") {
+			DiffStrategy::Server
+		} else {
+			DiffStrategy::Native
 		})
 	}
 
