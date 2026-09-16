@@ -323,11 +323,12 @@ dropped before that object space during thread teardown.
 
 ## Formatting
 
-The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a and 2b have landed: the
-lexer, the AST, the parser, the unparser, the pass traversal and three of the
-twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon` and
-`PrettyFieldNames`. **The other nine do not exist yet**, which is Phase 2c
-onwards, so a file needing one of them comes back unformatted.
+The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b and 2c have landed: the
+lexer, the AST, the parser, the unparser, the pass traversal and five of the
+twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon`,
+`PrettyFieldNames`, `EnforceStringStyle` and `EnforceCommentStyle`. **The other
+seven do not exist yet**, which is Phase 2d onwards, so a file needing one of
+them comes back unformatted.
 
 `crates/jrsonnet-formatter` is **not** tk-compatible and `cmds/jrsonnet-fmt` is
 not either. That crate is upstream's dprint-based, width-driven pretty-printer,
@@ -340,12 +341,52 @@ Both are left untouched so upstream jrsonnet syncs against
 `.jrsonnet-upstream-base` stay clean.
 
 `rtk fmt` lives in `crates/rtk-jsonnetfmt` instead. `rtk_jsonnetfmt::format`
-runs `FormatNode`'s pipeline with the nine unwritten passes missing from it; the
-doc comment on `format` carries the full fourteen-step order with each step's
-state, read off upstream rather than inferred. A file needing one of the missing
-passes comes back unformatted. The refusal is already real, though — a file that
-does not parse fails with go-jsonnet's message, which is what `tk fmt` prints
-before aborting the run.
+runs `FormatNode`'s pipeline with the seven unwritten passes missing from it;
+the doc comment on `format` carries the full fourteen-step order with each
+step's state, read off upstream rather than inferred. A file needing one of the
+missing passes comes back unformatted. The refusal is already real, though — a
+file that does not parse fails with go-jsonnet's message, which is what
+`tk fmt` prints before aborting the run.
+
+**Whether a pass runs is `format`'s business, never the pass's.** `FormatNode`
+gates `EnforceStringStyle` on `StringStyle != Leave` and `EnforceCommentStyle`
+on `CommentStyle != Leave`, so `Leave` means the pass is never constructed. Run
+with `Leave` anyway, `EnforceStringStyle` would behave as `Double`, since it
+asks only whether the style is `Single`.
+
+### Representation: strings and comments
+
+Two passes, and between them they hold most of what a reader would get wrong.
+
+`EnforceStringStyle` overrides `LiteralString`, **not** `Visit`, because
+`pass::base::import` reaches an import's filename through that leaf hook only —
+overriding `Visit` would restyle every string in a file except the one in
+`import 'foo.libsonnet'`. It is also a full `StringUnescape`/`StringEscape`
+round trip, so it normalises more than the quote: `"a\/b"` becomes `'a/b'`,
+`"A"` becomes `'A'`, and `""` becomes `''` because
+`StringEscape` formats with `%04x`. The option is consulted once and then
+overridden by the text — a `'` in it forces double quotes and a `"` forces
+single — and a string containing **both** is returned on untouched, keeping the
+kind it was written with. Blocks and both verbatim kinds are returned on
+unexamined; for the verbatim ones that matters, since the parser has already
+collapsed their doubled quotes.
+
+`EnforceCommentStyle` carries `seenFirstFodder`, and **the hashbang guard
+`return`s before setting it**. So a spared `#!` never counts as fodder seen and
+a second `#!` is spared too. The flag is otherwise set by any non-interstitial
+element whether or not anything was rewritten, which makes three things true
+and each is pinned by a snippet: one blank line at the top of a file disables
+the carve-out, an interstitial does not set the flag (so `/* c */ #!b` on **one
+line** still spares it), and a comment already in the target style sets it
+without being changed. Reading `addFodder` against `addFodderSafe` in the lexer
+is what explains the last group — a multi-line C comment goes through
+`FodderAppend`, which inserts a synthetic `LineEnd` in front of a paragraph
+appended to empty fodder, and it is that element which sets the flag.
+
+`EnforceCommentStyle` also cannot reach two of the four slots the traversal
+skips, so `tk fmt` leaves those comments as written: `{ a: 'b' # c` … `in
+super }` and `a. # c` … `b`. The same comment after `super.` *is* rewritten,
+because `base::super_index` visits `id_fodder` unconditionally.
 
 ### The pass traversal
 
@@ -388,6 +429,19 @@ the rest are unconditional in `FormatNode`.
 So **write the snippets before the pass**, every time. `FixIndentation` is the
 pass the plan calls hardest and it gets nine corpus cells; `EnforceCommentStyle`
 gets none.
+
+Phase 2c is the sharpest case of this and generalises the reason. A `#` comment
+in a file that is already `tk fmt`-clean has by definition already been
+rewritten to `//`, so no breadth corpus of real files can contain the input
+`EnforceCommentStyle` exists for. The same argument applies to the three
+remaining zero-cell passes. 2c added 57 snippets before either pass was
+written, taking `testdata/pass-snippets.json` from 56 to 113.
+
+One authoritative `tk fmt` answer for `EnforceCommentStyle` does exist outside
+the snippets and is free: go-jsonnet's own
+`formatter/testdata/empty_comment.fmt.golden` is `#` above an empty object
+formatting to `//`, graded as the `go_jsonnet/empty_comment` fixture whenever
+`GO_JSONNET_FOR_TESTS` is set.
 
 One inference to avoid, because it was made here and was wrong: **a pass
 changing a file is not the same as that file's output changing.**
@@ -472,7 +526,7 @@ compile, and it caught a wrong expectation before a line of parser existed —
 `a[::]` parses to the same tree as `a[:]`, because `::` lexes as one operator
 token and the parser's `::` branch never assigns `StepColonFodder`.
 
-### Four upstream oddities the port reproduces
+### Five upstream oddities the port reproduces
 
 Each is verified in go-jsonnet's source, each is what `tk fmt` prints, and none
 should be "fixed":
@@ -492,6 +546,10 @@ should be "fixed":
   formats to `a.foo` and **drops the comment**. The object-field path in the
   same pass uses `FodderMoveFront` and keeps everything, which is what makes
   this look like an oversight rather than a decision; reproduce it anyway.
+- `EnforceCommentStyle`'s hashbang guard `return`s **before** setting
+  `seenFirstFodder`, so a spared `#!` never marks fodder as seen and a second
+  `#!` is spared as well. See the representation section above for the three
+  things that *do* set the flag.
 
 There is deliberately no `fmt_golden_override/`. For fmt, every override would
 be a divergence from `tk fmt` — a bug.

@@ -16,7 +16,9 @@
 //!
 //! Phase 2c is the same story with the numbers even further apart. Over the
 //! 138 corpus files `EnforceStringStyle` changes **6** and
-//! `EnforceCommentStyle` will change **none at all**.
+//! `EnforceCommentStyle` changes **none at all** — so without the snippets the
+//! comment pass would land entirely ungraded, while carrying the `#!` carve-out
+//! and the `seenFirstFodder` oddity that goes with it.
 //!
 //! So `make update-fmt-pass-oracle` stages a dumper into a go-jsonnet checkout
 //! — `internal/formatter` can only be imported from inside that module — and
@@ -60,7 +62,10 @@ use rtk_jsonnetfmt::{
 	fodder::Fodder,
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
-	passes::{EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames},
+	passes::{
+		EnforceCommentStyle, EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon,
+		PrettyFieldNames,
+	},
 };
 use serde::Deserialize;
 
@@ -102,12 +107,13 @@ const IMPLEMENTED: &[&str] = &[
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
 	"EnforceStringStyle",
+	"EnforceCommentStyle",
 ];
 
 /// Run one named pass over a whole file, or report that rtk has not got it.
 ///
-/// The pass that reads an option gets it from `Options::default`, because
-/// `_staged/passdump.go` constructs it with `iformatter.DefaultOptions()`.
+/// The two passes that read an option get it from `Options::default`, because
+/// `_staged/passdump.go` constructs them with `iformatter.DefaultOptions()`.
 /// A pass is run unconditionally here, as it is there: `FormatNode`'s gates
 /// are [`rtk_jsonnetfmt::format`]'s business, and the corpus grades those.
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
@@ -118,6 +124,11 @@ fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
 		"EnforceStringStyle" => visit_file(
 			&mut EnforceStringStyle::new(options.string_style),
+			node,
+			final_fodder,
+		),
+		"EnforceCommentStyle" => visit_file(
+			&mut EnforceCommentStyle::new(options.comment_style),
 			node,
 			final_fodder,
 		),

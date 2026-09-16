@@ -21,11 +21,11 @@
 //! # State
 //!
 //! [`format`] parses, runs the passes that have landed, and unparses. Phases
-//! 0, 1, 2a and 2b of `docs/rtk-fmt-plan.md` are done, and 2c is half done:
-//! the lexer, the AST, the parser, the unparser, the [`pass`] traversal and
-//! four of the twelve passes. The other eight are no-ops, so a file that needs
-//! one of them comes back unformatted; `quarantine.toml` names the fixtures
-//! that leaves failing and `testdata/corpus-baseline.toml` counts the files.
+//! 0, 1, 2a, 2b and 2c of `docs/rtk-fmt-plan.md` are done: the lexer, the AST,
+//! the parser, the unparser, the [`pass`] traversal and five of the twelve
+//! passes. The other seven are no-ops, so a file that needs one of them comes
+//! back unformatted; `quarantine.toml` names the fixtures that leaves failing
+//! and `testdata/corpus-baseline.toml` counts the files.
 
 pub mod ast;
 pub mod files;
@@ -189,7 +189,7 @@ impl Error {
 ///
 /// # Current behaviour
 ///
-/// `FormatNode`'s pipeline, with the eight passes that have not landed yet
+/// `FormatNode`'s pipeline, with the seven passes that have not landed yet
 /// missing from it. The order below is upstream's, read off `FormatNode`
 /// rather than inferred, and the gaps are marked so the shape of what is left
 /// stays visible:
@@ -207,7 +207,7 @@ impl Error {
 /// | 9 | the three strip passes | skipped under `Options::default` |
 /// | 10 | [`PrettyFieldNames`](passes::PrettyFieldNames) | **runs** |
 /// | 11 | [`EnforceStringStyle`](passes::EnforceStringStyle) | **runs** |
-/// | 12 | `EnforceCommentStyle` | Phase 2c |
+/// | 12 | [`EnforceCommentStyle`](passes::EnforceCommentStyle) | **runs** |
 /// | 13 | `FixIndentation` | Phase 2d |
 /// | 14 | `removeExtraTrailingNewlines` | Phase 2d |
 ///
@@ -227,12 +227,20 @@ pub fn format(filename: &str, input: &str, options: &Options) -> Result<String, 
 	if options.pretty_field_names {
 		pass::visit_file(&mut passes::PrettyFieldNames, &mut node, &mut final_fodder);
 	}
-	// The gate is upstream's, and it is here rather than in the pass: `Leave`
-	// means the pass is never constructed. Note it would behave as `Double` if
-	// it were, since it asks only whether the style is `Single`.
+	// Both gates are upstream's, and both are here rather than in the pass:
+	// `Leave` means the pass is never constructed. Note `EnforceStringStyle`
+	// would behave as `Double` if it were, since it asks only whether the
+	// style is `Single`.
 	if options.string_style != StringStyle::Leave {
 		pass::visit_file(
 			&mut passes::EnforceStringStyle::new(options.string_style),
+			&mut node,
+			&mut final_fodder,
+		);
+	}
+	if options.comment_style != CommentStyle::Leave {
+		pass::visit_file(
+			&mut passes::EnforceCommentStyle::new(options.comment_style),
 			&mut node,
 			&mut final_fodder,
 		);

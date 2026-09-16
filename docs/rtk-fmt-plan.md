@@ -318,6 +318,8 @@ go-jsonnet's shape.
 | `FixTrailingCommas` | `src/passes/fix_trailing_commas.rs` | the pass oracle |
 | `NoRedundantSliceColon` | `src/passes/no_redundant_slice_colon.rs` | the pass oracle |
 | `PrettyFieldNames` | `src/passes/pretty_field_names.rs` | the pass oracle, and 2 corpus files |
+| `EnforceStringStyle` | `src/passes/enforce_string_style.rs` | the pass oracle, and 3 corpus files |
+| `EnforceCommentStyle` | `src/passes/enforce_comment_style.rs` | the pass oracle, and **no** corpus file |
 | pass oracle | `testdata/pass-oracle.json` | `make update-fmt-pass-oracle` |
 | pass snippets | `testdata/pass-snippets.json` | the same target |
 
@@ -545,6 +547,113 @@ object-field path in the same pass uses `FodderMoveFront` and keeps everything.
 **2c — representation.** `EnforceStringStyle`, `EnforceCommentStyle`. Watch the
 documented carve-outs: strings containing `'` or `"` use whichever syntax avoids
 escaping, and `#!` hashbang comments are always left alone.
+
+### 2c is done
+
+The corpus stands at **123 of 138**, up from 120, and for the first time the
+arithmetic is entirely legible: `EnforceStringStyle` fixes exactly the three
+files whose only remaining difference from their golden was the quote character
+— `tests/suite/rounding.jsonnet`, `tests/suite/sjsonnet_issue_127.jsonnet` and
+`tests/golden/issue195.jsonnet`, that last one a `"false"` field name that has
+to *stay* quoted, so it is also what says the keyword rule survived. Two more
+files the pass genuinely changes stay red because they are tab-indented and so
+also need `FixIndentation`: `tests/golden/builtin_strings_string.jsonnet` and
+`tests/suite/std_param_names.jsonnet`.
+
+`EnforceCommentStyle` contributes **nothing** to that number, and cannot. Which
+is the whole story of this step.
+
+#### The corpus grades one of these passes and not the other
+
+`EnforceStringStyle` gets 6 corpus cells. `EnforceCommentStyle` gets **zero**,
+for a reason that generalises: a `#` comment in a file that is already
+`tk fmt`-clean has by definition already been rewritten to `//`, so a breadth
+corpus of real files cannot contain the input this pass exists for. Neither can
+`Options` isolate it — and neither can the four remaining zero-cell passes
+(`NoRedundantSliceColon`, `EnforceMaxBlankLines`, `FixParens`), which is worth
+carrying into 2d and 2e.
+
+So 57 snippets were added before either pass was written, taking
+`testdata/pass-snippets.json` from 56 to 113. The standing rule from 2b held:
+**write the snippets first, every time.**
+
+There is one authoritative `tk fmt` answer for `EnforceCommentStyle` outside
+the snippets, and it is worth knowing about because it is free:
+go-jsonnet's own `formatter/testdata/empty_comment.fmt.golden` is `#` above an
+empty object formatting to `//`. It is graded as the `go_jsonnet/empty_comment`
+fixture whenever `GO_JSONNET_FOR_TESTS` is set, and it confirms the bare-hash
+case — where `len(*comment) > 1` fails and the hashbang guard is never
+consulted at all.
+
+#### Four things about `EnforceStringStyle` that the option does not decide
+
+1. **The quotes in the text win.** A string containing a `'` takes `"` and one
+   containing a `"` takes `'`, whatever `StringStyle` says — the option is
+   consulted once and then overridden by either count. A string containing
+   **both** is returned on untouched, so it keeps the kind it was written with
+   even where the option asked for the other one.
+2. **The counting is on the unescaped text**, so `"a\'b"` counts one single
+   quote although the source had no bare one, and comes back as `"a'b"` — the
+   kind unchanged and the value rewritten. That is the one shape where this
+   pass changes a literal without changing its kind.
+3. **It is a round trip, so it normalises more than quotes.** `StringUnescape`
+   then `StringEscape` drops an escape that was never needed (`"a\/b"` →
+   `'a/b'`), collapses an escape whose character needs none (`"A"` → `'A'`,
+   `"é"` → `'é'`), and re-spells one that does in upstream's own casing
+   (`""` → `''`, because `StringEscape` formats with `%04x`).
+4. **Three kinds are returned on unexamined**: `|||` blocks and both verbatim
+   kinds. For the verbatim ones that is not cosmetic — the parser has already
+   collapsed their doubled quotes, so restyling one would mean re-doubling
+   them, and upstream does not try.
+
+It overrides `LiteralString` and **not** `Visit`, which is not a stylistic
+choice: `pass.Base.Import` reaches an import's filename through that leaf hook
+only, so a pass overriding `Visit` would restyle every string in a file except
+the one in `import "foo.libsonnet"`.
+
+#### A fifth upstream oddity, and it is in the carve-out
+
+`EnforceCommentStyle`'s hashbang guard `return`s **before** setting
+`seenFirstFodder`. So a spared `#!` never marks fodder as seen, and a *second*
+`#!` is still "first" and is also spared. `comment_style/hashbang_twice` pins
+it.
+
+The flag is otherwise set by **any** non-interstitial element, whether or not
+anything about it was rewritten, because the assignment sits outside the
+`len(Comment) == 1` test. Three consequences, each with a snippet, and each
+surprising on its own:
+
+- One **blank line** at the top of a file is a commentless `LineEnd`, and it
+  disables the carve-out for the `#!` beneath it.
+- An **interstitial** does not set it, so `/* c */ #!b` on one line still
+  spares the hashbang. The `#!` has to be on the *same* line: a newline between
+  them makes the lexer emit its own `LineEnd`, and that does set it.
+- A comment **already in the target style** sets it without being rewritten, so
+  `// a` above a `#!b` costs the hashbang its exemption.
+
+A related trap the snippets were written around: a fresh-line `#` comment is a
+`FodderParagraph` appended with `addFodder` (a plain append), while a
+*multi-line* C comment goes through `addFodderSafe`, and `FodderAppend` puts a
+synthetic commentless `LineEnd` in front of a paragraph appended to empty
+fodder. So `/* a\n b */` above a `#!` converts the hashbang — not because the
+paragraph set the flag, but because that synthetic element did. Reading
+`addFodder` against `addFodderSafe` in the lexer is what makes this legible;
+guessing from the fodder model alone gets it backwards.
+
+#### Where this pass cannot reach
+
+`EnforceCommentStyle` only sees the fodder `pass::base` walks, and 2b pinned
+four slots it never walks. Two of them can hold a `#` comment, so `tk fmt`
+leaves it exactly as written:
+
+- `{ a: 'b' # c` … `in super }` — `InSuper`'s `in_fodder`.
+- `a. # c` … `b` — `Index`'s `right_bracket_fodder`, doubling as the fodder
+  before an identifier.
+
+The same comment after `super.` **is** rewritten, because
+`base::super_index` visits `id_fodder` unconditionally. That contrast is what
+makes the `Index` case a hole rather than a rule, and it is the payoff for
+having written those four unit tests in 2b before any pass needed them.
 
 **2d — layout.** `EnforceMaxBlankLines`, `FixNewlines`, `removeInitialNewlines`,
 `removeExtraTrailingNewlines`, then `FixIndentation`. `FixIndentation` is the
