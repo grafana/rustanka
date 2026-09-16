@@ -323,12 +323,15 @@ dropped before that object space during thread teardown.
 
 ## Formatting
 
-The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b and 2c have landed: the
-lexer, the AST, the parser, the unparser, the pass traversal and five of the
+The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b, 2c and 2d have landed:
+the lexer, the AST, the parser, the unparser, the pass traversal, nine of the
 twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon`,
-`PrettyFieldNames`, `EnforceStringStyle` and `EnforceCommentStyle`. **The other
-seven do not exist yet**, which is Phase 2d onwards, so a file needing one of
-them comes back unformatted.
+`PrettyFieldNames`, `EnforceStringStyle`, `EnforceCommentStyle`,
+`EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation` — and all three of
+`FormatNode`'s non-pass steps. **Three do not exist yet**: `FixParens` and
+`RemovePlusObject` (Phase 2e) and `SortImports` (Phase 2f), so a file needing
+one of them comes back unformatted. The corpus stands at 134 of 138 and the
+four that remain are exactly those three passes' files.
 
 `crates/jrsonnet-formatter` is **not** tk-compatible and `cmds/jrsonnet-fmt` is
 not either. That crate is upstream's dprint-based, width-driven pretty-printer,
@@ -341,12 +344,84 @@ Both are left untouched so upstream jrsonnet syncs against
 `.jrsonnet-upstream-base` stay clean.
 
 `rtk fmt` lives in `crates/rtk-jsonnetfmt` instead. `rtk_jsonnetfmt::format`
-runs `FormatNode`'s pipeline with the seven unwritten passes missing from it;
+runs `FormatNode`'s pipeline with the three unwritten passes missing from it;
 the doc comment on `format` carries the full fourteen-step order with each
 step's state, read off upstream rather than inferred. A file needing one of the
 missing passes comes back unformatted. The refusal is already real, though — a
 file that does not parse fails with go-jsonnet's message, which is what
 `tk fmt` prints before aborting the run.
+
+### Three of the fourteen steps are not passes
+
+Worth knowing before looking for one of them in `src/passes/`.
+
+`removeInitialNewlines` (step 2) and `removeExtraTrailingNewlines` (step 14)
+are unexported four-line functions in `jsonnetfmt.go`, so **the staged pass
+dumper cannot reach either** and the corpus is all that grades them. They live
+as inherent methods on the types they mutate, `ast::Node` and `fodder::Fodder`.
+Their *position* is the load-bearing part: step 2 runs before
+`EnforceMaxBlankLines` at step 3, so a blank run at the top of a file is
+deleted rather than clamped to two.
+
+Phase 2d decided **not** to close that gap by making `_staged/passdump.go` a
+`_test.go` inside `internal/formatter`, which the plan had left open. Both
+functions are a slice truncation and a field assignment — neither *composes*
+fodder, which is the one category this project has measured itself unreliable
+at deriving by hand — and the conversion means renaming packages and dropping
+the dumper's CLI to grade eight lines the corpus already covers end to end. If
+a later phase does want pipeline-level answers for hand-written input, there is
+a better route than the `_test.go`: `testdata/generate/main.go` already calls
+the **public** `formatter.Format`, so a snippets mode there needs no staged
+checkout at all.
+
+`FixIndentation` (step 13) is not a pass for a different reason: `FormatNode`
+calls `visitor.VisitFile(node, finalFodder)` on it directly rather than through
+upstream's `visitFile` helper, so it has its own `Visit(expr, currIndent,
+crowded)` and walks the tree itself. It lives in `src/fix_indentation.rs`, not
+`src/passes/`, and `src/pass.rs` does not carry it. The consequence that
+matters: **it reaches all four fodder slots `pass::base` skips**, which is why
+a `#` comment in `x in super` survives `EnforceCommentStyle` and is still
+re-indented.
+
+### `removeExtraTrailingNewlines` only ever fires on a file ending in a comment
+
+Not what the name suggests, and it was a wrong test expectation before it was a
+note. The lexer's main loop measures a whitespace run and *then* tests for end
+of input, breaking before it adds the line end — so trailing newlines never
+become fodder at all. A file of `1` and four newlines has **empty** final
+fodder. The only way blank lines survive to the end of a file is on a comment's
+own element, whose blanks `lex_until_newline` measures while a following token
+is still in prospect.
+
+### What `FixIndentation` gets wrong on purpose
+
+Five shapes where a near-miss would sit, each pinned by a snippet, plus one
+upstream bug. The full account is the module documentation on
+`src/fix_indentation.rs`; the two that are easiest to transpose:
+
+- **`fill_last`'s last element takes a different indent from the rest, and
+  which differs per node.** `Apply`, `Array`, `Object`, `Parens`, `Index` and a
+  `local` bind's close fodder all end on `currIndent.base`; `params` ends on
+  `currIndent.lineUp`. One character apart in the source.
+- **`Slice` never fills `right_bracket_fodder`.** Every other bracketed node
+  calls `fill_last` there. So a newline before a slice's `]` keeps whatever
+  indent it was lexed with.
+
+The bug is in `specs`: the conditions loop computes its indent from
+`openFodder(spec.Expr)` and then calls `Visit(spec.Expr)` — the `for`
+expression, **not** `cond.Expr`. So a comprehension's `for` expression is
+indented twice at two different columns and the second answer wins, while the
+`if` condition is never indented at all. Reproduced, not fixed; it is what
+`tk fmt` prints.
+
+### Idempotence is tested, and stays a hard assertion
+
+`tests/corpus.rs` formats each of the 138 goldens a second time and requires no
+movement. The allow-list beside it is **empty**: a failure is a bug in
+`FixIndentation` or `FixNewlines` until it is traced to a specific cross-pass
+interaction in `FormatNode`'s order, at which point it earns an entry here and
+an exclusion by name. Do not add a convergence loop — see the non-fixed-point
+note below for why that would diverge from `tk fmt` outright.
 
 **Whether a pass runs is `format`'s business, never the pass's.** `FormatNode`
 gates `EnforceStringStyle` on `StringStyle != Leave` and `EnforceCommentStyle`
@@ -476,6 +551,41 @@ the snippets and is free: go-jsonnet's own
 `formatter/testdata/empty_comment.fmt.golden` is `#` above an empty object
 formatting to `//`, graded as the `go_jsonnet/empty_comment` fixture whenever
 `GO_JSONNET_FOR_TESTS` is set.
+
+Phase 2d is the sharpest case *numerically*, and it is the one to cite next
+time. `EnforceMaxBlankLines` was graded by **nothing at all** before 2d — 0 of
+138 corpus files and 0 of the 113 snippets then in the file — for the same
+structural reason: a `tk fmt`-clean file has no run of three blank lines in it
+by definition. `FixNewlines` had 1 and 1, and `FixIndentation` 9 and 2, and
+both of those snippet hits were accidents of the comment-style group rather
+than cases written for the pass. 2d added 141 snippets before a line of pass
+code, taking `testdata/pass-snippets.json` from 113 to 254, and all three
+passes then matched go-jsonnet node for node on every one and on all 138 corpus
+files on the first compile — as the lexer, the node dumper and the 2b passes
+each had.
+
+**The count split is the argument in one line.** 2d's three small steps moved
+the corpus by **zero**; `FixIndentation` moved it by **ten**. Had the phase
+been graded on the corpus alone, four of the five things it landed would have
+looked like no-ops.
+
+### The oracle is a lower bound on the work, not a sufficient set
+
+The refinement 2d adds to the two warnings above, and the one to carry into 2e.
+`pass-oracle.json` answers "which passes change this file's AST" exactly. It
+does **not** answer "which passes does this file need to match its golden",
+and the two come apart.
+
+`test_fixtures/golden_envs/yaml_line_wrapping_env/main.jsonnet` is the only
+corpus file the oracle attributes to `FixNewlines` — and landing `FixNewlines`
+did not flip it. It took `FixIndentation` as well, because `FixNewlines` only
+ever inserts a bare `LineEnd(0, 0)` and something then has to indent it. So the
+corpus staying at 124 through the first half of 2d was correct rather than a
+regression, and a prediction built by counting oracle cells per pass would have
+called that half a one-file win.
+
+Use the oracle to say which files a pass *can* affect and to grade the pass
+node for node. Use the corpus, and only the corpus, to say what is finished.
 
 The converse is just as wrong, and 2c made that mistake after being warned
 about this one: **an input-against-golden diff says what is different, never

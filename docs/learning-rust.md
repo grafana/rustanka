@@ -470,6 +470,179 @@ derive off is a design decision, and worth a comment saying so.
 
 ---
 
+## 13. Disjoint field borrows: the rule is about *places*, not values
+
+§4 said you may have only one `&mut` to a value at a time. That is true, and it
+would make `FixIndentation` impossible to write if it meant what it sounds like.
+This compiles:
+
+```rust
+self.fill(&mut field.op_fodder, true, true, indent);
+if let Some(expr3) = field.expr3.as_deref_mut() {
+    self.visit(expr3, indent, true);
+}
+```
+
+Two `&mut` borrows out of the same `field`. The compiler allows it because it
+tracks **places** — `field.op_fodder` and `field.expr3` are different paths, so
+borrowing one says nothing about the other. This is why §4's destructuring trick
+was needed: there, both borrows went through `field` *itself*, which is one
+place.
+
+The practical shape: reach for a field directly and you are usually fine; reach
+for the whole struct twice and you need to destructure.
+
+**Where it is in the repo:** all through
+`crates/rtk-jsonnetfmt/src/fix_indentation.rs` — the `ObjectFieldKind::Assert`
+arm of `fields` is the clearest, borrowing `fodder1`, `op_fodder`, `expr2` and
+`expr3` in turn.
+
+**Why it is there:** the Go it ports takes a *copy* of each field struct and
+mutates through the slice headers inside it, which happens to work because a Go
+slice copy shares its backing array. Rust has no equivalent sleight of hand, so
+the port has to borrow each slot explicitly — and the borrow checker turns out
+to allow exactly the accesses Go was making by accident.
+
+---
+
+## 14. `&mut self` and `&mut arg` do not conflict
+
+The other thing that makes the above practical, and it trips people up because
+it looks like two mutable borrows:
+
+```rust
+fn fill(&mut self, fodder: &mut Fodder, /* … */) { /* … */ }
+
+// called as:
+self.fill(&mut node.close_fodder, false, false, indent);
+```
+
+`self` is the `FixIndentation` — it owns a column counter. `node` is part of the
+syntax tree. They are unrelated values, so `&mut self` and `&mut node.…` are
+simply two borrows of two different things. No conflict, no cloning, no
+`RefCell`.
+
+It is worth stating because a pass *feels* like it is "inside" the tree it walks.
+It is not. It is a separate object holding a cursor.
+
+**Why it matters here:** `fill` both writes indentation into the fodder and
+advances `self.column`. If those two had lived in one object the pass would have
+needed interior mutability, which would have cost the compile-time guarantee
+that nothing else is aliasing the tree mid-walk.
+
+---
+
+## 15. Associated functions: a method with no `self`
+
+Rust distinguishes:
+
+```rust
+impl FixIndentation {
+    fn new_indent(&self, /* … */) -> Indent { /* reads self.indent_width */ }
+
+    fn align(first_fodder: &Fodder, old: Indent, line_up: usize) -> Indent { /* … */ }
+}
+```
+
+`new_indent` is a **method** — called `self.new_indent(…)`. `align` is an
+**associated function** — called `Self::align(…)`. It lives in the type's
+namespace but takes no receiver. Go has no distinction; a Go method just ignores
+its receiver.
+
+**Why the split is there, and it is not arbitrary.** `align` and `align_strong`
+genuinely never read any field: their "reset" branch returns the old indent
+unchanged, so unlike `new_indent` they never consult the configured indent
+width. Making them associated functions records that in the signature — and the
+project's lint settings enforce it, because `clippy::unused_self` warns about a
+method that ignores `self`.
+
+So the shape of the API is telling you something true about the algorithm: two
+of the four indent combinators cannot depend on configuration.
+
+---
+
+## 16. `Option<Box<T>>`, and the `as_deref` family
+
+The tree is full of optional children:
+
+```rust
+pub expr2: Option<Box<Node>>,
+```
+
+`Box<Node>` is a `Node` on the heap (needed because a `Node` contains `Node`s —
+without a `Box` the type would be infinitely large). `Option` makes it
+optional. To get at it you almost never want `Option<Box<Node>>`; you want
+`Option<&Node>` or `Option<&mut Node>`:
+
+| you have | you want | write |
+| --- | --- | --- |
+| `&Option<Box<Node>>` | `Option<&Node>` | `field.expr2.as_deref()` |
+| `&mut Option<Box<Node>>` | `Option<&mut Node>` | `field.expr2.as_deref_mut()` |
+
+`as_ref()` would give you `Option<&Box<Node>>` — one indirection too many.
+`as_deref` peels the `Box` as well.
+
+And a pattern worth recognising, because this phase used it repeatedly:
+
+```rust
+let message_indent = field.expr2.as_deref().map_or(curr_indent, |expr2| {
+    self.new_indent(expr2.opening_fodder(), curr_indent, self.column + 1)
+});
+```
+
+`map_or(default, f)` means "if `Some`, apply `f`; if `None`, use `default`". It
+is the whole of Go's
+
+```go
+var x T
+if p != nil { x = f(p) }
+```
+
+in one expression, and crucially it is an *expression*, so the result can be
+`let`-bound and the value cannot be accidentally read before it is set.
+
+**Why it appears so much here:** the Go being ported dereferences these pointers
+without checking, because its parser guarantees they are non-nil. Rust will not
+let you skip the check, so every one of those sites becomes an `if let` or a
+`map_or`. The upside is real: `src/pass.rs` documents this as one of three
+deliberate departures, and notes that the behaviour is identical for every tree
+the parser can actually build.
+
+---
+
+## 17. Why 141 hand-written *inputs* were fine but hand-written *answers* were not
+
+Not a Rust feature, but the most transferable thing in this phase, and it has a
+Rust consequence worth seeing.
+
+Phase 2d wrote 141 new test cases before writing any of the three passes they
+test. Every **input** was written by hand. Not one **expected answer** was: those
+were generated by running the real Go formatter and recording what it did.
+
+The one place a hand-written answer did sneak in, it was wrong:
+
+```rust
+// This assertion failed. It says a file ending in four newlines has a fodder
+// element carrying two blank lines. It has no fodder element at all.
+assert_eq!(blanks("1\n\n\n\n"), ["LineEnd:2"]);
+```
+
+The lexer measures the whitespace run and *then* notices it has hit the end of
+the file, so it breaks before storing anything.
+
+The Rust consequence: this is why several tests in this crate assert on the
+**tree** rather than on the output text. For instance `fix_newlines.rs` has
+
+```rust
+fn breaks(input: &str) -> Vec<bool>   // "does each designated slot now start on a fresh line?"
+```
+
+instead of comparing formatted strings. Asserting the *postcondition* needs no
+guess about how the fodder was composed; asserting the text does. When you
+cannot generate an answer, assert the property rather than the output.
+
+---
+
 ## Quiz
 
 No looking. Answers below.
@@ -508,6 +681,28 @@ No looking. Answers below.
     compile. Why is leaving it off the safer choice?
 17. What does `#[derive(Debug)]` buy you that you would miss immediately in a
     test?
+18. Question 5 said this does not compile. Why does *this* compile, then?
+    ```rust
+    self.fill(&mut field.op_fodder, true, true, indent);
+    if let Some(expr3) = field.expr3.as_deref_mut() { self.visit(expr3, indent, true); }
+    ```
+19. `fn fill(&mut self, fodder: &mut Fodder)` — that is two `&mut` in one
+    signature. Why is it not a borrow error at the call site?
+20. What is the difference between a method and an associated function, and
+    what does the choice tell a reader about `FixIndentation::align`?
+21. You have a `&mut Option<Box<Node>>` and you want an `Option<&mut Node>`.
+    Which method? What would `as_mut()` have given you instead?
+22. Rewrite this Go as one Rust expression:
+    ```go
+    x := fallback
+    if p != nil { x = f(p) }
+    ```
+23. Phase 2d wrote 141 test cases by hand before writing the code they test,
+    and that was correct. It also wrote one expected *answer* by hand, and
+    that was wrong. What is the rule?
+24. A test wants to check that a pass put a newline in the right places. Why
+    might asserting on the formatted text be the worse choice than asserting
+    on the tree?
 
 ---
 
@@ -563,6 +758,34 @@ No looking. Answers below.
     fails to compile.
 17. Printing with `{:?}` — which is what `assert_eq!` uses to show you the two
     values when it fails. Without `Debug` the assertion does not compile.
+18. Because the borrow checker tracks **places**, not values.
+    `field.op_fodder` and `field.expr3` are different paths, so borrowing one
+    says nothing about the other. Question 5's version borrowed `field`
+    *itself* twice, which is one place — hence the destructuring.
+19. Because `self` and `fodder` are unrelated values. `self` is the pass,
+    holding a column counter; `fodder` is part of the syntax tree. A pass
+    feels like it is "inside" the tree it walks, but it is a separate object
+    holding a cursor.
+20. A method takes a `self` receiver and is called `x.f()`; an associated
+    function takes none and is called `Type::f()`. `align` being an
+    associated function says it cannot read any configuration — and that is
+    true of the algorithm: its reset branch returns the old indent unchanged,
+    so it never consults the indent width. `clippy::unused_self` enforces the
+    honesty.
+21. `as_deref_mut()`. `as_mut()` would give `Option<&mut Box<Node>>` — one
+    indirection too many, because it peels the `Option` but not the `Box`.
+22. `let x = p.as_deref().map_or(fallback, |p| f(p));` — and the win over the
+    Go is that it is an expression, so `x` cannot be read before it is set.
+23. **Inputs by hand, answers from an oracle.** Deciding *what* to test is
+    judgement and a person is good at it; predicting what a reference
+    implementation does is recall and this project has measured itself
+    unreliable at it — 2 of 16 hand-derived expectations were wrong, both
+    about fodder the model composes rather than reads.
+24. Because the text depends on how the *lexer* composed the fodder, which is
+    a separate question you would then also be guessing at — and on passes
+    that may not be written yet. Asserting the pass's own postcondition
+    ("does this slot now start on a fresh line?") needs neither. When you
+    cannot generate the answer, assert the property rather than the output.
 
 ---
 
@@ -580,3 +803,12 @@ No looking. Answers below.
   17 questions. The §1 table of implemented passes is left as it was, per the
   append-don't-rewrite rule; `crates/rtk-jsonnetfmt/src/passes/mod.rs` is the
   current list.
+- **2026-09-16** — Phase 2d (`EnforceMaxBlankLines`, `FixNewlines`,
+  `FixIndentation`, and the two four-line pipeline steps). Added §13 disjoint
+  field borrows — which is the proper answer to the question §4 and quiz Q5
+  left half-told — §14 why `&mut self` and `&mut arg` coexist, §15 methods
+  against associated functions and what `align` not taking `self` tells you,
+  §16 `Option<Box<T>>` and the `as_deref` family with `map_or`, and §17 the
+  inputs-by-hand / answers-from-an-oracle rule and its consequence for what a
+  test should assert. Quiz: 24 questions. §1's table of implemented passes is
+  again left as it was, per the append-don't-rewrite rule.

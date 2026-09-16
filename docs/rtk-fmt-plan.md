@@ -45,8 +45,10 @@ loop at all, which is a useful correctness signal (see
 [Phase 2](#phase-2--the-formatter-port)).
 
 > **Correction, from Phase 2c.** This paragraph used to say jsonnetfmt *is* a
-> fixed point. It is not — `a['foo']` formats to `a['foo']` and then to
-> `a.foo`, confirmed against `tk fmt`. The asymmetry is still real and still
+> fixed point. It is not — an index whose field name is written with a `\u`
+> escape formats to the unescaped spelling and then to a dotted index (the
+> counterexample is spelled out under [Phase 2](#phase-2--the-formatter-port)),
+> confirmed against `tk fmt`. The asymmetry is still real and still
 > the reason not to add a convergence loop here, but it is about `Format`
 > having no loop rather than about it not needing one. Phase 2's exit criterion
 > carries the counterexample and what replaces the property.
@@ -327,8 +329,14 @@ go-jsonnet's shape.
 | `PrettyFieldNames` | `src/passes/pretty_field_names.rs` | the pass oracle, and 2 corpus files |
 | `EnforceStringStyle` | `src/passes/enforce_string_style.rs` | the pass oracle, and 3 corpus files |
 | `EnforceCommentStyle` | `src/passes/enforce_comment_style.rs` | the pass oracle, and **no** corpus file |
+| `EnforceMaxBlankLines` | `src/passes/enforce_max_blank_lines.rs` | the pass oracle, and **no** corpus file |
+| `FixNewlines` | `src/passes/fix_newlines.rs` | the pass oracle, and 1 corpus file |
+| `FixIndentation` | `src/fix_indentation.rs` — **not** a pass | the pass oracle, and 9 corpus files |
+| `removeInitialNewlines` | `ast::Node::remove_initial_newlines` | the corpus only; see 2d |
+| `removeExtraTrailingNewlines` | `fodder::Fodder::remove_extra_trailing_newlines` | the corpus only; see 2d |
 | pass oracle | `testdata/pass-oracle.json` | `make update-fmt-pass-oracle` |
 | pass snippets | `testdata/pass-snippets.json` | the same target |
+| idempotence | `tests/corpus.rs` | the goldens, formatted twice |
 
 ### 2a is done
 
@@ -689,6 +697,102 @@ having written those four unit tests in 2b before any pass needed them.
 `removeExtraTrailingNewlines`, then `FixIndentation`. `FixIndentation` is the
 single largest and hardest pass — it reasons about continuation lines and is
 where near-misses will cluster. Budget accordingly.
+
+### 2d is done
+
+The corpus stands at **134 of 138**, up from 124, and the four that remain are
+`RemovePlusObject` (2e) on three files and `SortImports` (2f) on one. Nothing
+2d-shaped is left in it.
+
+**The prediction was 134 and the measurement was 134** — the first exact one in
+this sequence, after 2b under-counted and 2c predicted 123 for a measured 124.
+It was exact because it was derived by querying `pass-oracle.json` per file and
+per pass, which is what both earlier phases were told to do and did not.
+
+#### The split between 2d's two halves is the whole case for the snippets
+
+The three small steps moved the corpus by **zero**. `FixIndentation` moved it
+by ten. So four of the five things this phase landed are invisible to the
+breadth corpus, and one of them — `EnforceMaxBlankLines` — was graded by
+*nothing at all* beforehand: 0 of 138 corpus files and 0 of the 113 snippets
+then in the file, for the structural reason 2c generalised. A `tk fmt`-clean
+file has no run of three blank lines in it by definition.
+
+141 snippets were written before a line of pass code, taking
+`testdata/pass-snippets.json` from 113 to 254. All three passes then matched
+go-jsonnet node for node and slot for slot on every snippet and all 138 corpus
+files, on the first compile — as the lexer, the node dumper and the 2b passes
+each had. `FixIndentation` is 812 lines of Go and went green first time; that
+is what an oracle buys.
+
+#### The oracle is a lower bound on the work, not a sufficient set
+
+The new lesson, and a refinement of 2b's and 2c's rather than a repeat.
+`pass-oracle.json` says exactly which passes change a file's AST. It does not
+say which passes a file *needs*.
+
+`test_fixtures/golden_envs/yaml_line_wrapping_env/main.jsonnet` is the only
+corpus file the oracle attributes to `FixNewlines`, and landing `FixNewlines`
+did not flip it — it took `FixIndentation` too, because `FixNewlines` only
+inserts bare `LineEnd(0, 0)`s and something then has to indent them. The count
+holding at 124 through the first half of the phase was therefore correct.
+Predict with the oracle, but read the union of passes a file might need, not
+the one the oracle names.
+
+#### Decision: the two unexported functions are not dumped
+
+The plan left it to 2d whether to reach `removeInitialNewlines` and
+`removeExtraTrailingNewlines` by making `_staged/passdump.go` a `_test.go`
+inside `internal/formatter`. **It was decided against**, and the reasoning is
+recorded because a later phase may want to revisit it.
+
+Both are four lines, and both are a slice truncation and a field assignment —
+neither *composes* fodder, which is the one category this project has measured
+itself unreliable at deriving by hand (14 of 16, and both misses composed). The
+conversion means renaming packages and dropping the dumper's CLI, churning a
+working oracle to grade eight lines the corpus already covers end to end. They
+live as inherent methods on the types they mutate, with unit tests, and their
+*position* in the pipeline is documented as the load-bearing part.
+
+There is a better route than the `_test.go`, and it is worth knowing about:
+`testdata/generate/main.go` already calls the **public** `formatter.Format`, so
+a snippets mode there would give authoritative whole-pipeline answers for
+arbitrary hand-written input with no staged checkout at all. What it would need
+is a ratchet, since a whole-pipeline answer is only reproducible once the
+pipeline is complete.
+
+#### One finding that was a wrong test before it was a note
+
+`removeExtraTrailingNewlines` can only ever fire on a file that **ends in a
+comment**. The lexer's main loop measures a whitespace run and then tests for
+end of input, breaking before it adds the line end, so trailing newlines never
+become fodder: a file of `1` and four newlines has empty final fodder. The only
+route to blanks at end of file is a comment's own element, whose blanks
+`lex_until_newline` measures while a following token is still in prospect.
+
+A unit test asserting the opposite was the only failure in the phase, and it
+failed for the right reason — it was a hand-derived claim about *composed*
+fodder, which is exactly the category the standing rule says not to write by
+hand.
+
+#### Idempotence is now tested
+
+`tests/corpus.rs` formats each of the 138 goldens a second time and requires no
+movement, with an **empty** allow-list beside it. The plan asks for this per
+step and 2d is the step to ask it of, since `FixIndentation` and `FixNewlines`
+are the two passes that could plausibly fail to settle. A failure is a bug in
+one of them until it is traced to a specific cross-pass interaction in
+`FormatNode`'s order — see the Phase 2 correction below for the one that is
+already known, and for why a convergence loop is not the answer.
+
+#### Five upstream shapes and one upstream bug
+
+`FixIndentation`'s module documentation carries the full account. The bug is in
+`specs`: the conditions loop computes its indent from `openFodder(spec.Expr)`
+and then calls `Visit(spec.Expr)` — the `for` expression, not `cond.Expr`. So a
+comprehension's `for` expression is indented twice at two different columns and
+the second answer wins, while the `if` condition is never indented at all. Two
+snippets pin it from either side.
 
 **2e — semantics-affecting.** `FixParens`, `RemovePlusObject`. Graded by the
 Phase 0 unit tests. A bug here is a correctness bug, not a cosmetic one.

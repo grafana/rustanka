@@ -81,7 +81,23 @@ reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
 #
 # Phase 2c removed none either, and could not: not one of the nine inputs
 # contains a string literal or a comment. Its progress is in
-# `corpus-baseline.toml` (120 -> 123) and in `tests/pass_parity.rs`.
+# `corpus-baseline.toml` (120 -> 124) and in `tests/pass_parity.rs`. (This line
+# read "120 -> 123" until Phase 2d: 123 was 2c's *prediction* and 124 was what
+# it measured, which is the discrepancy `corpus-baseline.toml` explains at
+# length. The predicted number should not have been the one written down here.)
+#
+# Phase 2d removes none, and this is the last phase that can say so for a
+# boring reason. `EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation` and
+# the two non-pass steps have nothing to do with inserting a `+` or a paren:
+# the nine inputs are each a single line with no comment, no blank line and no
+# indentation to fix, so every one of them is already a fixed point of
+# everything 2d added. Its progress is in `corpus-baseline.toml` (124 -> 134)
+# and in `tests/pass_parity.rs`.
+#
+# **Phase 2e should empty this file.** All nine entries name `FixParens` or
+# `AddPlusObject`, which is exactly what 2e implements, and nothing else is
+# listed. If an entry survives 2e it is a divergence and needs a documented
+# `CLAUDE.md` entry rather than a line here.
 #
 # One fixture outside this list does flip, though it is only graded when
 # `GO_JSONNET_FOR_TESTS` is set: `go_jsonnet/empty_comment` is `#` above an
