@@ -76,7 +76,27 @@
 # What measures the passes is testdata/pass-snippets.json through
 # `make update-fmt-pass-oracle`; see docs/rtk-fmt-plan.md, Phase 2b.
 #
-# A drop below 120 means a pass or the round trip broke a file that used to
+# Phase 2c took it to 123, and this is the first time the arithmetic is
+# entirely legible. `EnforceStringStyle` fixes exactly the three files whose
+# only remaining difference from their golden was the quote character:
+#
+#   * tests/suite/rounding.jsonnet — nine double-quoted format strings
+#   * tests/suite/sjsonnet_issue_127.jsonnet — three more
+#   * tests/golden/issue195.jsonnet — `{ "false": "x" in super }`, which is
+#     also the case that says the keyword rule survives: PrettyFieldNames
+#     leaves the field name quoted and this pass only changes which quote
+#
+# Two more files the pass genuinely changes stay red, and they are the reason
+# the warning above is worth keeping: tests/golden/builtin_strings_string.jsonnet
+# and tests/suite/std_param_names.jsonnet are both tab-indented, so they also
+# need FixIndentation and the quote fix is masked in the byte comparison.
+#
+# `EnforceCommentStyle` contributes **nothing** here, and cannot: it changes no
+# corpus cell at all, because a `#` comment in a `tk fmt`-clean file has
+# already been rewritten to `//`. It is graded only by the snippets, which is
+# what Phase 2c added 57 more of them for.
+#
+# A drop below 123 means a pass or the round trip broke a file that used to
 # pass, and the test prints which. Expect this to reach 138 when the passes are
 # finished.
-matching = 120
+matching = 123

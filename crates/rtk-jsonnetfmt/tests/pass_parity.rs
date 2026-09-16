@@ -14,6 +14,10 @@
 //! `FixTrailingCommas` and `NoRedundantSliceColon` are unconditional, so no
 //! option setting makes their effect observable on its own.
 //!
+//! Phase 2c is the same story with the numbers even further apart. Over the
+//! 138 corpus files `EnforceStringStyle` changes **6** and
+//! `EnforceCommentStyle` will change **none at all**.
+//!
 //! So `make update-fmt-pass-oracle` stages a dumper into a go-jsonnet checkout
 //! — `internal/formatter` can only be imported from inside that module — and
 //! records what each pass does to each source. This test replays that here.
@@ -51,11 +55,12 @@ use std::{collections::BTreeMap, fs};
 
 use astdump::{DumpEntry, Entry, Snippet, compare, dump, read_oracle, repo_root, report};
 use rtk_jsonnetfmt::{
+	Options,
 	ast::Node,
 	fodder::Fodder,
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
-	passes::{FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames},
+	passes::{EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames},
 };
 use serde::Deserialize;
 
@@ -96,14 +101,26 @@ const IMPLEMENTED: &[&str] = &[
 	"FixTrailingCommas",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
+	"EnforceStringStyle",
 ];
 
 /// Run one named pass over a whole file, or report that rtk has not got it.
+///
+/// The pass that reads an option gets it from `Options::default`, because
+/// `_staged/passdump.go` constructs it with `iformatter.DefaultOptions()`.
+/// A pass is run unconditionally here, as it is there: `FormatNode`'s gates
+/// are [`rtk_jsonnetfmt::format`]'s business, and the corpus grades those.
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
+	let options = Options::default();
 	match name {
 		"FixTrailingCommas" => visit_file(&mut FixTrailingCommas, node, final_fodder),
 		"NoRedundantSliceColon" => visit_file(&mut NoRedundantSliceColon, node, final_fodder),
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
+		"EnforceStringStyle" => visit_file(
+			&mut EnforceStringStyle::new(options.string_style),
+			node,
+			final_fodder,
+		),
 		_ => return false,
 	}
 	true
