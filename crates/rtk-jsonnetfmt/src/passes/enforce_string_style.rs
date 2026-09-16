@@ -105,13 +105,18 @@ impl AstPass for EnforceStringStyle {
 			return;
 		}
 
-		let mut use_single = self.style == StringStyle::Single;
-		if num_single > 0 {
-			use_single = false;
-		}
-		if num_double > 0 {
-			use_single = true;
-		}
+		// Upstream writes this as an assignment from the option followed by two
+		// unconditional overrides. They collapse into one expression here
+		// because the branch above has already returned for the only input
+		// that could fire both — so at most one override applies, and the
+		// order they are written in cannot matter.
+		let use_single = if num_single > 0 {
+			false
+		} else if num_double > 0 {
+			true
+		} else {
+			self.style == StringStyle::Single
+		};
 
 		node.value = string_escape(&canonical, use_single);
 		node.kind = if use_single {
@@ -215,7 +220,10 @@ mod tests {
 		assert_eq!(restyle("@'it''s'"), "@'it''s'\n");
 		// The block early return is unconditional, so the quotes inside are
 		// never even counted.
-		assert_eq!(restyle("|||\n  it's \"x\"\n|||"), "|||\n  it's \"x\"\n|||\n");
+		assert_eq!(
+			restyle("|||\n  it's \"x\"\n|||"),
+			"|||\n  it's \"x\"\n|||\n"
+		);
 	}
 
 	#[test]
@@ -223,7 +231,10 @@ mod tests {
 		// The reason the pass overrides `literal_string`: `base::import`
 		// reaches this literal through that hook and not through `visit`, so
 		// overriding `visit` would miss every import in the file.
-		assert_eq!(restyle("import \"foo.libsonnet\""), "import 'foo.libsonnet'\n");
+		assert_eq!(
+			restyle("import \"foo.libsonnet\""),
+			"import 'foo.libsonnet'\n"
+		);
 		assert_eq!(restyle("importstr \"a.txt\""), "importstr 'a.txt'\n");
 		assert_eq!(restyle("importbin \"a.bin\""), "importbin 'a.bin'\n");
 	}

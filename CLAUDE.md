@@ -363,7 +363,7 @@ Two passes, and between them they hold most of what a reader would get wrong.
 overriding `Visit` would restyle every string in a file except the one in
 `import 'foo.libsonnet'`. It is also a full `StringUnescape`/`StringEscape`
 round trip, so it normalises more than the quote: `"a\/b"` becomes `'a/b'`,
-`"A"` becomes `'A'`, and `""` becomes `''` because
+`"\u0041"` becomes `'A'`, and `"\u009F"` becomes `'\u009f'` because
 `StringEscape` formats with `%04x`. The option is consulted once and then
 overridden by the text — a `'` in it forces double quotes and a `"` forces
 single — and a string containing **both** is returned on untouched, keeping the
@@ -387,6 +387,40 @@ appended to empty fodder, and it is that element which sets the flag.
 skips, so `tk fmt` leaves those comments as written: `{ a: 'b' # c` … `in
 super }` and `a. # c` … `b`. The same comment after `super.` *is* rewritten,
 because `base::super_index` visits `id_fodder` unconditionally.
+
+### `jsonnetfmt` is not a fixed point
+
+`docs/rtk-fmt-plan.md` assumed it was, and Phase 2c found a two-line
+counterexample:
+
+```
+a['fo\u006f']   ->   a['foo']   ->   a.foo
+```
+
+`PrettyFieldNames` (step 10) is asked whether `fo\u006f` is an identifier,
+because a fully escaped string keeps its escapes in its *stored* value. It sees
+a backslash and keeps the brackets. `EnforceStringStyle` (step 11) then
+unescapes it. So the output carries brackets justified by an escape that is no
+longer in it, and formatting that output again promotes the index.
+
+This is upstream's, not a port bug — each pass matches go-jsonnet in isolation
+and the order is `FormatNode`'s — and it is what `tk fmt` prints. Two
+consequences:
+
+- **Do not add a convergence loop.** `cmds/jrsonnet-fmt` needs `--conv-limit`
+  because the dprint formatter is not a fixed point; `rtk fmt` must not gain
+  one, or it turns `a['fo\u006f']` into `a.foo` in a single run and diverges
+  from `tk fmt` on the first escaped field lookup in a Grafana repo.
+- **Idempotence stays the default expectation.** A new non-convergence is a bug
+  until it is traced to a specific cross-pass interaction in upstream's order.
+
+How it surfaced is the reusable part: a Phase 2b unit test asserted that
+`format("a['fo\u006f']")` came back unchanged, and it passed for a whole phase
+because the pass that disproves it did not exist yet. **A whole-pipeline
+assertion written while the pipeline is half-built records the half-built
+answer.** Prefer asserting one pass's own effect — with the other passes'
+options set to `Leave` where that isolates them — and keep pipeline answers in
+tests that say so.
 
 ### The pass traversal
 
@@ -442,6 +476,15 @@ the snippets and is free: go-jsonnet's own
 `formatter/testdata/empty_comment.fmt.golden` is `#` above an empty object
 formatting to `//`, graded as the `go_jsonnet/empty_comment` fixture whenever
 `GO_JSONNET_FOR_TESTS` is set.
+
+The converse is just as wrong, and 2c made that mistake after being warned
+about this one: **an input-against-golden diff says what is different, never
+which pass does it.** `tests/suite/sjsonnet_issue_1029.jsonnet` is one line
+whose diff is dominated by `x*x` -> `x * x` and `[1,2,` -> `[1, 2,`, which the
+round trip fixes for free; the `error "3"` -> `error '3'` in the same line was
+read as part of that and the file was filed as already passing, which put the
+2c corpus prediction one file low. `pass-oracle.json` answers the question
+exactly, per file and per pass. Query it rather than reading a diff.
 
 One inference to avoid, because it was made here and was wrong: **a pass
 changing a file is not the same as that file's output changing.**

@@ -40,9 +40,16 @@ every file in a Grafana repo differently from `tk fmt`. It is not a shortcut; it
 is the failure mode.
 
 Related: the dprint formatter is not a one-pass fixed point, which is why
-`cmds/jrsonnet-fmt` needs `--conv-limit`. jsonnetfmt is, which is why
-`formatter.Format` has no convergence loop. That asymmetry is a useful
-correctness signal (see [Phase 2](#phase-2--the-formatter-port)).
+`cmds/jrsonnet-fmt` needs `--conv-limit`. `formatter.Format` has no convergence
+loop at all, which is a useful correctness signal (see
+[Phase 2](#phase-2--the-formatter-port)).
+
+> **Correction, from Phase 2c.** This paragraph used to say jsonnetfmt *is* a
+> fixed point. It is not — `a['foo']` formats to `a['foo']` and then to
+> `a.foo`, confirmed against `tk fmt`. The asymmetry is still real and still
+> the reason not to add a convergence loop here, but it is about `Format`
+> having no loop rather than about it not needing one. Phase 2's exit criterion
+> carries the counterexample and what replaces the property.
 
 ## Reference behaviour
 
@@ -550,18 +557,40 @@ escaping, and `#!` hashbang comments are always left alone.
 
 ### 2c is done
 
-The corpus stands at **123 of 138**, up from 120, and for the first time the
-arithmetic is entirely legible: `EnforceStringStyle` fixes exactly the three
-files whose only remaining difference from their golden was the quote character
-— `tests/suite/rounding.jsonnet`, `tests/suite/sjsonnet_issue_127.jsonnet` and
-`tests/golden/issue195.jsonnet`, that last one a `"false"` field name that has
-to *stay* quoted, so it is also what says the keyword rule survived. Two more
+The corpus stands at **124 of 138**, up from 120, and all four are
+`EnforceStringStyle`: `tests/suite/rounding.jsonnet`,
+`tests/suite/sjsonnet_issue_127.jsonnet`, `tests/golden/issue195.jsonnet` — a
+`"false"` field name that has to *stay* quoted, so it is also what says the
+keyword rule survived — and `tests/suite/sjsonnet_issue_1029.jsonnet`. Two more
 files the pass genuinely changes stay red because they are tab-indented and so
 also need `FixIndentation`: `tests/golden/builtin_strings_string.jsonnet` and
-`tests/suite/std_param_names.jsonnet`.
+`tests/suite/std_param_names.jsonnet`. Six changed cells, four files flipped,
+two masked.
 
 `EnforceCommentStyle` contributes **nothing** to that number, and cannot. Which
 is the whole story of this step.
+
+#### The count was predicted as 123 and measured as 124
+
+Worth recording, because it is the same mistake 2b made and it survived being
+warned about. `sjsonnet_issue_1029.jsonnet` is one line, and its diff against
+its golden is dominated by `x*x` → `x * x` and `[1,2,` → `[1, 2,` —
+horizontal whitespace, which the round trip fixes for free and which no pass
+touches. The `error "3"` → `error '3'` at the end of that same line was read as
+part of the same story, so the file was filed under "already passing".
+
+The general form: **an input-against-golden diff answers "what is different",
+never "which pass does it".** 2b learned that at the level of whole files —
+`FixTrailingCommas` changing a file whose output still differs — and this is
+the same error one level down, inside a single line. `pass-oracle.json` answers
+the question exactly, per file and per pass, and takes one query:
+
+```
+EnforceStringStyle: changes 6 of 138 corpus files
+EnforceCommentStyle: changes 0 of 138 corpus files
+```
+
+Read the oracle. Do not read the diff.
 
 #### The corpus grades one of these passes and not the other
 
@@ -598,9 +627,10 @@ consulted at all.
    pass changes a literal without changing its kind.
 3. **It is a round trip, so it normalises more than quotes.** `StringUnescape`
    then `StringEscape` drops an escape that was never needed (`"a\/b"` →
-   `'a/b'`), collapses an escape whose character needs none (`"A"` → `'A'`,
-   `"é"` → `'é'`), and re-spells one that does in upstream's own casing
-   (`""` → `''`, because `StringEscape` formats with `%04x`).
+   `'a/b'`), collapses an escape whose character needs none (`"\u0041"` → `'A'`,
+   `"\u00E9"` → `'é'`), and re-spells one that does in upstream's own
+   casing (`"\u009F"` → `'\u009f'`, because `StringEscape` formats with
+   `%04x`).
 4. **Three kinds are returned on unexamined**: `|||` blocks and both verbatim
    kinds. For the verbatim ones that is not cosmetic — the parser has already
    collapsed their doubled quotes, so restyling one would mean re-doubling
@@ -672,6 +702,47 @@ idempotence properties still hold.
 **Exit for the phase:** quarantine empty; `format(format(x)) == format(x)` for
 every fixture. A port that needs a second pass to converge has a bug in
 `FixIndentation` or `FixNewlines` — jsonnetfmt is a one-pass fixed point.
+
+> **Correction, from Phase 2c.** **`jsonnetfmt` is not a fixed point**, and the
+> counterexample is two lines of Jsonnet:
+>
+> ```
+> a['fo\u006f']   ->   a['foo']   ->   a.foo
+> ```
+>
+> `FormatNode` runs `PrettyFieldNames` at step 10 and `EnforceStringStyle` at
+> step 11. Step 10 is asked whether `fo\u006f` is an identifier — the *stored*
+> value of a fully escaped string keeps its escapes — finds a backslash, and
+> keeps the brackets. Step 11 then unescapes it to `foo`. So the output carries
+> brackets justified by an escape that is no longer in it, and formatting that
+> output promotes the index, because by then the value really is an identifier.
+>
+> Nothing here is a port bug. Each pass matches go-jsonnet in isolation on all
+> 113 snippets and all 138 corpus files, and the order is read off `FormatNode`;
+> the non-convergence is upstream's, and it is what `tk fmt` prints. Confirm
+> with `tk fmt -` twice over that input.
+>
+> So the exit criterion above is wrong as an unconditional property. What
+> replaces it: idempotence is required for every corpus file and fixture, and
+> **a new failure is a bug until it is traced to a specific cross-pass
+> interaction in upstream's order**, at which point it is recorded here and
+> excluded. The original reasoning — that a second convergence pass would
+> paper over a `FixIndentation` or `FixNewlines` bug — still holds, and is why
+> the default stays "this is a bug".
+>
+> It is also why `rtk fmt` must not gain a `--conv-limit` (see
+> [Why the existing formatter cannot be used](#why-the-existing-formatter-cannot-be-used)).
+> Iterating to convergence would turn `a['fo\u006f']` into `a.foo` in one run
+> and diverge from `tk fmt` on the first file in a Grafana repo that has an
+> escaped field lookup.
+>
+> How it surfaced is worth keeping too. A **Phase 2b unit test asserted the
+> wrong answer** — `pretty("a['fo\u006f']")` was expected to come back
+> unchanged — and it passed for a whole phase because the pass that proves it
+> wrong did not exist yet. A whole-pipeline assertion written while the
+> pipeline is half-built records the half-built answer. The test is now split:
+> the claim about *this pass* runs with `string_style: Leave`, and the pipeline
+> answer is its own test.
 
 ### Phase 3 — CLI
 
