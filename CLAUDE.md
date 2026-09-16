@@ -323,17 +323,19 @@ dropped before that object space during thread teardown.
 
 ## Formatting
 
-The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b, 2c, 2d and 2e have
-landed: the lexer, the AST, the parser, the unparser, the pass traversal,
-eleven of the twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon`,
-`PrettyFieldNames`, `EnforceStringStyle`, `EnforceCommentStyle`,
-`EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation`, `FixParens`,
-`RemovePlusObject`, `AddPlusObject` — and all three of `FormatNode`'s non-pass
-steps. **One does not exist yet**: `SortImports` (Phase 2f), so a file whose
-top-of-file import group is out of order comes back unformatted. The corpus
-stands at 137 of 138 and the one that remains is exactly that pass's file.
-`quarantine.toml` is **empty**, and an entry appearing in it again is a
-divergence needing an entry here rather than a line there.
+The plan is `docs/rtk-fmt-plan.md`. **Phase 2 is complete.** Phases 0, 1, 2a,
+2b, 2c, 2d, 2e and 2f have landed: the lexer, the AST, the parser, the
+unparser, the pass traversal, all twelve passes — `FixTrailingCommas`,
+`NoRedundantSliceColon`, `PrettyFieldNames`, `EnforceStringStyle`,
+`EnforceCommentStyle`, `EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation`,
+`FixParens`, `RemovePlusObject`, `AddPlusObject`, `SortImports` — and all three
+of `FormatNode`'s non-pass steps. The corpus stands at **138 of 138**,
+`quarantine.toml` is **empty**, and `tests/corpus.rs`'s idempotence allow-list
+is **empty**. An entry appearing in the quarantine again is a divergence
+needing an entry here rather than a line there.
+
+What is left is Phase 3, the CLI. `cmds/rtk/src/commands/fmt.rs` still
+`bail!`s, so nothing calls the library in anger yet.
 
 `crates/jrsonnet-formatter` is **not** tk-compatible and `cmds/jrsonnet-fmt` is
 not either. That crate is upstream's dprint-based, width-driven pretty-printer,
@@ -346,12 +348,120 @@ Both are left untouched so upstream jrsonnet syncs against
 `.jrsonnet-upstream-base` stay clean.
 
 `rtk fmt` lives in `crates/rtk-jsonnetfmt` instead. `rtk_jsonnetfmt::format`
-runs `FormatNode`'s pipeline with the one unwritten pass missing from it; the
-doc comment on `format` carries the full fourteen-step order with each step's
-state, read off upstream rather than inferred. A file needing that pass comes
-back unformatted. The refusal is already real, though — a file that does not
-parse fails with go-jsonnet's message, which is what `tk fmt` prints before
-aborting the run.
+runs all fourteen steps of `FormatNode`; the doc comment on `format` carries
+the order, read off upstream rather than inferred. A file that does not parse
+fails with go-jsonnet's message, which is what `tk fmt` prints before aborting
+the run.
+
+### `SortImports`, and the sort underneath it
+
+Step 1, `crates/rtk-jsonnetfmt/src/sort_imports.rs`. Not in `src/passes/`,
+because upstream's is a free function that touches nothing in `internal/pass`
+and **rebuilds the top of the tree** rather than visiting it: `buildGroupAST`
+constructs a fresh chain of `Local` nodes from the end backwards, one bind
+each. So `local a = import 'x', b = import 'y';` always comes out as two
+nested single-bind locals, whether or not anything was reordered, and every
+rebuilt local **loses its location** — Go builds them with
+`ast.NodeBase{Fodder: fodder}` and nothing observable reads a location.
+
+Its entry point is `ast::Node::sort_imports`, a method on the type it
+transforms, as step 2's `remove_initial_newlines` already is.
+
+Six things about it are load-bearing and each is pinned by a snippet:
+
+- **The sort key is the *stored* value of the string literal.** `SortImports`
+  is step 1 and `EnforceStringStyle` is step 11, so a path written
+  `'a'` sorts as six characters beginning with a backslash (0x5C), ahead
+  of `'_x'` (0x5F) — where the character it denotes, `a` (0x61), would sort
+  behind. Same seam as 2c's non-convergence. Comparison is bytewise in both
+  languages, so that part ports directly.
+- **`duplicatedVariables` keys on the bind *variable*, not the path**, and one
+  duplicate disables sorting for the whole group. The only route is shadowing
+  across locals in one group: two binds of a single local sharing a name are
+  refused by the parser with "Duplicate local var" before the formatter sees
+  the tree.
+- **`isGoodLocal` requires *every* bind to be a plain `import` with no `Fun`.**
+  `importstr` and `importbin` fail it, because Go asserts `*ast.Import`
+  specifically. A local that fails it is not the root of a sortable chain at
+  all, so one bad bind at the top of a file leaves every import below it
+  untouched.
+- **`groupEndsAfter` is narrower than its own doc comment.** A non-interstitial
+  element sets a flag and the *next* element ends the group, while any element
+  with `Blanks > 0` ends it immediately. So a bare `LineEnd` **continues** the
+  group; a `LineEnd` then a `Paragraph` ends it, which is how a comment on its
+  own line separates two groups with no blank line; and a `//` comment
+  trailing a `;` does *not* separate them, because a comment on a line that is
+  not fresh is a `LineEnd` **carrying** a comment. Empty fodder ends nothing
+  either, so `local b = …;local a = …;` is one group and its newlines are
+  invented by `FodderEnsureCleanNewline`.
+- **Fodder travels with the import in front of it.** Each element keeps the
+  fodder that *follows* it and `buildGroupAST` puts element `i-1`'s in front of
+  element `i`, so a trailing comment moves with the line it was written on and
+  the last element's becomes the fodder before the body.
+- **`splitFodder` is asymmetric.** The first half is a plain push and the
+  second goes through `FodderAppend`, which is what inserts a synthetic
+  `LineEnd` in front of a `Paragraph` landing first in an empty second half.
+  Blanks are *moved* rather than divided: zeroed on the first half's last
+  element and carried by a **fresh** `LineEnd` at the front of the second. So
+  the halves concatenate back to something equivalent to the original, not
+  equal to it.
+
+**All three of upstream's panics are unreachable, and all three are
+reproduced.** `"beforeNext should still be empty."` cannot fire because the
+second half is only appended to once the flag is already set and the flip
+happens after that append. `"Expected beforeNextFodder to be empty"` cannot
+fire because everything that makes the second half non-empty also makes
+`groupEndsAfter` true, over the same fodder. `"topLevelImport called with bad
+local."` is not even expressible here — `Group::absorb` takes an owned `Local`
+the caller could only have got by testing first. No cell of either oracle
+records a panic, over 138 files and 437 snippets.
+
+### `sort.Slice` is ported, because sorting has more than one right answer
+
+`crates/rtk-jsonnetfmt/src/go_sort.rs` is a port of Go's `sort.Slice` —
+pdqsort, from `sort/zsortfunc.go`. It is the **third deliberate Go-library
+port** here, alongside `rtk-gobwas-glob` and `rtk-masterminds`, and it is here
+for the same kind of reason: a Rust crate that does the job well but not
+identically is unusable when identical is the contract.
+
+Two imports can share a path — `local k = import 'k.libsonnet', kausal =
+import 'k.libsonnet';` is an ordinary habit — and "sorted" does not say which
+comes first. `sort.Slice` is documented as unstable, and the pass oracle
+measured what that costs: **ties invert from n = 13 upwards.** A group of
+thirteen whose first and last element share a key comes back with the last one
+first; a run of three sharing a key comes back `i09 i01 i04`. `Vec::sort_by`
+is therefore measurably wrong, and `sort_unstable_by` is a different pdqsort
+with different pivot choices and is wrong differently.
+
+Three details worth having before touching it:
+
+- **`maxInsertion` is 12 tested with `<=`**, so twelve is the *last* size that
+  leaves insertion sort, not the first that does not. Reading the constant as
+  a strict bound puts the boundary one out, and n = 12 then looks like
+  evidence of stability when it is only insertion sort.
+- **An all-equal range keeps its order at every length**, because
+  `partitionEqual` handles it. That is why every `ties_*_all_equal` snippet is
+  a no-op while the mixed arrangements are not — an all-equal group is not
+  evidence that the sort is stable.
+- **`partialInsertionSort`'s left shift is bounded by the literal `1`, not by
+  `a`**, so on a recursive call it can walk below the range it was given.
+  Upstream's; reproduced.
+
+The honest caveat: this tie order is an implementation detail of the Go
+toolchain that built `tk`, not a promise. It has been pdqsort since Go 1.19,
+`make update-go-sort-truth-table` records the Go version in the table, and a
+future Go that reorders ties would move `tk fmt`'s output and not rtk's. That
+is a reason to keep the table regenerable, not a reason to sort differently —
+there is no third answer more correct than the one `tk` prints.
+
+Graded by `testdata/go-sort-truth-table.json`: ten input shapes at forty
+lengths, 410 cases of which 235 have tied keys, generated by the standard
+library itself. That is also the only thing that reaches the heapsort fallback
+and `breakPatterns`, which need `bits.Len(n)` consecutive bad partitions and
+one respectively — no import group gets near either. The table records the
+permutation only, over integer keys; string comparison is graded through the
+real comparator by the `sort_imports/case_is_bytewise` and
+`sort_imports/punctuation_sorts_before_letters` snippets.
 
 Step 7 is one `if` with two branches and not two steps. `Options::default` has
 `use_implicit_plus` on, so **`tk fmt` runs `RemovePlusObject` and never runs
@@ -464,9 +574,15 @@ it is graded by the oracle rather than by a reading of the source.
 
 It reaches nothing in practice: `tk fmt` never runs `AddPlusObject`.
 
-### Three of the fourteen steps are not passes
+### Four of the fourteen steps are not passes
 
 Worth knowing before looking for one of them in `src/passes/`.
+
+`SortImports` (step 1) is a free function over the whole file that rebuilds the
+top of the tree rather than visiting it, so `src/pass.rs` does not apply to it
+at all. It lives in `src/sort_imports.rs` with its entry point as
+`ast::Node::sort_imports`; it *is* reachable by the pass oracle, because
+`SortImports` is exported. See the section above.
 
 `removeInitialNewlines` (step 2) and `removeExtraTrailingNewlines` (step 14)
 are unexported four-line functions in `jsonnetfmt.go`, so **the staged pass
@@ -535,6 +651,15 @@ movement. The allow-list beside it is **empty**: a failure is a bug in
 interaction in `FormatNode`'s order, at which point it earns an entry here and
 an exclusion by name. Do not add a convergence loop — see the non-fixed-point
 note below for why that would diverge from `tk fmt` outright.
+
+**Phase 2f is the other phase that could plausibly have broken it**, and for a
+reason no earlier pass had: `SortImports` is the only step that moves fodder
+*between different nodes*, so a second run sees a tree whose comments and blank
+lines are attached to different imports than the first run did. It did not
+break. The reason is that its output is a fixed point of itself by
+construction — every seam has already been through
+`FodderEnsureCleanNewline`, so `splitFodder` divides it the same way the second
+time, and a sorted group re-sorts to itself. The allow-list is still empty.
 
 Phase 2e is the phase that could most plausibly have broken this — `FixParens`
 and the plus-object passes rewrite node structure rather than fodder, and
@@ -625,8 +750,9 @@ tests that say so.
 ### The pass traversal
 
 `src/pass.rs` ports `internal/pass/pass.go`, and ten of the twelve passes are
-an override of one or two of its methods, so its shape decides theirs. Two
-things to know before writing a pass:
+an override of one or two of its methods, so its shape decides theirs. The
+other two are `FixIndentation`, which has its own walk, and `SortImports`,
+which is not a visitor at all. Two things to know before writing a pass:
 
 - **Go's `p ASTPass` first parameter is gone**, because a Rust trait with
   provided methods already dispatches to the outer pass — that parameter is Go
@@ -671,6 +797,15 @@ the rest are unconditional in `FormatNode`.
 So **write the snippets before the pass**, every time. `FixIndentation` is the
 pass the plan calls hardest and it gets nine corpus cells; `EnforceCommentStyle`
 gets none.
+
+Phase 2f is the case where this stopped being a coverage argument and started
+changing an answer. `SortImports` had **1 corpus cell and 0 of 361 snippets**
+going in. 76 snippets went in before a line of the pass, and fifteen of them
+exist only to ask what `sort.Slice` does with tied keys — which is how the
+decision to port Go's pdqsort instead of calling `sort_by` was reached. The one
+corpus file is a plain reversal of fourteen distinct paths; it could not have
+raised the question, let alone answered it. **A snippet set is also how you
+find out what you do not know yet.**
 
 Phase 2c is the sharpest case of this and generalises the reason. A `#` comment
 in a file that is already `tk fmt`-clean has by definition already been

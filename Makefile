@@ -1,4 +1,4 @@
-.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures update-glob-truth-table check-glob-truth-table update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle
+.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures update-glob-truth-table check-glob-truth-table update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle update-go-sort-truth-table check-go-sort-truth-table
 
 .DEFAULT_GOAL := help
 
@@ -26,6 +26,8 @@ help:
 	@echo "  update-fmt-lexer-oracle - Regenerate the go-jsonnet token/fodder oracle (requires Go)"
 	@echo "  update-fmt-node-oracle - Regenerate the go-jsonnet AST/fodder-slot oracle (requires Go)"
 	@echo "  update-fmt-pass-oracle - Regenerate the go-jsonnet per-pass AST oracle (requires Go)"
+	@echo "  update-go-sort-truth-table - Regenerate the Go sort.Slice permutation table (requires Go)"
+	@echo "  check-go-sort-truth-table - Check the sort.Slice table is up to date (requires Go)"
 
 target/release/jrsonnet:
 	@cargo build --release -p jrsonnet
@@ -269,6 +271,40 @@ update-fmt-pass-oracle:
 			$(CURDIR)/$(FMT_PASS_SNIPPET_ORACLE) ); \
 	rm -rf "$$staged"
 	@echo "Wrote $(FMT_PASS_ORACLE) and $(FMT_PASS_SNIPPET_ORACLE)."
+
+# The truth table crates/rtk-jsonnetfmt/src/go_sort.rs is graded against: the
+# permutation Go's own `sort.Slice` produces.
+#
+# `SortImports` sorts imports by a key two of them can share, and `sort.Slice`
+# is documented as *not* stable — so which of two equal-path imports comes
+# first is decided by pdqsort's pivot choices, and the pass oracle measured
+# that it inverts ties from n = 13 upwards. Neither `sort_by` nor
+# `sort_unstable_by` gives that answer, hence a port; and a permutation
+# produced by pdqsort is the least plausible thing in this repository to
+# derive by hand, hence a table.
+#
+# Needs no staged checkout and no dependency: `sort` is an ordinary
+# standard-library package, so this is a plain program in the generate module.
+# The table records the Go version that produced it, because that is what
+# would have to change for the answers to move.
+GO_SORT_TRUTH_TABLE := crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json
+
+update-go-sort-truth-table:
+	@echo "Regenerating $(GO_SORT_TRUTH_TABLE) with Go's sort.Slice..."
+	@cd $(FMT_GENERATE_DIR) && go run ./sortdump $(CURDIR)/$(GO_SORT_TRUTH_TABLE)
+	@echo "Truth table regenerated. Review the diff before committing: a change"
+	@echo "to goVersion together with changed permutations means tk fmt's output"
+	@echo "has moved and src/go_sort.rs needs revisiting."
+
+check-go-sort-truth-table:
+	@test -f $(GO_SORT_TRUTH_TABLE) || { \
+		echo "$(GO_SORT_TRUTH_TABLE) is missing; run 'make update-go-sort-truth-table' (requires Go)"; \
+		exit 1; \
+	}
+	@tmp=$$(mktemp) && \
+		(cd $(FMT_GENERATE_DIR) && go run ./sortdump $$tmp) && \
+		diff -u $(GO_SORT_TRUTH_TABLE) $$tmp && rm -f $$tmp
+	@echo "Truth table is up to date."
 
 check-glob-truth-table:
 	@test -f $(GLOB_TRUTH_TABLE) || { \

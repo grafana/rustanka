@@ -806,6 +806,110 @@ descriptor was never set". Those need different tests.
 
 ---
 
+## 20. Rebuilding a linked structure you own, back to front
+
+Phase 2f's pass, `SortImports`, is the first one that does not edit the tree at
+all — it **throws a piece of it away and builds a new one**. Given
+
+```
+local b = import 'b';
+local a = import 'a';
+1
+```
+
+it produces a fresh chain: a `Local` holding `a`, whose body is a `Local`
+holding `b`, whose body is the `1`. Go does this in four lines, because Go is
+moving pointers and does not mind that the thing it is reading from is also the
+thing it is writing to.
+
+The Rust problem is not the recursion. It is that **each new node needs a piece
+of the element next to it**, and you are consuming the elements as you go.
+Every import carries the fodder — the comments and blank lines — that followed
+it in the source, and the rebuild puts element `i - 1`'s fodder in *front* of
+element `i`. So while you are building the node for element 5, you need to take
+something out of element 4.
+
+The obvious shape does not work:
+
+```rust
+// Does not compile.
+for i in (0..elems.len()).rev() {
+    let fodder = elems[i - 1].adjacent_fodder;   // cannot move out of an index
+    body = Node::new(fodder, Local { bind: elems[i].bind, body: Box::new(body) });
+}
+```
+
+Indexing gives you a *borrow* of the vector's element, and §18's rule applies:
+you cannot move a field out of a borrow. You could clone the fodder, or leave
+placeholders behind with `std::mem::take`, and both work. But there is a shape
+that needs neither, and it is worth knowing because it comes up whenever you
+consume a sequence pairwise:
+
+```rust
+while let Some(elem) = self.0.pop() {
+    let fodder = match self.0.last_mut() {
+        Some(previous) => std::mem::take(&mut previous.adjacent_fodder),
+        None => std::mem::take(&mut group_open_fodder),
+    };
+    body = Node::new(fodder, /* … */ Local { binds: vec![elem.bind], body: Box::new(body) });
+}
+```
+
+`Vec::pop` hands you the last element **by value** — the vector is now one
+shorter and has no claim on it, so `elem.bind` moves freely. And because you
+are walking backwards, the element you need to read from is now exactly
+`last_mut()`: the new last. You take its fodder, and on the next iteration you
+pop that same element, so nothing is left half-emptied that anyone will look at
+again.
+
+Three things to take from this:
+
+1. **`pop` is the move-friendly end of a `Vec`.** `v[i]` borrows, `v.pop()`
+   owns. If an algorithm can be written to consume from the back, ownership
+   stops being a fight. (`Vec::drain` and `into_iter` are the other two ways
+   out.)
+2. **Walking backwards can be an ownership decision, not just an algorithmic
+   one.** Go walks backwards here because it is building a linked list and
+   needs the tail first. Rust wants to walk backwards for a second, unrelated
+   reason: the neighbour it needs to read is the one it is about to consume.
+   The two reasons happen to agree, which is luck, but noticing *why* it works
+   is what lets you find the shape next time they do not.
+3. **`std::mem::take` on a field of something that is about to be dropped is
+   free and honest.** It is not a hack to dodge the borrow checker; it is a
+   statement that this fodder now lives somewhere else. `Fodder` implements
+   `Default`, so `take` leaves an empty one — and an empty fodder is a
+   perfectly valid fodder, exactly as §18's `LiteralNull` is a perfectly valid
+   `NodeKind`.
+
+There is a fourth thing, which is about recursion rather than ownership.
+`SortImports` recurses twice for different reasons and the two have different
+shapes:
+
+```rust
+fn absorb(mut self, local: Local, group_open_fodder: Fodder) -> Node {
+    // … accumulate this local's imports into `self` …
+    if !body.ends_an_import_group() {
+        return self.absorb(next, group_open_fodder);   // same group, carried on
+    }
+    // …
+    let body_after_group = if body.is_import_group_local() {
+        Group::new().absorb(next, next_open_fodder)    // a NEW group
+    } else { /* … */ };
+    self.build(body_after_group, group_open_fodder)
+}
+```
+
+The method takes `self` **by value**, not `&mut self`. That is what makes the
+first branch a clean tail call: the group is handed onward and this frame has
+no further claim on it. Had it been `&mut self`, the recursive call would
+borrow `self` for the duration and the `return` would be fine but
+`self.build(...)` at the end — which *consumes* the group — would not compile.
+Taking `self` by value in a recursive method is the Rust way of saying "this
+frame is done with it either way": either it is passed on, or it is consumed
+here.
+
+---
+
 ## Quiz
 
 No looking. Answers below.
@@ -879,6 +983,15 @@ No looking. Answers below.
     it? Name *two* reasons, not one.
 28. `AddPlusObject` restates five of `pass::base`'s traversals by hand instead
     of calling them. Why is it forced to, and what is the risk that creates?
+29. You are consuming a `Vec` back to front, and each element needs a field
+    taken out of the element *before* it. Why does indexing not work, and what
+    two-line shape makes it work with no clone and no placeholder left behind
+    for anyone to see?
+30. `Group::absorb` is recursive and takes `self` by value rather than
+    `&mut self`. What would stop compiling if it took `&mut self`?
+31. Rust's `sort_by` and Go's `sort.Slice` both sort correctly. Why can this
+    codebase not use `sort_by`, and what does that tell you about when a Rust
+    crate is and is not a substitute for the Go library it mirrors?
 
 ---
 
@@ -987,6 +1100,26 @@ No looking. Answers below.
     pass silently stops working there, with nothing in the pass itself looking
     wrong. Hence a test case per slot, plus a separate counting walk over
     `pass::base` that shares none of the overrides.
+29. `v[i]` gives a *borrow* of the element, and you cannot move a field out of
+    a borrow (§18). The shape is `while let Some(elem) = self.0.pop()` plus
+    `self.0.last_mut()`: `pop` hands the element over by value, and because
+    you are going backwards the element you need to read from is now the new
+    last. You `std::mem::take` its field, and it is popped on the very next
+    iteration, so nothing half-emptied is ever looked at again.
+30. `self.build(...)` on the last line, which *consumes* the group. A
+    `&mut self` method only ever has a borrow, and you cannot consume through
+    one. Taking `self` by value says "this frame is finished with it either
+    way": either it is handed to the recursive call, or it is consumed here.
+31. Because sorting has more than one right answer, and only one of them is
+    the one `tk fmt` writes to the file. Two imports can have the same path,
+    "sorted" does not say which of them comes first, and the two languages
+    disagree — Go's leaves `i09 i01 i04` where Rust's stable sort leaves
+    `i01 i04 i09`. Both are sorted. So `src/go_sort.rs` ports Go's pdqsort.
+    The general lesson: a crate is a substitute for the Go library it mirrors
+    only where the *observable* behaviour is fully specified by what both
+    claim to do. Wherever the behaviour is unspecified — tie order here,
+    separator handling in `rtk-gobwas-glob`, what a bare `1.2.3` means in
+    `rtk-masterminds` — the two will differ, and "correct" is not the bar.
 
 ---
 
@@ -1025,3 +1158,16 @@ No looking. Answers below.
   this codebase. Quiz: 28 questions. §1's table of implemented passes is left
   as it was again; `crates/rtk-jsonnetfmt/src/passes/mod.rs` is the current
   list.
+- **2026-09-16** — Phase 2f (`SortImports`, the twelfth and last pass, plus a
+  port of Go's `sort.Slice`). Added §20 rebuilding an owned linked structure
+  by recursion: why indexing fails where §18's rule bites a second time, why
+  `Vec::pop` plus `last_mut()` is the shape that needs neither a clone nor a
+  visible placeholder, why walking backwards can be an *ownership* decision
+  rather than an algorithmic one, and why a recursive method that will consume
+  its state has to take `self` by value. Quiz: 31 questions, and Q31 is the
+  one worth arguing with — it is about when a Rust crate is not a substitute
+  for the Go library it mirrors, which is the reason three crates here are
+  hand ports. §1's table of implemented passes is left as it was, per the
+  append-don't-rewrite rule; that pipeline is now complete and
+  `crates/rtk-jsonnetfmt/src/lib.rs`'s `format` doc carries all fourteen
+  steps.

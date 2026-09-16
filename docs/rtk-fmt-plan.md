@@ -337,6 +337,8 @@ go-jsonnet's shape.
 | `AddPlusObject` | `src/passes/add_plus_object.rs` | the pass oracle, and the 9 `no_implicit_plus/` fixtures — the corpus **cannot** grade it |
 | `removeInitialNewlines` | `ast::Node::remove_initial_newlines` | the corpus only; see 2d |
 | `removeExtraTrailingNewlines` | `fodder::Fodder::remove_extra_trailing_newlines` | the corpus only; see 2d |
+| `SortImports` | `src/sort_imports.rs` — **not** a pass, and not a visitor | the pass oracle on 76 snippets, and 1 corpus file |
+| `sort.Slice` | `src/go_sort.rs` — a port of Go's pdqsort, not a formatter | `testdata/go-sort-truth-table.json`, 410 cases |
 | pass oracle | `testdata/pass-oracle.json` | `make update-fmt-pass-oracle` |
 | pass snippets | `testdata/pass-snippets.json` | the same target |
 | idempotence | `tests/corpus.rs` | the goldens, formatted twice |
@@ -961,12 +963,134 @@ produced, so it is a fixed point of itself.
 **2f — `SortImports`.** Runs first in the pipeline but last to implement: it is
 self-contained and only touches the top-of-file group.
 
+### 2f is done, and so is Phase 2
+
+The corpus stands at **138 of 138**, `quarantine.toml` is **empty**, and
+`tests/corpus.rs`'s idempotence allow-list is **empty**. The prediction was 138
+and the measurement was 138 — the third exact one in a row, and derived the
+same way, by querying `pass-oracle.json` per file and per pass.
+
+The one file is `tests/realworld/entry-graalvm.jsonnet`, exactly as the oracle
+named it in Phase 2d, and it flipped with nothing else needed: the rest of the
+file is already clean, so unlike 2d's `FixNewlines` case and 2e's docsonnet
+case this is the rare one where the oracle's single cell and the file's single
+flip are the same thing.
+
+#### It is unlike every pass before it, in three ways
+
+All three were known going in and all three cost something.
+
+1. **It is not a visitor.** `SortImports(file *ast.Node)` is a free function
+   over 229 lines and ten helpers, none of which touches `pass.ASTPass`. So
+   `src/pass.rs` bought nothing here and it does not live in `src/passes/`.
+   `FixIndentation` is the precedent for that, for a different reason.
+2. **It rebuilds the tree rather than rewriting nodes.** `buildGroupAST`
+   constructs a fresh chain of `ast.Local` nodes from the end backwards, one
+   bind each — so a multi-bind local is always split, whether or not anything
+   was reordered, and every rebuilt local loses its location. This is §18 of
+   `docs/learning-rust.md` at much larger scale, and it is where recursion and
+   ownership actually bit: the shape that works is popping elements off the
+   *back*, because the fodder each new node needs belongs to the element that
+   is then `last_mut` and will be popped next. Reaching for indices means
+   borrowing the vector while also moving out of it.
+3. **It runs first**, at step 1, before `removeInitialNewlines` — so the fodder
+   it divides has not been truncated and a file's leading blank run is still
+   there to be carried into the first group's own fodder.
+
+#### Snippets before the pass, and this time they changed the answer
+
+Going in, over 138 corpus files and 361 snippets:
+
+```
+SortImports    corpus 1/138   snippets 0/361
+```
+
+Worse than `FixParens` before 2e in one respect: only seven snippets contained
+the word `import` at all and all seven were written for `EnforceStringStyle` or
+`FixIndentation`. 76 went in before a line of the pass, taking
+`testdata/pass-snippets.json` from 361 to 437, and the oracle records
+`SortImports` changing 52 of them.
+
+The new lesson is not about coverage. **The snippets are also how you find out
+what you did not know.** Fifteen of the 76 exist only to ask what `sort.Slice`
+does with tied keys, and the answer changed the design — see below. The one
+corpus file is a reversal of fourteen distinct paths and could not have raised
+the question, never mind settled it.
+
+#### The sort had to be ported, which was not in the plan
+
+`sortGroup` calls `sort.Slice`, which is **not stable**, and two imports can
+share a path: `local k = import 'k.libsonnet', kausal = import 'k.libsonnet';`
+is an ordinary Jsonnet habit. So which of them comes first is decided by
+pdqsort's pivot choices, and the oracle measured it: **ties invert from n = 13
+upwards.** A group of thirteen whose first and last element share a key comes
+back with the last one first; a run of three sharing a key comes back
+`i09 i01 i04`. `Vec::sort_by` is therefore measurably wrong, and
+`sort_unstable_by` is a different pdqsort and wrong differently.
+
+Two readings that would have shipped a bug, both corrected by measurement:
+
+- **Twelve is not the boundary.** `maxInsertion` is 12 tested with `<=`, so
+  twelve is the *last* insertion-sorted size and thirteen the first that can
+  reorder ties. A battery that stopped at twelve would have concluded the sort
+  was stable.
+- **An all-equal group is not evidence either.** `partitionEqual` preserves
+  it at every length, so all six `ties_*_all_equal` snippets are no-ops. Only
+  *mixed* arrangements invert.
+
+So `crates/rtk-jsonnetfmt/src/go_sort.rs` ports `sort.Slice` — the third
+deliberate Go-library port here, after `rtk-gobwas-glob` and
+`rtk-masterminds`, and for the same kind of reason each time. It is graded by
+`make update-go-sort-truth-table`: ten input shapes at forty lengths, 410 cases
+of which 235 have tied keys, generated by the standard library itself and
+recording the Go version that produced it. That table is also the only thing
+that reaches the heapsort fallback and `breakPatterns`, which need
+`bits.Len(n)` consecutive bad partitions and one respectively — unreachable
+from any real import group.
+
+The alternative was a stable sort plus a documented divergence, and it was
+rejected rather than skipped: a group of thirteen imports is ordinary, aliasing
+one path twice is ordinary, and the two together are a file `rtk fmt` would
+rewrite and `tk fmt` would not — which is the exact failure mode this plan
+exists to prevent. The honest caveat is recorded on the module: the tie order
+is an implementation detail of the Go that built `tk`, not a promise, and if a
+future Go changes it then `tk fmt` moves and rtk does not.
+
+#### The three panics are all unreachable, and all reproduced
+
+Traced before being relied on, as 2d traced two dead branches and 2e traced
+`AddPlusObject`'s dead `ApplyBrace` panic.
+
+- `"beforeNext should still be empty."` — the second half is only appended to
+  once the flag is set, and the flip happens after that append.
+- `"Expected beforeNextFodder to be empty"` — everything that makes the second
+  half non-empty also makes `groupEndsAfter` true, over *the same fodder*.
+- `"topLevelImport called with bad local."` — not expressible in the port;
+  `Group::absorb` takes an owned `Local` the caller could only have got by
+  testing first.
+
+No cell of either oracle records a panic, over 138 files and 437 snippets.
+
+#### Idempotence survived the one pass most likely to break it
+
+`SortImports` is the only step that moves fodder **between different nodes**, so
+a second run sees comments and blank lines attached to different imports than
+the first run did. The allow-list is still empty, and the reason is
+structural: every seam its output contains has already been through
+`FodderEnsureCleanNewline`, so `splitFodder` divides it identically the second
+time, and a sorted group re-sorts to itself.
+
 **Exit per step:** quarantine list shrinks, no entry added, round-trip and
 idempotence properties still hold.
 
 **Exit for the phase:** quarantine empty; `format(format(x)) == format(x)` for
 every fixture. A port that needs a second pass to converge has a bug in
 `FixIndentation` or `FixNewlines` — jsonnetfmt is a one-pass fixed point.
+
+> **Met**, with the 2c correction below attached: 138 of 138 on the breadth
+> corpus, an empty `quarantine.toml`, and an empty idempotence allow-list.
+> The two known non-convergences are upstream's and neither is reached by any
+> fixture.
 
 > **Correction, from Phase 2c.** **`jsonnetfmt` is not a fixed point**, and the
 > counterexample is two lines of Jsonnet:
@@ -1096,6 +1220,7 @@ regenerable in one command.
 | Corpus goldens | breadth | `tk fmt -` | regen only |
 | Generated corpus | breadth, and the Phase 2a gate | `formatter.Format` over every in-repo Jsonnet file | no |
 | Pass oracle | one pass at a time, node for node | each pass run in isolation in a staged checkout | no |
+| Go sort table | the permutation `sort.Slice` gives, ties included | Go's own `sort` package over ten shapes at forty lengths | no |
 | Idempotence | one-pass fixed point | property, no fixtures | no |
 | Already-formatted | zero-diff on clean repo | property | no |
 | CLI parity | flags, modes, exits, stderr | tk | yes |
