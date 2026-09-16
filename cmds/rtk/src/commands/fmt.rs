@@ -11,7 +11,7 @@ pub struct FmtArgs {
 	pub paths: Vec<String>,
 
 	/// Globs to exclude
-	#[arg(short = 'e', long, default_values_t = vec!["**/.*".to_string(), ".*".to_string(), "**/vendor/**".to_string(), "vendor/**".to_string()])]
+	#[arg(short = 'e', long, default_values_t = rtk_gobwas_glob::TANKA_DEFAULT_EXCLUDES.map(String::from).to_vec())]
 	pub exclude: Vec<String>,
 
 	/// Print formatted contents to stdout instead of writing to disk

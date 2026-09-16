@@ -4707,7 +4707,9 @@ dependencies = [
  "rstest",
  "rtk-diff",
  "rtk-environments",
+ "rtk-gobwas-glob",
  "rtk-jsonnet",
+ "rtk-jsonnetfmt",
  "rtk-spec",
  "rtk-yaml",
  "rustc-hash 2.1.1",
@@ -4770,6 +4772,15 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "rtk-gobwas-glob"
+version = "0.5.0-pre99"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4870,6 +4881,19 @@ dependencies = [
  "regex",
  "rtk-jsonnet-core",
  "serde",
+]
+
+[[package]]
+name = "rtk-jsonnetfmt"
+version = "0.5.0-pre99"
+dependencies = [
+ "rtk-gobwas-glob",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]

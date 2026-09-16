@@ -321,6 +321,344 @@ are used, and the process is a short-lived CLI. Its TLS cache must initialize
 jrsonnet's thread-local GC object space before itself so cached values are
 dropped before that object space during thread teardown.
 
+## Formatting
+
+The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a and 2b have landed: the
+lexer, the AST, the parser, the unparser, the pass traversal and three of the
+twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon` and
+`PrettyFieldNames`. **The other nine do not exist yet**, which is Phase 2c
+onwards, so a file needing one of them comes back unformatted.
+
+`crates/jrsonnet-formatter` is **not** tk-compatible and `cmds/jrsonnet-fmt` is
+not either. That crate is upstream's dprint-based, width-driven pretty-printer,
+which re-lays-out from scratch; `jsonnetfmt` is fodder-preserving and only
+normalises indentation, trailing commas, redundant parens, quote style, comment
+style, blank-line runs and import order. These are different algorithms, not
+different settings, so wiring `FmtArgs` into that formatter would produce an
+`rtk fmt` that rewrites every file in a Grafana repo differently from `tk fmt`.
+Both are left untouched so upstream jrsonnet syncs against
+`.jrsonnet-upstream-base` stay clean.
+
+`rtk fmt` lives in `crates/rtk-jsonnetfmt` instead. `rtk_jsonnetfmt::format`
+runs `FormatNode`'s pipeline with the nine unwritten passes missing from it; the
+doc comment on `format` carries the full fourteen-step order with each step's
+state, read off upstream rather than inferred. A file needing one of the missing
+passes comes back unformatted. The refusal is already real, though — a file that
+does not parse fails with go-jsonnet's message, which is what `tk fmt` prints
+before aborting the run.
+
+### The pass traversal
+
+`src/pass.rs` ports `internal/pass/pass.go`, and nine of the twelve passes are
+an override of one or two of its methods, so its shape decides theirs. Two
+things to know before writing a pass:
+
+- **Go's `p ASTPass` first parameter is gone**, because a Rust trait with
+  provided methods already dispatches to the outer pass — that parameter is Go
+  simulating virtual dispatch through embedding. What Rust lacks is `super`, so
+  the base traversal is a free function per hook in `pass::base`; the trait's
+  defaults delegate to those, and an overriding pass calls the same function
+  where Go writes `c.Base.Array(p, node, ctx)`. They are not free functions
+  standing in for private methods.
+- **`Context` is an associated type**, because Go's is `interface{}` and exactly
+  one pass uses it: `AddPlusObject` carries the parent node. It compares the
+  parent's child against the current node by pointer, which Rust cannot do
+  while the parent is mutably borrowed, so Phase 2e will carry a descriptor of
+  the parent refined per slot instead.
+
+Four slots the traversal **never visits** are each pinned by a unit test,
+because a pass that rewrites fodder will silently not reach them: `InSuper`'s
+`in_fodder` and `super_fodder` (so a comment in `x /* c */ in super` is never
+touched), `Index`'s `right_bracket_fodder` when the index is an identifier,
+`Apply`'s `tail_strict_fodder` without `tailstrict`, and a `Parameter`'s
+`eq_fodder` without a default. All four are upstream's.
+
+### The corpus cannot grade a pass
+
+Worth knowing before reading a corpus count as progress in either direction.
+Jsonnet that is already `tk fmt`-clean gives a pass nothing to do, so the
+breadth corpus measures each pass least where it is newest. Changed cells over
+all 138 files, from the pass oracle: `AddPlusObject` 18, `FixIndentation` 9,
+`EnforceStringStyle` 6, `PrettyFieldNames` 3, `RemovePlusObject` 3,
+`FixNewlines` 1, `SortImports` 1, `FixTrailingCommas` 1, and **zero** for
+`NoRedundantSliceColon`, `EnforceCommentStyle`, `EnforceMaxBlankLines` and
+`FixParens`. `Options` does not isolate them either — three passes have a flag,
+the rest are unconditional in `FormatNode`.
+
+So **write the snippets before the pass**, every time. `FixIndentation` is the
+pass the plan calls hardest and it gets nine corpus cells; `EnforceCommentStyle`
+gets none.
+
+One inference to avoid, because it was made here and was wrong: **a pass
+changing a file is not the same as that file's output changing.**
+`FixTrailingCommas` does change `tests/suite/std_param_names.jsonnet`, and
+`PrettyFieldNames` does change `tests/golden/builtin_strings_string.jsonnet`,
+but both files still fail the corpus because they also need passes that do not
+exist, so the effect is masked in the byte comparison. Reading the
+input-against-golden diff had said neither pass touched anything.
+
+So `make update-fmt-pass-oracle` records the AST each pass leaves behind, in
+the node oracle's notation, and `tests/pass_parity.rs` grades it at full parity.
+Three things about it:
+
+- It is **staged into a go-jsonnet checkout**, like the lexer oracle, because
+  `internal/formatter` may only be imported from inside that module. Unlike the
+  lexer's it needs no `_test.go` trick: everything it touches is exported from
+  the internal package, so a `package main` in `<checkout>/rtkpassdump/` is
+  enough. The source lives in `testdata/generate/_staged/`, named for the go
+  tool's rule that a `_`-prefixed directory is ignored — it would not compile
+  in the generate module.
+- Each pass runs **in isolation on a fresh parse**, not on the pipeline's
+  accumulated state. A cumulative dump is only correct once everything before
+  it is written, so it could grade nothing until Phase 2f; isolation is what
+  lets passes land one at a time.
+- Most cells record `unchanged` rather than the tree, and the Rust side then
+  has to prove its own pass is a no-op there too. `testdata/pass-snippets.json`
+  holds the inputs, which are safe to write by hand — the answers are not, and
+  that is the point.
+
+**The three strip passes are deliberately not dumped.** Each rewrites every
+tree it touches, so two of them alone were about 270 of 356 changed cells and
+most of a 23 MB oracle — regenerated whole on every go-jsonnet bump and
+unreadable in a diff. All three are skipped under `DefaultOptions`, the only
+configuration `tk fmt` uses. Adding one back is a line in `passNames`.
+
+The counts are the argument for the oracle existing: over the snippets
+`FixTrailingCommas` changes 15, `PrettyFieldNames` 15, `NoRedundantSliceColon`
+2 — against 1, 3 and 0 over the 138 real files. All three then matched
+go-jsonnet node for node and slot for slot on every snippet and every corpus
+file, which is what Phase 2b rests on.
+
+`removeInitialNewlines` and `removeExtraTrailingNewlines` are unexported
+functions rather than passes, so even the staged program cannot reach them.
+Both are four lines and the corpus covers them end to end.
+
+Every fixture the current state gets wrong is listed in
+`crates/rtk-jsonnetfmt/quarantine.toml` with a reason, and `tests/fixtures.rs`
+asserts that list only ever shrinks: an unlisted failure, a listed fixture that
+now passes, and an entry naming no fixture all fail the test. That is how passes
+land one at a time without deleting cases.
+
+### Spacing is not fodder
+
+The single most useful thing to know before writing a pass. Fodder records line
+ends, blank counts, indents and comments — **and nothing else**. Every space
+*within* a line is regenerated by the unparser from `crowded`, `separate_token`
+and `PadArrays`/`PadObjects`, so `{a:1,b:2}` becomes `{ a: 1, b: 2 }` with no
+pass involved at all. Eleven corpus files improved when `format` started
+parsing, and only three of those were the parse errors.
+
+Indentation is the exception and is **not** free: it comes from
+`fodder.indent`, which the lexer filled counting a tab as 8, so a tab-indented
+file still needs `FixIndentation`. Do not reach for a pass to fix a spacing
+diff until you have checked which of the two it is.
+
+### The node oracle
+
+`make update-fmt-node-oracle` dumps the AST go-jsonnet's parser produces —
+every node, and every named fodder slot — to `testdata/node-oracle.json`, and
+`tests/node_parity.rs` grades the port against it. It asserts **full parity**
+with no baseline ratchet, because a parser that is right for 130 of 138 files is
+not a partial formatter but a wrong parser, and every pass built on it inherits
+the error. A divergence reports its path, so a misplaced `CommaFodder` reads as
+`$.Fields[2].CommaFodder` rather than as a whitespace diff hundreds of lines
+away.
+
+Unlike the lexer oracle it needs **no staged checkout**: every fodder slot is an
+exported field of package `ast` and `formatter.SnippetToRawAST` is public, so
+`testdata/generate/nodedump/` is an ordinary program in the generate module.
+Building it before the parser is what made the parser match on its first
+compile, and it caught a wrong expectation before a line of parser existed —
+`a[::]` parses to the same tree as `a[:]`, because `::` lexes as one operator
+token and the parser's `::` branch never assigns `StepColonFodder`.
+
+### Four upstream oddities the port reproduces
+
+Each is verified in go-jsonnet's source, each is what `tk fmt` prints, and none
+should be "fixed":
+
+- `tokenStringToAst` validates a string by wrapping `StringUnescape`'s
+  already-rendered error in a fresh one at the same token, so **the location
+  appears twice** in the message.
+- Both malformed-unicode-escape messages interpolate `s[0:4]` — the first four
+  bytes of the *whole string*, not of the offending escape — so `'ab\uZZZZ'`
+  reports `ab\u`.
+- `NamedArgument.EqFodder` is filled by the parser and never read by the
+  unparser, which writes `=` directly. So `f(b /* x */ = 2)` **loses that
+  comment**. The parser must still store it or the AST will not match.
+- `PrettyFieldNames.Index` does `index.RightBracketFodder = lit.Fodder` — an
+  assignment, not a `FodderMoveFront` — and that slot doubles as the fodder
+  before a `]` and the fodder before an identifier. So `a['foo' /* c */]`
+  formats to `a.foo` and **drops the comment**. The object-field path in the
+  same pass uses `FodderMoveFront` and keeps everything, which is what makes
+  this look like an oversight rather than a decision; reproduce it anyway.
+
+There is deliberately no `fmt_golden_override/`. For fmt, every override would
+be a divergence from `tk fmt` — a bug.
+
+Set `GO_JSONNET_FOR_TESTS` to a go-jsonnet checkout to also grade against
+`formatter/testdata/*.fmt.golden`. Those goldens are free and authoritative:
+they are generated by `Format(name, input, DefaultOptions())`, the identical
+call `tanka.Format` makes, so matching them *is* matching `tk fmt` with no `tk`
+binary in the loop.
+
+### Fodder, and why the round trip is not the identity
+
+`src/fodder.rs` ports `ast/fodder.go`. **Fodder is not a trivia stream**, and
+mistaking it for one is the way to get every layout pass subtly wrong. It is a
+normalised model of vertical space: blank lines are a *count*, indentation is a
+count of *spaces* with a tab counted as **8** by the lexer, and comments are
+pre-trimmed lines. `MakeFodderElement` enforces per-kind invariants, and
+`FodderAppend` enforces one across elements — a `LineEnd` may not follow a
+`LineEnd` or a `Paragraph`, so appending one either merges it into its
+predecessor or promotes it to a `Paragraph`. Extend fodder only through
+`Fodder::append`, never by pushing.
+
+`src/unparse.rs` ports the unparser's `fodderFill`. It *generates* text from
+that model rather than copying source, which is why **`unparse(parse(x)) == x`
+is false in go-jsonnet itself**, with every pass disabled:
+
+- a line-end comment is always preceded by exactly **two** spaces
+- indentation is `indent` spaces, so a tab-indented file comes back spaced
+- `\r` is dropped from block strings — "Formatter always outputs in unix mode"
+- trailing horizontal whitespace is stripped at lex time and never restored
+
+`docs/rtk-fmt-plan.md` originally gated Phase 2a on that round trip. It is
+corrected in place; do not reinstate it.
+
+### The lexer, and the oracle that grades it
+
+`src/lexer.rs` ports `internal/parser/lexer.go` — the **formatter's** lexer,
+which keeps whitespace and comments as fodder rather than discarding them. That
+is why jrsonnet's lexer cannot be reused for this.
+
+Graded by `make update-fmt-lexer-oracle`, which is worth understanding before
+changing it. Fodder is invisible from outside go-jsonnet: `internal/parser` is
+an internal package, and even inside the module `token`'s fields are
+unexported. So the target stages a `_test.go` into `internal/parser/` of a
+checkout and dumps the real values from inside it. It reuses
+`GO_JSONNET_FOR_TESTS` when set and otherwise clones the pinned version.
+
+**All 138 corpus files match token for token and fodder for fodder.** Read that
+for what it covers: 35 of the 37 token kinds, all three fodder kinds, 55 block
+strings, 644 paragraphs and 5 interstitials — but **no verbatim strings and not
+one lexer error**, so none of the messages are graded by it. The unit tests in
+`src/lexer.rs` exist for exactly that gap, and a new one belongs there whenever
+the oracle cannot reach a behaviour.
+
+`testdata/lexer-snippets.json` covers that gap with an oracle rather than by
+hand: the Go dumper has a snippets mode, so those expectations come from
+go-jsonnet too. It exists because the hand-written version was measurably
+unreliable — of 16 expectations derived by reading Go's source, **14 were right
+and 2 were wrong**, and both misses were the same kind of error: a `LineEnd` the
+*model* inserts that the source does not contain. `FodderAppend` puts one in
+front of a paragraph appended to empty fodder, so a file beginning with a
+multi-line C comment carries a synthetic line end — which is a large part of
+why `removeInitialNewlines` exists. **Write no fodder expectation by hand when a
+dump can supply it**; that is the standing lesson for the parser, where fodder
+is composed rather than read at nearly every node.
+
+Three upstream oddities are reproduced on purpose. Do not "fix" them:
+
+- **A tab counts as 8 spaces** of indent, and nothing downstream recovers it.
+- **The operator wind-back reads its deciding character once.** Upstream's
+  `for r = rune(l.input[l.pos.byteNo-1]); …; l.pos.byteNo--` never reassigns
+  `r`, so it winds back to a single rune whenever that character is one of
+  `+ - ~ ! $`. `+++` therefore lexes as three separate `+` operators rather
+  than one operator.
+- **The `allStar` hack in C-style comments is dead code.** It indents lines
+  beginning with `*`, but only when *every* line does, and the first line of a
+  comment always begins with the `/` of `/*`. It is computed anyway so the port
+  does not silently diverge if upstream ever fixes it.
+
+### The formatter corpus
+
+`make update-fmt-corpus` runs **go-jsonnet's `formatter.Format`** over every
+Jsonnet file in the repository and writes `testdata/corpus/` plus a manifest
+recording which go-jsonnet produced it. That is the identical call
+`tanka.Format` makes, so matching it is matching `tk fmt` — with no `tk` binary,
+and no temporary path baked into a golden through the diagnostic filename.
+Calling the library also allows varying `Options`, which `tk` does not expose
+and the `UseImplicitPlus: false` cases need. What it cannot reach is fodder:
+`internal/parser` is an internal package, so the oracle is text-level.
+
+`tests/corpus.rs` requires the match count to equal
+`testdata/corpus-baseline.toml` **exactly, in both directions**. Fewer is a
+regression; more is progress and the number is updated in the same commit. The
+small fixture families get one `quarantine.toml` entry each because each names a
+behaviour worth arguing about; 138 real files would need 138 entries saying only
+"the formatter is not finished", so breadth is ratcheted on the count instead
+and the test prints which files differ.
+
+**107 of 138 match with `format` still an identity stub.** That is worth knowing
+before reading a match count as progress: most Jsonnet here is already exactly
+`tk fmt`-clean, so only the other 31 exercise the passes at all, and a pass that
+moves the number by one may still be wrong on the files that were already
+passing for free. `crates/jrsonnet-formatter/src/tests/*` is over-represented
+among the 31, which figures — those fixtures were written to be awkward.
+
+### Finding Jsonnet Files
+
+`tk fmt` and `tk lint` share Tanka's `jsonnet.FindFiles`, so rtk shares
+`rtk_jsonnetfmt::files`. Six of its behaviours are surprising and each is
+pinned by a test in `crates/rtk-jsonnetfmt/tests/discovery.rs`; `src/files.rs`
+enumerates them. The two that bite hardest:
+
+- **A named regular file bypasses everything.** `tk fmt vendor/foo.libsonnet`
+  formats it despite the default `vendor/**` exclude, and `tk fmt README.md`
+  hands `README.md` to the Jsonnet formatter.
+- **Walked paths are cleaned.** Child paths go through `filepath.Join`, which
+  cleans, so a `./foo` argument yields `foo/bar` and not `./foo/bar`. Since `*`
+  crosses `/`, an uncleaned `./` prefix would make `.*` exclude the entire tree.
+
+`lint` used to hand-roll both the walk and the exclude matching. It pruned
+excluded directories (`FindFiles` returns `nil`, not `fs.SkipDir`), followed
+symlinks where `filepath.WalkDir` does not, and sniffed at the four default
+patterns as strings rather than compiling them. It now goes through the port.
+
+It does still default its paths to `"."`; `tk lint` and `tk fmt` are both
+`ArgsMin(1)`, so that remains a divergence to fix with the `fmt` CLI.
+
+### Globbing
+
+`--exclude` patterns are compiled by `crates/rtk-gobwas-glob`, a port of
+`github.com/gobwas/glob` v0.2.3 — a deliberate Go-library port, like
+`rtk-masterminds`.
+
+**Do not reach for `globset`.** `tk` calls `glob.Compile(e)` with no separator
+arguments, and with no separators `gobwas` treats `*` and `**` alike, so **`*`
+crosses `/`**. `globset` does not behave this way. That is also why tk's default
+exclude list ships each pattern twice (`".*"` *and* `"**/.*"`): the un-prefixed
+form catches the case where the match string has no leading directory
+component, and the prefixed form catches the nested one.
+
+It is graded against a truth table generated by the Go library itself
+(`crates/rtk-gobwas-glob/testdata/`, generator beside it,
+`make update-glob-truth-table` / `check-glob-truth-table`). The table is the
+oracle, not gobwas' syntax documentation, which disagrees with it about
+separators. The test skips when the table is absent.
+
+That table earned its keep immediately: it caught nine divergences a careful
+reading of the source had shipped, all of them about the **empty subject**,
+where gobwas answers from the shape of the matcher its optimiser happened to
+build rather than from what the pattern means.
+
+- `Single`, `List` and `Range` decode a rune with `utf8.DecodeRuneInString`,
+  which returns `(RuneError, 0)` for `""`. Their guard is `if len(s) > w`, and
+  `0 > 0` is false, so they fall through and test **U+FFFD** for membership.
+  So `?` matches the empty string, and `[!abc]` does while `[abc]` does not.
+- `BTree.Match` loops `for offset < limit`, both zero on empty input, so the
+  body never runs and it returns false. Anything composite cannot match `""`
+  however zero-width its parts are — which is why `***` matches `""` with no
+  separators (the run collapses to one `Super`) and stops matching as soon as
+  `/` is declared a separator.
+
+`matches_empty_subject` in `program.rs` reproduces this and `is_match` consults
+it before running the program at all. Nothing in rtk can reach it — `FindFiles`
+never matches an empty path and tk never passes separators — but the point of
+the crate is to be a port rather than an approximation, and the table is what
+says which it is.
+
 ## Version Expectations
 
 ### Which Tanka rtk answers for

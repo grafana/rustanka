@@ -1,0 +1,611 @@
+[
+  {
+    "source": "verbatim_double.jsonnet",
+    "tokens": [
+      {
+        "kind": "VERBATIM_STRING_DOUBLE",
+        "data": "a\"b"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "verbatim_single.jsonnet",
+    "tokens": [
+      {
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "a'b"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "verbatim_junk.jsonnet",
+    "error": "verbatim_junk.jsonnet:1:1 Couldn't lex verbatim string, junk after '@': 120"
+  },
+  {
+    "source": "unterminated_single.jsonnet",
+    "error": "unterminated_single.jsonnet:1:1 Unterminated String"
+  },
+  {
+    "source": "unterminated_in_object.jsonnet",
+    "error": "unterminated_in_object.jsonnet:1:6 Unterminated String"
+  },
+  {
+    "source": "unterminated_verbatim.jsonnet",
+    "error": "unterminated_verbatim.jsonnet:1:1 Unterminated String"
+  },
+  {
+    "source": "bad_character.jsonnet",
+    "error": "bad_character.jsonnet:1:1 Could not lex the character '`'"
+  },
+  {
+    "source": "number_underscores.jsonnet",
+    "tokens": [
+      {
+        "kind": "NUMBER",
+        "data": "1000"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "number_leading_zero_underscore.jsonnet",
+    "error": "number_leading_zero_underscore.jsonnet:1:2 Couldn't lex number, _ not allowed after leading 0"
+  },
+  {
+    "source": "number_junk_after_dot.jsonnet",
+    "error": "number_junk_after_dot.jsonnet:1:3 Couldn't lex number, junk after decimal point: 'x'"
+  },
+  {
+    "source": "number_junk_after_e.jsonnet",
+    "error": "number_junk_after_e.jsonnet:1:3 Couldn't lex number, junk after 'E': 'x'"
+  },
+  {
+    "source": "number_junk_after_exp_sign.jsonnet",
+    "error": "number_junk_after_exp_sign.jsonnet:1:4 Couldn't lex number, junk after exponent sign: 'x'"
+  },
+  {
+    "source": "number_junk_after_underscore.jsonnet",
+    "error": "number_junk_after_underscore.jsonnet:1:3 Couldn't lex number, junk after '_': 'x'"
+  },
+  {
+    "source": "number_exponents.jsonnet",
+    "tokens": [
+      {
+        "kind": "\"[\"",
+        "data": "["
+      },
+      {
+        "kind": "NUMBER",
+        "data": "1e10"
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "NUMBER",
+        "data": "1.5E-3"
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "NUMBER",
+        "data": "0.5"
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "NUMBER",
+        "data": "10.01e10"
+      },
+      {
+        "kind": "\"]\"",
+        "data": "]"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_plus_run.jsonnet",
+    "tokens": [
+      {
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_multi_symbol.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "\u003e="
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_ends_with_bang.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "="
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "="
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "!"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "dollar.jsonnet",
+    "tokens": [
+      {
+        "kind": "\"$\"",
+        "data": "$"
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "tab_indent.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 8
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "mixed_tab_space_indent.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 10
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "crlf.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_paragraph.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_line_end.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "y",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_hash.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "# c"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_trailing_whitespace.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_interstitial.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* c */"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_paragraph.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* a",
+              " b */"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_star_lhs.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* a",
+              " * b",
+              " * c */"
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_unterminated.jsonnet",
+    "error": "c_comment_unterminated.jsonnet:1:1 Multi-line comment has no terminating */"
+  },
+  {
+    "source": "blank_line_run.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 2,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block.jsonnet",
+    "tokens": [
+      {
+        "kind": "STRING_BLOCK",
+        "data": "a\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_chomp.jsonnet",
+    "tokens": [
+      {
+        "kind": "STRING_BLOCK",
+        "data": "a",
+        "stringBlockIndent": "  "
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_blank_lines.jsonnet",
+    "tokens": [
+      {
+        "kind": "STRING_BLOCK",
+        "data": "\na\n\nb\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_term_indent.jsonnet",
+    "tokens": [
+      {
+        "kind": "\"{\"",
+        "data": "{"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "a",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "kind": "OPERATOR",
+        "data": ":"
+      },
+      {
+        "kind": "STRING_BLOCK",
+        "data": "x\n",
+        "stringBlockIndent": "    ",
+        "stringBlockTermIndent": "  "
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "\"}\"",
+        "data": "}",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_no_whitespace.jsonnet",
+    "error": "text_block_no_whitespace.jsonnet:1:1 Text block's first line must start with whitespace"
+  },
+  {
+    "source": "text_block_no_newline.jsonnet",
+    "error": "text_block_no_newline.jsonnet:1:1 Text block requires new line after |||."
+  },
+  {
+    "source": "eof_fodder.jsonnet",
+    "tokens": [
+      {
+        "kind": "IDENTIFIER",
+        "data": "x"
+      },
+      {
+        "kind": "end of file",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// last"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "empty.jsonnet",
+    "tokens": [
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "only_whitespace.jsonnet",
+    "tokens": [
+      {
+        "kind": "end of file"
+      }
+    ]
+  }
+]
