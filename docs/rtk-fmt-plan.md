@@ -332,6 +332,9 @@ go-jsonnet's shape.
 | `EnforceMaxBlankLines` | `src/passes/enforce_max_blank_lines.rs` | the pass oracle, and **no** corpus file |
 | `FixNewlines` | `src/passes/fix_newlines.rs` | the pass oracle, and 1 corpus file |
 | `FixIndentation` | `src/fix_indentation.rs` — **not** a pass | the pass oracle, and 9 corpus files |
+| `FixParens` | `src/passes/fix_parens.rs` | the pass oracle, and **no** corpus file |
+| `RemovePlusObject` | `src/passes/remove_plus_object.rs` | the pass oracle, and 3 corpus files |
+| `AddPlusObject` | `src/passes/add_plus_object.rs` | the pass oracle, and the 9 `no_implicit_plus/` fixtures — the corpus **cannot** grade it |
 | `removeInitialNewlines` | `ast::Node::remove_initial_newlines` | the corpus only; see 2d |
 | `removeExtraTrailingNewlines` | `fodder::Fodder::remove_extra_trailing_newlines` | the corpus only; see 2d |
 | pass oracle | `testdata/pass-oracle.json` | `make update-fmt-pass-oracle` |
@@ -794,8 +797,166 @@ comprehension's `for` expression is indented twice at two different columns and
 the second answer wins, while the `if` condition is never indented at all. Two
 snippets pin it from either side.
 
-**2e — semantics-affecting.** `FixParens`, `RemovePlusObject`. Graded by the
-Phase 0 unit tests. A bug here is a correctness bug, not a cosmetic one.
+**2e — semantics-affecting.** `FixParens`, `RemovePlusObject`, `AddPlusObject`.
+Graded by the Phase 0 unit tests. A bug here is a correctness bug, not a
+cosmetic one.
+
+### 2e is done
+
+The corpus stands at **137 of 138**, up from 134, and the one that remains is
+`SortImports` (2f) on `tests/realworld/entry-graalvm.jsonnet`.
+`quarantine.toml` is **empty**: all nine of its entries were
+`no_implicit_plus/` cases naming `FixParens` or `AddPlusObject`, and landing
+those two removed them all. Nothing in it needed to become a documented
+divergence.
+
+**The prediction was 137 and the measurement was 137**, the second exact one in
+a row, and derived the same way — by querying `pass-oracle.json` per file and
+per pass and then reading the *union* of passes each of those files needs.
+`RemovePlusObject`'s three files are the three, and one of them, the docsonnet
+`render.libsonnet`, has a `+` at the start of its own line, so the `LineEnd`
+that preceded it moves on to the object and `FixIndentation` then has to put it
+back at the right column. That interaction was the one thing the oracle could
+not answer, because it runs each pass on a fresh parse and so grades no *pair*
+of them. The corpus is what said it was right.
+
+#### Snippets before passes, at its most extreme
+
+The standing rule from 2b, and 2e was the phase with the least to lose by
+ignoring it and the most to lose by getting it wrong. Before the phase, over
+138 corpus files and 254 snippets:
+
+```
+FixParens          corpus 0/138   snippets 0/254
+RemovePlusObject   corpus 3/138   snippets 0/254
+AddPlusObject      corpus 18/138  snippets 1/254
+```
+
+`FixParens` was graded by **nothing in either direction**, while being one of
+the two passes whose bugs change what a file *evaluates to*. That is strictly
+worse than `EnforceMaxBlankLines` in 2d, which was equally ungraded but only
+cosmetic. `AddPlusObject`'s one snippet was an accident of 2d's
+`indentation/apply_brace`.
+
+Worse still, and new: **`AddPlusObject`'s 18 corpus cells can never become
+corpus flips.** The corpus is generated with `DefaultOptions`, which takes
+`RemovePlusObject` and skips `AddPlusObject` entirely, so those cells exist
+only because the oracle runs each pass in isolation. Its end-to-end grading is
+the nine `no_implicit_plus/` fixtures and nothing else — the corpus count
+standing still when it landed is the *safety check* that step 7 is one `if`
+rather than two steps.
+
+107 snippets went in before a line of pass code, taking
+`testdata/pass-snippets.json` from 254 to 361: `fix_parens` 25,
+`remove_plus_object` 32, `add_plus_object` 50. Over them the oracle records
+`FixParens` changing 23, `RemovePlusObject` 19 and `AddPlusObject` 50. All
+three then matched go-jsonnet node for node and slot for slot on every snippet
+and all 138 corpus files, on the first compile — as the lexer, the node dumper
+and every pass phase before it had.
+
+The 13 `RemovePlusObject` no-ops are the most valuable cells in the group.
+Every one is a deliberate negative, and together they are what says the
+`Var`-or-`Index` restriction on the left, the plain-`Object` requirement on the
+right and the `+`-only operator test are each real. A pass that
+over-generalised any of the three would be green on every positive case.
+
+#### The Context design, which was the phase's real work
+
+`AddPlusObject` is the one pass that uses `pass.Context`, and Go's context is
+the parent node. It tells the parent's slots apart with
+`parent.Target == *node` — a **pointer** comparison. Since `node` is
+`&parent.Target` whenever the walk arrived through that slot, the comparison is
+an identity check of a place against itself: trivially true there, false
+everywhere else. What it is really asking is *which slot did the walk come
+through*.
+
+Rust has no answer to that while the parent is mutably borrowed, and
+`src/pass.rs` said so when the trait was written rather than discovering it
+afterwards. The replacement it scoped is what landed:
+`passes::add_plus_object::Parent`, a descriptor of the parent refined per slot,
+filled in by overriding the five node hooks whose slots upstream's switch
+distinguishes — `Apply`, `Index`, `Binary`, `Unary`, `InSuper`. The trait did
+not change.
+
+The cost lands entirely in the pass: those five overrides **restate the base
+traversal**, because a `pass::base` function takes one `ctx` and hands it to
+every slot. That is a hazard no fodder pass had — an override that drops a slot
+silently stops converting the `ApplyBrace`s in it, and nothing about the pass
+itself would look wrong. Two things guard it: a snippet putting an `e { }` in
+every slot of all five, and a separate counting walk over `pass::base` that
+shares no override, so it can still see an `ApplyBrace` in a slot the pass
+never visited.
+
+#### Four readings checked against the oracle rather than asserted
+
+Each of these was derived by reading Go and then confirmed from the regenerated
+oracle before being written down, which is the habit 2c and 2d were told to
+form:
+
+1. **`FixParens` is an `if`, not a loop.** `(((1)))` comes out with two levels
+   of parens and `((((1))))` also with two. So four halve to two and three
+   become two, and **`jsonnetfmt` is not a fixed point** here either — the
+   second counterexample after 2c's escaped field name, and a much simpler one.
+   It must not be answered with a convergence loop, for the reason 2c already
+   gives.
+2. **`AddPlusObject` has no `ast.Slice` case.** `{a:1} {b:2}[1:2]` keeps its
+   slice target as a bare `Binary`, so the output reparses as
+   `{a:1} + ({b:2}[1:2])` — a different tree. A slice binds exactly as tightly
+   as an index, so this is the same bug the `ast.Index` case exists to prevent
+   in the one node kind the case does not name. It is the only upstream oddity
+   this port carries that changes what a file evaluates to. Reproduced, because
+   matching `tk fmt` is the contract, and reached by nothing in practice since
+   `tk fmt` never runs the pass.
+3. **The `InSuper` branch is a constant false**, and correctly so: `+` binds
+   tighter than `in`, so no parens are needed. The oracle shows the InSuper's
+   index as a `Binary`, not a `Parens`.
+4. **The replacement node is what goes down as the parent.**
+   `{a:1} {b:2} {c:3}.x` gives `Index.Target = Parens`,
+   `Parens.Inner = Binary`, `Binary.Left = Binary` — one pair of parens and not
+   two, because the inner `ApplyBrace` saw the new `Binary` as its parent
+   rather than the original `ApplyBrace`.
+
+#### Two things in `AddPlusObject` that are inert, and stay
+
+Both were traced rather than assumed, and both are ported anyway so that an
+upstream change cannot silently diverge — the same treatment the lexer's
+`allStar` hack gets.
+
+- **The fodder move never moves anything.** Upstream builds the `Parens` with
+  `Fodder: binary.NodeBase.Fodder` and then nils the `Binary`'s, which looks
+  like the difference between a comment landing inside or outside the parens.
+  It is not: the parser constructs every `ApplyBrace` with `ast.Fodder{}`,
+  because an `ApplyBrace` is left-recursive and its opening fodder is stored on
+  the leftmost leaf — and no earlier pass writes a node's *own* fodder, since
+  they all go through `openFodder`, which walks that same spine. Both slots are
+  always empty.
+- **The `ast.ApplyBrace` parent panic is unreachable.** Every node arrives
+  through `Visit`, and `Visit` replaces an `ApplyBrace` before descending, so
+  no child can see one as its parent. The panic is reproduced on the
+  `apply_brace` hook — one step earlier in the walk than Go's, on the same
+  impossible condition — so it still fires if the invariant breaks.
+
+#### `FixParens` overrides `visit`, where upstream overrides `Parens`
+
+The one place the port's shape had to differ. Upstream's `*ast.Parens` embeds
+`NodeBase`, so its `Parens` hook can reach the node's own fodder for
+`FodderMoveFront(openFodder(node), …)`. `src/ast.rs` keeps that fodder on
+`Node`, so the `parens` hook is handed a payload that does not carry it.
+
+The move is unobservable. `Base.Visit` visits the open fodder and *then*
+dispatches to `p.Parens`, so upstream's collapse happens after that visit and
+this one happens before it — but `FixParens` overrides no fodder hook, so the
+base traversal over fodder is a no-op either way and the resulting tree, which
+is what the oracle grades, is the same. `openFodder` on a `Parens` is likewise
+provably its own fodder: `leftRecursive` has no `*ast.Parens` case.
+
+#### Idempotence survived, and 2e was the phase most likely to break it
+
+`tests/corpus.rs`'s allow-list is still **empty**. This was the phase with node
+structure being rewritten rather than fodder, and with a pass that is itself
+non-convergent — but no corpus golden holds a doubly-parenthesised expression,
+and `RemovePlusObject`'s output reparses directly as the `ApplyBrace` it
+produced, so it is a fixed point of itself.
 
 **2f — `SortImports`.** Runs first in the pipeline but last to implement: it is
 self-contained and only touches the top-of-file group.

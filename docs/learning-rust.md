@@ -643,6 +643,169 @@ cannot generate an answer, assert the property rather than the output.
 
 ---
 
+## 18. Replacing a value you only have a `&mut` to
+
+Phase 2e was the first phase whose passes change the *shape* of the tree rather
+than the comments in it. `FixParens` turns `((e))` into `(e)`;
+`RemovePlusObject` turns `a + { b: 1 }` into `a { b: 1 }`; `AddPlusObject` turns
+`e { }` into `e + { }` and sometimes wraps the result in parentheses. All three
+have to take a node's children out of one shape and put them into a differently
+shaped one.
+
+Here is the Go, from `remove_plus_object.go`:
+
+```go
+*node = &ast.ApplyBrace{
+    NodeBase: binary.NodeBase,
+    Left:     binary.Left,
+    Right:    rhs,
+}
+```
+
+Go is moving pointers around, so there is nothing to it. The Rust equivalent
+does not compile in the obvious form:
+
+```rust
+// Does not compile.
+if let NodeKind::Binary(binary) = &mut node.kind {
+    node.kind = NodeKind::ApplyBrace(ApplyBrace {
+        left: binary.left,    // cannot move out of a borrow
+        right: binary.right,
+    });
+}
+```
+
+Two separate problems. First, `binary.left` is a `Box<Node>` behind a `&mut`,
+and you cannot *move* a value out of a borrow — that would leave the thing you
+borrowed with a hole in it, and Rust has no concept of a half-initialised
+value. Second, `node.kind` is already mutably borrowed by the `if let`, so you
+cannot assign to it while the borrow is live.
+
+The fix for both is the same, and it is a standard Rust move:
+
+```rust
+let NodeKind::Binary(binary) = std::mem::replace(&mut node.kind, NodeKind::LiteralNull)
+else {
+    unreachable!("just matched a Binary")
+};
+// `binary` is now OWNED, so its fields can be moved freely.
+node.kind = NodeKind::ApplyBrace(ApplyBrace {
+    left: binary.left,
+    right: binary.right,
+});
+```
+
+`std::mem::replace(dest, value)` puts `value` where `dest` was and hands you
+back what used to be there, **by value**. There is never a hole: for one
+instant `node.kind` holds `LiteralNull`, which is a perfectly valid `NodeKind`,
+and then it holds the real answer. `std::mem::take(dest)` is the same thing when
+the type implements `Default` — `Fodder` does, which is why
+`std::mem::take(&mut node.fodder)` appears instead.
+
+Three consequences worth internalising, because all three shape how these three
+passes read:
+
+1. **The placeholder is a real value, not a trick.** People coming from C++
+   look for "move out and leave it invalid". Rust has no such state, so you
+   supply something cheap and valid. `NodeKind::LiteralNull` is a unit variant:
+   constructing one allocates nothing.
+2. **You have to test the shape before you own it.** Owning the payload means
+   `node.kind` no longer holds it, so there is no going back — you cannot look,
+   decide against it, and put it down again without writing the put-back. So
+   `remove_plus_object.rs` splits the decision into
+   `Self::is_implicit_plus_candidate(node)`, which only *borrows*, and does the
+   `mem::replace` after it has answered yes. Go asks all three questions inside
+   nested `if`s on a pointer it never gives up.
+3. **Nesting needs the `Box` deref.** `FixParens` has to reach a
+   *grand*child — `outer.inner` is a `Box<Node>`, and the Parens inside it has
+   its own `inner`. Once `outer` is owned, `let inner_node = *outer.inner;`
+   moves the `Node` out of the box. `*` on a `Box` you own is a move; `*` on a
+   `&Box` is a borrow. That distinction is the whole difference between the code
+   compiling and not.
+
+Sequencing tip: pull every piece you need out into `let` bindings *before* you
+start reassembling. `fix_parens.rs` takes the inner node's fodder and its close
+fodder into locals, then rebuilds, then does the fodder moves. Trying to do it
+in upstream's order means borrowing the half-built node.
+
+---
+
+## 19. Pointer identity, and the one Go trick that has no Rust translation
+
+This is 2e's real design problem, and the most interesting thing in the phase.
+
+`AddPlusObject` has to decide whether `e { }` becoming `e + { }` needs
+parentheses, which depends on *where in the parent* the node sits. `f() {a:1}`
+as a call target needs them; `f({a:1} {b:2})` as an argument does not. Upstream
+carries the parent node along the walk and asks:
+
+```go
+case *ast.Apply:
+    if parent.Target == *node {
+        needsParens = true
+    }
+```
+
+Read that twice, because it is stranger than it looks. `node` is a
+`*ast.Node` — a pointer to the slot the walk is currently in. When the walk came
+through the target slot, `node` *is* `&parent.Target`, so `parent.Target` and
+`*node` are the same pointer and the comparison is true. When the walk came
+through an argument, they are different pointers and it is false. The condition
+is not really "is the parent's target this expression" — it is **"did the walk
+arrive through the target slot"**, answered by comparing a place against itself.
+
+Rust cannot write that, for two reasons that are both worth knowing:
+
+- **The parent is mutably borrowed for the whole of its own traversal.** While
+  `pass.apply(node)` is running, there is exactly one live `&mut Apply`, and the
+  borrow checker guarantees no second reference to it exists. So there is
+  nothing to compare against.
+- **`Node` has no identity apart from its address.** It derives `PartialEq`, so
+  `==` compares *contents* — and two structurally identical subtrees would
+  compare equal, which is the wrong answer. (`std::ptr::eq` exists and compares
+  addresses, but you cannot get two references to the parent to hand it.)
+
+So the port carries a **descriptor** instead of the parent:
+
+```rust
+pub enum Parent {
+    None,
+    Other,
+    ApplyTarget,
+    IndexTarget,
+    InSuperIndex,
+    BinaryLeft(BinaryOp),
+    BinaryRight(BinaryOp),
+    UnaryOperand,
+}
+```
+
+Each variant names the slot the walk came through, and the pass fills it in when
+it visits that slot. The pointer comparison becomes a `match`. Two general
+lessons in that:
+
+1. **Where Go asks a question about identity, Rust usually asks it about
+   provenance instead.** Go could be vague about how the walk got here, because
+   it could check afterwards. Rust makes you say it on the way down. The result
+   is arguably clearer than the original: `BinaryLeft(op)` and
+   `BinaryRight(op)` being separate variants puts the associativity rule — `+`
+   on the left of `+` is fine, on the right it is not — right in the type.
+2. **The cost is real and has to be paid somewhere.** `pass::base::apply` hands
+   *one* `ctx` to every slot it visits, so a pass that needs different contexts
+   per slot cannot call it. `AddPlusObject` therefore restates five of the base
+   traversals by hand. That is a maintenance hazard with no compiler check
+   behind it: an override that forgets a slot silently stops doing its job
+   there. The guard is testing — a case per slot, plus a *separate* walk over
+   `pass::base` that shares none of the overrides and can therefore still see
+   what one of them skipped.
+
+The second lesson generalises past this codebase. When you replace a dynamic
+check with a statically-carried descriptor, you move a runtime question into
+the type — and you also move the risk from "the check is wrong" to "the
+descriptor was never set". Those need different tests.
+
+---
+
 ## Quiz
 
 No looking. Answers below.
@@ -703,6 +866,19 @@ No looking. Answers below.
 24. A test wants to check that a pass put a newline in the right places. Why
     might asserting on the formatted text be the worse choice than asserting
     on the tree?
+25. Why does this not compile, and what one function call fixes it?
+    ```rust
+    if let NodeKind::Binary(binary) = &mut node.kind {
+        node.kind = NodeKind::ApplyBrace(ApplyBrace { left: binary.left, right: binary.right });
+    }
+    ```
+26. `std::mem::replace` needs a value to leave behind. Why can you not leave
+    "nothing" behind, and what is left behind in these passes?
+27. Go decides which slot of a parent the walk came through by writing
+    `parent.Target == *node`. Why can Rust not write that, and what replaces
+    it? Name *two* reasons, not one.
+28. `AddPlusObject` restates five of `pass::base`'s traversals by hand instead
+    of calling them. Why is it forced to, and what is the risk that creates?
 
 ---
 
@@ -786,6 +962,31 @@ No looking. Answers below.
     that may not be written yet. Asserting the pass's own postcondition
     ("does this slot now start on a fresh line?") needs neither. When you
     cannot generate the answer, assert the property rather than the output.
+25. Two problems at once. `binary.left` is a `Box<Node>` behind a `&mut`, and
+    you cannot move a value out of a borrow; and `node.kind` is already
+    mutably borrowed by the `if let`, so it cannot be assigned to. Both go
+    away with `std::mem::replace(&mut node.kind, NodeKind::LiteralNull)`,
+    which hands you the payload **owned** and leaves a valid placeholder
+    behind. `std::mem::take` is the same thing for a type with a `Default`.
+26. Because Rust has no half-initialised state — every place always holds a
+    valid value of its type, which is what makes moving out of a borrow
+    illegal in the first place. These passes leave `NodeKind::LiteralNull`, a
+    unit variant that allocates nothing. It exists for one or two statements
+    and nothing observes it.
+27. First, the parent is mutably borrowed for the whole of its own traversal,
+    so no second reference to it exists to compare against. Second, `Node`
+    derives `PartialEq`, so `==` compares *contents* — two structurally
+    identical subtrees would compare equal, which is the wrong answer
+    entirely. What replaces it is `passes::add_plus_object::Parent`, a
+    descriptor naming the slot the walk arrived through, set on the way *down*
+    rather than checked on arrival. The pointer comparison becomes a `match`.
+28. Because `pass::base::apply` takes one `ctx` and hands it to every slot it
+    visits, and this pass needs a different context per slot — the target of a
+    call needs parens, an argument does not. The risk is that a restated
+    traversal is a copy with no compiler check behind it: drop a slot and the
+    pass silently stops working there, with nothing in the pass itself looking
+    wrong. Hence a test case per slot, plus a separate counting walk over
+    `pass::base` that shares none of the overrides.
 
 ---
 
@@ -812,3 +1013,15 @@ No looking. Answers below.
   inputs-by-hand / answers-from-an-oracle rule and its consequence for what a
   test should assert. Quiz: 24 questions. §1's table of implemented passes is
   again left as it was, per the append-don't-rewrite rule.
+- **2026-09-16** — Phase 2e (`FixParens`, `RemovePlusObject`, `AddPlusObject`:
+  the three passes that change what a file evaluates to rather than how it
+  looks). Added §18 replacing a value behind a `&mut` — `std::mem::replace`,
+  why there is no "move out and leave it invalid", why the shape has to be
+  tested before the payload is owned, and moving a `Node` out of a `Box` you
+  own — and §19 pointer identity, which is 2e's whole design problem: Go
+  decides which slot of a parent the walk came through by comparing a place
+  against itself, Rust cannot, and the replacement is a descriptor set on the
+  way down. §19 is the one to read if only one gets read; it generalises past
+  this codebase. Quiz: 28 questions. §1's table of implemented passes is left
+  as it was again; `crates/rtk-jsonnetfmt/src/passes/mod.rs` is the current
+  list.

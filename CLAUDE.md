@@ -323,15 +323,17 @@ dropped before that object space during thread teardown.
 
 ## Formatting
 
-The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b, 2c and 2d have landed:
-the lexer, the AST, the parser, the unparser, the pass traversal, nine of the
-twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon`,
+The plan is `docs/rtk-fmt-plan.md`. Phases 0, 1, 2a, 2b, 2c, 2d and 2e have
+landed: the lexer, the AST, the parser, the unparser, the pass traversal,
+eleven of the twelve passes — `FixTrailingCommas`, `NoRedundantSliceColon`,
 `PrettyFieldNames`, `EnforceStringStyle`, `EnforceCommentStyle`,
-`EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation` — and all three of
-`FormatNode`'s non-pass steps. **Three do not exist yet**: `FixParens` and
-`RemovePlusObject` (Phase 2e) and `SortImports` (Phase 2f), so a file needing
-one of them comes back unformatted. The corpus stands at 134 of 138 and the
-four that remain are exactly those three passes' files.
+`EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation`, `FixParens`,
+`RemovePlusObject`, `AddPlusObject` — and all three of `FormatNode`'s non-pass
+steps. **One does not exist yet**: `SortImports` (Phase 2f), so a file whose
+top-of-file import group is out of order comes back unformatted. The corpus
+stands at 137 of 138 and the one that remains is exactly that pass's file.
+`quarantine.toml` is **empty**, and an entry appearing in it again is a
+divergence needing an entry here rather than a line there.
 
 `crates/jrsonnet-formatter` is **not** tk-compatible and `cmds/jrsonnet-fmt` is
 not either. That crate is upstream's dprint-based, width-driven pretty-printer,
@@ -344,12 +346,123 @@ Both are left untouched so upstream jrsonnet syncs against
 `.jrsonnet-upstream-base` stay clean.
 
 `rtk fmt` lives in `crates/rtk-jsonnetfmt` instead. `rtk_jsonnetfmt::format`
-runs `FormatNode`'s pipeline with the three unwritten passes missing from it;
-the doc comment on `format` carries the full fourteen-step order with each
-step's state, read off upstream rather than inferred. A file needing one of the
-missing passes comes back unformatted. The refusal is already real, though — a
-file that does not parse fails with go-jsonnet's message, which is what
-`tk fmt` prints before aborting the run.
+runs `FormatNode`'s pipeline with the one unwritten pass missing from it; the
+doc comment on `format` carries the full fourteen-step order with each step's
+state, read off upstream rather than inferred. A file needing that pass comes
+back unformatted. The refusal is already real, though — a file that does not
+parse fails with go-jsonnet's message, which is what `tk fmt` prints before
+aborting the run.
+
+Step 7 is one `if` with two branches and not two steps. `Options::default` has
+`use_implicit_plus` on, so **`tk fmt` runs `RemovePlusObject` and never runs
+`AddPlusObject`**: the only way to reach the latter is
+`use_implicit_plus: false`, which nothing but upstream's own
+`TestFormatNoImplicitPlus` — the `no_implicit_plus/` fixtures — passes. So the
+138-file corpus cannot grade `AddPlusObject` at all, and if that count ever
+moves when it changes, step 7 has been wired wrong.
+
+`FixParens` at step 6 running before step 7 is load-bearing: `((e))` is
+collapsed before `AddPlusObject` inserts any parentheses, and the ones it
+inserts are never collapsed again. Do not reorder them.
+
+### The three semantics-affecting passes
+
+Everything else in the pipeline is cosmetic — a bug moves a comment or an
+indent. A bug in `FixParens`, `RemovePlusObject` or `AddPlusObject` changes
+what a file **evaluates to**: `{ a: 1 } { b: 2 }.a` has to become
+`({ a: 1 } + { b: 2 }).a`, and without the inserted parentheses the formatted
+expression is a runtime error rather than a differently-spelled program. They
+are also the only three that replace a node rather than rewriting its fodder.
+
+**`RemovePlusObject` only fires when the left side is a `Var` or an `Index`.**
+Upstream says so in a comment — "Could relax this to allow more ASTs on the LHS
+but this seems OK for now" — so `{ a: 1 } + { b: 2 }` keeps its `+`, and
+`tests/golden/string_object_extend.jsonnet` shows both answers on adjacent
+lines. Four shapes that look like they should qualify and do not, because Go
+types each separately: `a[1:2]` is `ast.Slice`, `super.a` is `ast.SuperIndex`,
+`f()` is `ast.Apply` (though `f().a` *does* qualify, the test being on the
+outermost node), and on the right `{ [k]: 1 for k in x }` is `ast.ObjectComp`.
+Each has a snippet, and the negatives are the ones worth having.
+
+**`AddPlusObject` is the one pass with a `pass.Context`, and Go's trick does
+not port.** Its context is the parent node, and it tells the parent's slots
+apart with `parent.Target == *node` — a *pointer* comparison which, since
+`node` is `&parent.Target` whenever the walk came through that slot, is an
+identity check against a place itself. Rust has no answer to that while the
+parent is mutably borrowed, so `passes::add_plus_object::Parent` is a
+descriptor of the parent refined per slot, filled in by overriding the five
+node hooks whose slots upstream's switch distinguishes. Those five restate the
+base traversal, because a `pass::base` function takes one `ctx` and hands it to
+every slot — which is a real hazard: an override that drops a slot silently
+stops converting the `ApplyBrace`s in it. The guard is a snippet per slot plus
+a separate counting walk over `pass::base` that no override is shared with.
+
+**The replacement node is what goes down as the parent.**
+`c.Base.Visit(p, node, passCtx{parent: *node})` sits outside the `if` and
+`*node` is read after the rewrite, so where parentheses were added the children
+see the new `Parens`. That is why `{a:1} {b:2} {c:3}.x` comes out with one pair
+and not two.
+
+Three things in `AddPlusObject` are inert or unreachable, each verified rather
+than assumed and each reproduced anyway:
+
+- **The fodder move is a no-op for every tree that can reach it.** The parser
+  builds every `ApplyBrace` with `ast.Fodder{}`, because an `ApplyBrace` is
+  left-recursive and its opening fodder lives on the leftmost leaf; and no
+  earlier pass writes a node's *own* fodder — they all go through `openFodder`,
+  which walks the same spine. So both slots are always empty.
+- **The `ast.ApplyBrace` parent panics, and cannot be reached.** Every node
+  arrives through `Visit`, which replaces an `ApplyBrace` before descending.
+  The panic is reproduced on the `apply_brace` hook — one step earlier in the
+  walk than Go's, on the same impossible condition — so it still fires if the
+  invariant ever breaks.
+- **The `InSuper` branch is a constant.** `precedence(in) <= precedence(+)` is
+  8 against 6, so an `e { } in super` never gets parentheses. That is the right
+  answer, `+` binding tighter than `in`. Written as the comparison because
+  upstream writes it that way.
+
+### `FixParens` collapses one level per run
+
+The **second** non-convergence this port has found; the first is Phase 2c's,
+under `jsonnetfmt` is not a fixed point below. Upstream's
+`Parens` hook is an `if` and not a loop, and it hands the walk the node that
+took the inner Parens' place rather than re-examining the outer one:
+
+```
+(((1)))  ->  ((1))  ->  (1)      and  ((((1))))  ->  ((1))
+```
+
+Confirmed against the pass oracle, not inferred. It is what `tk fmt` prints and
+it must **not** be answered with a convergence loop, for the reason the 2c case
+already gives: `rtk fmt` matching `tk fmt` on one run is the contract. No
+corpus golden reaches it, so `tests/corpus.rs`'s idempotence allow-list is
+still empty.
+
+Both of that pass's fodder moves are `FodderMoveFront`, so the inner Parens'
+fodder is *prepended*: a comment written between the two `(` comes out in front
+of the surviving one, and with both slots occupied the two comments swap order.
+
+`FixParens` overrides `visit` rather than `parens`, which is where upstream
+overrides. `ast::Node` keeps the fodder that `openFodder(node)` returns, and
+the `parens` hook is handed a `Parens` payload that does not carry it. The move
+is unobservable: `Base.Visit` visits the open fodder and then dispatches, so
+upstream's collapse happens after that visit and this one happens before it —
+and the pass does not override any fodder hook, so the base traversal over
+fodder is a no-op either way.
+
+### A sixth upstream oddity, and the most serious one
+
+`AddPlusObject`'s switch has no `ast.Slice` case, so a slice target takes the
+default branch and gets no parentheses: `{a:1} {b:2}[1:2]` is written back as
+`{a:1} + {b:2}[1:2]`, which parses as `{a:1} + ({b:2}[1:2])` — a different
+tree. A slice binds exactly as tightly as an index, so this is the same bug the
+`ast.Index` case exists to prevent, in the one node kind the case does not
+name. It is the only one of the upstream oddities this port carries that
+changes what a file evaluates to. Reproduced rather than fixed, because
+matching `tk fmt` is the contract; `add_plus_object/slice_target` pins it, and
+it is graded by the oracle rather than by a reading of the source.
+
+It reaches nothing in practice: `tk fmt` never runs `AddPlusObject`.
 
 ### Three of the fourteen steps are not passes
 
@@ -423,6 +536,12 @@ interaction in `FormatNode`'s order, at which point it earns an entry here and
 an exclusion by name. Do not add a convergence loop — see the non-fixed-point
 note below for why that would diverge from `tk fmt` outright.
 
+Phase 2e is the phase that could most plausibly have broken this — `FixParens`
+and the plus-object passes rewrite node structure rather than fodder, and
+`FixParens` is itself non-convergent on `(((e)))`. It did not: no corpus golden
+contains a doubly-parenthesised expression, and `RemovePlusObject`'s output
+reparses directly as the `ApplyBrace` it produced. The list is still empty.
+
 **Whether a pass runs is `format`'s business, never the pass's.** `FormatNode`
 gates `EnforceStringStyle` on `StringStyle != Leave` and `EnforceCommentStyle`
 on `CommentStyle != Leave`, so `Leave` means the pass is never constructed. Run
@@ -489,6 +608,12 @@ consequences:
 - **Idempotence stays the default expectation.** A new non-convergence is a bug
   until it is traced to a specific cross-pass interaction in upstream's order.
 
+There are now **two** known counterexamples, and the second is simpler than
+this one: `FixParens` removes one level of redundant parens per run, so
+`(((1)))` needs two runs to settle. It has its own section above. Neither is
+reached by any corpus golden, which is why `tests/corpus.rs`'s idempotence
+allow-list is still empty; and neither is a reason for a convergence loop.
+
 How it surfaced is the reusable part: a Phase 2b unit test asserted that
 `format("a['fo\u006f']")` came back unchanged, and it passed for a whole phase
 because the pass that disproves it did not exist yet. **A whole-pipeline
@@ -499,7 +624,7 @@ tests that say so.
 
 ### The pass traversal
 
-`src/pass.rs` ports `internal/pass/pass.go`, and nine of the twelve passes are
+`src/pass.rs` ports `internal/pass/pass.go`, and ten of the twelve passes are
 an override of one or two of its methods, so its shape decides theirs. Two
 things to know before writing a pass:
 
@@ -513,8 +638,16 @@ things to know before writing a pass:
 - **`Context` is an associated type**, because Go's is `interface{}` and exactly
   one pass uses it: `AddPlusObject` carries the parent node. It compares the
   parent's child against the current node by pointer, which Rust cannot do
-  while the parent is mutably borrowed, so Phase 2e will carry a descriptor of
-  the parent refined per slot instead.
+  while the parent is mutably borrowed, so Phase 2e carries
+  `passes::add_plus_object::Parent` — a descriptor of the parent refined per
+  slot — instead. That was scoped when the trait was written rather than
+  discovered afterwards, and it landed without changing the trait. It is also
+  why `AddPlusObject` is the one pass that overrides more than two hooks: the
+  refinement has to happen in the hooks, since a `pass::base` function takes
+  one `ctx` and hands it to every slot, and so the five it overrides restate
+  the base traversal. An override that drops a slot silently stops converting
+  the `ApplyBrace`s in it, which no fodder pass could have done — see the
+  Formatting section above for the guard.
 
 Four slots the traversal **never visits** are each pinned by a unit test,
 because a pass that rewrites fodder will silently not reach them: `InSuper`'s
@@ -568,6 +701,31 @@ each had.
 the corpus by **zero**; `FixIndentation` moved it by **ten**. Had the phase
 been graded on the corpus alone, four of the five things it landed would have
 looked like no-ops.
+
+Phase 2e is the sharpest case for **why it matters**, rather than for how big
+the gap is. Before it, `FixParens` was graded by 0 of the 138 corpus files and
+0 of the 254 snippets — *nothing, in either direction* — while being one of the
+two passes whose bugs change what a file evaluates to. `RemovePlusObject` had
+three corpus files and no snippets. `AddPlusObject` had 18 oracle cells and one
+snippet, and that one hit was an accident of 2d's `indentation/apply_brace`
+rather than a case written for it; worse, its 18 cells can never become corpus
+*flips*, because the corpus is generated with `DefaultOptions`, which takes
+`RemovePlusObject` and skips `AddPlusObject` entirely. So the corpus grades it
+at zero by construction and always will.
+
+2e added 107 snippets before a line of pass code, taking
+`testdata/pass-snippets.json` from 254 to 361: `fix_parens` 25,
+`remove_plus_object` 32, `add_plus_object` 50. Over them the oracle records
+`FixParens` changing 23, `RemovePlusObject` 19 and `AddPlusObject` 50 — against
+0, 3 and 18 over the real files. All three then matched go-jsonnet node for
+node on every snippet and all 138 corpus files on the first compile, as every
+phase since the lexer has.
+
+The 13 `RemovePlusObject` no-ops are all *intended* negatives and are the most
+valuable part of that group: they are what says the `Var`-or-`Index`
+restriction, the plain-`Object` requirement and the `+`-only test are each
+real. A pass that over-generalised any of them would still be green on every
+positive case.
 
 ### The oracle is a lower bound on the work, not a sufficient set
 
@@ -640,6 +798,11 @@ file, which is what Phase 2b rests on.
 functions rather than passes, so even the staged program cannot reach them.
 Both are four lines and the corpus covers them end to end.
 
+`AddPlusObject` is the one pass the oracle grades and the corpus cannot, for
+the structural reason above rather than for want of coverage. Its end-to-end
+grading is the nine `no_implicit_plus/` fixtures, which run with
+`use_implicit_plus: false` — the only configuration that reaches it.
+
 Every fixture the current state gets wrong is listed in
 `crates/rtk-jsonnetfmt/quarantine.toml` with a reason, and `tests/fixtures.rs`
 asserts that list only ever shrinks: an unlisted failure, a listed fixture that
@@ -703,6 +866,12 @@ should be "fixed":
   `seenFirstFodder`, so a spared `#!` never marks fodder as seen and a second
   `#!` is spared as well. See the representation section above for the three
   things that *do* set the flag.
+
+Phase 2e added two more, each with a section of its own above because each is
+about behaviour rather than about a slot: `FixParens` collapsing one level of
+redundant parentheses per run, and `AddPlusObject`'s switch having no
+`ast.Slice` case — which is the only one of these that changes what a file
+evaluates to.
 
 There is deliberately no `fmt_golden_override/`. For fmt, every override would
 be a divergence from `tk fmt` — a bug.
