@@ -341,9 +341,11 @@ as a second set of 719; every count in the phase history below still means the
 number now lives. See **The formatter corpus** below for the two sets and why
 they are stored differently.
 
-What is left is Phase 5: acceptance over Grafana's real Jsonnet, and the README
-flip. `rtk fmt` works, and it writes in place, so the README row stays ❌ until
-Phase 5's already-formatted gate says otherwise.
+**Phase 5 is complete and the README row is ✅.** `rtk fmt` is byte-identical to
+`tk fmt` over **3,016 files of real Grafana Jsonnet, 1,452 of them vendored**,
+leaves already-formatted files alone, and destroys none of them. See **The fmt
+acceptance gate** below for how to run it; `docs/rtk-fmt-plan.md` has the
+numbers, the predictions and the two that missed.
 
 ### The `fmt` CLI
 
@@ -1557,6 +1559,67 @@ files is a poor instrument for the match count, which is what
 a kind nobody thought to write a snippet for**. 719 files bought three inputs
 and four snippets, in a pass that had 27 of them and no comprehension case, plus
 fifteen error answers nobody would have written by hand.
+
+### The fmt acceptance gate
+
+Phase 5's, and a third corpus with a different job from the other two: the 857
+files above are graded against go-jsonnet's *library* with no `tk` in the loop,
+while this runs the **real `tk` binary** against the real `rtk` binary over
+Jsonnet written by people who never thought about this formatter.
+
+| piece | what it is |
+| --- | --- |
+| `fmt-acceptance.toml` | the pinned repositories, the discovery excludes, the ratcheted counts, the two `[known]` lists |
+| `scripts/fmt-acceptance-corpus.sh`, `make fmt-acceptance-corpus` | clones them and records each resolved commit in `<corpus>/<name>.rev` |
+| `cmds/tk-compare/src/subcommands/fmt_acceptance.rs`, `make fmt-acceptance` | the gate |
+| `.github/workflows/fmt-acceptance.yaml` | weekly, non-blocking, one issue updated rather than one a week |
+
+It measures four things in one pass over one corpus: per-file byte parity
+through `tk fmt -` / `rtk fmt -`, the already-formatted property, whether any
+formatted output fails to reparse, and discovery order per root. 3,016 files,
+1,452 vendored; all four green. `docs/rtk-fmt-plan.md` carries the numbers and
+the reasoning.
+
+Five things to know before changing it:
+
+- **It is deliberately not a pull-request gate.** Its corpus is several hundred
+  megabytes of external clones tracking moving branches, so as a PR gate it
+  would go red for a GitHub outage or an upstream commit — and a gate that is
+  red for unrelated reasons is one people learn to ignore. What gates a PR is
+  everything inside the repository.
+- **The corpus excludes dotfiles only**, so `tk fmt`'s own `vendor/**` default is
+  dropped on purpose and `vendor_files` *measures* how much vendored Jsonnet is
+  really in there. Do not claim vendor coverage; read the number.
+- **Per file through `-`, not per tree.** A parse failure aborts the whole run in
+  both tools, so a whole-tree comparison would have them *agree* about aborting
+  and go green having compared only the files before the bad one. Discovery is
+  bought back separately by comparing `fmt --test --verbose` per root.
+- **`--extra-root` adds a local tree** (a private one, say) for a one-off run.
+  Those roots are reported apart, cannot move a counted number, and their
+  presence downgrades the count ratchet to advisory and prints that it has.
+  Parity, the already-formatted gate and the reparse check stay enforced.
+- **Both `[known]` lists ratchet three ways**: an unlisted file that starts
+  failing, a listed one that starts passing, and **a listed one the run never
+  reached** — the corpus tracks moving branches, so an upstream rename would
+  otherwise leave an entry describing nothing while its count went down, which
+  reads as an improvement. Nothing is listed on rtk's own answer; confirm against
+  real `tk` on both runs first.
+
+`-1` in any count means never measured and **fails** the gate rather than
+defaulting to zero. `error_text_matching` is the one counter that grades nothing
+today — real Grafana Jsonnet parses, so `parse_errors` is 0 — and it prints
+`UNGRADED` rather than `0 of 0` for that reason. The property it was for lives in
+`tk_agrees_on_a_refusal` in `cmds/rtk/tests/fmt_parity_test.rs`, which constructs
+a refusal instead of hoping the corpus contains one — and grades it at **2 of 2
+agreeing**, so rtk's refusal wrapper *is* tk's, byte for byte on both streams,
+despite one being anyhow's and the other go-clix's. That was measured rather
+than assumed, and the guess beforehand was that they would differ.
+
+**`tk-compare-grafana.toml` was never Grafana's Jsonnet**; it is
+`tk-compare-in-repo.toml` now, after the in-repo fixtures it actually holds. That
+was the sixth instance of one shape here — a name, comment or fallback promising
+coverage it did not deliver — so: **check the artifact, not the name**, and make
+the unmeasured state fail rather than read as fine.
 
 ### CI, and what it did not check until Phase 4
 

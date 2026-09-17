@@ -20,11 +20,13 @@
 //!
 //! # State
 //!
-//! [`format`] parses, runs every step of `FormatNode`, and unparses. **Phases
-//! 2, 3 and 4 of `docs/rtk-fmt-plan.md` are complete**: the lexer, the AST, the
-//! parser, the unparser, the [`pass`] traversal, all twelve passes, all three
-//! of `FormatNode`'s non-pass steps, and the CLI that drives them.
-//! `quarantine.toml` is empty.
+//! [`format`] parses, runs every step of `FormatNode`, and unparses.
+//! **`docs/rtk-fmt-plan.md` is complete through Phase 5**: the lexer, the AST,
+//! the parser, the unparser, the [`pass`] traversal, all twelve passes, all
+//! three of `FormatNode`'s non-pass steps, the CLI that drives them, and
+//! acceptance against the real `tk` over 3,016 files of real Grafana Jsonnet —
+//! 1,452 of them vendored — at byte parity, with nothing rewritten that `tk fmt`
+//! had already formatted. `quarantine.toml` is empty.
 //!
 //! `testdata/corpus-baseline.toml` counts the files, and Phase 4 made that
 //! count two counts. The breadth corpus is now **857 files in two sets**: the

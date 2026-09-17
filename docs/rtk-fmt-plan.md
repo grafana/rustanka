@@ -1627,8 +1627,10 @@ eight files of jsonnet-libs/docsonnet, and the walk does not exclude it — its
 `doc-util/render.libsonnet` is one of the three files Phase 2e's
 `RemovePlusObject` flipped, so third-party style has earned its keep. The
 repository's other four vendor directories are ten files averaging 30 bytes and
-are named as deliberately left out. Real vendor breadth is Phase 5's
-`tk-compare-grafana.toml`, and the comment says so.
+are named as deliberately left out. Real vendor breadth is Phase 5's acceptance
+corpus, and the comment said `tk-compare-grafana.toml` — which Phase 5 then
+found held no such thing. It now names `fmt-acceptance.toml`; see Phase 5 below,
+where the same mistake is recorded a second time in a row.
 
 #### A second pre-existing finding: `target/go-jsonnet` was nobody's job
 
@@ -1664,7 +1666,275 @@ fallback that graded the family only under `make test`, and this.
    that is 99% right still rewrites half a repo on first run.
 3. README feature table: `fmt` ❌ → ✅. Close #11.
 4. Note in `CLAUDE.md`: where the port lives, that `cmds/jrsonnet-fmt` is *not*
-   tk-compatible, and that tk is pinned for fmt goldens.
+   tk-compatible, and that tk is pinned for fmt goldens. **Done in Phase 4**;
+   `CLAUDE.md` already carries all three.
+
+### Phase 5 is done
+
+`rtk fmt` is byte-identical to `tk fmt` over **3,016 files of real Grafana
+Jsonnet, 1,452 of them vendored**, leaves already-formatted files untouched, and
+destroys none of them. The README row is ✅. Numbers under **Measured** below,
+predictions above it, and the two that missed recorded as misses.
+
+One thing to carry forward before the detail: **the phase's own instrument
+reproduced the pattern the phase is about.** `error_text_matching` graded `0 of
+0`. See **Measured**.
+
+### The first thing it found was item 1's own premise
+
+**`tk-compare-grafana.toml` was not Grafana's real Jsonnet.** It was three
+tests — golden eval, golden export, diff — and all three `fixtures_dir` values
+named directories inside this repository: `test_fixtures/golden_envs` and
+`cmds/rtk/tests/testdata/diff`. Nothing cloned an external checkout and nothing
+said where one should come from. `fixtures_dir` passing through
+`expand_env_vars` was the only hint that one had ever been intended, and Phase
+4's own note — "Real vendor breadth is Phase 5's `tk-compare-grafana.toml`" —
+repeated the claim without checking it.
+
+That is the **sixth** instance of the shape `CLAUDE.md` now names outright, and
+the closest relative of `main.go`'s `roots` comment claiming a `vendor/` tree
+that did not exist. Item 1 was written against a file whose name was the whole
+of the evidence.
+
+So it is renamed `tk-compare-in-repo.toml`, after what it holds, and Phase 5's
+corpus is a new artifact that says where its files come from:
+
+- **`fmt-acceptance.toml`** — the corpus definition, the discovery excludes and
+  the ratcheted counts, with the provenance argument in full.
+- **`scripts/fmt-acceptance-corpus.sh`** / `make fmt-acceptance-corpus` — clones
+  the pinned repositories and records the commit each one resolved to.
+- **`tk-compare fmt-acceptance`** / `make fmt-acceptance` — the gate.
+- **`.github/workflows/fmt-acceptance.yaml`** — weekly, non-blocking, one issue
+  updated rather than one per week, red as well as filed.
+
+#### Provenance, stated rather than implied
+
+There is **no Grafana-internal Jsonnet checkout available to this repository.**
+`grafana/deployment_tools` appears once, in
+`.claude/skills/merge-upstream-jrsonnet/SKILL.md`, as a tree a developer may
+have locally for a real-world export check. It is private, so it cannot be the
+denominator of a committed gate — that is the `GO_JSONNET_FOR_TESTS` hazard
+again, and `corpus-baseline.toml` has already argued at length why an
+environment-dependent denominator makes a ratchet unenforceable.
+
+The corpus is therefore **public Grafana Jsonnet, pinned**: `jsonnet-libs` (the
+libraries Grafana's own deployments vendor), `tanka` (tk's own repository), and
+the production Jsonnet of `mimir`, `loki` and `tempo`. A private tree can still
+be added for a local run with `--extra-root`; those roots are reported apart
+from the pinned ones, they cannot move a counted number, and their presence
+**downgrades the count ratchet to advisory and says so**, while parity, the
+already-formatted gate and the reparse check stay enforced.
+
+Vendor inclusion is **measured, not claimed**: the discovery excludes are
+dotfiles only, `tk fmt`'s own `vendor/**` default being deliberately dropped,
+and `vendor_files` records how many discovered files sit under a `vendor/`
+directory. Phase 4's lesson, applied to the one sentence of Phase 5 that repeats
+its mistake.
+
+#### The route: per file through `-`, not per tree
+
+The phase brief offered two routes — in-place with `workspace = true` plus a
+directory comparison, or comparing the two tools' `--stdout` streams — and this
+takes the second one file at a time. `tk fmt -` and `rtk fmt -` on the same
+bytes, stdout, stderr and exit code compared. Four reasons, and the first is
+decisive:
+
+- **A parse failure aborts the whole run.** Both tools return on the first file
+  the parser refuses. One bad file in a corpus of thousands truncates a
+  whole-tree comparison to however many files preceded it — and the two tools
+  would *agree* about aborting, so the gate would pass having compared almost
+  nothing. That is this phase's own stated failure mode, reached by the obvious
+  design. Per file, a refusal is one file's verdict and the denominator stays
+  whole.
+- **Attribution.** A directory comparison says a tree differs; this says which
+  file and holds both answers.
+- **Nothing is written to the corpus**, so the parity measurement cannot
+  contaminate the already-formatted one. In-place mode also rewrites every
+  discovered file whether it changed or not, so a directory comparison cannot
+  tell "both agreed" from "neither changed anything".
+- `-` carries no wrapper text: no `// {name}` header, no per-file blank line on
+  stderr, no summary. The bytes on stdout are the formatted file.
+
+What it gives up is discovery, so that is bought back separately:
+`fmt --test --verbose` over each root in both tools, listings compared. `--test`
+discards, so nothing is written there either.
+
+#### Two numbers, because parity is two questions
+
+`matching` counts files where every observable agrees. `matching_formatted`
+counts the same over files **both tools formatted**, and that is the formatter's
+parity number. They come apart on a file neither tool can parse, where what is
+being compared is anyhow's error text against go-clix's — and **nothing in this
+repository grades a `fmt -` refusal against tk's**:
+`fmt_parity_test.rs`'s parse-failure test asserts `contains`, and none of its
+fifteen tk scenarios feeds in a file the parser refuses. Conflating the two
+would report a CLI difference as a formatter difference, on files where the
+formatter was never reached.
+
+#### Predictions, recorded before the first run
+
+Four phases in a row landed their count exactly, three of them by querying
+`pass-oracle.json` per file and per pass. **There is no oracle here at all** —
+the oracle answers only for files in `corpus/manifest.json` — so unlike Phase 4,
+which at least had full parity everywhere graded to reason from, this one has to
+argue from what the corpus adds that nothing has seen.
+
+| quantity | prediction |
+| --- | --- |
+| `matching_formatted` | `== formatted`, i.e. **100%** |
+| `already_formatted` | `== formatted`, and the tree gate exits 0 |
+| `refusing_to_reparse` | **0** |
+| `non_convergent` | **0** |
+| `non_utf8` | **0** |
+| `roots_with_matching_discovery` | **5 of 5** |
+| `parse_errors` | small but **non-zero** |
+| `error_text_matching` | **0** |
+| `matching` | `== matching_formatted`, i.e. **not** `== files` |
+| `files` | 3,000, and this one is a guess |
+
+`files` is the only number here with nothing behind it. There is no prior
+measurement and no oracle; 3,000 is arithmetic on rough repository sizes, the
+interval is something like 2,000 to 5,000, and being wrong about it costs
+nothing. Recorded anyway, so that it cannot later be presented as a derivation.
+
+**Why parity at 100%, and what would break it.** The formatter is at full parity
+everywhere it is graded: 857 corpus files in two sets, node and pass oracles
+exact over 63 and 440 snippets, 44 parse-error snippets graded on message *and*
+location, 15 of 15 fixtures, 25 CLI tests and 15 of 15 tk scenarios. What this
+corpus adds is four things graded at breadth for the **first time**, and they
+are the ordered list of suspects if the number is not 100%:
+
+1. **`#` comments**, so `EnforceCommentStyle`. It changes **0 of the 138**
+   in-repo files, for the structural reason Phase 2c generalised — a
+   `tk fmt`-clean file has had its `#` rewritten already — and **0 of the 719**
+   go-jsonnet files, which contain none. Real Grafana Jsonnet uses `#` comments.
+   This is that pass's first grading against a real file in the whole port, and
+   its hashbang carve-out is the subtle part.
+2. **Runs of three or more blank lines**, so `EnforceMaxBlankLines`, which was
+   graded by *nothing at all* before Phase 2d and by no corpus file since.
+3. **Import groups of thirteen or more**, so `go_sort`'s pdqsort proper. The
+   largest group in this repository is **12**, which is exactly `maxInsertion`,
+   so every branch past insertion sort is dead over real files here by a margin
+   of one import. Library and mixin files routinely have more. Graded by the
+   410-case truth table, never yet reached from real input.
+4. **`\u` escapes**, so `EnforceStringStyle`'s unescape/escape round trip. Zero
+   in the go-jsonnet set; dashboard Jsonnet has them.
+
+**CRLF looks like the obvious risk and is not one**, which is worth writing down
+because it is the first thing anyone will reach for. `\r` is horizontal
+whitespace in both lexers — `is_horizontal_whitespace` includes it — and
+trailing horizontal whitespace is stripped at lex time and never restored, so a
+CRLF file formats to LF in both tools. That is parity. A **BOM** is a genuine
+unknown (zero in both existing sets) and would be refused by both, so it lands
+in `parse_errors` rather than in the parity number.
+
+**`non_utf8` is predicted 0 but is counted, because it is a real divergence.**
+Go reads bytes and its strings tolerate invalid UTF-8; `rtk fmt` reads through
+`read_to_string` and refuses. A latin-1 `.libsonnet` in a vendored tree would be
+formatted by `tk fmt` and rejected by `rtk fmt`, which is a divergence in the
+one direction this project does not accept. The harness names those files rather
+than skipping them.
+
+**Why zero for both destructive mechanisms, and the argument against it.**
+Mechanism 1 needs a *string-literal* field name inside an object comprehension —
+`{ ['const']: v for x in … }` — which is legal and pointless: for any loop of
+more than one element it evaluates to a duplicate-field error. It survives in
+go-jsonnet's `testdata/` because those files exist to provoke a parser.
+Mechanism 2 needs a `|||` block whose value is nothing but newlines, which is a
+typo; it is the more plausible of the two — a placeholder or a commented-out
+script could produce one — so it is the one to expect first if either is
+non-zero. The five non-convergence mechanisms need `(((e)))`, `(\n  (1)\n)`, an
+index written `a['foo']` or an import path written with an escape, none of
+which a file anyone runs contains.
+
+The argument against all of that is a rate: 3 of 719 is 0.4%, and 0.4% of a few
+thousand files is a dozen or two. **It is rejected on the ground that
+go-jsonnet's `testdata/` is adversarial by construction and real Jsonnet is
+not** — the in-repo 138, which are real files, reach none of the five
+mechanisms. If the measurement comes back non-zero anyway, the rate argument was
+right and this distinction was the mistake; record it that way round rather than
+retrofitting a reason.
+
+#### Measured
+
+| quantity | predicted | measured | |
+| --- | --- | --- | --- |
+| `files` | 3,000, *as a guess* | **3,016** | — |
+| `matching_formatted` | `== formatted` | **3016 of 3016** | ✅ |
+| `already_formatted` | `== formatted` | **3016 of 3016** | ✅ |
+| `refusing_to_reparse` | 0 | **0** | ✅ |
+| `non_convergent` | 0 | **0** | ✅ |
+| `non_utf8` | 0 | **0** | ✅ |
+| `roots_with_matching_discovery` | 5 of 5 | **5 of 5** | ✅ |
+| `vendor_files` | not predicted | **1,452 of 3,016** | — |
+| `parse_errors` | small but non-zero | **0** | ❌ |
+| `matching` | `!= files` | **`== files` (3016)** | ❌ |
+
+Per root: jsonnet-libs 1144, tempo 1495, mimir 222, tanka 96, loki 59. The
+tree-level already-formatted gate ran green beside the per-file one — exit 0,
+the clean summary on stderr, and 3,016 `ok  ` lines.
+
+**Eight of ten landed and two missed, and both misses are one wrong belief:**
+that a few thousand files of real Grafana Jsonnet would contain some the parser
+refuses. None do. `parse_errors` is 0, and `matching` therefore equals `files`
+because the only thing that could have separated them was a refusal.
+
+**The consequence is worse than the miss, and it is the finding of the phase.**
+`error_text_matching` was built specifically because *nothing in this repository
+grades a `fmt -` refusal against tk's* — and with `parse_errors = 0` it reported
+`0 of 0`, which is an empty denominator dressed as agreement. That is the shape
+this project has now been bitten by six times, appearing in code written during
+the phase about that shape, within an hour of the paragraph warning against it.
+The generalisation earns its own line: **a breadth corpus cannot guarantee that
+a case exists, so it cannot be the home of a property that needs one.** A
+fixture can. So the property moved to `tk_agrees_on_a_refusal` in
+`cmds/rtk/tests/fmt_parity_test.rs`, which constructs a refusal — a named file
+and `-`, both streams, both exit codes, and what each tool left behind — and is
+a pull-request gate rather than a weekly external job. The counter stays in the
+harness as breadth and now prints `UNGRADED` rather than `0 of 0`.
+
+**And it agreed, 2 of 2, on the first run.** That was expected to fail: rtk's
+wrapper is anyhow's and tk's is go-clix's, and the stated guess was that they
+would differ cosmetically and the divergence would need documenting. They are
+byte-identical on both streams. So the hole was in the grading and not in the
+behaviour — which is exactly why the pattern is worth chasing rather than
+shrugging at. **An ungraded property is not a broken one; it is one nobody can
+say anything about, and the two are indistinguishable until something measures
+it.** Five of this project's six instances were harmless in the end. The sixth
+was `target/go-jsonnet`, which cost three fixtures for three phases.
+
+`files` at 3,016 against a guess of 3,000 is **not** a fifth exact prediction and
+must not be read as one: it was arithmetic on rough repository sizes with no
+oracle behind it, recorded as a guess beforehand precisely so it could not be
+presented afterwards as a derivation.
+
+**The four first-time gradings all came back clean**, which is the substantive
+result behind the parity number. `EnforceCommentStyle` and
+`EnforceMaxBlankLines` had between them **zero** grading against any real file
+anywhere in this port; `go_sort` had never been reached past insertion sort by
+real input; `EnforceStringStyle`'s escape round trip had never met `\u` at
+breadth. 3,016 real files, half of them third-party vendored libsonnet, moved
+none of them. CRLF was correctly identified beforehand as a non-risk.
+
+**And the rate argument was wrong, as predicted.** 3 of 719 in go-jsonnet's
+`testdata/` is 0.4%, which over this corpus would have been about a dozen
+destroyed files. It is zero, because that set is adversarial by construction and
+real Jsonnet is not. Recording which way round that went matters: the prediction
+named the counter-argument and rejected it for a stated reason, and the reason
+held.
+
+#### The README
+
+Flipped to ✅ on the strength of the numbers above, with the decision made before
+them, because a gate's result should not settle a safety claim by default.
+
+`tk fmt` destroys a file under either known mechanism, byte for byte and on both
+runs — but "tk also destroys it" is a parity argument, and a reader of ✅
+concludes the command is safe to run over their tree. So the row says what ✅
+means, that two upstream quirks can make *either* tool write a file that no
+longer parses, that none of the 3,016 reached them, and that `--test` is the way
+to look first. One sentence, not a warning block: rtk is not more dangerous than
+the thing it replaces, and implying otherwise would be its own inaccuracy.
 
 ## Test strategy summary
 
@@ -1682,8 +1952,8 @@ fallback that graded the family only under `make test`, and this.
 | Idempotence | one-pass fixed point | property, no fixtures | no |
 | Already-formatted | zero-diff on clean repo | property | no |
 | CLI parity | flags, modes, exits, and which stream each line is on | the CLI surface section above, written out in full | no |
-| CLI cross-check | the same, against the real thing | tk, over fourteen scenarios | yes, and it says when it has no tk |
-| `tk-compare-grafana` | acceptance | tk on real repos | yes |
+| CLI cross-check | the same, against the real thing | tk, over fifteen scenarios | yes, and it says when it has no tk |
+| `tk-compare fmt-acceptance` | acceptance: parity, already-formatted, refusals and discovery over real Grafana Jsonnet | tk, per file, over the pinned corpus in `fmt-acceptance.toml` | yes, and it refuses to run without it |
 
 ## Rules
 

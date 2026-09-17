@@ -133,9 +133,11 @@ type ExternalCorpus struct {
 // testdata/corpus-baseline.toml warns about at length.
 //
 // Breadth over real third-party style comes from the second set (go-jsonnet's
-// own testdata, see the package comment) and, in Phase 5, from
-// tk-compare-grafana.toml, which is where vendored Grafana Jsonnet by the
-// thousand actually lives.
+// own testdata, see the package comment) and, since Phase 5, from
+// fmt-acceptance.toml, which pins public Grafana repositories and is where
+// vendored Grafana Jsonnet by the thousand actually lives. It used to name
+// tk-compare-grafana.toml, which held nothing of the kind — that file is now
+// tk-compare-in-repo.toml, after its name.
 var roots = []string{
 	"tests/suite",
 	"tests/golden",

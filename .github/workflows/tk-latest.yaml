@@ -76,6 +76,12 @@ jobs:
         continue-on-error: true
         run: make check-golden-fixtures
 
+      # Deliberately not the fmt acceptance gate. That one clones several
+      # hundred megabytes of Grafana repositories and is its own weekly job
+      # (`fmt-acceptance.yaml`), pinned to the tk rtk answers for. Running it
+      # here would double the clone cost to re-ask a question the cross-check
+      # above already answers about tk moving.
+
       - name: Report divergence
         if: steps.cli.outcome == 'failure' || steps.goldens.outcome == 'failure'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7

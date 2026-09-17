@@ -60,7 +60,7 @@ Status is relative to [Tanka](https://github.com/grafana/tanka) (`tk`). ✅ impl
 | `env add` / `list` / `remove` / `set` | ✅ | ✅ | |
 | `delete` | ✅ | ❌ | Tracking: [#14](https://github.com/grafana/rustanka/issues/14) |
 | `status` | ✅ | ❌ | Tracking: [#13](https://github.com/grafana/rustanka/issues/13) |
-| `fmt` | ✅ | ❌ | Tracking: [#11](https://github.com/grafana/rustanka/issues/11) |
+| `fmt` | ✅ | ✅ | Byte-identical to `tk fmt` on 3,016 files of real Grafana Jsonnet, 1,452 of them vendored, and already-formatted files are left alone. Two upstream go-jsonnet quirks can make *either* tool write a file that no longer parses (neither was reached by any of the 3,016); `rtk fmt --test` is the safe way to look first, as it is with `tk fmt`. |
 | `init` | ✅ | ❌ | Tracking: [#12](https://github.com/grafana/rustanka/issues/12) |
 | `complete` | ✅ | ❌ | Tracking: [#15](https://github.com/grafana/rustanka/issues/15) |
 

@@ -3,8 +3,9 @@
 //! These grade the CLI surface rather than the formatter: the order of
 //! operations, which stream each line lands on, what reaches disk, and what the
 //! process exits with. The formatter itself is graded by
-//! `crates/rtk-jsonnetfmt` — 138 corpus files, 15 fixtures and three oracles at
-//! full parity — and nothing here re-grades it.
+//! `crates/rtk-jsonnetfmt` — 857 corpus files in two sets, 15 fixtures and three
+//! oracles at full parity — and by `make fmt-acceptance` against the real `tk`
+//! over 3,016 files of real Grafana Jsonnet. Nothing here re-grades it.
 //!
 //! # Why this runs the binary
 //!
@@ -32,6 +33,12 @@
 //! The no-argument case is checked separately and more weakly, because rtk's
 //! message and exit code there are clap's and tk's are go-clix's. What is
 //! compared is that both refuse and that neither touches a file.
+//!
+//! [`tk_agrees_on_a_refusal`] is a second cross-check, and it is here rather
+//! than in the acceptance gate for a reason worth keeping: the gate built a
+//! counter for exactly this and measured `0 of 0`, because real Grafana Jsonnet
+//! parses. **A breadth corpus cannot guarantee that a case exists, so it cannot
+//! be the home of a property that needs one.** A fixture can.
 
 use std::{
 	collections::BTreeMap,
@@ -925,6 +932,135 @@ fn tk_agrees_on_the_streams_and_the_exit_codes() {
 		"\n{} of {} scenarios differ from tk:\n\n{}",
 		mismatches.len(),
 		SCENARIOS.len(),
+		mismatches.join("\n\n")
+	);
+}
+
+/// Jsonnet the parser refuses, for the refusal cross-check below.
+///
+/// An unclosed brace rather than something exotic, because what is being
+/// compared is the wrapper around go-jsonnet's message, not the message.
+const UNPARSEABLE: &str = "{\n";
+
+/// What `tk fmt` and `rtk fmt` print when asked to format something that does
+/// not parse.
+///
+/// **This exists because a breadth corpus cannot guarantee a refusal.** Phase 5
+/// built `error_text_matching` into the acceptance gate to grade exactly this,
+/// over a few thousand files of real Grafana Jsonnet — and measured
+/// `parse_errors = 0`, because real Grafana Jsonnet parses. So that counter
+/// reported `0 of 0`, which is an empty denominator dressed as agreement: the
+/// shape `CLAUDE.md` now records six instances of. A fixture can guarantee what
+/// a corpus can only hope for, so the property lives here, where it is also a
+/// pull-request gate rather than a weekly external job.
+///
+/// Both halves are compared, because a parse failure reaches the user two ways:
+/// a named file, where the run aborts part way and leaves what it had already
+/// written, and `-`, where there is nothing to write.
+///
+/// **Both agreed on the first run, byte for byte on both streams.** That is
+/// worth writing down because it was expected to *fail*: rtk's wrapper is
+/// anyhow's and tk's is go-clix's, and the guess was that they would differ
+/// cosmetically. They do not. So the hole this closed was in the grading and
+/// not in the behaviour — which is the whole point of the pattern. An ungraded
+/// property is not a broken one; it is one nobody can say anything about, and
+/// the two are indistinguishable until something measures it.
+#[test]
+fn tk_agrees_on_a_refusal() {
+	if !tk_available() {
+		assert!(
+			!tk_required(),
+			"RTK_REQUIRE_TK=1, but `tk` is not on PATH — nothing was compared"
+		);
+		println!(
+			"SKIPPED: `tk` is not on PATH, so 0 of 2 refusal scenarios were compared against it. \
+			 Set RTK_REQUIRE_TK=1 to make this a failure."
+		);
+		return;
+	}
+
+	let mut mismatches = Vec::new();
+	// Counted per scenario rather than per difference: one scenario can
+	// contribute two entries to `mismatches` (the streams and the files left
+	// behind), and a printed count that subtracted differences from scenarios
+	// would then understate what was compared. The number in the log is the
+	// thing this whole shape exists to make readable, so it has to be right.
+	let mut agreeing = 0;
+	// Named apart from this file's module-level `SCENARIOS`, which is the
+	// fifteen-scenario stream cross-check and a different list entirely.
+	const REFUSAL_SCENARIOS: usize = 2;
+
+	// A named file. `b_bad` sorts after `a_good`, so this also compares what the
+	// two tools leave behind when the run dies part way through.
+	let ours = tree(&[
+		("a_good.jsonnet", UNFORMATTED),
+		("b_bad.jsonnet", UNPARSEABLE),
+	]);
+	let theirs = tree(&[
+		("a_good.jsonnet", UNFORMATTED),
+		("b_bad.jsonnet", UNPARSEABLE),
+	]);
+	let rtk = rtk_fmt(ours.path(), &["."], None);
+	let tk = run_binary("tk", theirs.path(), &["fmt", "."], None);
+	let mut named_agreed = true;
+	if rtk.stderr != tk.stderr || rtk.stdout != tk.stdout || rtk.code != tk.code {
+		named_agreed = false;
+		mismatches.push(format!(
+			"=== named file (fmt .) ===\nstdout:\n  rtk: {:?}\n  tk:  {:?}\nstderr:\n  rtk: \
+			 {:?}\n  tk:  {:?}\nexit:\n  rtk: {:?} ({})\n  tk:  {:?} ({})",
+			clip(&rtk.stdout),
+			clip(&tk.stdout),
+			clip(&rtk.stderr),
+			clip(&tk.stderr),
+			rtk.code,
+			rtk.status,
+			tk.code,
+			tk.status
+		));
+	}
+	let (our_files, their_files) = (contents(ours.path()), contents(theirs.path()));
+	if our_files != their_files {
+		named_agreed = false;
+		mismatches.push(format!(
+			"=== named file, what was left behind ===\n  rtk: {our_files:?}\n  tk:  {their_files:?}"
+		));
+	}
+	agreeing += usize::from(named_agreed);
+
+	// Stdin, where the message is all there is.
+	let mine = two_files();
+	let yours = two_files();
+	let rtk = rtk_fmt(mine.path(), &["-"], Some(UNPARSEABLE));
+	let tk = run_binary("tk", yours.path(), &["fmt", "-"], Some(UNPARSEABLE));
+	if rtk.stderr == tk.stderr && rtk.stdout == tk.stdout && rtk.code == tk.code {
+		agreeing += 1;
+	} else {
+		mismatches.push(format!(
+			"=== stdin (fmt -) ===\nstdout:\n  rtk: {:?}\n  tk:  {:?}\nstderr:\n  rtk: {:?}\n  \
+			 tk:  {:?}\nexit:\n  rtk: {:?} ({})\n  tk:  {:?} ({})",
+			clip(&rtk.stdout),
+			clip(&tk.stdout),
+			clip(&rtk.stderr),
+			clip(&tk.stderr),
+			rtk.code,
+			rtk.status,
+			tk.code,
+			tk.status
+		));
+	}
+
+	println!(
+		"compared {agreeing} of {REFUSAL_SCENARIOS} refusal scenarios against tk without a \
+		 difference"
+	);
+	assert!(
+		mismatches.is_empty(),
+		"\nrtk and tk disagree about a refusal. This is a CLI-surface difference rather than a \
+		 formatter one — the formatter's message is go-jsonnet's either way — but it is what a \
+		 user sees when `fmt` aborts, and until now nothing compared it: this file's \
+		 parse-failure test asserts `contains`, and the acceptance gate's own counter for it \
+		 graded 0 of 0. Either match tk's wrapper or record the divergence in CLAUDE.md beside \
+		 the `env set` and conflict-message ones.\n\n{}",
 		mismatches.join("\n\n")
 	);
 }

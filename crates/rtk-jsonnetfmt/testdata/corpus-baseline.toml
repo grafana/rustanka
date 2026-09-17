@@ -233,7 +233,10 @@
 #   * vendored libsonnet beyond what golden_envs already carries. There is no
 #     top-level vendor/ here; main.go's `roots` comment used to claim one was
 #     included and now says what is actually true. Real vendor breadth is
-#     Phase 5's tk-compare-grafana.toml.
+#     Phase 5's acceptance corpus, fmt-acceptance.toml — which is a second
+#     instance of the same lesson: the plan named tk-compare-grafana.toml for
+#     that job and that file pointed at this repository's own fixtures. Phase 5
+#     renamed it tk-compare-in-repo.toml and built the real corpus separately.
 #
 # ## Why the two sets are stored differently, which was the design problem
 #

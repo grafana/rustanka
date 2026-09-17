@@ -1,0 +1,225 @@
+# The acceptance corpus for `rtk fmt`, and the ratchet over it.
+#
+# Phase 5 of `docs/rtk-fmt-plan.md` asks for "Grafana's real Jsonnet, vendor
+# included. Thousands of files by people who never thought about this
+# formatter. This is the gate that says shippable."
+#
+# ## What this file is, and what `tk-compare-grafana.toml` was not
+#
+# The plan pointed that sentence at `tk-compare-grafana.toml`, and **that file
+# was never Grafana's real Jsonnet.** It is three tests — golden eval, golden
+# export and diff — and all three `fixtures_dir` values name directories inside
+# this repository: `test_fixtures/golden_envs` and
+# `cmds/rtk/tests/testdata/diff`. Nothing in the repository said where a real
+# checkout was supposed to come from, and no target cloned one. It has been
+# renamed to `tk-compare-in-repo.toml`, which is what it holds.
+#
+# That is the fifth time this port has been bitten by an artifact whose name or
+# comment promised coverage it did not deliver — `CLAUDE.md` lists the other
+# four, and `main.go`'s `roots` comment claiming a `vendor/` tree that did not
+# exist is the closest relative. The response here is the same one: say what is
+# actually measured, and make the unmeasured state fail rather than pass.
+#
+# ## Provenance
+#
+# There is **no Grafana-internal Jsonnet checkout available to this
+# repository.** `grafana/deployment_tools` is named once, in
+# `.claude/skills/merge-upstream-jrsonnet/SKILL.md`, as an environment tree a
+# developer may have locally for a real-world export check. It is private, so it
+# cannot be the denominator of a committed gate, and a gate whose corpus is only
+# on one laptop is the `GO_JSONNET_FOR_TESTS` hazard again.
+#
+# So the corpus is **public Grafana Jsonnet, pinned and clonable**: the
+# libraries Grafana's own deployments vendor, and the production Jsonnet of the
+# databases Grafana ships. `make fmt-acceptance-corpus` clones them;
+# `make fmt-acceptance` measures against them.
+#
+# A private tree can still be added for a local run with `--extra-root`, and the
+# harness reports those roots and their file counts **separately**. They can
+# never move the numbers below, because a denominator that depends on whose
+# laptop is running is a ratchet that cannot be enforced.
+#
+# ## The refs are pinned once measured, not before
+#
+# Every repo below carries a `ref` (what to clone) and a `rev` (the commit that
+# answers for the numbers). `rev` starts empty because a commit hash cannot be
+# invented — `make fmt-acceptance-corpus` records the resolved hash of each
+# clone next to it, and the harness prints it. Fill `rev` in from that first
+# run, in the same commit as the baseline, and every later run asserts it.
+#
+# **An empty `rev` is reported as `UNPINNED` and does not fail the run**, so the
+# first measurement is possible; a `rev` that is set and does not match **does**
+# fail. That asymmetry is deliberate and it is the one place this file tolerates
+# an unmeasured state, so it says so loudly rather than quietly.
+
+[[repos]]
+# The libsonnet Grafana's real deployments vendor. The widest variety of
+# third-party Jsonnet style available in public, which is exactly what stresses
+# a fodder-preserving formatter.
+name = "jsonnet-libs"
+url = "https://github.com/grafana/jsonnet-libs"
+ref = "master"
+rev = "29105ceda225ca384834445a5b84a813aac7de00"
+
+[[repos]]
+# tk's own repository: its examples and docs Jsonnet, written by the people who
+# wrote the formatter's caller.
+name = "tanka"
+url = "https://github.com/grafana/tanka"
+ref = "main"
+rev = "1f29e618a99d5d03e6dfce85fb180dc5ea9c3bad"
+
+[[repos]]
+# `operations/mimir` and the mixins, with a committed `vendor/` tree — real
+# production Jsonnet with real vendored dependencies.
+name = "mimir"
+url = "https://github.com/grafana/mimir"
+ref = "main"
+rev = "f2482cb40d3e95540e81a396c5d5283f75e55ddc"
+
+[[repos]]
+# `production/ksonnet/loki` and `production/loki-mixin`.
+name = "loki"
+url = "https://github.com/grafana/loki"
+ref = "main"
+rev = "fb3895c3f65291e1fcb428ff2e943940b2dabc97"
+
+[[repos]]
+# `operations/jsonnet` and `operations/tempo-mixin`.
+name = "tempo"
+url = "https://github.com/grafana/tempo"
+ref = "main"
+rev = "9295aaaf6b3fd8962a16df97e5b32e7fa22b27c4"
+
+[discovery]
+# **Dotfiles only.** `tk fmt`'s own default excludes drop `vendor/**` as well,
+# and this corpus deliberately does not: the plan asks for vendor included, and
+# vendored libsonnet is third-party style nobody reformatted. `.git` has to go,
+# or the walk reads the object store.
+#
+# The harness reports how many discovered files sit under a `vendor/` directory,
+# and `vendor_files` below records it. That number is measured rather than
+# claimed, because the last comment in this repository to claim vendor coverage
+# was wrong about it.
+exclude = ["**/.*", ".*"]
+
+# What the last measurement said. Asserted exactly, in both directions, exactly
+# as `crates/rtk-jsonnetfmt/testdata/corpus-baseline.toml` is: fewer is a
+# regression, more is progress and the number is updated in the same commit.
+#
+# **`-1` means "never measured", and the harness fails on it.** A count that
+# defaulted to zero would let an unmeasured gate go green, which is the whole
+# failure mode this phase was told to design against.
+#
+# ## Predicted, then measured
+#
+# Every prediction below was written into `docs/rtk-fmt-plan.md` before the
+# first run. **Eight of ten landed exactly and two missed**, and both misses are
+# the same wrong belief: that a few thousand files of real Grafana Jsonnet would
+# contain some the parser refuses. None do. So `parse_errors` was predicted
+# "small but non-zero" and is 0, and `matching` was predicted *not* to equal
+# `files` — the only reason it could have differed — and equals it.
+#
+# **The consequence is worse than the miss.** `error_text_matching` exists to
+# grade a `fmt -` refusal against tk's, which nothing else in this repository
+# does, and with `parse_errors = 0` it grades **nothing**: `0 of 0` reads as
+# agreement and is an empty denominator. That is this project's own recurring
+# pattern — a counter whose zero says nothing — appearing in code written in the
+# phase about that pattern. The property now has a home where a refusal can be
+# guaranteed rather than hoped for: `tk_agrees_on_a_refusal` in
+# `cmds/rtk/tests/fmt_parity_test.rs`, which constructs one. This counter stays
+# as breadth, and the harness prints `UNGRADED` rather than `0 of 0` so the
+# empty denominator cannot be misread again.
+#
+# **That test then agreed, 2 of 2.** It was expected to fail — rtk's wrapper is
+# anyhow's and tk's is go-clix's — and the two are byte-identical on both
+# streams. So the hole was in the grading and not in the behaviour, which is why
+# the pattern is worth chasing rather than shrugging at: an ungraded property is
+# not a broken one, it is one nobody can say anything about, and the two are
+# indistinguishable until something measures it.
+#
+# `files` was predicted as 3,000 and measured 3,016 — and that was a **guess**,
+# arithmetic on rough repository sizes with no oracle behind it. It is recorded
+# as a guess rather than presented as a fourth exact derivation.
+[baseline]
+# Every `.jsonnet`/`.libsonnet` the walk found across the pinned repos.
+# Predicted ~3,000, as a guess. jsonnet-libs 1144, tempo 1495, mimir 222,
+# tanka 96, loki 59.
+files = 3016
+# How many of those are under a `vendor/` directory: **48% of the corpus**, so
+# "vendor included" is now a measured claim rather than a hopeful one.
+vendor_files = 1452
+# Files where tk and rtk agree on **everything observable**: stdout, stderr and
+# exit code. The strict number, over every file. Predicted to be *below* `files`
+# and is not, because nothing here fails to parse.
+matching = 3016
+# Of `formatted`, how many agree. **This is the formatter's parity number.** It
+# is separate from `matching` because a file neither tool can parse contributes
+# an error message to `matching`, and rtk's error text is anyhow's while tk's is
+# go-clix's. Predicted `== formatted`; measured `== formatted`.
+matching_formatted = 3016
+# Files both tools formatted successfully — the ones where the formatter was
+# asked the ordinary question rather than the error question.
+formatted = 3016
+# Files both tools refused. Predicted small but non-zero; **measured 0**. Real
+# Grafana Jsonnet parses. Do not read a future non-zero as a regression: it is
+# upstream committing something broken.
+parse_errors = 0
+# Of `parse_errors`, how many agree on stderr and the exit code. 0 of 0, which
+# grades nothing — see the note above, and `tk_agrees_on_a_refusal`.
+error_text_matching = 0
+# Of `formatted`, how many are already fixed points: formatting tk's own output
+# again changes nothing. This **is** the already-formatted property, per file,
+# and the tree-level gate ran green beside it.
+already_formatted = 3016
+# Of `formatted`, how many format to something different but still valid.
+non_convergent = 0
+# Of `formatted`, how many format to something the parser then **refuses**. Zero,
+# which is what unblocked the README flip. Both known upstream mechanisms need
+# input no working file contains: a string-literal field name inside an object
+# comprehension, or a `|||` block of nothing but whitespace.
+refusing_to_reparse = 0
+# Files whose bytes are not UTF-8. rtk refuses them and Go does not, so this is
+# a real divergence risk rather than a curiosity — see the harness.
+non_utf8 = 0
+# Roots where `tk fmt --test --verbose` and `rtk fmt --test --verbose` print the
+# identical per-file listing. The only thing here that grades discovery order
+# over a real tree, and it agreed on all five.
+roots_with_matching_discovery = 5
+
+# The two classes of second-run outcome that may be non-empty, by name — the
+# same split `crates/rtk-jsonnetfmt/tests/corpus.rs` keeps as
+# `OUTPUT_DOES_NOT_REPARSE` and `KNOWN_NON_CONVERGENT`, and kept apart for the
+# reason that file gives: a file that formats to a different file is unsettled,
+# while a file that formats to one the parser refuses is **destroyed**, and
+# `tk fmt` writes in place. One list would let the worse class hide inside the
+# ordinary one.
+#
+# Keys are `<repo>/<path inside it>`, which is also the layout of the staging
+# tree, so a finding names a path that exists in both places and does not depend
+# on where the corpus was cloned.
+#
+# **Both ratchet in both directions.** An unlisted file that starts failing is a
+# failure; a listed file that starts passing is a failure; and a listed file this
+# run never reached is a failure too, because the corpus tracks moving branches
+# and an upstream rename would otherwise leave an entry describing nothing while
+# the count beside it went down — which reads as an improvement.
+#
+# Nothing goes in either list on the strength of rtk's own answer. Confirm it
+# against the real `tk` on both runs — for the refusing class that means the
+# refusal, its message *and* its location — and name the mechanism in CLAUDE.md
+# first. Two mechanisms are already known and documented there; a third would be
+# the most important finding of this phase.
+#
+# Both are empty because the prediction was that they stay empty — a constant
+# field name inside an object comprehension is legal but pointless Jsonnet, and a
+# `|||` block of nothing but whitespace is a typo — and **the measurement agreed**
+# over 3,016 files, 1,452 of them vendored.
+#
+# That also settles the rate argument the plan raised against the prediction: 3
+# of 719 in go-jsonnet's `testdata/` is 0.4%, which over this corpus would have
+# been about a dozen. It is zero, because that set is adversarial by construction
+# and real Jsonnet is not.
+[known]
+output_does_not_reparse = []
+non_convergent = []
