@@ -5,7 +5,7 @@
 //! formatting is [`rtk_jsonnetfmt::format_default`] and everything here is the
 //! CLI surface around it: the order of operations, the streams and the exit
 //! codes. **The order is part of the contract**, not a presentation choice, so
-//! the steps below are numbered the way `docs/rtk-fmt-plan.md` numbers them and
+//! the steps below are numbered the way the fmt port plan numbered them and
 //! the code follows them in that order.
 //!
 //! # The streams are the thing to be careful about

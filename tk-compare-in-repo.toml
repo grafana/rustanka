@@ -9,7 +9,7 @@
 #   TK_PATH  - Path to tk executable (optional; default: tk)
 #   RTK_PATH - Path to rtk executable (optional; default: rtk)
 #
-# This file was called `tk-compare-grafana.toml`, and `docs/rtk-fmt-plan.md`
+# This file was called `tk-compare-grafana.toml`, and the fmt port plan
 # cited that name for Phase 5's acceptance gate — "Grafana's real Jsonnet,
 # vendor included, thousands of files". It was never that. Every `fixtures_dir`
 # below names a directory inside this repository, nothing cloned an external

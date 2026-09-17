@@ -1,6 +1,6 @@
 //! The red baseline: one harness, three fixture families, one ratchet.
 //!
-//! Phase 0 of `docs/rtk-fmt-plan.md`. Nothing here formats anything; it grades
+//! Phase 0 of the fmt port plan. Nothing here formats anything; it grades
 //! whatever [`rtk_jsonnetfmt::format`] currently does against oracles that cost
 //! nothing to trust:
 //!

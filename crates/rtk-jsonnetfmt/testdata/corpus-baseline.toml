@@ -38,7 +38,7 @@
 #     precedes the terminator; the marker and the blank cancel, so it comes
 #     back as a plain `|||`
 #
-# The 7 are the interesting entry. `docs/rtk-fmt-plan.md` describes the round
+# The 7 are the interesting entry. the fmt port plan describes the round
 # trip as preserving what the passes would not change, which understates it:
 # **inter-token horizontal whitespace is not fodder at all.** Fodder records
 # line ends, blank counts, indents and comments, and nothing else — so every
@@ -74,7 +74,7 @@
 # end-to-end result; it does not measure the passes.
 #
 # What measures the passes is testdata/pass-snippets.json through
-# `make update-fmt-pass-oracle`; see docs/rtk-fmt-plan.md, Phase 2b.
+# `make update-fmt-pass-oracle`; see CLAUDE.md's Formatting section.
 #
 # Phase 2c took it to 124, all four of them `EnforceStringStyle`:
 #
@@ -210,7 +210,7 @@
 #
 # The new set is go-jsonnet's own root `testdata/` — 719 files of Jsonnet
 # written by people testing a parser and an evaluator, not a formatter. It is
-# what Phase 4 of docs/rtk-fmt-plan.md asks for, and it is the breadth this
+# what Phase 4 of the fmt port plan asks for, and it is the breadth this
 # corpus most lacked: the in-repo 138 are overwhelmingly already `tk fmt`-clean
 # (107 of them matched while `format` was the identity stub), while these were
 # written to be awkward about escapes, text blocks, verbatim strings and

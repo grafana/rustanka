@@ -1,6 +1,6 @@
 # The acceptance corpus for `rtk fmt`, and the ratchet over it.
 #
-# Phase 5 of `docs/rtk-fmt-plan.md` asks for "Grafana's real Jsonnet, vendor
+# Phase 5 of the fmt port plan asks for "Grafana's real Jsonnet, vendor
 # included. Thousands of files by people who never thought about this
 # formatter. This is the gate that says shippable."
 #
@@ -113,7 +113,7 @@ exclude = ["**/.*", ".*"]
 #
 # ## Predicted, then measured
 #
-# Every prediction below was written into `docs/rtk-fmt-plan.md` before the
+# Every prediction below was written into the fmt port plan before the
 # first run. **Eight of ten landed exactly and two missed**, and both misses are
 # the same wrong belief: that a few thousand files of real Grafana Jsonnet would
 # contain some the parser refuses. None do. So `parse_errors` was predicted

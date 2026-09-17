@@ -1,7 +1,7 @@
 // Emits the corpus rtk-jsonnetfmt is graded against, by running go-jsonnet's
 // formatter over every Jsonnet file already in this repository.
 //
-// This replaces the round-trip gate docs/rtk-fmt-plan.md originally asked for.
+// This replaces the round-trip gate the fmt port plan originally asked for.
 // That gate cannot hold: go-jsonnet's unparser renders text *from* the fodder
 // model rather than copying the source, so `unparse(parse(x)) == x` is false
 // even with every pass disabled — a tab becomes eight spaces, a line-end

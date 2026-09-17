@@ -21,7 +21,7 @@
 //! # State
 //!
 //! [`format`] parses, runs every step of `FormatNode`, and unparses.
-//! **`docs/rtk-fmt-plan.md` is complete through Phase 5**: the lexer, the AST,
+//! **The port is complete**: the lexer, the AST,
 //! the parser, the unparser, the [`pass`] traversal, all twelve passes, all
 //! three of `FormatNode`'s non-pass steps, the CLI that drives them, and
 //! acceptance against the real `tk` over 3,016 files of real Grafana Jsonnet —
@@ -121,7 +121,7 @@ pub enum CommentStyle {
 /// - Nothing implements them. `format` has no step 9, and an absent field is
 ///   the only honest way to say so.
 /// - `DefaultOptions()` skips all three, `tk` exposes no way to ask for them,
-///   and no phase of `docs/rtk-fmt-plan.md` schedules them.
+///   and no phase of the fmt port plan schedules them.
 /// - The pass oracle deliberately does **not** dump them: two of the three
 ///   rewrite every tree they touch, which was about 270 of 356 changed cells
 ///   and most of a 23 MB file. So the passes would land ungraded, which is the

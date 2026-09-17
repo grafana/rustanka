@@ -22,7 +22,7 @@
 //! # Every case below is upstream's
 //!
 //! `jsonnetfmt` is not a fixed point, and `rtk fmt` must not become one — see
-//! `CLAUDE.md` and `docs/rtk-fmt-plan.md`. Matching `tk fmt` on **one** run is
+//! `CLAUDE.md`. Matching `tk fmt` on **one** run is
 //! the contract, so a convergence loop would be a divergence, not a fix. Three
 //! mechanisms account for all twelve, and each is a seam between a pass that
 //! decides something and a later pass that changes what it decided on:

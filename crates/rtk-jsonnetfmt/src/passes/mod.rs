@@ -7,7 +7,7 @@
 //!
 //! # What has landed
 //!
-//! Phase 2b of `docs/rtk-fmt-plan.md`: [`FixTrailingCommas`],
+//! Phase 2b of the fmt port plan: [`FixTrailingCommas`],
 //! [`NoRedundantSliceColon`] and [`PrettyFieldNames`]. Phase 2c:
 //! [`EnforceStringStyle`] and [`EnforceCommentStyle`]. Phase 2d:
 //! [`EnforceMaxBlankLines`] and [`FixNewlines`], plus the two four-line

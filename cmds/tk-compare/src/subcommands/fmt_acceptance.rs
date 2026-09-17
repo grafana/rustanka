@@ -1,6 +1,6 @@
 //! Phase 5's acceptance gate for `rtk fmt`: real Grafana Jsonnet, measured.
 //!
-//! `docs/rtk-fmt-plan.md`'s Phase 5 asks for four things, and this is all four
+//! the fmt port plan's Phase 5 asks for four things, and this is all four
 //! in one pass over one corpus, because they are four readings of the same
 //! formatting run and splitting them would mean formatting a few thousand files
 //! four times:

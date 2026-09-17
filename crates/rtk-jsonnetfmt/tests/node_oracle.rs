@@ -2,7 +2,7 @@
 //! produces.
 //!
 //! This is the oracle the parser port is written against, and it exists before
-//! the parser on purpose. `docs/rtk-fmt-plan.md` argues the order from
+//! the parser on purpose. the fmt port plan argues the order from
 //! evidence: the lexer went 138/138 on a first compile because a token-level
 //! dump existed first, and of 16 lexer expectations derived by *reading* Go's
 //! source, 2 were wrong — both about fodder the model composes rather than

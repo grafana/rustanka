@@ -1,7 +1,7 @@
 //! Breadth: real Jsonnet, formatted by go-jsonnet, compared byte for byte.
 //!
 //! This is what Phase 2 was measured against, and it replaces the round-trip
-//! gate `docs/rtk-fmt-plan.md` originally asked for. That gate — `unparse(parse
+//! gate the fmt port plan originally asked for. That gate — `unparse(parse
 //! (x)) == x` byte-for-byte — cannot hold, because go-jsonnet's unparser
 //! renders text from the fodder model rather than copying the source: a tab
 //! becomes eight spaces, a line-end comment is always preceded by exactly two
@@ -381,7 +381,7 @@ fn clip(text: &str) -> String {
 
 /// Formatting go-jsonnet's own answer has to return that answer unchanged.
 ///
-/// `docs/rtk-fmt-plan.md` asks for this per step, and Phase 2d is the step that
+/// the fmt port plan asks for this per step, and Phase 2d is the step that
 /// first asked it: `FixIndentation` and `FixNewlines` are the two passes that
 /// could plausibly fail to settle, and the plan's original reasoning still
 /// holds — a port that needs a second run to converge has a bug in one of them,
@@ -473,7 +473,7 @@ fn formatting_an_answer_again_changes_nothing() {
 							 pass — most likely FixIndentation or FixNewlines — until it is \
 							 traced to a specific cross-pass interaction in FormatNode's order. \
 							 Do **not** add a convergence loop; see the correction in \
-							 docs/rtk-fmt-plan.md, Phase 2.\n      1st {}\n      2nd {}\n",
+							 CLAUDE.md's Formatting section.\n      1st {}\n      2nd {}\n",
 							case.name,
 							clip(&case.answer),
 							clip(&again)

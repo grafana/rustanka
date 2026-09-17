@@ -1,7 +1,7 @@
 #!/bin/sh
 # Clone the `rtk fmt` acceptance corpus, and record what it resolved to.
 #
-# Phase 5 of docs/rtk-fmt-plan.md needs real Grafana Jsonnet, vendor included.
+# Phase 5 of the fmt port plan needs real Grafana Jsonnet, vendor included.
 # There is no Grafana-internal checkout available to this repository —
 # `grafana/deployment_tools` is private and a gate whose corpus lives on one
 # laptop cannot be enforced — so the corpus is public Grafana Jsonnet, pinned.
