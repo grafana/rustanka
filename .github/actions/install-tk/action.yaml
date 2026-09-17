@@ -72,7 +72,12 @@ runs:
         curl -fSL -o /usr/local/bin/tk \
           "https://github.com/grafana/tanka/releases/download/${version}/tk-linux-amd64"
         chmod +x /usr/local/bin/tk
-        reported=$(tk --version)
+        # tk prints its version through Go's `log` package, which writes to
+        # **stderr** — so `$(tk --version)` captures the empty string and the
+        # assertion below fails on a perfectly good install. Merge the streams.
+        # `|| true` because the exit code is not the thing being asserted, and
+        # `set -e` would otherwise abort before the message could be printed.
+        reported=$(tk --version 2>&1) || true
         echo "tk --version: ${reported}"
         # Matched on the number rather than the whole tag, so a leading `v` on
         # one side and not the other cannot fail a correct install. A dev build

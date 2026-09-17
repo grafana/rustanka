@@ -1601,11 +1601,20 @@ matching on the **number** rather than the tag; a dev build reports something
 else and fails, which matters because a dev build of tk skips the
 `expectVersions.tanka` check altogether.
 
-**Matching the number is load-bearing, and that is measured.** A release tk
-prints `tk version 0.38.0` — with no leading `v`, while the constant and the
-download URL both carry one. An assertion on the full tag would therefore have
-failed every correct install, which is the worst kind of CI change: red on the
-happy path, so the next person deletes the assertion rather than the bug.
+**Matching the number is load-bearing, and that is measured.** Whether a
+release tk carries a leading `v` in what it prints is not something to rely
+on — v0.38.0 reports `tk version v0.38.0`, while the constant and the download
+URL also carry one, and earlier releases did not. An assertion on the full tag
+is therefore a coin flip on a correct install, which is the worst kind of CI
+change: red on the happy path, so the next person deletes the assertion rather
+than the bug. Matching `${version#v}` with `grep -F` is right either way.
+
+**And `tk --version` goes to stderr.** It is printed through Go's `log`
+package, timestamp and all, so `$(tk --version)` captures the empty string and
+the assertion fails on a perfectly good install — which is exactly how this job
+failed once the pin landed. The capture merges the streams with `2>&1`, and
+takes `|| true` because the exit code is not what is being asserted and
+`set -e` would abort before the message could be printed.
 
 `benchmarks.yaml` uses the same action: those jobs validate that rtk's output
 still matches tk's, so an unpinned tk retargets them exactly as it would the
