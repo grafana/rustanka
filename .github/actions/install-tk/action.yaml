@@ -29,9 +29,17 @@ runs:
   steps:
     - id: resolve
       shell: bash
+      # Through `env` rather than interpolated into `run`. `${{ }}` is expanded
+      # by the runner *before* bash sees the script, so an input spliced into
+      # `run` arrives as code: a tag containing a quote and a `;` would execute.
+      # As an environment variable it reaches bash as data and cannot be
+      # anything but a string, whatever it holds. This is what zizmor's
+      # template-injection audit asks for, and it costs nothing here.
+      env:
+        REQUESTED_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        case '${{ inputs.version }}' in
+        case "$REQUESTED_VERSION" in
           pinned)
             # One home for the pin: the constant rtk itself answers for.
             # `git describe --tags` builds it into tk, so a release reports the
@@ -59,16 +67,22 @@ runs:
             echo "latest tanka release is $version"
             ;;
           *)
-            version='${{ inputs.version }}'
+            version="$REQUESTED_VERSION"
             echo "using the requested tag $version"
             ;;
         esac
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - shell: bash
+      # Same reasoning as the step above. zizmor did not flag this one — a step
+      # output is a narrower source than an action input — but leaving one
+      # interpolation in a file whose other two were just removed invites the
+      # pattern back.
+      env:
+        RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
       run: |
         set -euo pipefail
-        version='${{ steps.resolve.outputs.version }}'
+        version="$RESOLVED_VERSION"
         curl -fSL -o /usr/local/bin/tk \
           "https://github.com/grafana/tanka/releases/download/${version}/tk-linux-amd64"
         chmod +x /usr/local/bin/tk
