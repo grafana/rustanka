@@ -137,30 +137,71 @@ each surprising and each must be reproduced:
 5. **Extensions are exactly `.jsonnet` and `.libsonnet`**, case-sensitive.
 6. **No sorting, no dedup across arguments.** `filepath.WalkDir` walks lexically
    within a tree; `FormatFiles` concatenates per-argument results in argument
-   order. A file named twice is formatted twice and counted twice in
-   `Formatted N files`.
+   order. A file named twice is formatted twice.
+
+   > **Correction, from Phase 3.** This used to end "and counted twice in
+   > `Formatted N files`", which is only true of a mode that does not write.
+   > The default mode writes the file on the first pass, so the second pass
+   > reads it back clean and it reports `Formatted 1 files`; `--test` and
+   > `--stdout` leave it alone and report 2. The two quirks compose, the
+   > unconditional write perturbing the second read. Measured against tk, not
+   > reasoned about — the test asserted 2, failed, and the cross-check's
+   > `named-twice-writing` scenario says tk reports 1 as well.
 
 `filepath.WalkDir` does not follow symlinks. `rtk lint` currently uses
 `follow_links(true)` — a divergence to fix alongside.
 
 ### CLI surface
 
-- `ArgsMin(1)`: no argument is an error. Do **not** copy `lint.rs`'s
-  default-to-`"."`.
-- `-` reads stdin, formats, prints to stdout via bare `fmt.Print` (no wrapper
-  text), and with `--test` exits `ExitStatusDiff` if changed.
-- `--test`: writes nothing; on changes prints
-  `The following files are not properly formatted:` then one path per line to
-  stderr, exit **16** (reuse `commands::diff::EXIT_CODE_DIFF_FOUND`).
-- `--stdout`: prints `// {name}\n{content}` to stdout, then a blank line to
-  stderr per file.
-- `--verbose`: prints `fmt {path}` or `ok  {path}` (two spaces after `ok`) per
-  file, then one trailing blank line to stderr.
-- Summary on stderr: `All discovered files are already formatted. No changes were made`
-  when nothing changed, else `Formatted {n} files`.
-- In-place writes are whole-file at mode `0644`.
-- A parse failure propagates out of `FormatFiles` and aborts the run — **error
-  text is part of the contract.**
+Read off `cmd/tk/fmt.go` and `pkg/tanka/format.go`. The order of operations is
+itself part of the contract, so it is given as an order.
+
+**1. `ArgsMin(1)`.** No argument is an error. Do **not** copy `lint.rs`'s
+default-to-`"."` — and `lint.rs` should lose it at the same time, since
+`tk lint` is `ArgsMin(1)` too.
+
+**2. Stdin, before anything else.** `-` is honoured only as the **sole**
+argument (`len(args) == 1 && args[0] == "-"`), and this branch returns before
+the excludes are compiled — so `rtk fmt - --exclude '[a'` succeeds where
+`rtk fmt . --exclude '[a'` does not. It reads all of stdin, formats under the
+diagnostic filename `<stdin>`, and prints the result to **stdout** with a bare
+`fmt.Print` — no `// name` header, no trailing newline of its own. With
+`--test` it prints the formatted output **anyway** and only then exits 16 if it
+differs.
+
+**3. Compile the excludes.** Before any file is read, so a malformed glob
+aborts the run untouched and the message is gobwas' own — which
+`rtk-gobwas-glob` already reproduces.
+
+**4. Pick one output mode.** `--test` is checked first, so **`--test` beats
+`--stdout`**: nothing is printed and nothing is written. Otherwise `--stdout`
+prints `// {name}\n{content}` to stdout and one blank line to **stderr** per
+file. Otherwise files are written in place, whole-file, mode `0644`.
+
+**The output mode runs for every discovered file, changed or not.** `outFn` is
+called unconditionally in `FormatFiles`'s loop. So `--stdout` prints every file
+and the default mode **rewrites every file**, touching the mtime of a file it
+did not change. Reproduce it.
+
+**5. `--verbose` prints to STDOUT, not stderr.** `FormatFiles`'s `printFn` is
+`fmt.Println(i...)`. One line per file: `fmt {path}` for changed, `ok  {path}`
+for unchanged — two spaces, because `Println` inserts one between its operands
+and the literal is already `"ok "`. Only the single trailing blank line, after
+the loop, goes to stderr.
+
+**6. The summary, on stderr**, and it is a three-way switch in this order:
+
+- `--test` **and** something changed: `The following files are not properly
+  formatted:` then one path per line, then exit **16** (reuse
+  `commands::diff::EXIT_CODE_DIFF_FOUND`).
+- nothing changed: `All discovered files are already formatted. No changes were
+  made`. Note this is also what `--test` prints when everything is clean, and
+  it exits 0.
+- something changed: `Formatted {n} files`.
+
+**A parse failure aborts the whole run** and returns before the summary, so no
+count is printed. The message is go-jsonnet's, which `format` already produces.
+A discovery failure is wrapped `finding Jsonnet files`.
 
 ## Decision: new crate
 
@@ -323,6 +364,7 @@ go-jsonnet's shape.
 | string escaping | `src/string_util.rs` | unit tests on each message, including two upstream bugs |
 | node oracle | `testdata/node-oracle.json` | `make update-fmt-node-oracle` |
 | node snippets | `testdata/node-snippets.json` | the same target |
+| parse-error snippets | `testdata/parse-error-snippets.json` | the same target — the only grading of an error's **location** |
 | pass traversal | `src/pass.rs` | unit tests on the four slots it does *not* visit |
 | `FixTrailingCommas` | `src/passes/fix_trailing_commas.rs` | the pass oracle |
 | `NoRedundantSliceColon` | `src/passes/no_redundant_slice_colon.rs` | the pass oracle |
@@ -341,7 +383,9 @@ go-jsonnet's shape.
 | `sort.Slice` | `src/go_sort.rs` — a port of Go's pdqsort, not a formatter | `testdata/go-sort-truth-table.json`, 410 cases |
 | pass oracle | `testdata/pass-oracle.json` | `make update-fmt-pass-oracle` |
 | pass snippets | `testdata/pass-snippets.json` | the same target |
-| idempotence | `tests/corpus.rs` | the goldens, formatted twice |
+| idempotence, corpus | `tests/corpus.rs` | the goldens, formatted twice — a weak test, since a golden is already a fixed point of `Format` |
+| idempotence, snippets | `tests/idempotence.rs` | both snippet families formatted twice, with the twelve known cases listed and ratcheted both ways |
+| the CLI | `cmds/rtk/src/commands/fmt.rs` | `cmds/rtk/tests/fmt_parity_test.rs`, streams captured apart, plus a tk cross-check over fourteen scenarios |
 
 ### 2a is done
 
@@ -1089,8 +1133,12 @@ every fixture. A port that needs a second pass to converge has a bug in
 
 > **Met**, with the 2c correction below attached: 138 of 138 on the breadth
 > corpus, an empty `quarantine.toml`, and an empty idempotence allow-list.
-> The two known non-convergences are upstream's and neither is reached by any
-> fixture.
+> The known non-convergences are upstream's and none is reached by any fixture.
+> There are **three mechanisms and twelve inputs**, all measured by
+> `tests/idempotence.rs` rather than reasoned about; `CLAUDE.md` carries the
+> table and the account. The prediction beforehand was five, and the six it
+> missed were all `FixParens`, invisible to a grep for `((` because the shape
+> that matters is `(\n  (1)`.
 
 > **Correction, from Phase 2c.** **`jsonnetfmt` is not a fixed point**, and the
 > counterexample is two lines of Jsonnet:
@@ -1135,17 +1183,156 @@ every fixture. A port that needs a second pass to converge has a bug in
 
 ### Phase 3 — CLI
 
-`FmtArgs` in `cmds/rtk/src/commands/fmt.rs` already mirrors tk's flags. What is
-missing is the `-` stdin path, and `run()` is `bail!("not implemented")`.
+The library is finished. `FmtArgs` in `cmds/rtk/src/commands/fmt.rs` already
+mirrors tk's flags and its `--exclude` default already comes from
+`rtk_gobwas_glob::TANKA_DEFAULT_EXCLUDES`; what is missing is the `-` stdin
+path, and `run()` is `bail!("not implemented")`.
 
-Implement discovery + the four output modes + exit codes + exact stderr strings
-per the reference section. Test as CLI parity, separate from the formatter,
-following `cmds/rtk/tests/error_parity_test.rs` and
-`env_list_error_parity_test.rs`.
+Implement the [CLI surface](#cli-surface) exactly, in the order given there.
+Discovery is `rtk_jsonnetfmt::find_files_all` and formatting is
+`rtk_jsonnetfmt::format_default`; neither needs anything added.
 
-**Exit:** parity tests pin every string and exit code listed above, including
-`ArgsMin(1)`, the duplicate-argument double count, and stdin with and without
-`--test`.
+**The thing to be careful about is the streams**, because that is where this
+phase can be wrong while looking right. `--verbose` goes to **stdout**, its
+trailing blank line to stderr, `--stdout` content to stdout and its separating
+blank line to stderr, and every summary line to stderr. A parity test that
+merges the two streams cannot see any of that, so **capture them separately**.
+
+Two behaviours worth a test of their own because they read like bugs:
+
+- `--test` with `--stdout` prints nothing at all.
+- The default mode **rewrites unchanged files**, so an unchanged file's mtime
+  moves. `--stdout` likewise prints files it did not change.
+
+**Also fix `lint.rs`'s default-to-`"."`** in this phase. `tk lint` is
+`ArgsMin(1)` as well, and `CLAUDE.md` has been carrying that divergence with a
+note pointing here.
+
+#### Formatting must run on a large stack, and the reason is parity
+
+The port recurses to the nesting depth of the input in several independent
+places — `Node::opening_fodder_mut`, the parser's `parse`/`parse_terminal`,
+every `AstPass`, `FixIndentation::visit` and `Group::absorb` — and there is no
+depth limit anywhere in `crates/rtk-jsonnetfmt`. `cmds/rtk/src/main.rs` sets no
+stack size for any command, so today `fmt` would run on whatever the main
+thread was given; only `rtk-environment`'s discover and export spawn 8 MiB
+workers.
+
+Go grows a goroutine stack to 1 GiB, so `tk fmt` formats a deeply nested file
+that rtk would abort on with a stack overflow — SIGSEGV, no message, no exit
+code. That is a worse outcome than a wrong byte, because the default output
+mode rewrites files as it goes: the run dies part way with some files already
+written and nothing said about why.
+
+**So the answer is a bigger stack, not a depth limit.** A limit would refuse a
+file `tk fmt` formats, which is a divergence in the one direction this project
+never accepts. Spawn the formatting work on a `thread::Builder` with a large
+`stack_size`, the way `crates/rtk-environment/src/export/mod.rs` already does,
+and join it.
+
+It belongs in this phase rather than earlier because the CLI is what owns
+process setup, and until `run()` does something there is nothing to wrap.
+Worth a test with a generated input — a few tens of thousands of nested
+brackets — asserting rtk formats it rather than dying; the depth that actually
+overflows depends on the platform's default, so the test should generate
+something comfortably past it rather than probe for the edge.
+
+Test as CLI parity, separate from the formatter, following
+`cmds/rtk/tests/error_parity_test.rs` and `env_list_error_parity_test.rs`.
+
+**Exit:** parity tests pin every string, every stream and every exit code in
+the CLI surface section — including `ArgsMin(1)`, the duplicate-argument double
+count in `Formatted {n} files`, `--test` beating `--stdout`, a malformed
+`--exclude` aborting before any file is read, stdin with and without `--test`,
+and stdin ignoring a malformed `--exclude`. Plus one test that a deeply nested
+file formats rather than overflowing the stack, per the section above.
+
+### Phase 3 is done
+
+`cmds/rtk/src/commands/fmt.rs` implements the CLI surface in the order given
+above, `cmds/rtk/tests/fmt_parity_test.rs` grades it, and `CLAUDE.md` carries
+the account under **The `fmt` CLI**. Nothing was added to
+`crates/rtk-jsonnetfmt` for it: `format_default` and `find_files_all` were
+enough, as this section predicted.
+
+Four things are worth recording beyond "it works".
+
+#### The tests run the binary, because that is the only way to see the streams
+
+`run` returns a `bool` and `main` turns it into
+`commands::diff::EXIT_CODE_DIFF_FOUND`, so an in-process test can see neither
+the exit code nor which stream a line landed on. Both matter here more than
+usual: six of the CLI's strings are on stderr and two on stdout, and an
+implementation that put them all on one stream would pass any test that merged
+them. So `fmt_parity_test.rs` spawns `CARGO_BIN_EXE_rtk`, captures the two
+streams separately, and writes each expectation out in full rather than deriving
+it from the code under test. It also scrubs `RUST_LOG` and the two OpenTelemetry
+endpoint variables, so a developer's shell cannot write to the stderr being
+asserted.
+
+The tk cross-check is one test over fifteen scenarios, comparing both streams,
+both exit codes and the files left behind. It **prints how many scenarios it
+compared**, and it prints a loud `SKIPPED` naming the count as zero when `tk` is
+not on `PATH`; `RTK_REQUIRE_TK=1` makes that skip a failure, which is what CI
+should set. That shape is deliberate: this project has twice shipped a test that
+was green while measuring nothing, and both times what would have caught it was
+reading what the test printed.
+
+It also did the one thing the standalone tests could not: it is what said the
+plan's own double-count claim was wrong, by agreeing with rtk where the
+hand-written expectation disagreed with both.
+
+The no-argument case is the one scenario compared weakly, and deliberately:
+rtk's message and exit code there are clap's, tk's are go-clix's, and neither is
+the other's. What is compared is that both refuse and that neither formats
+anything.
+
+#### One ordering was not in the source as read, and the cross-check settled it
+
+The CLI surface section does not say whether `printFn` or `outFn` runs first
+within `FormatFiles`'s loop, and with `--verbose --stdout` both write to stdout,
+so the interleaving is observable. It is implemented as `printFn` first — a
+file's `fmt` line before that file's contents — pinned by
+`verbose_and_stdout_share_stdout_in_loop_order`, and the `verbose-and-stdout`
+scenario of the cross-check **confirmed it against tk**. The same applies to
+`--verbose`'s trailing blank line being conditional on `--verbose` rather than
+unconditional, which `without_verbose_there_is_no_blank_line_on_stderr` pins
+because an unconditional one would pass every other test in the file.
+
+That is what the cross-check was for, and it paid for itself on the first run:
+all fifteen scenarios agreed, which is a stronger statement about the two
+guesses above than any amount of re-reading the plan would have been.
+
+#### The stack is 1 GiB and wraps the whole command
+
+Including the stdin branch: a deeply nested file is as likely to arrive down a
+pipe as to be named. A scoped thread, because the work borrows the caller's
+writer; the tree is therefore also *dropped* on that stack, which matters as
+much as building it.
+
+**And 1 GiB is not parity at every depth — which the test measured rather than
+assumed.** It first generated 50,000 nested brackets and overflowed the 1 GiB,
+putting this port at roughly **20 KiB of stack per level**: several parser
+frames per level, plus one each for twelve passes, `FixIndentation` and the
+drop. go-jsonnet's frames are far smaller, so tk reaches deeper in the same
+gigabyte and always will. Real Jsonnet nests to tens of levels, so the gap is
+theoretical, and raising the number is an arms race with no stopping point.
+The test settled at **10,000** — an order of magnitude inside 1 GiB, and one to
+two orders past the ~400 levels an 8 MiB default survives unoptimized. Both
+margins are load-bearing in opposite directions, and the build profile decides
+the arithmetic.
+
+#### The three `strip_*` options were removed rather than implemented
+
+This phase was the first to hand `Options` to a caller, and the question was
+left open here. They are gone: nothing implemented them, `tk` exposes no way to
+ask for them, the pass oracle deliberately does not dump them, and a `pub` flag
+that promises to strip comments while silently keeping them is worse than an
+absent one. `Options`' own documentation carries the route back — one
+`if / else if / else if` chain at step 9, first-wins, plus a line in
+`passNames`.
+
+`rtk lint` lost its default of `"."` in the same change.
 
 ### Phase 4 — corpus and CI
 
@@ -1183,7 +1370,14 @@ following `cmds/rtk/tests/error_parity_test.rs` and
    four. `rtk_diff::directory::compare_directories_detailed` already does byte
    comparison for the export goldens.
 
-5. **Pin tk.** `.github/workflows/test.yaml` computes `TK_VERSION` and then
+5. **Set `RTK_REQUIRE_TK=1`** in the job that has tk, so
+   `tk_agrees_on_the_streams_and_the_exit_codes` fails rather than skipping when
+   tk is missing. It compares fifteen scenarios and prints how many it compared;
+   without the variable a tk that failed to install turns the whole CLI
+   cross-check into a green no-op, which is the one hazard that shape was built
+   against.
+
+6. **Pin tk.** `.github/workflows/test.yaml` computes `TK_VERSION` and then
    ignores it, curling `releases/latest`. Pin to the version
    `rtk_masterminds::TANKA_COMPATIBLE_VERSION` names and assert
    `tk --version` matches at job start, so drift fails loudly instead of
@@ -1195,6 +1389,270 @@ following `cmds/rtk/tests/error_parity_test.rs` and
 
 **Exit:** `make check-fmt-fixtures` green in CI against pinned tk; corpus
 regenerable in one command.
+
+### Phase 4 is done
+
+Three of the six items above were already done or superseded before the phase
+started — item 1 in Phase 2a and differently (the corpus calls
+`formatter.Format` from a Go program rather than shelling out to `tk`), item 3
+superseded by `tests/corpus.rs`'s byte comparison and exact count ratchet
+rather than `insta`, item 4 by that same comparison. What this phase landed is
+the other three, plus one hole the plan does not mention at all and two
+pre-existing findings that fell out of looking.
+
+#### The hole: nothing in CI ran the staleness checks
+
+Before this phase CI ran exactly two things — `make check-golden-fixtures` and
+`cargo test --all` — while `check-fmt-corpus`, `check-go-sort-truth-table` and
+`check-glob-truth-table` existed as Makefile targets called by nobody.
+
+Worth stating precisely, because it is easy to overstate: **correctness was
+covered.** `cargo test --all` grades the formatter against the committed
+corpus, so a broken pass failed CI. What was covered by nothing is whether the
+committed corpus and the two truth tables still equal what the Go libraries
+produce. A go-jsonnet bump, or a hand edit to a golden, drifted silently with
+every fmt test green.
+
+They now run in a `check-generated` job of test.yaml. A job rather than steps
+on `test`: they need Go and no Rust, they are independent of one another so
+three steps give three independent red checks, and they run in parallel with
+the suite so the wall time is free. `make check-generated` is the same three for
+local use.
+
+**One of the three could not have passed as it was, and that is the finding.**
+`testdata/go-sort-truth-table.json` records `"goVersion": "go1.27.1"` and
+`check-go-sort-truth-table` is a plain `diff -u`, so **any other Go fails it on
+that one field**, before a single permutation is compared. So the job installs
+the Go the table names, read out of the table with `jq`. That is the right
+coupling rather than a workaround: the table's own caveat is that pdqsort's tie
+order belongs to the toolchain, so a regeneration under a newer Go should carry
+CI with it, and a Go that reorders ties is exactly what would move `tk fmt`'s
+output and not rtk's. A second step then asserts the Go on `PATH` is the one
+installed, because a failed install would otherwise leave the runner's own Go
+there and the failure would read as drift in the permutations.
+
+#### tk is pinned, and the pin has one home
+
+Both jobs had an identical step that computed `TK_VERSION` from the releases
+API, then downloaded `releases/latest` anyway without using the variable, and
+printed `tk --version` without asserting anything about it.
+
+`.github/actions/install-tk` replaces it. It reads
+`TANKA_COMPATIBLE_VERSION` out of `crates/rtk-masterminds/src/lib.rs` with
+`sed`, so the pin lives in the one place rtk already answers for rather than
+being restated in YAML, and **an empty read fails the job** — falling back to
+latest is the bug being fixed. It then asserts `tk --version` reports that
+version, matching on the number so a leading `v` on one side cannot fail a
+correct install.
+
+`benchmarks.yaml` was curling latest too, and it is **in scope**: those jobs
+validate that rtk's output still matches tk's, so an unpinned tk retargets them
+exactly as it would the goldens, and a timing ratio against a moving tk is not
+a comparison. It uses the same action.
+
+`RTK_REQUIRE_TK=1` is set on `cargo test --all`, so
+`tk_agrees_on_the_streams_and_the_exit_codes` fails rather than printing a loud
+`SKIPPED` naming zero scenarios. `tk_also_refuses_to_run_without_a_path` in the
+same file skipped unconditionally and now honours the variable too — with tk
+installed it was the one remaining way that file could quietly compare nothing.
+
+#### The scheduled job, and what it is worth running
+
+`.github/workflows/tk-latest.yaml` is non-blocking by construction: nothing
+calls it and it has no `pull_request` trigger, so it cannot gate a merge. It
+runs weekly against tk latest, files one issue that it updates rather than one
+per Monday, and goes red as well — an issue already open makes the next run
+look clean otherwise.
+
+**What it runs is the interesting decision.** The fmt corpus is generated by
+calling go-jsonnet's `formatter.Format` directly, pinned, with `tk` nowhere in
+it, so running it against tk latest would compare nothing new. What observes tk
+moving is the CLI cross-check and the golden fixtures. The cross-check is the
+better of the two for this purpose than it looks: it compares both streams,
+both exit codes **and the files left behind**, so a newer tk carrying a newer
+go-jsonnet formatter shows up there too, not only a change to the CLI surface.
+
+It also grades its own log. `RTK_REQUIRE_TK=1` covers a missing tk, and two
+`grep`s then require the "compared N of M scenarios" line and forbid `SKIPPED`
+— because that test printed `ok` whether it compared fifteen scenarios or
+skipped them all, and nobody reads a passing job's log.
+
+#### The corpus is 857 files in two sets, and 138 is no longer the number
+
+`testdata/corpus-baseline.toml` carries the full argument; the short version is
+that the design problem the plan's item 2 walks into is real. `tests/corpus.rs`
+asserts its count exactly, in both directions, and go-jsonnet's root
+`testdata/` is 719 files whose **inputs are not in this repository** — so
+answers alone would make the denominator depend on whether a checkout happened
+to be present, which is an exact assertion that cannot hold in both
+environments. That is the `GO_JSONNET_FOR_TESTS` hazard `CLAUDE.md` records
+about the `go_jsonnet/` family, one level up and worse: there a missing checkout
+made a family grade silently at zero, here it would make the ratchet itself
+unenforceable.
+
+So the set is committed as one self-contained JSON carrying **both halves** of
+every entry, `files` is asserted as well as `matching` — a set that lost entries
+would otherwise satisfy a match-count check while grading almost nothing — and a
+declared set whose artifact is missing is a **failure, not a skip**, both being
+committed. The same applied to the in-repo set, whose loader used to return
+early on a missing manifest.
+
+**The in-repo set deliberately did not grow.** The node, pass and lexer oracles
+are all driven by `corpus/manifest.json`, and `tests/node_oracle.rs` asserts the
+node oracle covers the same list in the same order; adding files invalidates
+about 19 MB of committed oracle, `node-oracle.json` alone being 11 MB. Those
+oracles grade node kinds, fodder slots and one pass at a time, and
+`node_oracle.rs` already asserts every kind and slot is reached. Text-level
+breadth belongs at the text level.
+
+**Not added, and each for a reason.** `cmds/rtk/testdata` and
+`crates/rtk-jsonnet/testdata` are 173 in-repo files, 32 KB between them, almost
+all sub-100-byte discovery fixtures already in exactly the shape `tk fmt`
+writes; they would raise the denominator by more than they raise the grading,
+which is what this file and `corpus-baseline.toml` have been warning about since
+2b.
+
+#### The prediction was 719 and the measurement was 719
+
+The fourth exact one in a row, and the first made **without an oracle to
+query**: `pass-oracle.json` holds no cell for a file outside the manifest, so
+unlike 2d, 2e and 2f this could not be derived per file and per pass. What it
+rested on instead was that the formatter is at full parity everywhere it is
+already graded, and that the shapes the set adds which the in-repo corpus lacks
+are each covered by the snippet oracles —
+measured over the 719: 3 files with verbatim strings, 12 with `|||` blocks, 8
+tab-indented, 18 non-ASCII, 162 with no trailing newline, and zero with `#`
+comments, `\u` escapes, CRLF or a BOM. The named risk was the 18 non-ASCII
+files through `EnforceStringStyle`'s escape round trip. Nothing missed, and the
+named risk was not where anything interesting turned out to be.
+
+**One premise in that list was stated as fact and was wrong.** It also said
+every file in the set parses, derived by grepping the set's `.golden` files for
+"STATIC ERROR" and finding none — the wrong instrument, since those goldens
+record *evaluation* output and a file the parser refuses has no evaluation
+golden to say so. Fifteen of the 719 do not parse. The conclusion survived, the
+reason did not, and a right answer resting on a wrong reason is worth flagging:
+it is the same shape as deriving coverage by grepping inputs, which this plan
+already records for the idempotence count.
+
+The fifteen are a gain rather than a caveat. Their committed answer is
+go-jsonnet's error **message and location**, and they add eleven distinct
+parser-error templates end to end — including three rendered `(1:8)-(3:4)`, the
+multi-line form of `LocationRange`, which one fixture had been carrying alone.
+Two of them are `object_comp_bad_field.jsonnet` and `..._bad_field2.jsonnet`,
+whose answer is the very message `PrettyFieldNames` manufactures below: the set
+holds that error as an input and as an output, from opposite directions.
+
+#### What the set actually bought: three files whose output does not parse
+
+The match count was exact. The **idempotence** count was not, and this is the
+result worth carrying out of the phase.
+
+Three of the 719 format to something go-jsonnet's own parser then refuses, and
+**no file among the in-repo 138 reaches that class at all**:
+
+- `object_comp_err_elem.jsonnet` and `object_literal_in_object_comp.jsonnet` —
+  `PrettyFieldNames` promotes `['x']:` to `x:` with no `ObjectComp` guard, and a
+  comprehension may only have `[e]` fields, so the second run fails with
+  `Object comprehensions can only have [e] fields`.
+- `escaped_fields.jsonnet` — a `|||` block whose value is nothing but newlines.
+  The unparser writes a blank value-line with no indent, so no content line
+  carries the block indent; the lexer's leading-blank-line loop then runs before
+  the indent is calculated, takes it from the terminator line and swallows the
+  `|||` as content: `Text block not terminated with |||`.
+
+All three are upstream's, and **that was settled by measurement rather than by
+reading Go**. rtk and tk agree byte for byte on the first run — which the corpus
+already proves, all three being inside the 719 — and on the second they agree on
+the refusal, its message *and* its location. The first mechanism is the only
+oddity this port carries that turns a working file into one that will not parse
+while being reachable from `DefaultOptions`; `AddPlusObject`'s missing
+`ast.Slice` case changes what a file evaluates to but `tk fmt` never runs that
+pass.
+
+`tests/corpus.rs` keeps two lists rather than one. `KNOWN_NON_CONVERGENT` is
+still empty; `OUTPUT_DOES_NOT_REPARSE` holds those three. The split is the
+finding, not bookkeeping: a file that formats to a different file is unsettled,
+while a file that formats to one the parser refuses is destroyed, and `tk fmt`
+writes in place. `tests/idempotence.rs` already treated this class as
+unlistable over the snippets and asserted it empty; the corpus is where it
+turned out to be reachable. The mechanism table in `CLAUDE.md` goes from three
+mechanisms and twelve inputs to **five and fifteen**, with a class column.
+
+#### And the attribution was measured too, which changed what got written down
+
+The two comprehension files were predicted here as `FixIndentation`'s `specs`
+bug — the documented one that indents a comprehension's `for` expression twice
+and never indents the `if`. **Wrong**: it is `PrettyFieldNames`, a pass whose
+27 snippets did not include a single computed field inside a comprehension. The
+text-block one was predicted to produce different-but-valid output; it produces
+a file that does not lex.
+
+So two `pretty_names` snippets and two lexer snippets went in, and the pass
+oracle then attributed both comprehension cases to `PrettyFieldNames` and to no
+other pass. Attributing a change to a pass by reading an input-against-output
+diff is the mistake this plan records for 2b and again for 2c, and it would have
+been made a third time here if the guess had not been checked. The snippets are
+also the only per-pass grading these will ever have: the pass oracle cannot see
+a file outside `corpus/manifest.json`, and by design that is where the in-repo
+manifest stays.
+
+**And the second snippet was written as a negative and turned out to widen the
+bug.** `pretty_names/field_computed_in_object_comp_not_an_identifier` was meant
+to confine the damage to identifier-shaped names —
+`{ ['a b']: 1 for x in [1] }` should have kept its brackets. It keeps its
+*quotes* and loses its brackets, coming out as `{ 'a b': 1 for x in [1] }`,
+which the parser refuses exactly as the identifier case does. So the rule is
+**any string-literal field name in an object comprehension**, and only a
+genuinely computed name survives — which five existing comprehension snippets
+already demonstrate by passing the sweep. Two wrong predictions in one finding,
+both caught by running it. A negative that fails is worth more than a positive
+that passes.
+
+That also gave `tests/idempotence.rs` its second list. It had no allow-list for
+the refused class and asserted it empty, which was the right default while no
+snippet reached the class; the two that now do are named there, ratcheted both
+ways, alongside the three in `tests/corpus.rs`.
+
+#### `main.go`'s `roots` comment claimed coverage that did not exist
+
+It said "`vendor` is deliberately included even though `tk fmt` excludes it by
+default". There is no top-level `vendor/` in the repository and none of the
+roots is one — the same class of error as the parser asserting locations
+"deferred to the oracle" while the oracle held zero error cells.
+
+Half of it was true, and the comment now says which half: one root *contains* a
+real vendored tree, `test_fixtures/golden_envs/kustomize_job_hash_env/vendor`,
+eight files of jsonnet-libs/docsonnet, and the walk does not exclude it — its
+`doc-util/render.libsonnet` is one of the three files Phase 2e's
+`RemovePlusObject` flipped, so third-party style has earned its keep. The
+repository's other four vendor directories are ten files averaging 30 bytes and
+are named as deliberately left out. Real vendor breadth is Phase 5's
+`tk-compare-grafana.toml`, and the comment says so.
+
+#### A second pre-existing finding: `target/go-jsonnet` was nobody's job
+
+`tests/fixtures.rs` falls back to `target/go-jsonnet` when
+`GO_JSONNET_FOR_TESTS` is unset, and its comment — and the Makefile's, and
+`CLAUDE.md`'s — all said the oracle targets leave a checkout there. **None
+did.** `update-fmt-node-oracle` is an ordinary program in the generate module
+and takes go-jsonnet from the module cache; the lexer and pass oracles clone
+into `mktemp -d` and delete it.
+
+So outside the nix devShell — CI included — the `go_jsonnet/` family graded **12
+of 15**, saying so only in an eprintln. That cost more than three fixtures:
+`empty_comment` is the only end-to-end `EnforceCommentStyle` case in the suite,
+a pass that changes 0 of the corpus files, and `regular_expression` is the only
+authoritative answer for a parse error's doubled location and its range shape.
+`make go-jsonnet-checkout` is what makes the sentence true, the corpus's second
+set needs the same checkout, and CI gets it as a side effect of
+`check-fmt-corpus`.
+
+It is the third instance of one shape in this port, and the shape is worth
+naming: **a fallback, a deferral or a skip is only as good as the thing it
+points at, and this project has now been wrong about that thing three times** —
+the parser deferring locations to an oracle with no error cells, the Makefile
+fallback that graded the family only under `make test`, and this.
 
 ### Phase 5 — acceptance and ship
 
@@ -1223,7 +1681,8 @@ regenerable in one command.
 | Go sort table | the permutation `sort.Slice` gives, ties included | Go's own `sort` package over ten shapes at forty lengths | no |
 | Idempotence | one-pass fixed point | property, no fixtures | no |
 | Already-formatted | zero-diff on clean repo | property | no |
-| CLI parity | flags, modes, exits, stderr | tk | yes |
+| CLI parity | flags, modes, exits, and which stream each line is on | the CLI surface section above, written out in full | no |
+| CLI cross-check | the same, against the real thing | tk, over fourteen scenarios | yes, and it says when it has no tk |
 | `tk-compare-grafana` | acceptance | tk on real repos | yes |
 
 ## Rules

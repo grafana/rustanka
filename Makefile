@@ -1,4 +1,4 @@
-.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures update-glob-truth-table check-glob-truth-table update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle update-go-sort-truth-table check-go-sort-truth-table
+.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare-grafana lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures update-glob-truth-table check-glob-truth-table go-jsonnet-checkout check-fmt-go-jsonnet-pin update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle update-go-sort-truth-table check-go-sort-truth-table check-generated
 
 .DEFAULT_GOAL := help
 
@@ -21,8 +21,10 @@ help:
 	@echo "  check-golden-fixtures  - Check that golden files are up to date (requires tk)"
 	@echo "  update-glob-truth-table - Regenerate the gobwas/glob truth table (requires Go)"
 	@echo "  check-glob-truth-table - Check the gobwas/glob truth table is up to date (requires Go)"
+	@echo "  go-jsonnet-checkout    - Clone the pinned go-jsonnet to target/go-jsonnet (requires Go)"
 	@echo "  update-fmt-corpus      - Regenerate the go-jsonnet formatter corpus (requires Go)"
 	@echo "  check-fmt-corpus       - Check the formatter corpus is up to date (requires Go)"
+	@echo "  check-generated        - Check every Go-generated artifact at once (requires Go)"
 	@echo "  update-fmt-lexer-oracle - Regenerate the go-jsonnet token/fodder oracle (requires Go)"
 	@echo "  update-fmt-node-oracle - Regenerate the go-jsonnet AST/fodder-slot oracle (requires Go)"
 	@echo "  update-fmt-pass-oracle - Regenerate the go-jsonnet per-pass AST oracle (requires Go)"
@@ -53,6 +55,17 @@ fmt:
 fmt-check:
 	@cargo fmt --all -- --check
 
+# `tests/fixtures.rs` grades the `go_jsonnet/` family — go-jsonnet's own
+# `formatter/testdata/*.fmt.golden` — against GO_JSONNET_FOR_TESTS, falling back
+# to `target/go-jsonnet`. That fallback lives in the test rather than here on
+# purpose: putting it in this target graded the family under `make test` while a
+# plain `cargo test -p rtk-jsonnetfmt` still skipped it, which is the entry
+# point anyone actually uses while working. Nothing to set here as a result.
+#
+# This comment used to say the oracle targets leave a checkout there. **None
+# did**, so the family graded 12 of 15 everywhere outside the nix devShell. See
+# `go-jsonnet-checkout` below, which is the target that now makes it true; run
+# it once and this and every later `cargo test` grades all fifteen.
 test:
 	@cargo test --all
 
@@ -101,27 +114,103 @@ update-glob-truth-table:
 	@cd $(GLOB_GENERATE_DIR) && go mod tidy && go run . > $(CURDIR)/$(GLOB_TRUTH_TABLE)
 	@echo "Truth table regenerated. Review the diff before committing."
 
+# A go-jsonnet checkout at a stable path.
+#
+# Two things need one. The fmt corpus's second set is go-jsonnet's own root
+# testdata/, whose inputs are not in this repository; and
+# `crates/rtk-jsonnetfmt/tests/fixtures.rs` grades the `go_jsonnet/` fixture
+# family against `formatter/testdata/*.fmt.golden`.
+#
+# That second one is why this target exists at all, and it is a bug fix rather
+# than a convenience. fixtures.rs falls back to `target/go-jsonnet` when
+# GO_JSONNET_FOR_TESTS is unset, and its comment — and the one further up this
+# file, and CLAUDE.md — all said the oracle targets leave one there. **None
+# did.** `update-fmt-node-oracle` is an ordinary program in the generate module
+# and takes go-jsonnet from the module cache; the lexer and pass oracles clone
+# into `mktemp -d` and delete it. So on every machine without the nix devShell,
+# CI included, the family graded 12 of 15 and said so only in a log nobody
+# reads — and two of the three missing carry answers nothing else in the suite
+# has. `make go-jsonnet-checkout` is what makes that fallback true.
+#
+# GO_JSONNET_VERSION is defined further down, with the lexer oracle that needed
+# it first.
+GO_JSONNET_CHECKOUT := target/go-jsonnet
+# What every recipe below resolves to: an explicit checkout wins, and failing
+# that the one this file clones.
+GO_JSONNET_PATH = $${GO_JSONNET_FOR_TESTS:-$(CURDIR)/$(GO_JSONNET_CHECKOUT)}
+
+# A real directory target rather than a phony one, so it is cloned once and
+# then left alone.
+$(GO_JSONNET_CHECKOUT):
+	@if [ -n "$${GO_JSONNET_FOR_TESTS:-}" ]; then \
+		echo "GO_JSONNET_FOR_TESTS is set to $$GO_JSONNET_FOR_TESTS; not cloning"; \
+	else \
+		echo "cloning go-jsonnet $(GO_JSONNET_VERSION) into $@..."; \
+		mkdir -p $(dir $@); \
+		git clone --quiet --depth 1 --branch $(GO_JSONNET_VERSION) \
+			https://github.com/google/go-jsonnet $@; \
+	fi
+
+go-jsonnet-checkout: $(GO_JSONNET_CHECKOUT)
+	@checkout="$(GO_JSONNET_PATH)"; \
+	test -d "$$checkout/formatter/testdata" || { \
+		echo "$$checkout does not look like a go-jsonnet checkout"; exit 1; \
+	}; \
+	echo "go-jsonnet checkout ready at $$checkout"
+
 # The breadth corpus Phase 2 is measured against: go-jsonnet's formatter run
-# over every Jsonnet file in this repository. Replaces the round-trip gate the
-# plan originally asked for, which go-jsonnet itself does not satisfy — its
-# unparser renders from the fodder model rather than copying the source.
+# over every Jsonnet file in this repository, and over go-jsonnet's own root
+# testdata/. Replaces the round-trip gate the plan originally asked for, which
+# go-jsonnet itself does not satisfy — its unparser renders from the fodder
+# model rather than copying the source.
+#
+# Phase 4 added the second set. The in-repo set stays where it is because the
+# node, pass and lexer oracles mirror its manifest file for file; the external
+# set is one self-contained JSON carrying inputs as well as answers, so its
+# count does not depend on a checkout being present. See the package comment on
+# $(FMT_GENERATE_DIR)/main.go.
 FMT_GENERATE_DIR := crates/rtk-jsonnetfmt/testdata/generate
 FMT_CORPUS_DIR := crates/rtk-jsonnetfmt/testdata/corpus
+FMT_EXTERNAL_CORPUS := crates/rtk-jsonnetfmt/testdata/go-jsonnet-corpus.json
 
-update-fmt-corpus:
-	@echo "Regenerating $(FMT_CORPUS_DIR) with go-jsonnet's formatter..."
-	@cd $(FMT_GENERATE_DIR) && go mod tidy && go run . $(CURDIR) $(CURDIR)/$(FMT_CORPUS_DIR)
-	@echo "Corpus regenerated. Review the diff, and update matching= in"
-	@echo "crates/rtk-jsonnetfmt/testdata/corpus-baseline.toml if the count moved."
+# The two sets have to answer for the same go-jsonnet: one takes it from the
+# module cache via go.mod, the other from the cloned checkout. Nothing else
+# would notice them drifting apart.
+check-fmt-go-jsonnet-pin:
+	@grep -qx "require github.com/google/go-jsonnet $(GO_JSONNET_VERSION)" \
+		$(FMT_GENERATE_DIR)/go.mod || { \
+		echo "$(FMT_GENERATE_DIR)/go.mod does not require go-jsonnet $(GO_JSONNET_VERSION),"; \
+		echo "which is the version this file clones. The two corpus sets would answer"; \
+		echo "for different go-jsonnets. Reconcile GO_JSONNET_VERSION and go.mod."; \
+		exit 1; \
+	}
 
-check-fmt-corpus:
+update-fmt-corpus: check-fmt-go-jsonnet-pin $(GO_JSONNET_CHECKOUT)
+	@echo "Regenerating $(FMT_CORPUS_DIR) and $(FMT_EXTERNAL_CORPUS) with go-jsonnet's formatter..."
+	@checkout="$(GO_JSONNET_PATH)"; \
+		cd $(FMT_GENERATE_DIR) && go mod tidy && go run . \
+			$(CURDIR) $(CURDIR)/$(FMT_CORPUS_DIR) \
+			"$$checkout" $(CURDIR)/$(FMT_EXTERNAL_CORPUS)
+	@echo "Corpus regenerated. Review the diff, and update the per-set counts in"
+	@echo "crates/rtk-jsonnetfmt/testdata/corpus-baseline.toml if either moved."
+
+check-fmt-corpus: check-fmt-go-jsonnet-pin $(GO_JSONNET_CHECKOUT)
 	@test -f $(FMT_CORPUS_DIR)/manifest.json || { \
 		echo "$(FMT_CORPUS_DIR) is missing; run 'make update-fmt-corpus' (requires Go)"; \
 		exit 1; \
 	}
-	@tmp=$$(mktemp -d) && \
-		(cd $(FMT_GENERATE_DIR) && go mod tidy && go run . $(CURDIR) $$tmp) && \
-		diff -ru $(FMT_CORPUS_DIR) $$tmp && rm -rf $$tmp
+	@test -f $(FMT_EXTERNAL_CORPUS) || { \
+		echo "$(FMT_EXTERNAL_CORPUS) is missing; run 'make update-fmt-corpus' (requires Go)"; \
+		exit 1; \
+	}
+	@set -e; \
+		checkout="$(GO_JSONNET_PATH)"; \
+		tmp=$$(mktemp -d); \
+		(cd $(FMT_GENERATE_DIR) && go mod tidy && go run . \
+			$(CURDIR) "$$tmp/corpus" "$$checkout" "$$tmp/go-jsonnet-corpus.json"); \
+		diff -ru $(FMT_CORPUS_DIR) "$$tmp/corpus"; \
+		diff -u $(FMT_EXTERNAL_CORPUS) "$$tmp/go-jsonnet-corpus.json"; \
+		rm -rf "$$tmp"
 	@echo "Corpus is up to date."
 
 # The lexer oracle: the tokens and fodder go-jsonnet's own lexer produces.
@@ -199,6 +288,21 @@ FMT_NODE_ORACLE := crates/rtk-jsonnetfmt/testdata/node-oracle.json
 # graded by nothing.
 FMT_NODE_SNIPPETS := crates/rtk-jsonnetfmt/testdata/node-snippets.json
 FMT_NODE_SNIPPET_ORACLE := crates/rtk-jsonnetfmt/testdata/node-snippet-oracle.json
+# Malformed input, dumped by the same program into a third answer file.
+#
+# It cannot live in $(FMT_NODE_SNIPPETS): `node_oracle.rs` asserts go-jsonnet
+# refuses *none* of those, because a snippet it refuses pins no fodder slot.
+# These are the opposite — every one must be refused, and what is graded is the
+# refusal. `nodedump` needs no change for it; `dumpOne` already records
+# `err.Error()`, which is `"<loc> <msg>"`, so the **location** is graded too.
+#
+# That is the gap this closes. Of go-jsonnet's 29 distinct parser-error
+# templates, 26 had no graded location at all: `src/parser.rs`'s unit tests
+# assert the message body with `ends_with` and defer positions to the oracle,
+# and the node and pass snippet oracles contain zero error cells. A parse error
+# aborts a whole `tk fmt` run, so the text and the position are both contract.
+FMT_PARSE_ERROR_SNIPPETS := crates/rtk-jsonnetfmt/testdata/parse-error-snippets.json
+FMT_PARSE_ERROR_ORACLE := crates/rtk-jsonnetfmt/testdata/parse-error-snippet-oracle.json
 
 update-fmt-node-oracle:
 	@test -f $(FMT_CORPUS_DIR)/manifest.json || { \
@@ -212,7 +316,12 @@ update-fmt-node-oracle:
 		go run ./nodedump snippets \
 			$(CURDIR)/$(FMT_NODE_SNIPPETS) \
 			$(CURDIR)/$(FMT_NODE_SNIPPET_ORACLE)
-	@echo "Wrote $(FMT_NODE_ORACLE) and $(FMT_NODE_SNIPPET_ORACLE)."
+	@cd $(FMT_GENERATE_DIR) && \
+		go run ./nodedump snippets \
+			$(CURDIR)/$(FMT_PARSE_ERROR_SNIPPETS) \
+			$(CURDIR)/$(FMT_PARSE_ERROR_ORACLE)
+	@echo "Wrote $(FMT_NODE_ORACLE), $(FMT_NODE_SNIPPET_ORACLE) and"
+	@echo "$(FMT_PARSE_ERROR_ORACLE)."
 
 # The pass oracle: the AST each formatter pass leaves behind.
 #
@@ -305,6 +414,19 @@ check-go-sort-truth-table:
 		(cd $(FMT_GENERATE_DIR) && go run ./sortdump $$tmp) && \
 		diff -u $(GO_SORT_TRUTH_TABLE) $$tmp && rm -f $$tmp
 	@echo "Truth table is up to date."
+
+# Everything whose committed answer is produced by a Go library, checked at
+# once. This is the local equivalent of CI's `check-generated` job, which runs
+# the three separately so a drifted table is its own red check rather than one
+# hidden behind whichever check happened to run first.
+#
+# Nothing ran any of these in CI before Phase 4: `cargo test --all` grades the
+# formatter against the *committed* corpus, so correctness was covered, but
+# whether the committed corpus and the two truth tables still equal what the Go
+# libraries produce was checked by nobody. A go-jsonnet bump or a hand edit to a
+# golden drifted silently with every fmt test green.
+check-generated: check-fmt-corpus check-go-sort-truth-table check-glob-truth-table
+	@echo "All generated artifacts are up to date."
 
 check-glob-truth-table:
 	@test -f $(GLOB_TRUTH_TABLE) || { \

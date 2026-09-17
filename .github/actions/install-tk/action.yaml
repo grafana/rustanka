@@ -1,0 +1,85 @@
+name: Install tk
+description: >
+  Installs Tanka's tk and asserts which version arrived.
+
+  It exists because the step it replaces computed a TK_VERSION and then
+  downloaded releases/latest anyway, never using the variable, and printed
+  `tk --version` without asserting anything about it. So the goldens and the
+  CLI cross-check were retargeted at whatever tanka released most recently,
+  silently, with no rtk change.
+
+inputs:
+  version:
+    description: >
+      `pinned` (the default) reads rtk_masterminds::TANKA_COMPATIBLE_VERSION
+      out of the source, so the pin has exactly one home and cannot drift from
+      the version rtk answers for. `latest` resolves the newest release, which
+      only the non-blocking scheduled workflow wants. Anything else is taken as
+      a tag.
+    required: false
+    default: pinned
+
+outputs:
+  version:
+    description: The tag that was installed, e.g. v0.38.0.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        case '${{ inputs.version }}' in
+          pinned)
+            # One home for the pin: the constant rtk itself answers for.
+            # `git describe --tags` builds it into tk, so a release reports the
+            # tag verbatim and the two are directly comparable.
+            source=crates/rtk-masterminds/src/lib.rs
+            version=$(sed -n \
+              's/^pub const TANKA_COMPATIBLE_VERSION: &str = "\(v[0-9][^"]*\)";$/\1/p' \
+              "$source")
+            # An empty read must fail rather than fall back to latest: that is
+            # exactly the bug this action replaces. A reformat that wraps the
+            # constant, or a move to another file, lands here loudly.
+            if [ -z "$version" ]; then
+              echo "::error::could not read TANKA_COMPATIBLE_VERSION from $source"
+              exit 1
+            fi
+            echo "pinned to $version, read from $source"
+            ;;
+          latest)
+            version=$(curl -fsSL https://api.github.com/repos/grafana/tanka/releases/latest \
+              | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+            if [ -z "$version" ]; then
+              echo "::error::could not resolve the latest tanka release"
+              exit 1
+            fi
+            echo "latest tanka release is $version"
+            ;;
+          *)
+            version='${{ inputs.version }}'
+            echo "using the requested tag $version"
+            ;;
+        esac
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - shell: bash
+      run: |
+        set -euo pipefail
+        version='${{ steps.resolve.outputs.version }}'
+        curl -fSL -o /usr/local/bin/tk \
+          "https://github.com/grafana/tanka/releases/download/${version}/tk-linux-amd64"
+        chmod +x /usr/local/bin/tk
+        reported=$(tk --version)
+        echo "tk --version: ${reported}"
+        # Matched on the number rather than the whole tag, so a leading `v` on
+        # one side and not the other cannot fail a correct install. A dev build
+        # reports something else entirely and fails here — which matters,
+        # because a dev build of tk skips the expectVersions.tanka check
+        # altogether and would answer golden fixtures differently.
+        if ! printf '%s' "${reported}" | grep -qF "${version#v}"; then
+          echo "::error::expected tk ${version}, but tk --version said: ${reported}"
+          exit 1
+        fi

@@ -197,4 +197,184 @@
 #
 # A drop below 138 means a pass or the round trip broke a file that used to
 # pass, and the test prints which.
+#
+# ============================================================================
+# Phase 4: two sets, and a denominator that is no longer 138
+# ============================================================================
+#
+# Everything above is about one set of 138 files. Phase 4 added a second, so
+# **"138 of 138" stops being the number to compare against earlier phases** and
+# `[sets.in_repo]` below is where that 138 now lives. The old single
+# `matching = 138` key is gone rather than kept alongside: one number with two
+# homes drifts, which is the same argument the ratchet itself rests on.
+#
+# The new set is go-jsonnet's own root `testdata/` — 719 files of Jsonnet
+# written by people testing a parser and an evaluator, not a formatter. It is
+# what Phase 4 of docs/rtk-fmt-plan.md asks for, and it is the breadth this
+# corpus most lacked: the in-repo 138 are overwhelmingly already `tk fmt`-clean
+# (107 of them matched while `format` was the identity stub), while these were
+# written to be awkward about escapes, text blocks, verbatim strings and
+# whitespace.
+#
+# Where the files come from, and where they do not:
+#
+#   * in_repo (138) — the five roots in testdata/generate/main.go. Unchanged.
+#   * go_jsonnet_testdata (719) — `<checkout>/testdata/*.{jsonnet,libsonnet}`,
+#     from the checkout GO_JSONNET_FOR_TESTS names or the one
+#     `make go-jsonnet-checkout` clones.
+#
+# Not added, and each for a reason worth having:
+#
+#   * cmds/rtk/testdata and crates/rtk-jsonnet/testdata — 173 in-repo files,
+#     32 KB between them, almost all sub-100-byte discovery fixtures already in
+#     exactly the shape `tk fmt` writes. They would raise the denominator by
+#     more than the go-jsonnet set raises the *grading*, which is precisely
+#     what this file has been warning about since Phase 2b.
+#   * vendored libsonnet beyond what golden_envs already carries. There is no
+#     top-level vendor/ here; main.go's `roots` comment used to claim one was
+#     included and now says what is actually true. Real vendor breadth is
+#     Phase 5's tk-compare-grafana.toml.
+#
+# ## Why the two sets are stored differently, which was the design problem
+#
+# The in-repo set commits only answers, because its inputs are already here.
+# The external set commits **inputs and answers together**, in one JSON file.
+#
+# The alternative — commit only the answers and read the inputs from whatever
+# go-jsonnet checkout is lying around — makes the file count depend on the
+# machine. This test asserts its counts exactly, in both directions, so an
+# environment-dependent denominator is an assertion that cannot hold in both
+# environments. That is the GO_JSONNET_FOR_TESTS hazard CLAUDE.md records about
+# the `go_jsonnet/` fixture family, one level up and worse: there a missing
+# checkout made a family grade silently at zero, here it would make the ratchet
+# itself unenforceable. So the artifact is self-contained and the numbers below
+# are the same everywhere, on a laptop, in CI and in the nix devShell.
+#
+# Two consequences, both deliberate:
+#
+#   * `files` is asserted as well as `matching`. A regenerated artifact that
+#     silently lost entries — a checkout without testdata/, a walk that found
+#     nothing — would otherwise pass a matching-count check while grading
+#     almost nothing. The denominator is ratcheted too.
+#   * a declared set whose artifact is missing is a **failure, not a skip**.
+#     Both artifacts are committed, so absence means a broken checkout rather
+#     than "you have not run the generator yet".
+#
+# ## Why the in-repo set did not simply grow
+#
+# The node, pass and lexer oracles are all driven by `corpus/manifest.json`,
+# and `tests/node_oracle.rs` asserts the node oracle covers the same list in
+# the same order. Adding files to that manifest invalidates about 19 MB of
+# committed oracle — node-oracle.json alone is 11 MB — and every go-jsonnet
+# bump regenerates the lot. Those oracles exist to grade node kinds, fodder
+# slots and one pass at a time, and `node_oracle.rs` already asserts every kind
+# and every slot is reached; 719 tiny one-liners would add megabytes for
+# essentially no new slot. Text-level breadth belongs at the text level, which
+# is what this corpus is.
+#
+# ## The prediction was 719 and the measurement was 719
+#
+# The fourth exact one in a row, and the first made without an oracle to query:
+# `pass-oracle.json` holds no cell for a file outside the manifest, so unlike
+# 2d, 2e and 2f this one could not be derived per file and per pass. What it
+# rested on instead:
+#
+#   * almost every file in the set parses, so the formatter is being asked the
+#     ordinary question on nearly all 719.
+#
+#     **That bullet said "every file parses" and it was wrong.** Fifteen do
+#     not. The premise was derived by grepping the set's `.golden` files for
+#     "STATIC ERROR" and finding none, which is the wrong instrument: those
+#     goldens record *evaluation* output, so a file go-jsonnet's parser refuses
+#     has no evaluation golden to say so. The conclusion happened to survive —
+#     the count was still exactly right — but a right answer resting on a wrong
+#     reason is worth flagging rather than quietly correcting, and it is the
+#     same class of error as deriving coverage by grepping inputs.
+#
+#     The fifteen are a *bonus* rather than a caveat; see below.
+#   * the formatter is at full parity everywhere it is already graded: 138 of
+#     138, 15 of 15 fixtures, node and pass oracles exact over 63 and 438
+#     snippets, 44 parse-error snippets graded on message and location.
+#   * the shapes this set adds that the in-repo corpus lacks are each already
+#     graded by the snippet oracles. Measured over the 719: 3 files with
+#     verbatim strings, 12 with `|||` blocks, 8 tab-indented, 18 non-ASCII,
+#     162 with no trailing newline — and 0 with `#` comments, 0 with `\u`
+#     escapes, 0 with CRLF, 0 with a BOM.
+#
+# The named risk, if it misses: at most a handful, clustered in the 18
+# non-ASCII files, through `EnforceStringStyle`'s StringUnescape/StringEscape
+# round trip — the one thing here the corpus has never exercised at scale.
+# Nothing missed, and the named risk was not where anything interesting was.
+#
+# ## Where the set did pay off: three files whose output does not parse
+#
+# The match count was exact and the **idempotence** count was not. Three of the
+# 719 format to something go-jsonnet's own parser then refuses, and no file
+# among the in-repo 138 reaches that at all:
+#
+#   * object_comp_err_elem.jsonnet and object_literal_in_object_comp.jsonnet —
+#     `PrettyFieldNames` promotes `['x']:` to `x:` with no ObjectComp guard,
+#     and a comprehension may only have [e] fields
+#   * escaped_fields.jsonnet — a `|||` block whose value is nothing but
+#     newlines, where the unparser writes a blank value-line with no indent, so
+#     no content line carries the block indent and the re-lex eats the
+#     terminator
+#
+# All three are **upstream's**, and that was settled by measurement rather than
+# by reading Go: rtk and tk agree byte for byte on the first run — which this
+# corpus already proves, all three being inside the 719 — and on the second
+# they agree on the refusal *and* on its message and its location.
+#
+# `tests/corpus.rs` lists them in OUTPUT_DOES_NOT_REPARSE, kept separate from
+# KNOWN_NON_CONVERGENT, which is still empty. The distinction is the point: a
+# file that formats to a different file is unsettled, while a file that formats
+# to one the parser refuses is destroyed, and `tk fmt` writes in place.
+#
+# ## And fifteen graded parse errors, which were not predicted at all
+#
+# 15 of the 719 do not parse, so their committed answer is go-jsonnet's error
+# message — **message and location**, through the same coalesce-error path the
+# in-repo set uses for its three. That is a real gain in a family this
+# repository records as thin: before the parse-error snippets, 26 of
+# go-jsonnet's 29 parser-error templates had no graded location at all.
+#
+# These fifteen add eleven distinct templates end to end, and three of them —
+# `import_block_literal`, `importstr_block_literal`, `importbin_block_literal` —
+# are rendered `(1:8)-(3:4)`, the multi-line form of `LocationRange`. Before
+# this, that rendering was graded by essentially one fixture.
+#
+# Two of them are `object_comp_bad_field.jsonnet` and `..._bad_field2.jsonnet`,
+# whose committed answer is "Object comprehensions can only have [e] fields" —
+# the very message `PrettyFieldNames` manufactures on the two files below. The
+# set contains the error as an input and as an output, from opposite
+# directions.
+#
+# **The argument for extending this corpus is not the one the plan made.**
+# Phase 4's item 2 asks for breadth, and breadth is what 719 more
+# files sounded like — 719 more chances for the match count to be wrong. The
+# match count was not wrong. What the set actually bought was three inputs of a
+# class the suite had never seen, in a pass with 27 snippets none of which put
+# a computed field inside a comprehension. Two more snippets now do, and two
+# lexer snippets pin the block half, because attributing this to a pass by
+# reading the diff is the mistake this file has recorded twice. The pass oracle
+# then named `PrettyFieldNames` and no other pass, so the attribution is
+# measured rather than reasoned.
+#
+# **One more prediction inside the finding was also wrong, and cheaply.** The
+# second snippet was written as the negative that would confine the damage to
+# identifier-shaped names. It does not: `{ ['a b']: 1 for x in [1] }` keeps its
+# quotes, loses its brackets, and is refused too. The rule is any
+# string-literal field name in a comprehension, and only a genuinely computed
+# name survives. A negative that fails is worth more than a positive that
+# passes, which is the reusable part.
+
+# The set the oracles mirror file for file. This is the 138 every phase above
+# is talking about.
+[sets.in_repo]
+files = 138
 matching = 138
+
+# go-jsonnet's own root testdata/, inputs committed alongside the answers.
+[sets.go_jsonnet_testdata]
+files = 719
+matching = 719

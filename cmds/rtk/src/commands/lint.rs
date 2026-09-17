@@ -13,6 +13,10 @@ pub const EXIT_CODE_PROBLEMS: i32 = 2;
 #[derive(Args)]
 pub struct LintArgs {
 	/// Files or directories to lint
+	// `ArgsMin(1)`, as `tk lint` is. This used to default to `"."`, which was
+	// a divergence carried with a note pointing at the `fmt` CLI; the two
+	// commands share Tanka's discovery and now share its argument rule too.
+	#[arg(required = true)]
 	pub paths: Vec<String>,
 
 	/// Globs to exclude
@@ -38,12 +42,6 @@ pub fn run<W: Write>(args: LintArgs, _writer: W) -> Result<()> {
 		.with_disabled_checks(&args.disable_checks)
 		.map_err(anyhow::Error::msg)?;
 
-	let paths = if args.paths.is_empty() {
-		vec![".".to_string()]
-	} else {
-		args.paths
-	};
-
 	// `tk lint` and `tk fmt` share Tanka's `jsonnet.FindFiles`, so rtk shares
 	// the port of it. What this replaced got three things wrong: it pruned
 	// excluded directories (`FindFiles` returns `nil`, not `fs.SkipDir`, so a
@@ -52,7 +50,7 @@ pub fn run<W: Write>(args: LintArgs, _writer: W) -> Result<()> {
 	// sniffed at the exclude patterns instead of compiling them — so `*` did
 	// not cross `/` and anything but the four default patterns was ignored.
 	let excludes = rtk_gobwas_glob::compile_all(&args.exclude)?;
-	let all_files = rtk_jsonnetfmt::find_files_all(&paths, &excludes)?;
+	let all_files = rtk_jsonnetfmt::find_files_all(&args.paths, &excludes)?;
 
 	let mut had_problems = false;
 	for file in &all_files {
