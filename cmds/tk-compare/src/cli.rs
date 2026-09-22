@@ -27,6 +27,7 @@ pub enum Commands {
 	List(ListCli),
 	Compare(CompareCli),
 	GoldenFixtures(GoldenFixturesCli),
+	FmtAcceptance(FmtAcceptanceCli),
 }
 
 #[derive(Args, Clone, Default)]
@@ -142,6 +143,38 @@ pub struct CompareCli {
 	pub kind: CompareKind,
 	pub left: String,
 	pub right: String,
+}
+
+/// Phase 5's acceptance gate for `rtk fmt`.
+///
+/// Every default here points at something a Makefile target produces, so the
+/// bare `tk-compare fmt-acceptance` is the run the plan and `CLAUDE.md` refer
+/// to. Nothing is optional in a way that would let the gate grade less than the
+/// whole corpus: `--extra-root` adds roots and can never remove one, and the
+/// harness reports the extras apart from the ratcheted repositories.
+#[derive(Args, Clone)]
+#[command(name = "fmt-acceptance")]
+pub struct FmtAcceptanceCli {
+	/// The corpus definition and the recorded counts
+	#[arg(long, default_value = "fmt-acceptance.toml")]
+	pub config: String,
+
+	/// Where `make fmt-acceptance-corpus` cloned the pinned repositories
+	#[arg(long, default_value = "target/fmt-acceptance-corpus")]
+	pub corpus_dir: String,
+
+	/// Where tk's own output is staged for the already-formatted gate
+	#[arg(long, default_value = "target/fmt-acceptance-staged")]
+	pub staged_dir: String,
+
+	/// An extra corpus root, e.g. a private Jsonnet tree. Reported separately
+	/// and never part of the recorded counts (repeatable)
+	#[arg(long = "extra-root")]
+	pub extra_root: Vec<String>,
+
+	/// Worker threads; defaults to rayon's own choice
+	#[arg(long)]
+	pub jobs: Option<usize>,
 }
 
 #[derive(Args, Clone)]

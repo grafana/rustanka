@@ -26,6 +26,11 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 tracing = "0.1.44"
 globset = "0.4.16"
 indicatif = "0.17.11"
+# The fmt acceptance gate reparses every formatted result in process, so it
+# needs the formatter's own parser rather than a second subprocess per file.
+rtk-jsonnetfmt.workspace = true
+rtk-gobwas-glob.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 indoc = "2.0"
