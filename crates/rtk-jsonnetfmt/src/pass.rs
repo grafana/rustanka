@@ -82,10 +82,23 @@ pub trait AstPass {
 	/// go-jsonnet's `pass.Context`, which is `interface{}` — each pass chooses
 	/// its own, and all but one choose nothing.
 	///
-	/// Only `AddPlusObject` uses it, to carry the parent node so it can decide
+	/// Only [`AddPlusObject`](crate::passes::AddPlusObject) uses it, to decide
 	/// whether replacing `e {}` with `e + {}` needs parentheses. That is why
 	/// this is an associated type rather than `()`: the one pass that needs a
 	/// context needs a particular one.
+	///
+	/// Go's is the parent *node*, and it distinguishes the slots of that parent
+	/// by comparing the parent's child pointer against the current node — which
+	/// Rust cannot do while the parent is mutably borrowed. So that pass
+	/// carries [`passes::add_plus_object::Parent`], a descriptor of the parent
+	/// refined per slot, and fills it in by overriding the five node hooks
+	/// whose slots upstream's switch tells apart. This trait was written with
+	/// that case scoped rather than discovered to be incompatible with it; the
+	/// cost, paid there and not here, is that those five overrides restate the
+	/// base traversal, because a [`base`] function takes one `ctx` and hands it
+	/// to every slot.
+	///
+	/// [`passes::add_plus_object::Parent`]: crate::passes::add_plus_object::Parent
 	type Ctx;
 
 	/// `BaseContext`: the context the root is visited with.
@@ -251,8 +264,12 @@ pub trait AstPass {
 
 	/// Visit a node of any kind.
 	///
-	/// This is the only hook that can **replace** the node, which `FixParens`,
-	/// `RemovePlusObject` and `AddPlusObject` all do.
+	/// This is the only hook that gets the whole [`Node`], so it is the only
+	/// one that can **replace** it — which all three of Phase 2e's passes do.
+	/// It is also why [`FixParens`](crate::passes::FixParens) overrides this
+	/// rather than [`AstPass::parens`], although upstream overrides `Parens`:
+	/// it needs the node's own fodder, and this module's second departure keeps
+	/// that on [`Node`] instead of in the variant.
 	fn visit(&mut self, node: &mut Node, ctx: &Self::Ctx) {
 		base::visit(self, node, ctx);
 	}
