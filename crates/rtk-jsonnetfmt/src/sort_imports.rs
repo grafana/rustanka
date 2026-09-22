@@ -354,8 +354,7 @@ impl Node {
 	///
 	/// A predicate rather than an extractor because owning the [`Local`] means
 	/// taking it out of the node, with no way to put it back if the answer is
-	/// no. That is §18 of `docs/learning-rust.md`: test the shape before you
-	/// own it.
+	/// no — test the shape before you own it.
 	fn is_import_group_local(&self) -> bool {
 		match &self.kind {
 			NodeKind::Local(local) => local.is_import_group(),

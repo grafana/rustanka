@@ -1,0 +1,178 @@
+[
+  {
+    "source": "expected_token_bracket_r.jsonnet",
+    "error": "expected_token_bracket_r.jsonnet:2:1 Expected token \"]\" but got end of file"
+  },
+  {
+    "source": "expected_token_operator_in_field.jsonnet",
+    "error": "expected_token_operator_in_field.jsonnet:1:5-6 Expected token OPERATOR but got (NUMBER, \"1\")"
+  },
+  {
+    "source": "expected_token_identifier_parsing_parameter.jsonnet",
+    "error": "expected_token_identifier_parsing_parameter.jsonnet:1:10-11 Expected token IDENTIFIER but got (NUMBER, \"1\") while parsing parameter"
+  },
+  {
+    "source": "expected_operator_eq_in_local_bind.jsonnet",
+    "error": "expected_operator_eq_in_local_bind.jsonnet:1:9-10 Expected operator = but got (OPERATOR, \":\")"
+  },
+  {
+    "source": "expected_operator_eq_in_object_local.jsonnet",
+    "error": "expected_operator_eq_in_object_local.jsonnet:1:11-12 Expected operator = but got (OPERATOR, \":\")"
+  },
+  {
+    "source": "expected_comma_before_function_argument.jsonnet",
+    "error": "expected_comma_before_function_argument.jsonnet:1:5-6 Expected a comma before next function argument, got (NUMBER, \"2\")"
+  },
+  {
+    "source": "expected_comma_before_function_parameter.jsonnet",
+    "error": "expected_comma_before_function_parameter.jsonnet:1:12-13 Expected a comma before next function parameter, got (IDENTIFIER, \"b\")"
+  },
+  {
+    "source": "expected_comma_before_method_parameter.jsonnet",
+    "error": "expected_comma_before_method_parameter.jsonnet:1:7-8 Expected a comma before next method parameter, got (IDENTIFIER, \"b\")"
+  },
+  {
+    "source": "positional_argument_after_named.jsonnet",
+    "error": "positional_argument_after_named.jsonnet:1:8-9 Positional argument after a named argument is not allowed"
+  },
+  {
+    "source": "duplicate_local_var_in_binds.jsonnet",
+    "error": "duplicate_local_var_in_binds.jsonnet:1:14-15 Duplicate local var: a"
+  },
+  {
+    "source": "duplicate_local_var_in_object.jsonnet",
+    "error": "duplicate_local_var_in_object.jsonnet:1:22-23 Duplicate local var: a"
+  },
+  {
+    "source": "expected_comma_or_semicolon_after_bind.jsonnet",
+    "error": "expected_comma_or_semicolon_after_bind.jsonnet:1:13-14 Expected , or ; but got \"]\""
+  },
+  {
+    "source": "object_op_not_colons.jsonnet",
+    "error": "object_op_not_colons.jsonnet:1:5-6 Expected one of :, ::, :::, +:, +::, +:::, got: *"
+  },
+  {
+    "source": "object_op_plus_with_no_colons.jsonnet",
+    "error": "object_op_plus_with_no_colons.jsonnet:1:5-6 Expected one of :, ::, :::, +:, +::, +:::, got: +"
+  },
+  {
+    "source": "object_op_four_colons.jsonnet",
+    "error": "object_op_four_colons.jsonnet:1:4-8 Expected one of :, ::, :::, +:, +::, +:::, got: ::::"
+  },
+  {
+    "source": "object_comprehension_with_assert.jsonnet",
+    "error": "object_comprehension_with_assert.jsonnet:1:23-26 Object comprehension cannot have asserts"
+  },
+  {
+    "source": "object_comprehension_two_fields.jsonnet",
+    "error": "object_comprehension_two_fields.jsonnet:1:18-21 Object comprehension can only have one field"
+  },
+  {
+    "source": "object_comprehension_hidden_field.jsonnet",
+    "error": "object_comprehension_hidden_field.jsonnet:1:11-14 Object comprehensions cannot have hidden fields"
+  },
+  {
+    "source": "object_comprehension_id_field.jsonnet",
+    "error": "object_comprehension_id_field.jsonnet:1:8-11 Object comprehensions can only have [e] fields"
+  },
+  {
+    "source": "plus_sugar_in_method.jsonnet",
+    "error": "plus_sugar_in_method.jsonnet:1:3-4 Cannot use +: syntax sugar in a method: f"
+  },
+  {
+    "source": "duplicate_field.jsonnet",
+    "error": "duplicate_field.jsonnet:1:9-10 Duplicate field: a"
+  },
+  {
+    "source": "expected_comma_before_field.jsonnet",
+    "error": "expected_comma_before_field.jsonnet:1:8-9 Expected a comma before next field"
+  },
+  {
+    "source": "unexpected_token_parsing_field_definition.jsonnet",
+    "error": "unexpected_token_parsing_field_definition.jsonnet:1:3-4 Unexpected: (NUMBER, \"1\") while parsing field definition"
+  },
+  {
+    "source": "expected_for_if_or_bracket_after_for.jsonnet",
+    "error": "expected_for_if_or_bracket_after_for.jsonnet:1:15-16 Expected for, if or \"]\" after for clause, got: (IDENTIFIER, \"z\")"
+  },
+  {
+    "source": "expected_for_if_or_brace_after_for.jsonnet",
+    "error": "expected_for_if_or_brace_after_for.jsonnet:1:21-22 Expected for, if or \"}\" after for clause, got: (IDENTIFIER, \"z\")"
+  },
+  {
+    "source": "expected_comma_before_array_element.jsonnet",
+    "error": "expected_comma_before_array_element.jsonnet:1:4-5 Expected a comma before next array element"
+  },
+  {
+    "source": "bad_escape_reports_its_location_twice.jsonnet",
+    "error": "bad_escape_reports_its_location_twice.jsonnet:2:6-12 bad_escape_reports_its_location_twice.jsonnet:2:6-12 Unknown escape sequence in string literal: \\q"
+  },
+  {
+    "source": "bad_unicode_escape_reports_first_four_bytes.jsonnet",
+    "error": "bad_unicode_escape_reports_first_four_bytes.jsonnet:1:1-11 bad_unicode_escape_reports_first_four_bytes.jsonnet:1:1-11 Unicode escape sequence was malformed: ab\\u"
+  },
+  {
+    "source": "bad_escape_in_field_name.jsonnet",
+    "error": "bad_escape_in_field_name.jsonnet:1:3-8 bad_escape_in_field_name.jsonnet:1:3-8 Unknown escape sequence in string literal: \\q"
+  },
+  {
+    "source": "unexpected_token_parsing_terminal.jsonnet",
+    "error": "unexpected_token_parsing_terminal.jsonnet:1:1-2 Unexpected: \"]\" while parsing terminal"
+  },
+  {
+    "source": "unexpected_token_parsing_terminal_comma.jsonnet",
+    "error": "unexpected_token_parsing_terminal_comma.jsonnet:1:1-2 Unexpected: \",\" while parsing terminal"
+  },
+  {
+    "source": "unexpected_end_of_file_after_operator.jsonnet",
+    "error": "unexpected_end_of_file_after_operator.jsonnet:2:1 Unexpected end of file"
+  },
+  {
+    "source": "unexpected_end_of_file_whitespace_only.jsonnet",
+    "error": "unexpected_end_of_file_whitespace_only.jsonnet:4:1 Unexpected end of file"
+  },
+  {
+    "source": "expected_dot_or_bracket_after_super.jsonnet",
+    "error": "expected_dot_or_bracket_after_super.jsonnet:1:6-11 Expected . or [ after super"
+  },
+  {
+    "source": "expected_paren_after_function.jsonnet",
+    "error": "expected_paren_after_function.jsonnet:1:10-11 Expected ( but got (IDENTIFIER, \"x\")"
+  },
+  {
+    "source": "import_block_string.jsonnet",
+    "error": "import_block_string.jsonnet:(1:8)-(3:4) Block string literals not allowed in imports"
+  },
+  {
+    "source": "computed_import.jsonnet",
+    "error": "computed_import.jsonnet:1:8-19 Computed imports are not allowed"
+  },
+  {
+    "source": "importstr_computed.jsonnet",
+    "error": "importstr_computed.jsonnet:1:11-22 Computed imports are not allowed"
+  },
+  {
+    "source": "importbin_block_string.jsonnet",
+    "error": "importbin_block_string.jsonnet:(1:11)-(3:4) Block string literals not allowed in imports"
+  },
+  {
+    "source": "not_a_unary_operator.jsonnet",
+    "error": "not_a_unary_operator.jsonnet:1:1-2 Not a unary operator: *"
+  },
+  {
+    "source": "not_a_binary_operator.jsonnet",
+    "error": "not_a_binary_operator.jsonnet:1:3-4 Not a binary operator: !"
+  },
+  {
+    "source": "invalid_slice_too_many_colons.jsonnet",
+    "error": "invalid_slice_too_many_colons.jsonnet:1:8-9 Invalid slice: too many colons"
+  },
+  {
+    "source": "index_requires_an_expression.jsonnet",
+    "error": "index_requires_an_expression.jsonnet:1:3-4 ast.Index requires an expression"
+  },
+  {
+    "source": "did_not_expect_trailing_token.jsonnet",
+    "error": "did_not_expect_trailing_token.jsonnet:1:3-4 Did not expect: (NUMBER, \"2\")"
+  }
+]

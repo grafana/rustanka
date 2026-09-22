@@ -29,7 +29,7 @@
 //! Because the unparser renders text *from* this model rather than copying the
 //! source, `unparse(parse(x)) == x` is false in go-jsonnet even with every pass
 //! disabled — a tab, a CRLF, trailing whitespace or a single space before a
-//! `//` comment all come back different. `docs/rtk-fmt-plan.md` asked for that
+//! `//` comment all come back different. the fmt port plan asked for that
 //! round trip as the Phase 2a gate; the generated corpus replaces it.
 
 /// `ast.FodderKind`.
