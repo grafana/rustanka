@@ -76,7 +76,37 @@
 # What measures the passes is testdata/pass-snippets.json through
 # `make update-fmt-pass-oracle`; see docs/rtk-fmt-plan.md, Phase 2b.
 #
-# A drop below 120 means a pass or the round trip broke a file that used to
+# Phase 2c took it to 124, all four of them `EnforceStringStyle`:
+#
+#   * tests/suite/rounding.jsonnet — nine double-quoted format strings
+#   * tests/suite/sjsonnet_issue_127.jsonnet — three more
+#   * tests/golden/issue195.jsonnet — `{ "false": "x" in super }`, which is
+#     also the case that says the keyword rule survives: PrettyFieldNames
+#     leaves the field name quoted and this pass only changes which quote
+#   * tests/suite/sjsonnet_issue_1029.jsonnet — `error "3"` -> `error '3'`
+#
+# **That fourth one was predicted as a no-op and was not.** Its diff against
+# its golden is one line, and what stands out in it is `x*x` -> `x * x` and
+# `[1,2,` -> `[1, 2,` — horizontal whitespace, which the round trip fixes for
+# free. The `error "3"` at the end of the same line was read as part of the
+# same whitespace story, so the file was filed under "already passing" and the
+# prediction came out at 123. It is the warning below happening again, at the
+# level of a single line rather than a whole file, and the fix is the same:
+# **ask `pass-oracle.json` which files a pass changes**, rather than reading an
+# input-against-golden diff. Its answer here is six files, and it is exact.
+#
+# The other two of those six stay red, and they are the reason the warning is
+# worth keeping: tests/golden/builtin_strings_string.jsonnet and
+# tests/suite/std_param_names.jsonnet are both tab-indented, so they also need
+# FixIndentation and a real quote fix stays invisible in the byte comparison.
+# Six changed cells, four files flipped, two masked.
+#
+# `EnforceCommentStyle` contributes **nothing** here, and cannot: the oracle
+# puts it at zero changed cells of 138, because a `#` comment in a
+# `tk fmt`-clean file has already been rewritten to `//`. It is graded only by
+# the snippets, which is what Phase 2c added 57 more of them for.
+#
+# A drop below 124 means a pass or the round trip broke a file that used to
 # pass, and the test prints which. Expect this to reach 138 when the passes are
 # finished.
-matching = 120
+matching = 124
