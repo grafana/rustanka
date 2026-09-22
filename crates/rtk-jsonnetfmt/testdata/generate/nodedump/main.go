@@ -7,7 +7,7 @@
 //
 // # Why this exists, and why before the parser
 //
-// docs/rtk-fmt-plan.md argues the order, and the argument is empirical. The
+// the fmt port plan argues the order, and the argument is empirical. The
 // lexer went 138/138 on a first compile precisely because a token-level dump
 // existed before a line of it was written; and of 16 lexer expectations derived
 // by reading Go's source, 2 were wrong — both about fodder the model *composes*

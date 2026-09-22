@@ -260,6 +260,11 @@
     "why": "Stays quoted. tests/golden/issue195.jsonnet in the corpus is this case."
   },
   {
+    "name": "pretty_names/field_escape_sequence",
+    "why": "The field twin of index_escape_sequence, and the one shape in this pass with no snippet at all: the ObjectFieldStr -> ObjectFieldID step asks IsValidIdentifier of the *stored* value too, so a fully escaped field name keeps its quotes here and EnforceStringStyle unescapes it at step 11. Graded end to end by tests/idempotence.rs.",
+    "source": "{ 'fo\\u006f': 1 }"
+  },
+  {
     "name": "pretty_names/field_hidden",
     "source": "{ ['foo']:: 1 }",
     "why": "Visibility has to survive the kind change."
@@ -278,6 +283,16 @@
     "name": "pretty_names/nested",
     "source": "{ ['a']: { ['b']: c['d'] } }",
     "why": "The traversal has to keep working after the rewrite, since upstream calls the base traversal on the changed node."
+  },
+  {
+    "name": "pretty_names/field_computed_in_object_comp",
+    "source": "{ ['foo']: 1 for x in [1] }",
+    "why": "The pass has no ObjectComp guard, so it promotes this to `foo:` — and a comprehension may only have [e] fields, so the output no longer parses. Phase 4's go-jsonnet testdata set found it end to end on two files; this is the cell that says which pass does it, rather than inferring it from a diff. Do not 'fix' it: `tk fmt` destroys the file and matching that is the contract."
+  },
+  {
+    "name": "pretty_names/field_computed_in_object_comp_not_an_identifier",
+    "source": "{ ['a b']: 1 for x in [1] }",
+    "why": "Written as the negative that would bound the bug above, and it is not one — it widens it. `['a b']` is not an identifier so the name keeps its quotes, but the pass still drops the brackets, and `{ 'a b': 1 for x in [1] }` is refused exactly as the identifier case is. So the damage is not confined to identifier-shaped names: **any string-literal field name in an object comprehension** is destroyed. What survives is a genuinely computed name, `{ [k]: 1 for k in ... }`, which five other snippets in this file already pass the idempotence sweep with — which is why there is no sixth snippet here restating it."
   },
   {
     "name": "string_style/double_to_single",

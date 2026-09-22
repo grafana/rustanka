@@ -607,5 +607,65 @@
         "kind": "end of file"
       }
     ]
+  },
+  {
+    "source": "text_block_unexpected_eof.jsonnet",
+    "error": "text_block_unexpected_eof.jsonnet:1:1 Unexpected EOF"
+  },
+  {
+    "source": "text_block_not_terminated.jsonnet",
+    "error": "text_block_not_terminated.jsonnet:1:1 Text block not terminated with |||"
+  },
+  {
+    "source": "text_block_only_whitespace_lines.jsonnet",
+    "tokens": [
+      {
+        "kind": "\"{\"",
+        "data": "{"
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "a",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "kind": "OPERATOR",
+        "data": ":"
+      },
+      {
+        "kind": "STRING_BLOCK",
+        "data": "\n\n",
+        "stringBlockIndent": "    ",
+        "stringBlockTermIndent": "  "
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "\"}\"",
+        "data": "}",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          }
+        ]
+      },
+      {
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_only_newlines.jsonnet",
+    "error": "text_block_only_newlines.jsonnet:2:6 Text block not terminated with |||"
   }
 ]
