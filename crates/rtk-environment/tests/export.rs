@@ -676,8 +676,8 @@ fn prefers_the_environment_whose_name_matches_in_full() {
 		"environments/several/main.jsonnet",
 		&format!(
 			"{{ first: {}, second: {} }}",
-			declare("base", "exact"),
-			declare("base-extended", "substring")
+			declare("base-extended", "substring"),
+			declare("base", "exact")
 		),
 	);
 
@@ -695,6 +695,51 @@ fn prefers_the_environment_whose_name_matches_in_full() {
 	assert_eq!(
 		project.exported().keys().collect::<Vec<_>>(),
 		["manifest.json", "v1.ConfigMap-exact.yaml"]
+	);
+}
+
+#[test]
+fn exports_inline_environments_with_overlapping_names() {
+	let project = Project::new();
+	project.write(
+		"environments/several/main.jsonnet",
+		r"local environment(name) = {
+			apiVersion: 'tanka.dev/v1alpha1',
+			kind: 'Environment',
+			metadata: { name: name },
+			spec: { namespace: name },
+			data: { config: {
+				apiVersion: 'v1',
+				kind: 'ConfigMap',
+				metadata: { name: 'settings' },
+			} },
+		};
+		{
+			first: environment('base-extended'),
+			second: environment('base'),
+		}",
+	);
+
+	let exported = engine()
+		.export_bulk(
+			vec![project.path().join("environments")],
+			&Options {
+				recursive: true,
+				format: "{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}".to_owned(),
+				merge_strategy: MergeStrategy::FailOnConflicts,
+				..options(&project)
+			},
+		)
+		.expect("each discovered environment exports its own namespace");
+
+	assert_eq!(exported.successful(), 2);
+	assert_eq!(
+		project.exported().keys().collect::<Vec<_>>(),
+		[
+			"base-extended/ConfigMap-settings.yaml",
+			"base/ConfigMap-settings.yaml",
+			"manifest.json",
+		]
 	);
 }
 

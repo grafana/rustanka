@@ -30,9 +30,8 @@ const INLINE_ENVIRONMENT_EXT_CODE: &str = r#"error "Using tk.env and std.extVar(
 
 /// Selects a single inline environment by name, discarding the rest.
 ///
-/// Mirrors Tanka's `SingleEnvEvalScript` (`pkg/tanka/evaluators.go`): the
-/// environment stays where it was declared, and everything else collapses, so a
-/// file declaring several environments can be exported one at a time.
+/// Discovery has already resolved user-supplied filters to a full name. Reload
+/// must match it exactly so a longer name containing it cannot win instead.
 const SINGLE_ENVIRONMENT_EVAL_SCRIPT: &str = r"
 local singleEnv(object) =
   if std.isObject(object)
@@ -41,7 +40,7 @@ local singleEnv(object) =
        && std.objectHas(object, 'kind')
     then
       if object.kind == 'Environment'
-         && std.member(object.metadata.name, '%s')
+         && object.metadata.name == '%s'
       then object
       else {}
     else
