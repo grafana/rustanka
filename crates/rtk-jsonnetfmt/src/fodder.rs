@@ -200,6 +200,23 @@ impl Fodder {
 		&self.elements
 	}
 
+	/// The elements, owned, consuming the fodder.
+	///
+	/// The inverse of [`Fodder::from_elements`], and the counterpart to Go's
+	/// `for _, elem := range fodder`, which copies each element because
+	/// `ast.FodderElement` is a value type. Rust's elements own a
+	/// `Vec<String>` of comment lines, so iterating by reference and cloning
+	/// would be the same work with an extra allocation per comment; a pass
+	/// that is going to redistribute every element should take them instead.
+	///
+	/// `SortImports`' own `split_after_first_line` — declared on this type in
+	/// `src/sort_imports.rs`, because it is `sort_imports.go`'s function — is
+	/// the only caller, and it needs exactly this: every element ends up in
+	/// one of two new fodders.
+	pub fn into_elements(self) -> Vec<FodderElement> {
+		self.elements
+	}
+
 	pub fn is_empty(&self) -> bool {
 		self.elements.is_empty()
 	}
