@@ -228,16 +228,52 @@ impl Fodder {
 		self.elements.iter_mut()
 	}
 
-	/// Drop leading elements while `keep` says to.
+	/// Drop leading elements while `should_drop` says to, then stop.
 	///
-	/// `removeInitialNewlines` is the only caller, and it drops leading
-	/// `LineEnd`s.
-	pub fn retain_from(&mut self, mut keep: impl FnMut(&FodderElement) -> bool) {
+	/// [`Node::remove_initial_newlines`] is the only caller, and it drops the
+	/// leading `LineEnd`s at the top of a file. The run stops at the first
+	/// element the predicate refuses, so the *rest* of the fodder is untouched
+	/// however many later elements would also match.
+	///
+	/// [`Node::remove_initial_newlines`]: crate::ast::Node::remove_initial_newlines
+	pub fn drop_leading_while(&mut self, mut should_drop: impl FnMut(&FodderElement) -> bool) {
 		let mut drop_count = 0;
-		while drop_count < self.elements.len() && keep(&self.elements[drop_count]) {
+		while drop_count < self.elements.len() && should_drop(&self.elements[drop_count]) {
 			drop_count += 1;
 		}
 		self.elements.drain(..drop_count);
+	}
+
+	/// `formatter.removeExtraTrailingNewlines`: step 14 of `FormatNode`.
+	///
+	/// A step of the pipeline rather than a pass — Go has it as an unexported
+	/// four-line function in `jsonnetfmt.go`, which the staged pass dumper
+	/// cannot reach, so it lives on the type it mutates. It zeroes the blanks
+	/// on the **last** element of the final fodder and nothing else.
+	///
+	/// # It can only ever fire on a file that ends in a comment
+	///
+	/// Which is not what the name suggests, and is worth knowing before
+	/// reasoning about the end of a file. The lexer's main loop measures a run
+	/// of whitespace and *then* tests for end of input, breaking before it
+	/// adds the line end — so trailing newlines never become fodder at all
+	/// and there is nothing here to zero. The only way blank lines survive to
+	/// the end of a file is on a comment's own element, whose blanks
+	/// `lex_until_newline` measures while the run still has a token after it
+	/// in prospect. So `1` and four newlines has empty final fodder, while
+	/// `1`, `// c` and four newlines has a `LineEnd` and then a `Paragraph`
+	/// carrying `blanks = 3` — and that paragraph is what this zeroes.
+	///
+	/// An interstitial's blanks are already 0 by the model's own invariant, so
+	/// a file ending in one is untouched either way.
+	///
+	/// Go takes the slice by value and assigns through it, so the mutation
+	/// reaches the caller's backing array. That is why this is a mutation here
+	/// and not a return value.
+	pub fn remove_extra_trailing_newlines(&mut self) {
+		if let Some(last) = self.last_mut() {
+			last.blanks = 0;
+		}
 	}
 
 	/// `ast.FodderHasCleanEndline`: non-empty and not ending in an
@@ -502,17 +538,45 @@ mod tests {
 	}
 
 	#[test]
-	fn retain_from_drops_only_the_leading_run() {
+	fn drop_leading_while_drops_only_the_leading_run() {
 		let mut fodder = Fodder::from_elements(vec![
 			FodderElement::line_end(0, 0),
 			interstitial("/* x */"),
 			FodderElement::line_end(0, 0),
 		]);
 
-		fodder.retain_from(|element| element.kind == FodderKind::LineEnd);
+		fodder.drop_leading_while(|element| element.kind == FodderKind::LineEnd);
 
 		assert_eq!(fodder.len(), 2, "the trailing line end is not touched");
 		assert_eq!(fodder.first().expect("two").kind, FodderKind::Interstitial);
+	}
+
+	#[test]
+	fn remove_extra_trailing_newlines_only_touches_the_last_element() {
+		let mut fodder = Fodder::from_elements(vec![
+			FodderElement::line_end(3, 0),
+			paragraph(&["// c"], 4, 0),
+		]);
+
+		fodder.remove_extra_trailing_newlines();
+
+		let blanks: Vec<usize> = fodder.iter().map(|element| element.blanks).collect();
+		assert_eq!(
+			blanks,
+			vec![3, 0],
+			"only the last element is zeroed, and a paragraph is zeroed like a line end"
+		);
+	}
+
+	#[test]
+	fn remove_extra_trailing_newlines_on_empty_fodder_does_nothing() {
+		// Go's guard is `len(finalFodder) > 0`, and empty final fodder is the
+		// common case rather than an edge one: the lexer discards a run of
+		// newlines at end of file outright, so every file that does not end
+		// in a comment reaches here with nothing at all.
+		let mut fodder = Fodder::new();
+		fodder.remove_extra_trailing_newlines();
+		assert!(fodder.is_empty());
 	}
 
 	#[test]

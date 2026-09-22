@@ -59,12 +59,13 @@ use astdump::{DumpEntry, Entry, Snippet, compare, dump, read_oracle, repo_root, 
 use rtk_jsonnetfmt::{
 	Options,
 	ast::Node,
+	fix_indentation::FixIndentation,
 	fodder::Fodder,
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
 	passes::{
-		EnforceCommentStyle, EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon,
-		PrettyFieldNames,
+		EnforceCommentStyle, EnforceMaxBlankLines, EnforceStringStyle, FixNewlines,
+		FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames,
 	},
 };
 use serde::Deserialize;
@@ -103,22 +104,31 @@ struct PassFileDump {
 /// against the oracle's own list, so a pass that lands without being wired in
 /// here fails rather than being silently ungraded.
 const IMPLEMENTED: &[&str] = &[
+	"EnforceMaxBlankLines",
+	"FixNewlines",
 	"FixTrailingCommas",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
 	"EnforceStringStyle",
 	"EnforceCommentStyle",
+	"FixIndentation",
 ];
 
 /// Run one named pass over a whole file, or report that rtk has not got it.
 ///
-/// The two passes that read an option get it from `Options::default`, because
+/// The three passes that read an option get it from `Options::default`, because
 /// `_staged/passdump.go` constructs them with `iformatter.DefaultOptions()`.
 /// A pass is run unconditionally here, as it is there: `FormatNode`'s gates
 /// are [`rtk_jsonnetfmt::format`]'s business, and the corpus grades those.
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 	let options = Options::default();
 	match name {
+		"EnforceMaxBlankLines" => visit_file(
+			&mut EnforceMaxBlankLines::new(options.max_blank_lines),
+			node,
+			final_fodder,
+		),
+		"FixNewlines" => visit_file(&mut FixNewlines, node, final_fodder),
 		"FixTrailingCommas" => visit_file(&mut FixTrailingCommas, node, final_fodder),
 		"NoRedundantSliceColon" => visit_file(&mut NoRedundantSliceColon, node, final_fodder),
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
@@ -132,6 +142,9 @@ fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 			node,
 			final_fodder,
 		),
+		// Not an `AstPass`: `_staged/passdump.go` calls `VisitFile` on it
+		// directly, exactly as `FormatNode` does, so this side must too.
+		"FixIndentation" => FixIndentation::new(&options).visit_file(node, final_fodder),
 		_ => return false,
 	}
 	true
