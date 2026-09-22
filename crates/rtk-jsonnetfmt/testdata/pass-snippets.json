@@ -563,5 +563,710 @@
     "name": "comment_style/hashbang_after_slash_comment",
     "source": "// a\n#!b\n1",
     "why": "A comment already in the target style is not rewritten but does set the flag, so the #! after it is converted. The pair with hashbang_after_interstitial: what matters is the element's kind, not whether anything changed."
+  },
+  {
+    "name": "max_blank_lines/three_blanks_between_fields",
+    "source": "{\n  a: 1,\n\n\n\n  b: 2,\n}",
+    "why": "Four newlines are one LineEnd with blanks=3, clamped to 2. The base case."
+  },
+  {
+    "name": "max_blank_lines/exactly_two_blanks",
+    "source": "{\n  a: 1,\n\n\n  b: 2,\n}",
+    "why": "blanks == MaxBlankLines, so the strict `>` leaves it. A graded no-op."
+  },
+  {
+    "name": "max_blank_lines/one_blank",
+    "source": "{\n  a: 1,\n\n  b: 2,\n}",
+    "why": "Under the limit. No-op."
+  },
+  {
+    "name": "max_blank_lines/ten_blanks",
+    "source": "{\n  a: 1,\n\n\n\n\n\n\n\n\n\n\n  b: 2,\n}",
+    "why": "A long run collapses to exactly 2, not to 2 per newline: blanks is a count on one element, not a run of elements."
+  },
+  {
+    "name": "max_blank_lines/leading_blanks",
+    "source": "\n\n\n\n1",
+    "why": "The file's opening fodder. In the pipeline removeInitialNewlines (step 2) deletes this before the pass (step 3) can see it; the oracle runs each pass on a fresh parse, so here it is clamped instead. That difference is the whole reason those two steps' order is load-bearing."
+  },
+  {
+    "name": "max_blank_lines/trailing_blanks_in_final_fodder",
+    "source": "1\n\n\n\n",
+    "why": "base::file visits the final fodder, so it is clamped to 2 — and then removeExtraTrailingNewlines (step 14) zeroes it anyway. Both steps touch this one element, in that order."
+  },
+  {
+    "name": "max_blank_lines/blanks_after_a_paragraph_comment",
+    "source": "// c\n\n\n\n1",
+    "why": "A Paragraph carries the blanks that follow its comment, and the kind guard excludes only interstitials, so a paragraph is clamped like a line end."
+  },
+  {
+    "name": "max_blank_lines/blanks_before_a_paragraph_comment",
+    "source": "{\n  a: 1,\n\n\n\n  // c\n  b: 2,\n}",
+    "why": "Here the blanks are on the LineEnd ahead of the paragraph rather than on it."
+  },
+  {
+    "name": "max_blank_lines/interstitial_between_blank_runs",
+    "source": "[\n\n\n\n  /* c */\n\n\n\n  1,\n]",
+    "why": "The interstitial is skipped by kind and could not carry blanks anyway — the model forbids them. The line ends either side of it are clamped."
+  },
+  {
+    "name": "max_blank_lines/in_super_fodder_is_out_of_reach",
+    "source": "{ a: 'b'\n\n\n\n  in super }",
+    "why": "InSuper's in_fodder is one of the four slots pass::base never visits, so tk fmt leaves this run of blanks exactly as written. FixIndentation does reach it, because it is not an ASTPass and walks the tree itself."
+  },
+  {
+    "name": "max_blank_lines/index_id_fodder_is_out_of_reach",
+    "source": "a.\n\n\n\n  b",
+    "why": "Index's right_bracket_fodder, doubling as the fodder before an identifier: the second of the two unvisited slots that can hold blanks."
+  },
+  {
+    "name": "max_blank_lines/super_index_id_fodder_is_reached",
+    "source": "{ a: super.\n\n\n\n  b }",
+    "why": "The contrast that makes the Index case a hole rather than a rule: base::super_index visits id_fodder unconditionally, so this one is clamped."
+  },
+  {
+    "name": "max_blank_lines/parameter_eq_fodder_is_reached_with_a_default",
+    "source": "function(x\n\n\n\n  = 1) x",
+    "why": "eq_fodder is visited only where there is a default — and without one there is no `=` for fodder to precede, which is why that unvisited slot is unobservable here."
+  },
+  {
+    "name": "max_blank_lines/tail_strict_fodder_is_reached",
+    "source": "f(1)\n\n\n\ntailstrict",
+    "why": "Same shape: tail_strict_fodder is skipped unless `tailstrict` is present, and without it the slot is empty. So only two of the four holes matter to this pass."
+  },
+  {
+    "name": "max_blank_lines/blanks_in_a_local_bind",
+    "source": "local x =\n\n\n\n  1;\nx",
+    "why": "A bind's eq_fodder, reached through base::local."
+  },
+  {
+    "name": "max_blank_lines/blanks_in_call_arguments",
+    "source": "f(\n\n\n\n  1,\n\n\n\n  2\n)",
+    "why": "An argument's opening fodder and the fodder before the closing paren."
+  },
+  {
+    "name": "fix_newlines/array_expand_from_an_element",
+    "source": "[1,\n  2, 3]",
+    "why": "One element on a new line expands them all, and the close bracket too."
+  },
+  {
+    "name": "fix_newlines/array_expand_from_the_close_bracket",
+    "source": "[1, 2, 3\n]",
+    "why": "CloseFodder alone is enough to expand every element."
+  },
+  {
+    "name": "fix_newlines/array_stays_unexpanded",
+    "source": "[1, 2, 3]",
+    "why": "Nothing designated holds a newline, so nothing is added. No-op."
+  },
+  {
+    "name": "fix_newlines/array_shallow_over_a_nested_object",
+    "source": "[{\n  a: 'b',\n  c: 'd',\n}]",
+    "why": "Upstream's own doc-comment example: the outer array stays unexpanded because the newlines are inside the braces, not between `[` and `{`."
+  },
+  {
+    "name": "fix_newlines/array_empty_with_a_newline",
+    "source": "[\n]",
+    "why": "No elements, so only CloseFodder is consulted — and it already has a clean newline, so this is a no-op."
+  },
+  {
+    "name": "fix_newlines/array_element_after_an_interstitial",
+    "source": "[1, /* c */ 2\n]",
+    "why": "FodderEnsureCleanNewline appends to fodder ending in an interstitial rather than replacing it, so the comment keeps its place and the element moves below it."
+  },
+  {
+    "name": "fix_newlines/array_interstitials_only_do_not_count",
+    "source": "[/* a */ 1, /* b */ 2]",
+    "why": "FodderCountNewlines scores an interstitial 0, so a line full of them leaves the array unexpanded. No-op."
+  },
+  {
+    "name": "fix_newlines/array_paragraph_counts",
+    "source": "[1,  // c\n  2, 3]",
+    "why": "A trailing `//` comment is a Paragraph, whose count is comment lines plus blanks and so is at least 1. The array expands."
+  },
+  {
+    "name": "fix_newlines/object_expand_from_a_field",
+    "source": "{ a: 1,\n  b: 2 }",
+    "why": "Fodder1 of a non-first field carries the newline."
+  },
+  {
+    "name": "fix_newlines/object_expand_from_the_close_brace",
+    "source": "{ a: 1, b: 2\n}",
+    "why": "CloseFodder alone expands every field."
+  },
+  {
+    "name": "fix_newlines/object_stays_unexpanded",
+    "source": "{ a: 1, b: 2 }",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/object_field_str_reads_the_expression_fodder",
+    "source": "{ 'a': 1,\n  'b': 2 }",
+    "why": "objectFieldOpenFodder switches on the kind: an ObjectFieldStr has no Fodder1, so it reads openFodder(Expr1) instead. Get that wrong and an object of quoted fields never expands."
+  },
+  {
+    "name": "fix_newlines/object_field_str_mixed_with_an_id",
+    "source": "{ a: 1, 'b': 2\n}",
+    "why": "One field of each kind, so both branches of objectFieldOpenFodder run over the same node."
+  },
+  {
+    "name": "fix_newlines/object_local_field",
+    "source": "{ local x = 1,\n  a: x }",
+    "why": "An ObjectLocal takes the Fodder1 branch."
+  },
+  {
+    "name": "fix_newlines/object_assert_field",
+    "source": "{ assert true,\n  a: 1 }",
+    "why": "So does an ObjectAssert."
+  },
+  {
+    "name": "fix_newlines/local_expand_from_the_first_bind",
+    "source": "local\n  x = 1, y = 2;\nx",
+    "why": "shouldExpand is computed over every bind including the first, but the rewrite skips i == 0 — so the first bind's newline expands the others while the first is left exactly as written."
+  },
+  {
+    "name": "fix_newlines/local_expand_from_a_later_bind",
+    "source": "local x = 1,\n  y = 2, z = 3;\nx",
+    "why": "y's newline expands z; x is skipped by the i > 0 guard even though it has no newline of its own."
+  },
+  {
+    "name": "fix_newlines/local_single_bind_is_a_no_op",
+    "source": "local\n  x = 1;\nx",
+    "why": "shouldExpand is true and the loop body never runs, because the only bind is i == 0. A no-op, and not the same kind of no-op as having nothing to expand."
+  },
+  {
+    "name": "fix_newlines/local_stays_unexpanded",
+    "source": "local x = 1, y = 2; x",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/parens_expand_from_the_inside",
+    "source": "(\n  1)",
+    "why": "The inner expression's newline pulls the close paren onto its own line."
+  },
+  {
+    "name": "fix_newlines/parens_expand_from_the_close",
+    "source": "(1\n)",
+    "why": "And the reverse."
+  },
+  {
+    "name": "fix_newlines/parens_flat",
+    "source": "(1)",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/params_near_parens_from_the_first",
+    "source": "function(\n  a, b) 1",
+    "why": "A newline before the first parameter sets shouldExpandNearParens only, so the close paren moves and `b` does not."
+  },
+  {
+    "name": "fix_newlines/params_between_from_a_later_one",
+    "source": "function(a,\n  b, c) 1",
+    "why": "A newline before a non-first parameter sets shouldExpandBetween only, so b and c expand and neither `a` nor the close paren does."
+  },
+  {
+    "name": "fix_newlines/params_near_parens_from_the_close",
+    "source": "function(a, b\n) 1",
+    "why": "A newline before `)` is the other way into shouldExpandNearParens, and it expands the first parameter but not the second."
+  },
+  {
+    "name": "fix_newlines/params_both",
+    "source": "function(\n  a,\n  b, c) 1",
+    "why": "Both flags set at once: everything expands."
+  },
+  {
+    "name": "fix_newlines/params_none",
+    "source": "function(\n) 1",
+    "why": "With no parameters the loops do nothing and only `r` is consulted — and it already has a clean newline. No-op."
+  },
+  {
+    "name": "fix_newlines/params_default_arg",
+    "source": "function(a,\n  b = 2) 1",
+    "why": "NameFodder is what is measured, never EqFodder."
+  },
+  {
+    "name": "fix_newlines/args_positional_between",
+    "source": "f(1,\n  2, 3)",
+    "why": "Upstream's `f(1, 2,` / `3)` example: the newline is between arguments, so they line up and the close paren stays put."
+  },
+  {
+    "name": "fix_newlines/args_positional_near_parens",
+    "source": "f(\n  1, 2, 3)",
+    "why": "Upstream's `foo(` / `1, 2, 3)` example: the close paren moves instead."
+  },
+  {
+    "name": "fix_newlines/args_named_between",
+    "source": "f(a=1,\n  b=2, c=3)",
+    "why": "The named loop reads NameFodder, and `first` is shared with the positional loop above it."
+  },
+  {
+    "name": "fix_newlines/args_named_only_first",
+    "source": "f(\n  a=1, b=2)",
+    "why": "With no positional arguments the first *named* one is what `first` protects."
+  },
+  {
+    "name": "fix_newlines/args_mixed_newline_before_a_named",
+    "source": "f(1,\n  a=2, b=3)",
+    "why": "`first` is consumed by the positional argument, so the named `a` counts as non-first and sets shouldExpandBetween. The positional stays."
+  },
+  {
+    "name": "fix_newlines/args_mixed_newline_before_the_positional",
+    "source": "f(\n  1, a=2)",
+    "why": "The mirror: the positional is first, so this is nearParens, and the named argument is not expanded."
+  },
+  {
+    "name": "fix_newlines/args_none",
+    "source": "f(\n)",
+    "why": "No arguments, so only `r` is consulted. No-op."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_the_for",
+    "source": "[x\n  for x in [1]]",
+    "why": "ForFodder's newline expands the body, every spec and the close bracket."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_the_body",
+    "source": "[\n  x for x in [1]]",
+    "why": "openFodder(Body) is the other trigger."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_an_if",
+    "source": "[x for x in [1]\n  if x]",
+    "why": "shouldExpandSpec also reads each condition's IfFodder."
+  },
+  {
+    "name": "fix_newlines/array_comp_nested_for_expands_both",
+    "source": "[x for x in [1]\n  for y in [2]]",
+    "why": "The leftmost `for` is the outermost, so the newline here is on the inner spec; shouldExpandSpec recurses through Outer and ensureSpecExpanded then expands both."
+  },
+  {
+    "name": "fix_newlines/array_comp_flat",
+    "source": "[x for x in [1]]",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/object_comp_expand",
+    "source": "{ [x]: x\n  for x in [1] }",
+    "why": "The object-comprehension path: fields, then the spec, then the brace."
+  },
+  {
+    "name": "fix_newlines/object_comp_flat",
+    "source": "{ [x]: x for x in [1] }",
+    "why": "No-op."
+  },
+  {
+    "name": "indentation/already_correct",
+    "source": "{\n  a: 1,\n}",
+    "why": "The case that matters most for a formatter that writes in place: a tk-fmt-clean file has to come back untouched. No-op."
+  },
+  {
+    "name": "indentation/tab_indented",
+    "source": "{\n\ta: 1,\n}",
+    "why": "The lexer counts a tab as 8, so this arrives as indent=8 and has to become 2. Indentation is the one thing the parse/unparse round trip does not regenerate for free."
+  },
+  {
+    "name": "indentation/over_indented",
+    "source": "{\n      a: 1,\n}",
+    "why": "Six spaces down to two."
+  },
+  {
+    "name": "indentation/under_indented",
+    "source": "{\na: 1,\n}",
+    "why": "Zero up to two."
+  },
+  {
+    "name": "indentation/nested_objects",
+    "source": "{\n a: {\n   b: {\n  c: 1,\n     },\n  },\n}",
+    "why": "Three levels, every one of them wrong, so each `base + Indent` step is observable separately."
+  },
+  {
+    "name": "indentation/array_lines_up_after_the_bracket",
+    "source": "[1,\n2]",
+    "why": "The first element is on the bracket's line, so newIndent lines up at the column after `[` rather than resetting to base + Indent."
+  },
+  {
+    "name": "indentation/array_resets_when_the_first_element_is_on_a_new_line",
+    "source": "[\n1,\n2]",
+    "why": "firstFodder starts with a LineEnd, so newIndent takes the reset branch and nothing lines up."
+  },
+  {
+    "name": "indentation/array_strong_indent",
+    "source": "[1,\n2,\n3]",
+    "why": "A later element preceded by a newline turns on strongIndent, so newIndentStrong makes the line-up column the new *base* as well — which changes what sub-expressions inside the elements indent from."
+  },
+  {
+    "name": "indentation/array_strong_indent_nested",
+    "source": "[{\n  a: 1,\n},\n{\n  b: 2,\n}]",
+    "why": "strongIndent with sub-objects, which is where base != lineUp shows."
+  },
+  {
+    "name": "indentation/array_close_bracket_takes_the_base",
+    "source": "[\n1,\n2\n]",
+    "why": "fillLast gives the closing bracket's own element currIndent.base while every element before it gets newIndent.lineUp. Two answers in one fodder."
+  },
+  {
+    "name": "indentation/array_close_bracket_with_two_comments",
+    "source": "[\n  1,\n  // c\n\n  // d\n]",
+    "why": "Two paragraphs in CloseFodder, so setIndents's all-but-last split is observable: the first takes newIndent.lineUp and only the second takes currIndent.base."
+  },
+  {
+    "name": "indentation/apply_lines_up_under_the_paren",
+    "source": "foobar(1,\n2)",
+    "why": "The `indent` struct's own doc example: at the `2` the indent is base 0, lineUp 11."
+  },
+  {
+    "name": "indentation/apply_resets_after_a_newline",
+    "source": "foobar(\n1, 2)",
+    "why": "firstFodder is the first argument's and it has a newline, so the arguments reset to base + Indent instead of lining up under the paren."
+  },
+  {
+    "name": "indentation/apply_strong_indent",
+    "source": "foobar(1,\n2,\n3)",
+    "why": "A non-first argument with a newline selects newIndentStrong."
+  },
+  {
+    "name": "indentation/apply_named_args",
+    "source": "foobar(a=1,\nb=2)",
+    "why": "firstFodder is taken from Named only when Positional is empty — the Positional loop runs second and overwrites it."
+  },
+  {
+    "name": "indentation/apply_mixed_args_first_fodder",
+    "source": "foobar(1,\na=2)",
+    "why": "With both kinds present the positional wins firstFodder, and `first` is shared across the two strongIndent loops."
+  },
+  {
+    "name": "indentation/apply_close_paren_takes_the_base",
+    "source": "foobar(\n1,\n2\n)",
+    "why": "Apply's fillLast ends on currIndent.base where params ends on currIndent.lineUp. The pair is easy to transpose and this snippet is what tells them apart."
+  },
+  {
+    "name": "indentation/apply_tailstrict",
+    "source": "foobar(1)\n  tailstrict",
+    "why": "TailStrictFodder is filled at currIndent.base, and the column then advances by 10."
+  },
+  {
+    "name": "indentation/apply_chained",
+    "source": "foo(1)(\n2)(\n3)",
+    "why": "Apply is left-recursive, so separateToken is false and align carries the target's own fodder rather than the node's."
+  },
+  {
+    "name": "indentation/params_close_paren_takes_the_line_up",
+    "source": "function(\na,\nb\n) 1",
+    "why": "The other half of the Apply pairing above: params's fillLast ends on currIndent.lineUp."
+  },
+  {
+    "name": "indentation/params_default_arg_has_no_spacing",
+    "source": "function(a,\nb=2) 1",
+    "why": "EqFodder is filled with crowded and separateToken both false and the column advances by exactly 1 — `x=e`, no spaces around it."
+  },
+  {
+    "name": "indentation/params_empty",
+    "source": "function(\n) 1",
+    "why": "With no parameters firstInside is fodderR, so newIndent is computed from the very fodder fillLast is about to rewrite."
+  },
+  {
+    "name": "indentation/binary_align_op_on_the_first_line",
+    "source": "1 +\n2",
+    "why": "OpFodder has no newline but the right side does, so alignStrong is selected rather than align."
+  },
+  {
+    "name": "indentation/binary_align_op_on_the_second_line",
+    "source": "1\n+ 2",
+    "why": "The other half of the same condition: here OpFodder carries the newline."
+  },
+  {
+    "name": "indentation/binary_no_newlines",
+    "source": "1 + 2",
+    "why": "align, taking its reset branch, which returns `old` unchanged. No-op."
+  },
+  {
+    "name": "indentation/binary_chain_keeps_one_indent",
+    "source": "true &&\ntrue &&\ntrue",
+    "why": "Upstream deliberately does not compute a new indent for the right side, so a chain does not stair-step."
+  },
+  {
+    "name": "indentation/binary_deep_left",
+    "source": "1 *\n2 +\n3",
+    "why": "Left-recursive through two Binary nodes, so openFodder has to reach the leftmost leaf."
+  },
+  {
+    "name": "indentation/conditional_uses_the_base",
+    "source": "if a\nthen b\nelse c",
+    "why": "ThenFodder and ElseFodder are filled at currIndent.base, not lineUp, while each branch gets its own newIndent at column + 1."
+  },
+  {
+    "name": "indentation/conditional_nested",
+    "source": "if a then\nif b then\nc else\nd else\ne",
+    "why": "Nested conditionals, where base and lineUp diverge."
+  },
+  {
+    "name": "indentation/conditional_no_else",
+    "source": "if a then\nb",
+    "why": "BranchFalse absent, so ElseFodder is never filled."
+  },
+  {
+    "name": "indentation/local_binds_line_up",
+    "source": "local x = 1,\ny = 2;\nx",
+    "why": "newIndent comes from the *first* bind's VarFodder at column + 1, and every later bind is filled from it."
+  },
+  {
+    "name": "indentation/local_bind_body_indents_from_the_bind",
+    "source": "local x =\n1;\nx",
+    "why": "newIndent2 is computed with `newIndent` as its old rather than currIndent — the one place in this pass that chains instead of resetting from the node."
+  },
+  {
+    "name": "indentation/local_close_fodder_takes_the_base",
+    "source": "local x =\n1\n,\ny = 2;\nx",
+    "why": "fillLast on a bind's CloseFodder: newIndent2.lineUp for all but the last element and currIndent.base for the last."
+  },
+  {
+    "name": "indentation/local_function_bind",
+    "source": "local f(a,\nb) = a;\nf(1, 2)",
+    "why": "A bind's Fun goes through params with `newIndent`, not currIndent."
+  },
+  {
+    "name": "indentation/local_body_takes_the_outer_indent",
+    "source": "local x = 1;\n{\na: x,\n}",
+    "why": "The body is visited with currIndent, so a `local` at the top of a file does not indent what follows it."
+  },
+  {
+    "name": "indentation/object_field_id",
+    "source": "{\na: 1,\nb: 2,\n}",
+    "why": "The ObjectFieldID branch fills Fodder1 at the `newIndent` int, which is the object's newIndent.lineUp — not at currIndent.base."
+  },
+  {
+    "name": "indentation/object_local_field_uses_curr_indent",
+    "source": "{\nlocal x =\n1,\na: x,\n}",
+    "why": "ObjectLocal fills at currIndent.lineUp where ObjectFieldID fills at the `newIndent` int. They happen to agree here, which is exactly why a transposition would survive most inputs."
+  },
+  {
+    "name": "indentation/object_field_expr",
+    "source": "{\n[\n'a'\n]: 1,\n}",
+    "why": "The computed-name branch: Expr1 is visited with currIndent and Fodder2 is filled at newIndent."
+  },
+  {
+    "name": "indentation/object_field_str",
+    "source": "{\n'a': 1,\n'b': 2,\n}",
+    "why": "ObjectFieldStr has no Fodder1 at all; the name expression is visited with currIndent and carries the crowded flag instead."
+  },
+  {
+    "name": "indentation/object_assert_visits_the_condition_with_curr_indent",
+    "source": "{\nassert\ntrue\n: 'm',\n}",
+    "why": "The oddity: newIndent2 is computed from openFodder(Expr2) at column + 1, then Expr2 is visited with **currIndent** and only Expr3 gets newIndent2. The top-level Assert node visits its condition with the new indent, so the two disagree."
+  },
+  {
+    "name": "indentation/object_method",
+    "source": "{\nf(a,\nb): 1,\n}",
+    "why": "fieldParams runs params with currIndent, inside a field whose own fills use the newIndent int."
+  },
+  {
+    "name": "indentation/object_close_brace_takes_the_base",
+    "source": "{\na: 1,\nb: 2\n}",
+    "why": "fillLast on CloseFodder, with PadObjects true so the line-up column is one past the brace."
+  },
+  {
+    "name": "indentation/object_pad_objects_shifts_the_line_up",
+    "source": "{ a: 1,\nb: 2 }",
+    "why": "PadObjects is true under DefaultOptions, so the first field is crowded and newColumn is incremented before newIndent is taken."
+  },
+  {
+    "name": "indentation/object_empty_with_a_newline",
+    "source": "{\n}",
+    "why": "No fields, so firstFodder is CloseFodder and `fields` does nothing."
+  },
+  {
+    "name": "indentation/object_comp",
+    "source": "{\n[x]: x\nfor x in [1]\n}",
+    "why": "ObjectComp passes crowded=true to fillLast unconditionally, where Object passes len(Fields) > 0."
+  },
+  {
+    "name": "indentation/array_comp",
+    "source": "[\nx\nfor x in [1]\n]",
+    "why": "specs walks Outer first, so the fors come out in source order."
+  },
+  {
+    "name": "indentation/array_comp_nested_for",
+    "source": "[\nx\nfor x in [1]\nfor y in [2]\n]",
+    "why": "Two specs, and the recursion in specs is what puts them at one indent rather than stair-stepping."
+  },
+  {
+    "name": "indentation/comp_if_revisits_the_for_expression",
+    "source": "[x for x in [1,\n2] if x]",
+    "why": "UPSTREAM BUG, reproduced. The conditions loop in `specs` computes its indent from openFodder(spec.Expr) and then calls Visit(spec.Expr) — the `for` expression, not cond.Expr. So this array is indented twice, at two different columns, and the second answer wins."
+  },
+  {
+    "name": "indentation/comp_if_condition_is_never_visited",
+    "source": "[x for x in [1] if\n      true]",
+    "why": "The other half of the same bug: cond.Expr is never visited at all, so the six spaces before `true` survive untouched. Only IfFodder is filled."
+  },
+  {
+    "name": "indentation/parens_are_strong",
+    "source": "(1 +\n2)",
+    "why": "Parens is the only node that calls newIndentStrong unconditionally, so everything inside indents from the column after `(`."
+  },
+  {
+    "name": "indentation/parens_close_takes_the_base",
+    "source": "(\n1\n)",
+    "why": "fillLast again: newIndent.lineUp, then currIndent.base for the last element."
+  },
+  {
+    "name": "indentation/index_by_id",
+    "source": "a.\nb",
+    "why": "The Id branch takes newIndent *from* RightBracketFodder and then fills that same slot from it, so the order of those two lines matters."
+  },
+  {
+    "name": "indentation/index_by_expression",
+    "source": "a[\n'b'\n]",
+    "why": "The bracket branch, whose fillLast ends on currIndent.base."
+  },
+  {
+    "name": "indentation/super_index_by_id",
+    "source": "{ a: super.\nb }",
+    "why": "The same doubled slot under a different name — IDFodder here."
+  },
+  {
+    "name": "indentation/super_index_by_expression",
+    "source": "{ a: super[\n'b'\n] }",
+    "why": "And its bracket branch."
+  },
+  {
+    "name": "indentation/in_super_is_reached_here",
+    "source": "{ a: 'b'\n      in super }",
+    "why": "InFodder and SuperFodder are two of the four slots pass::base never visits — but FixIndentation is not an ASTPass, so it fills both. That asymmetry is why a comment there survives EnforceCommentStyle and is still re-indented."
+  },
+  {
+    "name": "indentation/slice_begin_and_end",
+    "source": "a[1:\n2]",
+    "why": "EndColonFodder supplies newIndent when EndIndex is present."
+  },
+  {
+    "name": "indentation/slice_step_without_an_end",
+    "source": "a[1::\n2]",
+    "why": "Step with no EndIndex: the EndColonFodder branch runs inside the Step branch instead, and newIndent is assigned there."
+  },
+  {
+    "name": "indentation/slice_bare_colon",
+    "source": "a[\n:\n]",
+    "why": "All three absent, which is the fourth and otherwise unreachable branch."
+  },
+  {
+    "name": "indentation/slice_all_three",
+    "source": "a[1:\n2:\n3]",
+    "why": "newIndent is reassigned as the branches run, so the step indents from the end index's answer."
+  },
+  {
+    "name": "indentation/slice_right_bracket_is_never_filled",
+    "source": "a[1:2\n      ]",
+    "why": "A hole: the Slice case fills LeftBracketFodder and each colon's fodder and never touches RightBracketFodder, so a newline before a slice's `]` keeps whatever indent it was lexed with. Every other bracketed node calls fillLast there."
+  },
+  {
+    "name": "indentation/unary",
+    "source": "-\n1",
+    "why": "newIndent from the operand's fodder at the column after the operator."
+  },
+  {
+    "name": "indentation/unary_of_dollar_is_crowded",
+    "source": "{ a: -\n$.b }",
+    "why": "leftRecursiveDeep(Expr) is a Dollar, so the operand is visited as crowded — the one place this pass asks what the leftmost leaf *is* rather than what fodder it holds."
+  },
+  {
+    "name": "indentation/unary_of_a_var_is_not_crowded",
+    "source": "{ a: -\nb }",
+    "why": "The contrast: not a Dollar, so crowded is false and the column model differs by one."
+  },
+  {
+    "name": "indentation/error_expression",
+    "source": "error\n'x'",
+    "why": "column += 5, then newIndent at column + 1 for the space after `error`."
+  },
+  {
+    "name": "indentation/assert_expression",
+    "source": "assert\ntrue\n: 'm';\n1",
+    "why": "The top-level Assert: Cond does get newIndent here, unlike the object assert above, and Rest is visited with currIndent."
+  },
+  {
+    "name": "indentation/assert_without_a_message",
+    "source": "assert\ntrue;\n1",
+    "why": "Message absent, so ColonFodder is never filled."
+  },
+  {
+    "name": "indentation/import",
+    "source": "import\n'x.libsonnet'",
+    "why": "column += 6, and the file is then visited as an ordinary node."
+  },
+  {
+    "name": "indentation/importstr",
+    "source": "importstr\n'x'",
+    "why": "column += 9, which importbin shares and import does not."
+  },
+  {
+    "name": "indentation/importbin",
+    "source": "importbin\n'x'",
+    "why": "The third keyword width."
+  },
+  {
+    "name": "indentation/function_body",
+    "source": "function(a)\na",
+    "why": "The body's newIndent is taken at column + 1, after params has advanced the column past the closing paren."
+  },
+  {
+    "name": "indentation/apply_brace",
+    "source": "{ a: 1 }\n{ b: 2 }",
+    "why": "ApplyBrace aligns on the left operand and visits the right as crowded."
+  },
+  {
+    "name": "indentation/block_string_indents_are_rewritten",
+    "source": "{\n  a: |||\n      x\n  |||,\n}",
+    "why": "StringBlock is the only case where this pass edits the AST rather than fodder: BlockIndent becomes base + Indent spaces and BlockTermIndent becomes base spaces, whatever the author wrote. It also *assigns* the column rather than adding to it."
+  },
+  {
+    "name": "indentation/block_string_at_the_top_level",
+    "source": "|||\n  x\n|||",
+    "why": "base is 0 here, so BlockTermIndent becomes the empty string."
+  },
+  {
+    "name": "indentation/block_string_nested_deeper",
+    "source": "{\n  a: {\n    b: |||\n        x\n    |||,\n  },\n}",
+    "why": "base is further along by this point, so the two indents come out larger."
+  },
+  {
+    "name": "indentation/string_column_counts_bytes",
+    "source": "['ééé',\n1]",
+    "why": "StringSingle advances the column by 2 + len(Value) in *bytes*, so three two-byte characters count six. The next element lines up from that."
+  },
+  {
+    "name": "indentation/verbatim_string_column_counts_runes",
+    "source": "[@'ééé',\n1]",
+    "why": "The verbatim branches loop over runes instead, adding 1 each — so the same three characters count three. Bytes there, runes here, in one match."
+  },
+  {
+    "name": "indentation/verbatim_string_doubles_quotes",
+    "source": "[@'a''b',\n1]",
+    "why": "A quote inside a verbatim string costs 2 columns, because the unparser will write it doubled."
+  },
+  {
+    "name": "indentation/interstitial_advances_the_column",
+    "source": "[/* a long comment */ 1,\n2]",
+    "why": "fillLast models the unparser's column bookkeeping: an interstitial adds its comment's byte length, plus one for the space when crowded."
+  },
+  {
+    "name": "indentation/interstitial_then_line_end",
+    "source": "[1, /* c */\n2]",
+    "why": "A LineEnd after an interstitial *assigns* the column from the indent, discarding everything the interstitial added."
+  },
+  {
+    "name": "indentation/final_fodder_is_zeroed",
+    "source": "1\n      // c\n",
+    "why": "VisitFile ends with setIndents(finalFodder, 0, 0), so a comment after the last token is flushed left however it was written."
+  },
+  {
+    "name": "indentation/literal_widths",
+    "source": "[true,\nfalse,\nnull,\n1.25,\n]",
+    "why": "The four fixed column widths — 4, 5, 4, and the number's original string."
+  },
+  {
+    "name": "indentation/deeply_mixed",
+    "source": "local f(x) = {\n  ['k' + x]: [\n  x,\n    {\n y: x,\n  },\n  ],\n};\nf(\n1,\n)",
+    "why": "One snippet through most of the branches at once, as an integration case rather than a unit one."
   }
 ]
