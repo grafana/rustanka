@@ -26,8 +26,9 @@ Three cases distinguish cold costs from reuse:
 
 Every timed command starts a fresh process. Filesystem caches may be warm, but
 the prepared-import cache starts empty. Output directories are cleared outside
-timing. With a base binary, the runner checks exported filenames and contents
-byte for byte before timing. Without one, it only checks command success.
+timing. The runner checks exported filenames and contents against Tanka byte for
+byte before timing, including `manifest.json`. Timings compare current rtk,
+Tanka, and the base binary when supplied.
 
 Run from the repository root with release binaries built before and after the
 cache change:

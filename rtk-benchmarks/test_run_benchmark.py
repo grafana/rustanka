@@ -176,6 +176,24 @@ class BaseOnlyTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in run.call_args_list],
                          [str(self.runner.rtk), "tk"])
 
+    def test_tanka_export_comparison_rejects_missing_or_different_files(self):
+        self.runner.config.skip_tk = False
+        self.runner.export_dir_tk = self.root / "tk"
+        self.runner.export_dir_tk.mkdir()
+        current = self.runner.export_dir_rtk / "resource.yaml"
+        reference = self.runner.export_dir_tk / "resource.yaml"
+        current.write_bytes(b"value: 1\n")
+        reference.write_bytes(current.read_bytes())
+        test = benchmark.Test("export", command="export {export_dir} .")
+        with patch.object(self.runner, "run_command", return_value=self.result()):
+            self.runner.validate_test(test)
+            reference.write_bytes(b"value: 2\n")
+            with self.assertRaises(SystemExit):
+                self.runner.validate_test(test)
+            reference.unlink()
+            with self.assertRaises(SystemExit):
+                self.runner.validate_test(test)
+
     def test_cli_enables_skip_tk(self):
         config = self.root / "bench.yaml"
         config.write_text("name: Test\nid: test\ndescription: test\nfixtures_dir: fixtures\ntests:\n  - name: sample\n")

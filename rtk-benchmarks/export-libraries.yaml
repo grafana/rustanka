@@ -1,7 +1,6 @@
 name: "Export (Shared Libraries)"
 id: "export-libraries"
 description: "Synthetic library-heavy exports: large shared source, small environment-specific output."
-skip_tk: true
 
 fixtures:
   static_envs: 64

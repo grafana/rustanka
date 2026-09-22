@@ -129,7 +129,7 @@ jobs:
         run: chmod +x bin/*
 
       - name: Install Tanka
-        if: matrix.benchmark.id != 'export-large' && matrix.benchmark.id != 'export-libraries'
+        if: matrix.benchmark.id != 'export-large'
         run: |
           curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
           chmod +x /usr/local/bin/tk
@@ -170,6 +170,8 @@ jobs:
 
           if [ "${{ matrix.benchmark.id }}" = "export-large" ]; then
             ARGS="$ARGS -- --runs 3"
+          elif [ "${{ matrix.benchmark.id }}" = "export-libraries" ]; then
+            ARGS="$ARGS -- --runs 5"
           fi
           ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
 
