@@ -21,13 +21,12 @@
 //! # State
 //!
 //! [`format`] parses, runs the passes that have landed, and unparses. Phases
-//! 0, 1, 2a, 2b, 2c and 2d of `docs/rtk-fmt-plan.md` are done: the lexer, the
-//! AST, the parser, the unparser, the [`pass`] traversal, nine of the twelve
-//! passes and all three of `FormatNode`'s non-pass steps. The three that
-//! remain are `SortImports` (2f) and `FixParens` with `RemovePlusObject`
-//! (2e); a file that needs one of them comes back unformatted.
-//! `quarantine.toml` names the fixtures that leaves failing and
-//! `testdata/corpus-baseline.toml` counts the files.
+//! 0, 1, 2a, 2b, 2c, 2d and 2e of `docs/rtk-fmt-plan.md` are done: the lexer,
+//! the AST, the parser, the unparser, the [`pass`] traversal, eleven of the
+//! twelve passes and all three of `FormatNode`'s non-pass steps. The one that
+//! remains is `SortImports` (2f), so a file whose top-of-file imports are out
+//! of order comes back unformatted. `testdata/corpus-baseline.toml` counts the
+//! files, and `quarantine.toml` is empty.
 
 pub mod ast;
 pub mod files;
@@ -75,8 +74,9 @@ pub enum CommentStyle {
 ///
 /// `tk` exposes none of these, so `Options::default` — go-jsonnet's
 /// `DefaultOptions()` — is the only configuration that has to be correct. The
-/// rest are carried because the passes are shared and because the upstream
-/// regression tests for `FixParens` run with `use_implicit_plus` off.
+/// rest are carried because the passes are shared and because upstream's own
+/// `TestFormatNoImplicitPlus` runs with `use_implicit_plus` off — which is the
+/// only way to reach [`passes::AddPlusObject`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 // A faithful port of a Go struct of eight bools; grouping them would hide the
 // correspondence.
@@ -192,10 +192,10 @@ impl Error {
 ///
 /// # Current behaviour
 ///
-/// `FormatNode`'s pipeline, with the seven passes that have not landed yet
-/// missing from it. The order below is upstream's, read off `FormatNode`
-/// rather than inferred, and the gaps are marked so the shape of what is left
-/// stays visible:
+/// `FormatNode`'s pipeline, with the one pass that has not landed yet missing
+/// from it. The order below is upstream's, read off `FormatNode` rather than
+/// inferred, and the gap is marked so the shape of what is left stays
+/// visible:
 ///
 /// | # | pass | state |
 /// | --- | --- | --- |
@@ -204,8 +204,8 @@ impl Error {
 /// | 3 | [`EnforceMaxBlankLines`](passes::EnforceMaxBlankLines) | **runs** |
 /// | 4 | [`FixNewlines`](passes::FixNewlines) | **runs** |
 /// | 5 | [`FixTrailingCommas`](passes::FixTrailingCommas) | **runs** |
-/// | 6 | `FixParens` | Phase 2e |
-/// | 7 | `RemovePlusObject` / `AddPlusObject` | Phase 2e |
+/// | 6 | [`FixParens`](passes::FixParens) | **runs** |
+/// | 7 | [`RemovePlusObject`](passes::RemovePlusObject) or [`AddPlusObject`](passes::AddPlusObject) | **runs** |
 /// | 8 | [`NoRedundantSliceColon`](passes::NoRedundantSliceColon) | **runs** |
 /// | 9 | the three strip passes | skipped under `Options::default` |
 /// | 10 | [`PrettyFieldNames`](passes::PrettyFieldNames) | **runs** |
@@ -214,10 +214,17 @@ impl Error {
 /// | 13 | [`FixIndentation`](fix_indentation::FixIndentation) | **runs** |
 /// | 14 | [`removeExtraTrailingNewlines`](fodder::Fodder::remove_extra_trailing_newlines) | **runs** |
 ///
-/// A file that needs one of the missing passes comes back unformatted. What
-/// is already real is the refusal: a file that does not parse fails here with
+/// A file that needs the missing pass comes back unformatted. What is already
+/// real is the refusal: a file that does not parse fails here with
 /// go-jsonnet's message, which is what `tk fmt` prints before aborting the
 /// whole run.
+///
+/// Step 7 is one `if` with two branches rather than two steps, and
+/// `Options::default` takes the first — so `AddPlusObject` is reached only
+/// through `use_implicit_plus: false`, which nothing but upstream's own
+/// regression cases passes. Step 6 running before step 7 is load-bearing:
+/// `((e))` is collapsed before `AddPlusObject` inserts any parentheses, and
+/// the ones it inserts are never collapsed again.
 ///
 /// Three of the fourteen steps are not passes. Steps 2 and 14 are unexported
 /// four-line functions in `jsonnetfmt.go`, which is why the staged pass
@@ -249,6 +256,20 @@ pub fn format(filename: &str, input: &str, options: &Options) -> Result<String, 
 	}
 	pass::visit_file(&mut passes::FixNewlines, &mut node, &mut final_fodder);
 	pass::visit_file(&mut passes::FixTrailingCommas, &mut node, &mut final_fodder);
+	pass::visit_file(&mut passes::FixParens, &mut node, &mut final_fodder);
+	// The two branches of one `if`, not consecutive steps. `tk fmt` always
+	// takes the first: `use_implicit_plus` is on in `DefaultOptions()`, and
+	// `AddPlusObject` is reached only by upstream's own `TestFormatNoImplicitPlus`
+	// and the `no_implicit_plus/` fixtures that port it.
+	//
+	// `FixParens` running first is load-bearing and must not be reordered:
+	// `((e))` is collapsed before any parentheses are inserted here, and the
+	// ones inserted here are never collapsed again.
+	if options.use_implicit_plus {
+		pass::visit_file(&mut passes::RemovePlusObject, &mut node, &mut final_fodder);
+	} else {
+		pass::visit_file(&mut passes::AddPlusObject, &mut node, &mut final_fodder);
+	}
 	pass::visit_file(
 		&mut passes::NoRedundantSliceColon,
 		&mut node,

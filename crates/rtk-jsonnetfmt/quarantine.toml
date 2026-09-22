@@ -21,85 +21,48 @@
 # would be a divergence from `tk fmt` — that is, a bug.
 
 # ---------------------------------------------------------------------------
-# Phase 2e: `FixParens` and the two `*PlusObject` passes are not written yet.
-# These nine are upstream's own `TestFormatNoImplicitPlus` cases, ported in
-# Phase 0, and they are the only fixtures whose bugs would change what a file
-# *evaluates to* — `{ a: 1 } { b: 2 }.a` must become `({ a: 1 } + { b: 2 }).a`.
-# They all go away in Phase 2e; none of them is an accepted divergence.
-#
-# Note they run with `use_implicit_plus: false`, which is not what `tk fmt`
-# passes: that branch is `AddPlusObject`, and `Options::default` takes
-# `RemovePlusObject` instead. They are kept because upstream keeps them.
+# This file is EMPTY, and Phase 2e is what emptied it.
 # ---------------------------------------------------------------------------
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-apply"
-reason = "`FixParens` is not implemented (Phase 2e), so no parens are inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-index"
-reason = "`FixParens` is not implemented (Phase 2e), so no parens are inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-three"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-left"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-right"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-unary"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-mul-right"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-[[entry]]
-id = "no_implicit_plus/implicit-plus-mul-left"
-reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
-
-# The three `parse_errors/` entries were removed when the parser landed in
-# Phase 2a: `format` now parses, so it refuses these files with go-jsonnet's
-# own messages. That is what the ratchet is for — an entry that starts passing
-# is deleted in the same commit.
 #
-# Phase 2b removed none, which is expected: `FixTrailingCommas`,
-# `NoRedundantSliceColon` and `PrettyFieldNames` have nothing to do with these
-# nine. Its progress shows up in `testdata/corpus-baseline.toml` (118 -> 120)
-# and, for the two passes the corpus cannot see at all, in
-# `tests/pass_parity.rs`.
+# The history, because the ratchet is only meaningful if what came off it is
+# written down:
 #
-# Phase 2c removed none either, and could not: not one of the nine inputs
-# contains a string literal or a comment. Its progress is in
-# `corpus-baseline.toml` (120 -> 124) and in `tests/pass_parity.rs`. (This line
-# read "120 -> 123" until Phase 2d: 123 was 2c's *prediction* and 124 was what
-# it measured, which is the discrepancy `corpus-baseline.toml` explains at
-# length. The predicted number should not have been the one written down here.)
+#   * Phase 0 listed three `parse_errors/` entries and nine
+#     `no_implicit_plus/` ones. The nine are upstream's own
+#     `TestFormatNoImplicitPlus` cases, and they were the only fixtures here
+#     whose failure changed what a file *evaluates to* rather than how it
+#     looks — `{ a: 1 } { b: 2 }.a` has to become `({ a: 1 } + { b: 2 }).a`,
+#     and without the inserted parens the formatted expression is a runtime
+#     error rather than a differently-spelled program.
+#   * Phase 2a removed the three `parse_errors/` entries: `format` started
+#     parsing, so it refuses those files with go-jsonnet's own messages.
+#   * Phases 2b, 2c and 2d removed none, and each for a boring and correct
+#     reason. Not one of the nine inputs contains a string literal, a comment,
+#     a blank line or anything to indent, so every one of them was already a
+#     fixed point of everything those phases added. Their progress is in
+#     `testdata/corpus-baseline.toml` (118 -> 120 -> 124 -> 134) and, for the
+#     passes the corpus cannot see at all, in `tests/pass_parity.rs`.
+#   * Phase 2e removed the remaining nine, by landing `FixParens` and
+#     `AddPlusObject`. Note those nine run with `use_implicit_plus: false`,
+#     which is not what `tk fmt` passes: that branch is `AddPlusObject`, and
+#     `Options::default` takes `RemovePlusObject` instead. They are kept
+#     because upstream keeps them, and they are now the *only* end-to-end
+#     grading `AddPlusObject` has — the 138-file corpus is generated with
+#     `DefaultOptions` and so never runs it.
 #
-# Phase 2d removes none, and this is the last phase that can say so for a
-# boring reason. `EnforceMaxBlankLines`, `FixNewlines`, `FixIndentation` and
-# the two non-pass steps have nothing to do with inserting a `+` or a paren:
-# the nine inputs are each a single line with no comment, no blank line and no
-# indentation to fix, so every one of them is already a fixed point of
-# everything 2d added. Its progress is in `corpus-baseline.toml` (124 -> 134)
-# and in `tests/pass_parity.rs`.
+# So an entry appearing here again is a divergence from `tk fmt`, and the rule
+# above applies to it: it needs a documented `CLAUDE.md` note saying why rtk
+# differs, of the kind the `env set` and conflict-message divergences have —
+# not a line here. The one 2e-shaped candidate was considered and rejected:
+# `AddPlusObject` does not add parens around an implicit plus in a *slice's*
+# target, although a slice binds as tightly as an index, because `ast.Slice` is
+# not in upstream's switch. That is an upstream bug that changes what the file
+# evaluates to, and it is reproduced rather than fixed, because `rtk fmt`
+# matching `tk fmt` is the contract. It is documented on
+# `crates/rtk-jsonnetfmt/src/passes/add_plus_object.rs` and pinned by the
+# `add_plus_object/slice_target` snippet.
 #
-# **Phase 2e should empty this file.** All nine entries name `FixParens` or
-# `AddPlusObject`, which is exactly what 2e implements, and nothing else is
-# listed. If an entry survives 2e it is a divergence and needs a documented
-# `CLAUDE.md` entry rather than a line here.
-#
-# One fixture outside this list does flip, though it is only graded when
+# One fixture outside this list flipped in Phase 2c and is only graded when
 # `GO_JSONNET_FOR_TESTS` is set: `go_jsonnet/empty_comment` is `#` above an
 # empty object, and go-jsonnet's own `empty_comment.fmt.golden` says the answer
 # is `//`. That golden is the single authoritative `tk fmt` answer
