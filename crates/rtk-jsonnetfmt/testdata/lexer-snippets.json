@@ -1,0 +1,187 @@
+[
+  {
+    "name": "verbatim_double.jsonnet",
+    "why": "The corpus contains no verbatim string at all, so neither verbatim path is graded by it. Doubled quotes are resolved here and put back by the unparser.",
+    "source": "@\"a\"\"b\"\n"
+  },
+  {
+    "name": "verbatim_single.jsonnet",
+    "why": "The single-quoted verbatim path, likewise ungraded by the corpus.",
+    "source": "@'a''b'\n"
+  },
+  {
+    "name": "verbatim_junk.jsonnet",
+    "why": "Upstream formats the offending rune with %v, which prints its numeric value rather than the character.",
+    "source": "@x\n"
+  },
+  {
+    "name": "unterminated_single.jsonnet",
+    "why": "No corpus file provokes a lexer error, so every message below is ungraded by it.",
+    "source": "'abc"
+  },
+  {
+    "name": "unterminated_in_object.jsonnet",
+    "why": "The same error with a non-trivial column, which is what the parse-error fixture pins.",
+    "source": "{ a: 'oops }\n"
+  },
+  {
+    "name": "unterminated_verbatim.jsonnet",
+    "source": "@\"abc"
+  },
+  {
+    "name": "bad_character.jsonnet",
+    "why": "A character that starts no token at all.",
+    "source": "`\n"
+  },
+  {
+    "name": "number_underscores.jsonnet",
+    "why": "Separators are dropped from the token data, so the formatter writes 1000 where the author wrote 1_000.",
+    "source": "1_000\n"
+  },
+  {
+    "name": "number_leading_zero_underscore.jsonnet",
+    "source": "0_1\n"
+  },
+  {
+    "name": "number_junk_after_dot.jsonnet",
+    "source": "1.x\n"
+  },
+  {
+    "name": "number_junk_after_e.jsonnet",
+    "source": "1ex\n"
+  },
+  {
+    "name": "number_junk_after_exp_sign.jsonnet",
+    "source": "1e+x\n"
+  },
+  {
+    "name": "number_junk_after_underscore.jsonnet",
+    "source": "1_x\n"
+  },
+  {
+    "name": "number_exponents.jsonnet",
+    "why": "The accepting paths through the state machine, not just the rejecting ones.",
+    "source": "[1e10, 1.5E-3, 0.5, 1_0.0_1e1_0]\n"
+  },
+  {
+    "name": "operator_plus_run.jsonnet",
+    "why": "The wind-back reads its deciding character once and never reassigns it, so a run of + cannot form one operator.",
+    "source": "+++\n"
+  },
+  {
+    "name": "operator_multi_symbol.jsonnet",
+    "why": "And a multi-symbol operator that does not end in one of + - ~ ! $ survives intact.",
+    "source": "a >= b\n"
+  },
+  {
+    "name": "operator_ends_with_bang.jsonnet",
+    "why": "Wind-back again, on an operator that genuinely ends with a forbidden character.",
+    "source": "a ==! b\n"
+  },
+  {
+    "name": "dollar.jsonnet",
+    "why": "$ reaches the lexer through the operator path and is then re-labelled.",
+    "source": "$\n"
+  },
+  {
+    "name": "tab_indent.jsonnet",
+    "why": "A tab counts as 8 spaces of indent and nothing downstream recovers it.",
+    "source": "a\n\tb\n"
+  },
+  {
+    "name": "mixed_tab_space_indent.jsonnet",
+    "why": "Spaces then a tab, which is the ill-advised case the lexer comments on.",
+    "source": "a\n  \tb\n"
+  },
+  {
+    "name": "crlf.jsonnet",
+    "why": "\\r is consumed as whitespace and contributes no indent, which is half of why a CRLF file does not round-trip.",
+    "source": "a\r\n  b\r\n"
+  },
+  {
+    "name": "comment_paragraph.jsonnet",
+    "why": "First on its line, so a paragraph.",
+    "source": "// c\nx\n"
+  },
+  {
+    "name": "comment_line_end.jsonnet",
+    "why": "After a token on the same line, so a line end carrying the comment.",
+    "source": "x  // c\ny\n"
+  },
+  {
+    "name": "comment_hash.jsonnet",
+    "source": "# c\nx\n"
+  },
+  {
+    "name": "comment_trailing_whitespace.jsonnet",
+    "why": "Trailing horizontal whitespace is stripped at lex time and never restored.",
+    "source": "// c   \nx\n"
+  },
+  {
+    "name": "c_comment_interstitial.jsonnet",
+    "why": "One line, so it flows after the token it follows.",
+    "source": "a /* c */ b\n"
+  },
+  {
+    "name": "c_comment_paragraph.jsonnet",
+    "why": "More than one line, so a paragraph — and this is where the dead allStar hack lives.",
+    "source": "/* a\n b */\nx\n"
+  },
+  {
+    "name": "c_comment_star_lhs.jsonnet",
+    "why": "Every continuation line begins with *, which is exactly what allStar claims to handle — and it still does not fire, because the first line begins with the comment's own /.",
+    "source": "/* a\n * b\n * c */\nx\n"
+  },
+  {
+    "name": "c_comment_unterminated.jsonnet",
+    "source": "/* a"
+  },
+  {
+    "name": "blank_line_run.jsonnet",
+    "why": "Blank lines become a count, and the indent is whatever follows the last newline.",
+    "source": "a\n\n\n  b\n"
+  },
+  {
+    "name": "text_block.jsonnet",
+    "why": "Both indents are recorded and the unparser reproduces them verbatim.",
+    "source": "|||\n  a\n|||\n"
+  },
+  {
+    "name": "text_block_chomp.jsonnet",
+    "why": "|||- drops the final newline.",
+    "source": "|||-\n  a\n|||\n"
+  },
+  {
+    "name": "text_block_blank_lines.jsonnet",
+    "why": "Leading and interior blank lines, which are handled before and inside the indent loop respectively.",
+    "source": "|||\n\n  a\n\n  b\n|||\n"
+  },
+  {
+    "name": "text_block_term_indent.jsonnet",
+    "why": "The closing ||| may be indented less than the body, and that indent is kept separately.",
+    "source": "{\n  a: |||\n    x\n  |||,\n}\n"
+  },
+  {
+    "name": "text_block_no_whitespace.jsonnet",
+    "source": "|||\na\n|||\n"
+  },
+  {
+    "name": "text_block_no_newline.jsonnet",
+    "source": "||| a\n"
+  },
+  {
+    "name": "eof_fodder.jsonnet",
+    "why": "Final whitespace is discarded, so a trailing comment lands on the end-of-file token and nothing else does.",
+    "source": "x\n// last\n"
+  },
+  {
+    "name": "empty.jsonnet",
+    "why": "An empty file still produces an end-of-file token.",
+    "source": ""
+  },
+  {
+    "name": "only_whitespace.jsonnet",
+    "why": "And whitespace alone produces no fodder, because final whitespace is discarded.",
+    "source": "\n\n  \n"
+  }
+]
