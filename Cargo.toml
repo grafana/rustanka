@@ -142,6 +142,8 @@ rustls = { version = "0.23", default-features = false }
 rtk-environments = { path = "./crates/rtk-environment", version = "0.5.0-pre99" }
 rtk-jsonnet = { path = "./crates/rtk-jsonnet", version = "0.5.0-pre99" }
 rtk-masterminds = { path = "./crates/rtk-masterminds", version = "0.5.0-pre99" }
+rtk-gobwas-glob = { path = "./crates/rtk-gobwas-glob", version = "0.5.0-pre99" }
+rtk-jsonnetfmt = { path = "./crates/rtk-jsonnetfmt", version = "0.5.0-pre99" }
 rtk-jsonnet-core = { path = "./crates/rtk-jsonnet-core", version = "0.5.0-pre99" }
 rtk-jsonnet-helm = { path = "./crates/rtk-jsonnet-helm", version = "0.5.0-pre99" }
 rtk-jsonnet-jrsonnet = { path = "./crates/rtk-jsonnet-jrsonnet", version = "0.5.0-pre99" }
@@ -225,7 +227,9 @@ similar_names = "allow"
 # Pre-existing issues in jrsonnet crates
 unnecessary_semicolon = "allow"
 too_long_first_doc_paragraph = "allow"
-map_or_unwrap = "allow"
+# The lint is `map_unwrap_or`; `map_or_unwrap` is not a lint name and never was,
+# so this entry did nothing but earn an `unknown_lints` warning per target.
+map_unwrap_or = "allow"
 option_if_let_else = "allow"
 manual_repeat_n = "allow"
 mem_replace_option_with_some = "allow"
