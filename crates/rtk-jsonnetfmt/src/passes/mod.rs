@@ -17,17 +17,39 @@
 //! here: `FormatNode` calls `visitor.VisitFile(node, finalFodder)` on it
 //! directly rather than through the `pass.ASTPass` machinery, so it is not an
 //! implementation of [`crate::pass::AstPass`] and does not belong in this
-//! module. That leaves `SortImports` (Phase 2f), `FixParens` and the two
-//! `*PlusObject` passes (Phase 2e), and the three strip passes, which no
-//! phase schedules because `Options::default` skips them.
+//! module. Phase 2e: [`FixParens`], [`RemovePlusObject`] and
+//! [`AddPlusObject`]. That leaves `SortImports` (Phase 2f) and the three strip
+//! passes, which no phase schedules because `Options::default` skips them.
+//!
+//! # Phase 2e's three are the ones that change meaning
+//!
+//! Everything before them is cosmetic: a bug moves a comment or an indent. A
+//! bug in these three changes what a file *evaluates to* —
+//! `{ a: 1 } { b: 2 }.a` has to become `({ a: 1 } + { b: 2 }).a`, and without
+//! the inserted parentheses the formatted expression is a runtime error rather
+//! than a differently-spelled program. They are also the first three that
+//! replace a node rather than rewriting its fodder, which is why each one
+//! needs `std::mem::replace` to get an owned payload out of `node.kind`:
+//! moving a child into a differently-shaped parent is not something a `&mut`
+//! borrow of the whole node will allow.
+//!
+//! [`AddPlusObject`] is the `use_implicit_plus: false` branch of step 7 and so
+//! is the one pass here that `tk fmt` never runs; [`RemovePlusObject`] is the
+//! branch it does.
 //!
 //! [`Node::remove_initial_newlines`]: crate::ast::Node::remove_initial_newlines
 //! [`Fodder::remove_extra_trailing_newlines`]: crate::fodder::Fodder::remove_extra_trailing_newlines
 //!
-//! # None of these has a context
+//! # Only one of these has a context
 //!
-//! All seven use `Ctx = ()`. Only `AddPlusObject` — Phase 2e, and skipped
-//! under `Options::default` — needs one.
+//! Nine of the ten use `Ctx = ()`. [`AddPlusObject`] is the exception, and it
+//! is the reason [`crate::pass::AstPass::Ctx`] is an associated type rather
+//! than `()`: it carries [`add_plus_object::Parent`], a descriptor of the
+//! parent refined per slot, because Go's version compares the parent's child
+//! *pointer* against the current node and Rust has no answer to that while the
+//! parent is mutably borrowed. It is also the only pass that overrides more
+//! than two hooks, for the same reason — the per-slot refinement has to happen
+//! in the hooks, since `pass::base` gives one context to every slot.
 //!
 //! # Three of them read an option, and one of them has state
 //!
@@ -38,18 +60,24 @@
 //! `Copy` — see its own documentation. Whether a pass runs at all is
 //! [`crate::format`]'s business, exactly as it is `FormatNode`'s.
 
+pub mod add_plus_object;
 pub mod enforce_comment_style;
 pub mod enforce_max_blank_lines;
 pub mod enforce_string_style;
 pub mod fix_newlines;
+pub mod fix_parens;
 pub mod fix_trailing_commas;
 pub mod no_redundant_slice_colon;
 pub mod pretty_field_names;
+pub mod remove_plus_object;
 
+pub use add_plus_object::AddPlusObject;
 pub use enforce_comment_style::EnforceCommentStyle;
 pub use enforce_max_blank_lines::EnforceMaxBlankLines;
 pub use enforce_string_style::EnforceStringStyle;
 pub use fix_newlines::FixNewlines;
+pub use fix_parens::FixParens;
 pub use fix_trailing_commas::FixTrailingCommas;
 pub use no_redundant_slice_colon::NoRedundantSliceColon;
 pub use pretty_field_names::PrettyFieldNames;
+pub use remove_plus_object::RemovePlusObject;

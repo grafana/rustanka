@@ -148,6 +148,28 @@
 # So nothing 2d-shaped is left in this corpus, and 138 is reachable with three
 # passes rather than four.
 #
-# A drop below 134 means a pass or the round trip broke a file that used to
+# Phase 2e took it to 137: RemovePlusObject's three files, exactly the ones
+# named above, and each of them a `+` in front of an object literal that stops
+# being written. Two are a single line each and the third is the docsonnet
+# render.libsonnet, where the `+` sat at the start of its own line — so the
+# LineEnd that preceded it moves on to the object and FixIndentation then has
+# to put it back at the right column. That interaction is the one thing 2e
+# could not predict from the oracle, because the oracle runs each pass on a
+# fresh parse and so grades no pair of them; this corpus is what says it is
+# right.
+#
+# **FixParens and AddPlusObject move this number by zero, and that is the
+# check rather than a disappointment.** FixParens changes 0 of the 138 files:
+# no Jsonnet here has a doubly-parenthesised expression, which is unsurprising
+# in files that are already `tk fmt`-clean. AddPlusObject *cannot* move it —
+# the corpus is generated with DefaultOptions, which takes RemovePlusObject and
+# skips AddPlusObject entirely, so its 18 oracle cells come from the oracle
+# running it in isolation and its only end-to-end grading is the nine
+# `no_implicit_plus/` fixtures. If this count ever moves when AddPlusObject
+# changes, step 7 has been wired as two steps instead of one `if`.
+#
+# The one that remains is SortImports (2f) on tests/realworld/entry-graalvm.jsonnet.
+#
+# A drop below 137 means a pass or the round trip broke a file that used to
 # pass, and the test prints which.
-matching = 134
+matching = 137
