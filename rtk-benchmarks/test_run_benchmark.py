@@ -15,6 +15,39 @@ sys.modules[spec.name] = benchmark
 spec.loader.exec_module(benchmark)
 
 
+class FixtureGeneratorTests(unittest.TestCase):
+    def test_custom_generator_expands_paths_and_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "generate.py"
+            script.write_text(
+                "import pathlib, sys\n"
+                "pathlib.Path(sys.argv[1], 'generated').write_text(sys.argv[2])\n")
+            config = root / "bench.yaml"
+            config.write_text("""name: Test
+id: test
+description: test
+fixtures:
+  static_envs: 64
+  inline_files: 0
+  envs_per_inline_file: 0
+  resources_per_env: 8
+fixture_generator: 'python3 "{repo_root}/generate.py" "{fixtures_dir}" {static_envs}'
+tests: []
+""")
+            runner = benchmark.BenchmarkRunner(
+                benchmark.BenchmarkConfig.from_yaml(config, root), root, [])
+            fixtures = root / "fixtures with spaces"
+            fixtures.mkdir()
+            runner.generate_fixtures(fixtures)
+            self.assertEqual((fixtures / "generated").read_text(), "64")
+            self.assertEqual(list(fixtures.iterdir()), [fixtures / "generated"])
+
+            runner.config.fixture_generator = "exit 23"
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.generate_fixtures(fixtures)
+
+
 class BaseOnlyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

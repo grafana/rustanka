@@ -70,6 +70,7 @@ class BenchmarkConfig:
     mode: Literal["generated", "static", "diff"]
     # Generated fixtures mode
     fixtures: GeneratedFixtures | None = None
+    fixture_generator: str | None = None
     setup: str | None = None
     prepare: str | None = None
     # Diff mode
@@ -110,6 +111,7 @@ class BenchmarkConfig:
             tests=tests,
             mode=mode,
             fixtures=fixtures,
+            fixture_generator=data.get("fixture_generator"),
             fixtures_dir=fixtures_dir,
             setup=data.get("setup"),
             prepare=data.get("prepare"),
@@ -293,6 +295,14 @@ class BenchmarkRunner:
         """Generate test fixtures for generated mode."""
         assert self.config.fixtures is not None
         self.fixtures_dir = fixtures_dir
+
+        if self.config.fixture_generator:
+            subprocess.run(
+                ["sh", "-c", self.expand_command(self.config.fixture_generator)],
+                cwd=self.repo_root,
+                check=True,
+            )
+            return
 
         script = f"""
         set -euo pipefail
@@ -806,8 +816,9 @@ class BenchmarkRunner:
                   f"{self.config.fixtures.inline_files * self.config.fixtures.envs_per_inline_file} total)", flush=True)
             print(
                 f"- Resources per environment: {self.config.fixtures.resources_per_env}", flush=True)
-            print(f"- Lib files: {self.config.fixtures.total_lib_files} "
-                  f"(1 global + {self.config.fixtures.total_env_libs} env-specific)", flush=True)
+            if not self.config.fixture_generator:
+                print(f"- Lib files: {self.config.fixtures.total_lib_files} "
+                      f"(1 global + {self.config.fixtures.total_env_libs} env-specific)", flush=True)
             print(
                 f"- Total environments: {self.config.fixtures.total_envs}", flush=True)
         else:

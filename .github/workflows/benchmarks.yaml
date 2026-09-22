@@ -78,6 +78,9 @@ jobs:
           - name: "Export (Memoize)"
             config: "rtk-benchmarks/export-memoize.yaml"
             id: "export-memoize"
+          - name: "Export (Shared Libraries)"
+            config: "rtk-benchmarks/export-libraries.yaml"
+            id: "export-libraries"
           - name: "Export (Replace)"
             config: "rtk-benchmarks/export-replace.yaml"
             id: "export-replace"
@@ -126,7 +129,7 @@ jobs:
         run: chmod +x bin/*
 
       - name: Install Tanka
-        if: matrix.benchmark.id != 'export-large'
+        if: matrix.benchmark.id != 'export-large' && matrix.benchmark.id != 'export-libraries'
         run: |
           curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
           chmod +x /usr/local/bin/tk
