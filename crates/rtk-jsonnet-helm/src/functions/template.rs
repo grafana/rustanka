@@ -441,16 +441,20 @@ fn normalize_helm_multiline_quotes(input: &str) -> String {
 	}
 
 	fn opening_quote(line: &str) -> Option<(usize, u8)> {
-		for (colon, _) in line.match_indices(':') {
-			let tail = &line[colon + 1..];
-			let value = tail.trim_start();
-			let quote = *value.as_bytes().first()?;
-			if matches!(quote, b'\'' | b'"') && quote_is_open(&value[1..], quote) {
-				let quote_column = colon + 1 + tail.len() - value.len();
-				return Some((quote_column + 1, quote));
-			}
+		// Only the mapping value can open a quoted scalar; later colons and
+		// quotes may be ordinary text inside a plain scalar.
+		let (key, tail) = line.split_once(':')?;
+		if !tail.starts_with(char::is_whitespace) {
+			return None;
 		}
-		None
+		let value = tail.trim_start();
+		let quote = *value.as_bytes().first()?;
+		if matches!(quote, b'\'' | b'"') && quote_is_open(&value[1..], quote) {
+			let quote_column = key.len() + 1 + tail.len() - value.len();
+			Some((quote_column + 1, quote))
+		} else {
+			None
+		}
 	}
 
 	let mut output = String::with_capacity(input.len());
@@ -581,6 +585,25 @@ mod tests {
 		);
 		let parsed: serde_json::Value = serde_saphyr::from_str(&normalized).unwrap();
 		assert_eq!(parsed["spec"]["description"], "first line second line");
+	}
+
+	#[test]
+	fn parses_quoted_continuations_without_changing_plain_scalar_quotes() {
+		for description in ["Must not contain ':'.", "Must\n        not contain ':'."] {
+			let yaml = format!(
+				"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: example\n\
+				 spec:\n  description: 'first line\n  second line'\n  properties:\n\
+				\x20   path:\n      description: {description}\n      type: string\n"
+			);
+			let parsed = parse_helm_yaml_output(&yaml, None).unwrap();
+			let spec = &parsed["config_map_example"]["spec"];
+			assert_eq!(spec["description"], "first line second line");
+			assert_eq!(
+				spec["properties"]["path"]["description"],
+				"Must not contain ':'."
+			);
+			assert_eq!(spec["properties"]["path"]["type"], "string");
+		}
 	}
 
 	fn cache_directory(called_from: &Path) -> Option<PathBuf> {
