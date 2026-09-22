@@ -190,7 +190,7 @@ mod tests {
 
 		// Which makes `tk fmt` non-idempotent on this input: formatting the
 		// answer again promotes it, because by then the value really is an
-		// identifier. `docs/rtk-fmt-plan.md` records this against Phase 2's
+		// identifier. the fmt port plan recorded this against Phase 2's
 		// exit criterion, which had assumed a one-pass fixed point.
 		assert_eq!(pretty("a['foo']"), "a.foo\n");
 	}

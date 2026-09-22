@@ -108,7 +108,14 @@ fn run(cli: Cli) -> Result<i32> {
 		Commands::Env(args) => commands::env::run(args, stdout).map(|_| 0),
 		Commands::Status(args) => commands::status::run(args, stdout).map(|_| 0),
 		Commands::Export(args) => commands::export::run(args, stdout).map(|_| 0),
-		Commands::Fmt(args) => commands::fmt::run(args, stdout).map(|_| 0),
+		Commands::Fmt(args) => {
+			// `--test` with something to change exits 16 — the same code
+			// `diff` uses, and the one `tk fmt --test` exits with.
+			if commands::fmt::run(args, stdout)? {
+				return Ok(commands::diff::EXIT_CODE_DIFF_FOUND);
+			}
+			Ok(0)
+		}
 		Commands::Lint(args) => commands::lint::run(args, stdout).map(|_| 0),
 		Commands::Eval(args) => commands::eval::run(
 			args.path.as_ref(),
