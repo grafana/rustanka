@@ -183,5 +183,25 @@
     "name": "only_whitespace.jsonnet",
     "why": "And whitespace alone produces no fodder, because final whitespace is discarded.",
     "source": "\n\n  \n"
+  },
+  {
+    "name": "text_block_unexpected_eof.jsonnet",
+    "why": "lexer.go:811. A text block whose content line reaches end of input, which is the one text-block error the other snippets here do not reach. Deliberately has no trailing newline.",
+    "source": "|||\n  a"
+  },
+  {
+    "name": "text_block_not_terminated.jsonnet",
+    "why": "lexer.go:833. The dedented line ends the block, and what follows is not `|||`. The location is commentStartLoc - the `|||` that opened the block, lines earlier - which is why it is worth taking from go-jsonnet rather than deriving.",
+    "source": "|||\n  a\nb\n"
+  },
+  {
+    "name": "text_block_only_whitespace_lines.jsonnet",
+    "why": "A block whose every line is whitespace. Which indent the lexer records for it is the first half of a round trip that destroys the file: the leading-blank-line loop runs before the indent is calculated, so what ends up in BlockIndent is decided by a line that carries no content.",
+    "source": "{\n  a: |||\n    \n    \n  |||,\n}\n"
+  },
+  {
+    "name": "text_block_only_newlines.jsonnet",
+    "why": "And the second half: this is what the unparser writes for the snippet above, because a blank value-line is emitted with no indent at all (unparse.rs, write_block_string). No content line then carries the block indent, so the re-lex takes it from the terminator line and swallows the `|||` as content. go-jsonnet refuses it, and the message and location are what this cell pins. Reached end to end by go-jsonnet/testdata/escaped_fields.jsonnet in the breadth corpus.",
+    "source": "{\n  a: |||\n\n\n  |||,\n}\n"
   }
 ]
