@@ -20,23 +20,30 @@
 //!
 //! # State
 //!
-//! [`format`] parses, runs the passes that have landed, and unparses. Phases
-//! 0, 1, 2a, 2b, 2c, 2d and 2e of `docs/rtk-fmt-plan.md` are done: the lexer,
-//! the AST, the parser, the unparser, the [`pass`] traversal, eleven of the
-//! twelve passes and all three of `FormatNode`'s non-pass steps. The one that
-//! remains is `SortImports` (2f), so a file whose top-of-file imports are out
-//! of order comes back unformatted. `testdata/corpus-baseline.toml` counts the
-//! files, and `quarantine.toml` is empty.
+//! [`format`] parses, runs every step of `FormatNode`, and unparses. **Phase
+//! 2 of `docs/rtk-fmt-plan.md` is complete**: the lexer, the AST, the parser,
+//! the unparser, the [`pass`] traversal, all twelve passes and all three of
+//! `FormatNode`'s non-pass steps. `testdata/corpus-baseline.toml` counts the
+//! files — all 138 of them — and `quarantine.toml` is empty.
+//!
+//! What is left is Phase 3, the CLI: `cmds/rtk/src/commands/fmt.rs` still
+//! `bail!`s, so this crate is a library nothing calls in anger yet.
+//!
+//! One thing here is not a formatter at all. [`go_sort`] is a port of
+//! `sort.Slice`, needed because [`sort_imports`] sorts by a key two imports
+//! can share and Go's tie order is not Rust's — measured, not assumed.
 
 pub mod ast;
 pub mod files;
 pub mod fix_indentation;
 pub mod fodder;
+pub mod go_sort;
 pub mod lexer;
 pub mod location;
 pub mod parser;
 pub mod pass;
 pub mod passes;
+pub mod sort_imports;
 pub mod string_util;
 pub mod token;
 pub mod unparse;
@@ -192,14 +199,12 @@ impl Error {
 ///
 /// # Current behaviour
 ///
-/// `FormatNode`'s pipeline, with the one pass that has not landed yet missing
-/// from it. The order below is upstream's, read off `FormatNode` rather than
-/// inferred, and the gap is marked so the shape of what is left stays
-/// visible:
+/// All fourteen steps of `FormatNode`, in upstream's order — read off
+/// `FormatNode` rather than inferred:
 ///
 /// | # | pass | state |
 /// | --- | --- | --- |
-/// | 1 | `SortImports` (a free function, not a visitor) | Phase 2f |
+/// | 1 | [`sortImports`](ast::Node::sort_imports) — not a visitor | **runs** |
 /// | 2 | [`removeInitialNewlines`](ast::Node::remove_initial_newlines) | **runs** |
 /// | 3 | [`EnforceMaxBlankLines`](passes::EnforceMaxBlankLines) | **runs** |
 /// | 4 | [`FixNewlines`](passes::FixNewlines) | **runs** |
@@ -214,10 +219,8 @@ impl Error {
 /// | 13 | [`FixIndentation`](fix_indentation::FixIndentation) | **runs** |
 /// | 14 | [`removeExtraTrailingNewlines`](fodder::Fodder::remove_extra_trailing_newlines) | **runs** |
 ///
-/// A file that needs the missing pass comes back unformatted. What is already
-/// real is the refusal: a file that does not parse fails here with
-/// go-jsonnet's message, which is what `tk fmt` prints before aborting the
-/// whole run.
+/// A file that does not parse fails here with go-jsonnet's message, which is
+/// what `tk fmt` prints before aborting the whole run.
 ///
 /// Step 7 is one `if` with two branches rather than two steps, and
 /// `Options::default` takes the first — so `AddPlusObject` is reached only
@@ -226,9 +229,14 @@ impl Error {
 /// `((e))` is collapsed before `AddPlusObject` inserts any parentheses, and
 /// the ones it inserts are never collapsed again.
 ///
-/// Three of the fourteen steps are not passes. Steps 2 and 14 are unexported
-/// four-line functions in `jsonnetfmt.go`, which is why the staged pass
-/// dumper cannot reach either — see
+/// **Four of the fourteen steps are not passes**, each for its own reason.
+/// Step 1 is a free function over the whole file that rebuilds the top of the
+/// tree rather than rewriting nodes, so [`pass`] does not apply to it at all;
+/// it is [`ast::Node::sort_imports`] here, and
+/// [`sort_imports`](crate::sort_imports) carries the account.
+///
+/// Steps 2 and 14 are unexported four-line functions in `jsonnetfmt.go`,
+/// which is why the staged pass dumper cannot reach either — see
 /// [`ast::Node::remove_initial_newlines`] for what that means for how they
 /// are graded. Their **position** is the load-bearing part: step 2 runs
 /// before `EnforceMaxBlankLines` at step 3, so a blank run at the top of a
@@ -246,6 +254,11 @@ impl Error {
 pub fn format(filename: &str, input: &str, options: &Options) -> Result<String, Error> {
 	let (mut node, mut final_fodder) = parser::snippet_to_raw_ast(filename, input)?;
 
+	// Step 1, and the only step that runs before `removeInitialNewlines` — so
+	// the fodder it divides still carries a file's leading blank run.
+	if options.sort_imports {
+		node.sort_imports();
+	}
 	node.remove_initial_newlines();
 	if options.max_blank_lines > 0 {
 		pass::visit_file(
