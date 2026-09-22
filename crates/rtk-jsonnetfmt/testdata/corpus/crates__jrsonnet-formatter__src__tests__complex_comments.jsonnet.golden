@@ -1,0 +1,1 @@
+crates/jrsonnet-formatter/src/tests/complex_comments.jsonnet:17:4-5 Duplicate field: c

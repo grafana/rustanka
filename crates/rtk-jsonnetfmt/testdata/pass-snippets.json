@@ -1,0 +1,282 @@
+[
+  {
+    "name": "trailing_comma/array_one_line",
+    "source": "[1,]",
+    "why": "The comma is not needed, so it goes and its (empty) fodder moves to the ]."
+  },
+  {
+    "name": "trailing_comma/array_multiline_missing",
+    "source": "[\n  1\n]",
+    "why": "A newline before the ] means the comma has to be added."
+  },
+  {
+    "name": "trailing_comma/array_multiline_present",
+    "source": "[\n  1,\n]",
+    "why": "Already right: nothing moves, nothing is added. The no-op is graded too."
+  },
+  {
+    "name": "trailing_comma/array_comment_before_comma",
+    "source": "[1 /* c */,]",
+    "why": "Removing the comma must not take the comment with it: it moves to the front of the close fodder."
+  },
+  {
+    "name": "trailing_comma/array_comma_on_its_own_line",
+    "source": "[\n  1\n  ,\n]",
+    "why": "The middle branch of fixComma: the comma is needed but a newline separates it from the element, so that newline moves to the ] and merges with the one already there."
+  },
+  {
+    "name": "trailing_comma/array_comment_only_before_close",
+    "source": "[1 /* c */]",
+    "why": "An interstitial is not a newline, so no comma is added. This is what containsNewline is for."
+  },
+  {
+    "name": "trailing_comma/array_line_comment_before_close",
+    "source": "[1 // c\n]",
+    "why": "A line-end comment does contain a newline, so a comma is added before it."
+  },
+  {
+    "name": "trailing_comma/array_empty",
+    "source": "[]",
+    "why": "Upstream returns before the base traversal, so the close fodder is not even visited."
+  },
+  {
+    "name": "trailing_comma/array_empty_multiline",
+    "source": "[\n]",
+    "why": "A newline before the ], but no element to put a comma after. Must not add one."
+  },
+  {
+    "name": "trailing_comma/array_nested",
+    "source": "[[1,], [\n  2\n]]",
+    "why": "One array losing a comma while the other gains one, in one traversal."
+  },
+  {
+    "name": "trailing_comma/object_one_line",
+    "source": "{ a: 1, }",
+    "why": "The object half of the same rule."
+  },
+  {
+    "name": "trailing_comma/object_multiline_missing",
+    "source": "{\n  a: 1\n}",
+    "why": "The comma is added to the last field, not to the object."
+  },
+  {
+    "name": "trailing_comma/object_last_field_is_a_local",
+    "source": "{\n  a: 1,\n  local b = 2\n}",
+    "why": "The last field can be an ObjectLocal, whose CommaFodder is the slot that has to be found."
+  },
+  {
+    "name": "trailing_comma/object_last_field_is_an_assert",
+    "source": "{\n  a: 1,\n  assert true\n}",
+    "why": "And it can be an assert, which has no Expr1 at all."
+  },
+  {
+    "name": "trailing_comma/object_empty",
+    "source": "{}",
+    "why": "The early return again, for the object hook."
+  },
+  {
+    "name": "trailing_comma/array_comp_comma",
+    "source": "[x, for x in [1]]",
+    "why": "A comprehension's comma is always removed, however it is laid out, and its fodder goes to the front of the for."
+  },
+  {
+    "name": "trailing_comma/array_comp_comma_multiline",
+    "source": "[\n  x,\n  for x in [1]\n]",
+    "why": "Still removed when the comprehension spans lines — this is removeComma, not fixComma."
+  },
+  {
+    "name": "trailing_comma/array_comp_comment_before_comma",
+    "source": "[x /* c */, for x in [1]]",
+    "why": "The comment lands in the ForFodder, where unparseSpecs writes it before the for."
+  },
+  {
+    "name": "trailing_comma/array_comp_no_comma",
+    "source": "[x for x in [1]]",
+    "why": "Nothing to remove."
+  },
+  {
+    "name": "trailing_comma/object_comp_comma",
+    "source": "{ [k]: k, for k in ['a'] }",
+    "why": "The object comprehension takes the last field's CommaFodder, not a TrailingCommaFodder — upstream never fills that slot on an ObjectComp."
+  },
+  {
+    "name": "trailing_comma/object_comp_with_local",
+    "source": "{ local v = 1, [k]: v, for k in ['a'] }",
+    "why": "The last field is still the computed one, so the local's comma is untouched."
+  },
+  {
+    "name": "trailing_comma/apply_arguments_are_untouched",
+    "source": "f(\n  1,\n)",
+    "why": "This pass handles arrays, objects and comprehensions only. An argument list's trailing comma is FixNewlines' business, and must not move here."
+  },
+  {
+    "name": "trailing_comma/function_params_are_untouched",
+    "source": "function(\n  x,\n) x",
+    "why": "Same, for a parameter list."
+  },
+  {
+    "name": "slice_colon/double_colon",
+    "source": "a[::]",
+    "why": "`::` is one operator token, so StepColonFodder is never filled and this is already the tree a[:] produces. Nothing for the pass to do."
+  },
+  {
+    "name": "slice_colon/empty_step",
+    "source": "a[1:2:]",
+    "why": "Two adjacent colons again, so still nothing in the slot."
+  },
+  {
+    "name": "slice_colon/comment_before_step_colon",
+    "source": "a[1:2 /* c */:]",
+    "why": "The case the pass exists for: the colon is about to disappear, so the comment before it has to move to the ] first."
+  },
+  {
+    "name": "slice_colon/newline_before_step_colon",
+    "source": "a[1:2\n:]",
+    "why": "A LineEnd in the slot rather than an interstitial."
+  },
+  {
+    "name": "slice_colon/comment_with_a_real_step",
+    "source": "a[1:2 /* c */:3]",
+    "why": "There is a step, so the colon stays and so does its fodder."
+  },
+  {
+    "name": "slice_colon/plain",
+    "source": "a[1:]",
+    "why": "No step colon at all."
+  },
+  {
+    "name": "slice_colon/all_three",
+    "source": "a[1:2:3]",
+    "why": "Nothing redundant."
+  },
+  {
+    "name": "pretty_names/index_single_quoted",
+    "source": "a['foo']",
+    "why": "The plain case: brackets to a dot."
+  },
+  {
+    "name": "pretty_names/index_double_quoted",
+    "source": "a[\"foo\"]",
+    "why": "The string's kind does not matter, only its value."
+  },
+  {
+    "name": "pretty_names/index_verbatim",
+    "source": "a[@'foo']",
+    "why": "A verbatim string's value is already collapsed, so it is an identifier too."
+  },
+  {
+    "name": "pretty_names/index_not_an_identifier",
+    "source": "a['not an id']",
+    "why": "Left alone."
+  },
+  {
+    "name": "pretty_names/index_empty_string",
+    "source": "a['']",
+    "why": "IsValidIdentifier's first guard."
+  },
+  {
+    "name": "pretty_names/index_keyword",
+    "source": "a['false']",
+    "why": "IsValidIdentifier ends by asking the keyword table, so this keeps its brackets."
+  },
+  {
+    "name": "pretty_names/index_keyword_cased",
+    "source": "a['False']",
+    "why": "But only the keywords exactly: this one is promoted."
+  },
+  {
+    "name": "pretty_names/index_leading_digit",
+    "source": "a['1foo']",
+    "why": "isIdentifierFirst rejects a digit."
+  },
+  {
+    "name": "pretty_names/index_escape_sequence",
+    "source": "a['fo\\u006f']",
+    "why": "A fully escaped string keeps its escapes in Value, so the pass is asked about the text `fo\\u006f` and refuses it. Do not 'fix' this by unescaping first."
+  },
+  {
+    "name": "pretty_names/index_block_string",
+    "source": "a[\n  |||\n    foo\n  |||\n]",
+    "why": "A block string's value ends in a newline, so it is never an identifier."
+  },
+  {
+    "name": "pretty_names/index_number",
+    "source": "a[1]",
+    "why": "Not a string at all."
+  },
+  {
+    "name": "pretty_names/index_comment_before_bracket",
+    "source": "a['foo' /* c */]",
+    "why": "THE ODDITY: RightBracketFodder is assigned over rather than moved into, and that one slot doubles as the fodder before the identifier — so tk fmt drops this comment. The oracle is what confirms it."
+  },
+  {
+    "name": "pretty_names/index_comment_before_string",
+    "source": "a[/* c */ 'foo']",
+    "why": "This one survives, as the literal's own fodder becoming the id fodder."
+  },
+  {
+    "name": "pretty_names/index_comment_both_sides",
+    "source": "a[/* b */ 'foo' /* c */]",
+    "why": "Both at once, so the oracle says which of the two is kept."
+  },
+  {
+    "name": "pretty_names/super_index_is_untouched",
+    "source": "{ a: super['foo'] }",
+    "why": "SuperIndex has the same Id/Index shape as Index and this pass does NOT override it, so super['foo'] keeps its brackets. Worth pinning: tidying it would be a divergence."
+  },
+  {
+    "name": "pretty_names/field_computed_string",
+    "source": "{ ['foo']: 1 }",
+    "why": "Both steps in one visit: ObjectFieldExpr to ObjectFieldStr to ObjectFieldID."
+  },
+  {
+    "name": "pretty_names/field_computed_not_an_identifier",
+    "source": "{ ['a b']: 1 }",
+    "why": "The first step has no identifier check, so the brackets go and the quotes stay."
+  },
+  {
+    "name": "pretty_names/field_computed_expression",
+    "source": "{ [k]: 1 }",
+    "why": "Not a literal string, so neither step applies."
+  },
+  {
+    "name": "pretty_names/field_computed_comments_everywhere",
+    "source": "{ /* a */ [ /* b */ 'foo' /* c */ ] /* d */ : 1 }",
+    "why": "Both FodderMoveFront calls at once: Fodder1 into the literal's own fodder, Fodder2 into the OpFodder. This is the snippet that says whether the port got the direction of each move right."
+  },
+  {
+    "name": "pretty_names/field_computed_method",
+    "source": "{ [ 'foo' /* c */ ](x): x }",
+    "why": "The method branch moves Fodder2 into ParenLeftFodder instead of into OpFodder."
+  },
+  {
+    "name": "pretty_names/field_quoted",
+    "source": "{ 'foo': 1 }",
+    "why": "Only the second step."
+  },
+  {
+    "name": "pretty_names/field_quoted_keyword",
+    "source": "{ 'false': 1 }",
+    "why": "Stays quoted. tests/golden/issue195.jsonnet in the corpus is this case."
+  },
+  {
+    "name": "pretty_names/field_hidden",
+    "source": "{ ['foo']:: 1 }",
+    "why": "Visibility has to survive the kind change."
+  },
+  {
+    "name": "pretty_names/field_super_sugar",
+    "source": "{ ['foo']+: 1 }",
+    "why": "And so does +:."
+  },
+  {
+    "name": "pretty_names/field_local_and_assert",
+    "source": "{ local x = 1, assert true, a: x }",
+    "why": "Neither kind has a name expression, so both must be left exactly alone."
+  },
+  {
+    "name": "pretty_names/nested",
+    "source": "{ ['a']: { ['b']: c['d'] } }",
+    "why": "The traversal has to keep working after the rewrite, since upstream calls the base traversal on the changed node."
+  }
+]
