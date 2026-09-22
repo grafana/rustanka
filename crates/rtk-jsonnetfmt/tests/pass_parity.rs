@@ -54,12 +54,22 @@
 //! here — which is the failure mode that matters most, since `tk fmt` is run
 //! in place on working trees.
 //!
+//! Phase 2f is the last of these, and the one where the oracle changed a
+//! decision rather than confirming one. `SortImports` sorts by a key two
+//! imports can share, and `sort.Slice` is not stable: the `sort_imports/ties_*`
+//! snippets measured it inverting ties from thirteen elements upwards, so a
+//! stable Rust sort would have been red here on six of them. That is why
+//! `src/go_sort.rs` is a port of Go's pdqsort rather than a call to `sort_by`
+//! — and the single corpus file that pass affects could never have caught it,
+//! because it has no two imports of the same path.
+//!
 //! # Full parity, no ratchet
 //!
 //! Like `node_parity`, and for the same reason: a pass that is right on most
 //! inputs is not a partial formatter, it is a wrong pass. Passes rtk has not
 //! written yet are **skipped by name**, and the test prints which — so the
-//! coverage it is actually providing is visible rather than assumed.
+//! coverage it is actually providing is visible rather than assumed. As of
+//! Phase 2f nothing is skipped: every pass the oracle records is written.
 
 mod astdump;
 
@@ -114,6 +124,7 @@ struct PassFileDump {
 /// against the oracle's own list, so a pass that lands without being wired in
 /// here fails rather than being silently ungraded.
 const IMPLEMENTED: &[&str] = &[
+	"SortImports",
 	"EnforceMaxBlankLines",
 	"FixNewlines",
 	"FixTrailingCommas",
@@ -136,6 +147,12 @@ const IMPLEMENTED: &[&str] = &[
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 	let options = Options::default();
 	match name {
+		// Not an `AstPass` either, and for a different reason from
+		// `FixIndentation`: upstream's is a free function over the whole file
+		// that rebuilds the top of the tree rather than visiting it. It reads
+		// no final fodder, as `_staged/passdump.go`'s
+		// `iformatter.SortImports(node)` does not pass any.
+		"SortImports" => node.sort_imports(),
 		"EnforceMaxBlankLines" => visit_file(
 			&mut EnforceMaxBlankLines::new(options.max_blank_lines),
 			node,
