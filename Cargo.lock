@@ -3027,6 +3027,7 @@ name = "jrsonnet-evaluator"
 version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
+ "criterion 0.8.2",
  "drop_bomb",
  "educe",
  "hi-doc",
@@ -3046,6 +3047,7 @@ dependencies = [
  "smallvec",
  "stacker",
  "static_assertions",
+ "stats_alloc",
  "strip-ansi-escapes",
  "strsim",
  "thiserror 2.0.18",
