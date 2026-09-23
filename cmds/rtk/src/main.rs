@@ -96,7 +96,14 @@ fn main() -> Result<()> {
 		Commands::Env(args) => commands::env::run(args, stdout),
 		Commands::Status(args) => commands::status::run(args, stdout),
 		Commands::Export(args) => commands::export::run(args, stdout),
-		Commands::Fmt(args) => commands::fmt::run(args, stdout),
+		Commands::Fmt(args) => {
+			// `--test` with something to change exits 16 — the same code
+			// `diff` uses, and the one `tk fmt --test` exits with.
+			if commands::fmt::run(args, stdout)? {
+				std::process::exit(commands::diff::EXIT_CODE_DIFF_FOUND);
+			}
+			Ok(())
+		}
 		Commands::Lint(args) => commands::lint::run(args, stdout),
 		Commands::Eval(args) => commands::eval::run(
 			args.path.as_ref(),

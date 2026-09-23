@@ -1,0 +1,80 @@
+# Fixtures known to fail.
+#
+# THIS LIST MAY ONLY EVER SHRINK. `tests/fixtures.rs` asserts the ratchet in
+# three directions, and each failure mode tells you what to do:
+#
+#   * a fixture fails and is not listed here  -> fix it, or add it with a reason
+#   * a fixture listed here now passes        -> delete its entry
+#   * an entry names no fixture at all        -> delete its entry (it is stale)
+#
+# The third check is skipped for a namespace that was not graded on this run —
+# `go_jsonnet/` needs `GO_JSONNET_FOR_TESTS` pointing at a go-jsonnet checkout,
+# so its entries cannot be reconciled without one.
+#
+# This is the mechanism for landing the formatter passes one at a time without
+# deleting cases, which `CLAUDE.md` forbids. It is not a dumping ground: every
+# entry carries a `reason`, and the ratchet is what stops the list growing.
+#
+# There is deliberately no `fmt_golden_override/` directory to go with it.
+# `tests/go_testdata_golden_override/` is legitimate because rtk's *evaluation*
+# genuinely differs from Go's in documented places. For fmt, every override
+# would be a divergence from `tk fmt` — that is, a bug.
+
+# ---------------------------------------------------------------------------
+# This file is EMPTY. Phase 2e emptied it, and Phase 2f — which completed the
+# pipeline and took the breadth corpus to 138 of 138 — added nothing to it.
+# ---------------------------------------------------------------------------
+#
+# The history, because the ratchet is only meaningful if what came off it is
+# written down:
+#
+#   * Phase 0 listed three `parse_errors/` entries and nine
+#     `no_implicit_plus/` ones. The nine are upstream's own
+#     `TestFormatNoImplicitPlus` cases, and they were the only fixtures here
+#     whose failure changed what a file *evaluates to* rather than how it
+#     looks — `{ a: 1 } { b: 2 }.a` has to become `({ a: 1 } + { b: 2 }).a`,
+#     and without the inserted parens the formatted expression is a runtime
+#     error rather than a differently-spelled program.
+#   * Phase 2a removed the three `parse_errors/` entries: `format` started
+#     parsing, so it refuses those files with go-jsonnet's own messages.
+#   * Phases 2b, 2c and 2d removed none, and each for a boring and correct
+#     reason. Not one of the nine inputs contains a string literal, a comment,
+#     a blank line or anything to indent, so every one of them was already a
+#     fixed point of everything those phases added. Their progress is in
+#     `testdata/corpus-baseline.toml` (118 -> 120 -> 124 -> 134) and, for the
+#     passes the corpus cannot see at all, in `tests/pass_parity.rs`.
+#   * Phase 2f added none, and there was one candidate. `sort.Slice` is not a
+#     stable sort, so which of two imports sharing a path comes first is
+#     decided by pdqsort's pivot choices — and the pass oracle measured that
+#     it inverts ties from thirteen elements upwards, which neither
+#     `sort_by` nor `sort_unstable_by` reproduces. A stable sort plus an entry
+#     here was the cheap answer and was rejected: a group of thirteen imports
+#     is ordinary, aliasing one path twice is an ordinary Jsonnet habit, and
+#     the two together are a file `rtk fmt` would rewrite and `tk fmt` would
+#     not. `crates/rtk-jsonnetfmt/src/go_sort.rs` ports the sort instead.
+#   * Phase 2e removed the remaining nine, by landing `FixParens` and
+#     `AddPlusObject`. Note those nine run with `use_implicit_plus: false`,
+#     which is not what `tk fmt` passes: that branch is `AddPlusObject`, and
+#     `Options::default` takes `RemovePlusObject` instead. They are kept
+#     because upstream keeps them, and they are now the *only* end-to-end
+#     grading `AddPlusObject` has — the 138-file corpus is generated with
+#     `DefaultOptions` and so never runs it.
+#
+# So an entry appearing here again is a divergence from `tk fmt`, and the rule
+# above applies to it: it needs a documented `CLAUDE.md` note saying why rtk
+# differs, of the kind the `env set` and conflict-message divergences have —
+# not a line here. The one 2e-shaped candidate was considered and rejected:
+# `AddPlusObject` does not add parens around an implicit plus in a *slice's*
+# target, although a slice binds as tightly as an index, because `ast.Slice` is
+# not in upstream's switch. That is an upstream bug that changes what the file
+# evaluates to, and it is reproduced rather than fixed, because `rtk fmt`
+# matching `tk fmt` is the contract. It is documented on
+# `crates/rtk-jsonnetfmt/src/passes/add_plus_object.rs` and pinned by the
+# `add_plus_object/slice_target` snippet.
+#
+# One fixture outside this list flipped in Phase 2c and is only graded when
+# `GO_JSONNET_FOR_TESTS` is set: `go_jsonnet/empty_comment` is `#` above an
+# empty object, and go-jsonnet's own `empty_comment.fmt.golden` says the answer
+# is `//`. That golden is the single authoritative `tk fmt` answer
+# `EnforceCommentStyle` has outside the snippets — the 138-file corpus gives it
+# none at all.

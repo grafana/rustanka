@@ -1,0 +1,2202 @@
+[
+  {
+    "name": "trailing_comma/array_one_line",
+    "source": "[1,]",
+    "why": "The comma is not needed, so it goes and its (empty) fodder moves to the ]."
+  },
+  {
+    "name": "trailing_comma/array_multiline_missing",
+    "source": "[\n  1\n]",
+    "why": "A newline before the ] means the comma has to be added."
+  },
+  {
+    "name": "trailing_comma/array_multiline_present",
+    "source": "[\n  1,\n]",
+    "why": "Already right: nothing moves, nothing is added. The no-op is graded too."
+  },
+  {
+    "name": "trailing_comma/array_comment_before_comma",
+    "source": "[1 /* c */,]",
+    "why": "Removing the comma must not take the comment with it: it moves to the front of the close fodder."
+  },
+  {
+    "name": "trailing_comma/array_comma_on_its_own_line",
+    "source": "[\n  1\n  ,\n]",
+    "why": "The middle branch of fixComma: the comma is needed but a newline separates it from the element, so that newline moves to the ] and merges with the one already there."
+  },
+  {
+    "name": "trailing_comma/array_comment_only_before_close",
+    "source": "[1 /* c */]",
+    "why": "An interstitial is not a newline, so no comma is added. This is what containsNewline is for."
+  },
+  {
+    "name": "trailing_comma/array_line_comment_before_close",
+    "source": "[1 // c\n]",
+    "why": "A line-end comment does contain a newline, so a comma is added before it."
+  },
+  {
+    "name": "trailing_comma/array_empty",
+    "source": "[]",
+    "why": "Upstream returns before the base traversal, so the close fodder is not even visited."
+  },
+  {
+    "name": "trailing_comma/array_empty_multiline",
+    "source": "[\n]",
+    "why": "A newline before the ], but no element to put a comma after. Must not add one."
+  },
+  {
+    "name": "trailing_comma/array_nested",
+    "source": "[[1,], [\n  2\n]]",
+    "why": "One array losing a comma while the other gains one, in one traversal."
+  },
+  {
+    "name": "trailing_comma/object_one_line",
+    "source": "{ a: 1, }",
+    "why": "The object half of the same rule."
+  },
+  {
+    "name": "trailing_comma/object_multiline_missing",
+    "source": "{\n  a: 1\n}",
+    "why": "The comma is added to the last field, not to the object."
+  },
+  {
+    "name": "trailing_comma/object_last_field_is_a_local",
+    "source": "{\n  a: 1,\n  local b = 2\n}",
+    "why": "The last field can be an ObjectLocal, whose CommaFodder is the slot that has to be found."
+  },
+  {
+    "name": "trailing_comma/object_last_field_is_an_assert",
+    "source": "{\n  a: 1,\n  assert true\n}",
+    "why": "And it can be an assert, which has no Expr1 at all."
+  },
+  {
+    "name": "trailing_comma/object_empty",
+    "source": "{}",
+    "why": "The early return again, for the object hook."
+  },
+  {
+    "name": "trailing_comma/array_comp_comma",
+    "source": "[x, for x in [1]]",
+    "why": "A comprehension's comma is always removed, however it is laid out, and its fodder goes to the front of the for."
+  },
+  {
+    "name": "trailing_comma/array_comp_comma_multiline",
+    "source": "[\n  x,\n  for x in [1]\n]",
+    "why": "Still removed when the comprehension spans lines — this is removeComma, not fixComma."
+  },
+  {
+    "name": "trailing_comma/array_comp_comment_before_comma",
+    "source": "[x /* c */, for x in [1]]",
+    "why": "The comment lands in the ForFodder, where unparseSpecs writes it before the for."
+  },
+  {
+    "name": "trailing_comma/array_comp_no_comma",
+    "source": "[x for x in [1]]",
+    "why": "Nothing to remove."
+  },
+  {
+    "name": "trailing_comma/object_comp_comma",
+    "source": "{ [k]: k, for k in ['a'] }",
+    "why": "The object comprehension takes the last field's CommaFodder, not a TrailingCommaFodder — upstream never fills that slot on an ObjectComp."
+  },
+  {
+    "name": "trailing_comma/object_comp_with_local",
+    "source": "{ local v = 1, [k]: v, for k in ['a'] }",
+    "why": "The last field is still the computed one, so the local's comma is untouched."
+  },
+  {
+    "name": "trailing_comma/apply_arguments_are_untouched",
+    "source": "f(\n  1,\n)",
+    "why": "This pass handles arrays, objects and comprehensions only. An argument list's trailing comma is FixNewlines' business, and must not move here."
+  },
+  {
+    "name": "trailing_comma/function_params_are_untouched",
+    "source": "function(\n  x,\n) x",
+    "why": "Same, for a parameter list."
+  },
+  {
+    "name": "slice_colon/double_colon",
+    "source": "a[::]",
+    "why": "`::` is one operator token, so StepColonFodder is never filled and this is already the tree a[:] produces. Nothing for the pass to do."
+  },
+  {
+    "name": "slice_colon/empty_step",
+    "source": "a[1:2:]",
+    "why": "Two adjacent colons again, so still nothing in the slot."
+  },
+  {
+    "name": "slice_colon/comment_before_step_colon",
+    "source": "a[1:2 /* c */:]",
+    "why": "The case the pass exists for: the colon is about to disappear, so the comment before it has to move to the ] first."
+  },
+  {
+    "name": "slice_colon/newline_before_step_colon",
+    "source": "a[1:2\n:]",
+    "why": "A LineEnd in the slot rather than an interstitial."
+  },
+  {
+    "name": "slice_colon/comment_with_a_real_step",
+    "source": "a[1:2 /* c */:3]",
+    "why": "There is a step, so the colon stays and so does its fodder."
+  },
+  {
+    "name": "slice_colon/plain",
+    "source": "a[1:]",
+    "why": "No step colon at all."
+  },
+  {
+    "name": "slice_colon/all_three",
+    "source": "a[1:2:3]",
+    "why": "Nothing redundant."
+  },
+  {
+    "name": "pretty_names/index_single_quoted",
+    "source": "a['foo']",
+    "why": "The plain case: brackets to a dot."
+  },
+  {
+    "name": "pretty_names/index_double_quoted",
+    "source": "a[\"foo\"]",
+    "why": "The string's kind does not matter, only its value."
+  },
+  {
+    "name": "pretty_names/index_verbatim",
+    "source": "a[@'foo']",
+    "why": "A verbatim string's value is already collapsed, so it is an identifier too."
+  },
+  {
+    "name": "pretty_names/index_not_an_identifier",
+    "source": "a['not an id']",
+    "why": "Left alone."
+  },
+  {
+    "name": "pretty_names/index_empty_string",
+    "source": "a['']",
+    "why": "IsValidIdentifier's first guard."
+  },
+  {
+    "name": "pretty_names/index_keyword",
+    "source": "a['false']",
+    "why": "IsValidIdentifier ends by asking the keyword table, so this keeps its brackets."
+  },
+  {
+    "name": "pretty_names/index_keyword_cased",
+    "source": "a['False']",
+    "why": "But only the keywords exactly: this one is promoted."
+  },
+  {
+    "name": "pretty_names/index_leading_digit",
+    "source": "a['1foo']",
+    "why": "isIdentifierFirst rejects a digit."
+  },
+  {
+    "name": "pretty_names/index_escape_sequence",
+    "source": "a['fo\\u006f']",
+    "why": "A fully escaped string keeps its escapes in Value, so the pass is asked about the text `fo\\u006f` and refuses it. Do not 'fix' this by unescaping first."
+  },
+  {
+    "name": "pretty_names/index_block_string",
+    "source": "a[\n  |||\n    foo\n  |||\n]",
+    "why": "A block string's value ends in a newline, so it is never an identifier."
+  },
+  {
+    "name": "pretty_names/index_number",
+    "source": "a[1]",
+    "why": "Not a string at all."
+  },
+  {
+    "name": "pretty_names/index_comment_before_bracket",
+    "source": "a['foo' /* c */]",
+    "why": "THE ODDITY: RightBracketFodder is assigned over rather than moved into, and that one slot doubles as the fodder before the identifier — so tk fmt drops this comment. The oracle is what confirms it."
+  },
+  {
+    "name": "pretty_names/index_comment_before_string",
+    "source": "a[/* c */ 'foo']",
+    "why": "This one survives, as the literal's own fodder becoming the id fodder."
+  },
+  {
+    "name": "pretty_names/index_comment_both_sides",
+    "source": "a[/* b */ 'foo' /* c */]",
+    "why": "Both at once, so the oracle says which of the two is kept."
+  },
+  {
+    "name": "pretty_names/super_index_is_untouched",
+    "source": "{ a: super['foo'] }",
+    "why": "SuperIndex has the same Id/Index shape as Index and this pass does NOT override it, so super['foo'] keeps its brackets. Worth pinning: tidying it would be a divergence."
+  },
+  {
+    "name": "pretty_names/field_computed_string",
+    "source": "{ ['foo']: 1 }",
+    "why": "Both steps in one visit: ObjectFieldExpr to ObjectFieldStr to ObjectFieldID."
+  },
+  {
+    "name": "pretty_names/field_computed_not_an_identifier",
+    "source": "{ ['a b']: 1 }",
+    "why": "The first step has no identifier check, so the brackets go and the quotes stay."
+  },
+  {
+    "name": "pretty_names/field_computed_expression",
+    "source": "{ [k]: 1 }",
+    "why": "Not a literal string, so neither step applies."
+  },
+  {
+    "name": "pretty_names/field_computed_comments_everywhere",
+    "source": "{ /* a */ [ /* b */ 'foo' /* c */ ] /* d */ : 1 }",
+    "why": "Both FodderMoveFront calls at once: Fodder1 into the literal's own fodder, Fodder2 into the OpFodder. This is the snippet that says whether the port got the direction of each move right."
+  },
+  {
+    "name": "pretty_names/field_computed_method",
+    "source": "{ [ 'foo' /* c */ ](x): x }",
+    "why": "The method branch moves Fodder2 into ParenLeftFodder instead of into OpFodder."
+  },
+  {
+    "name": "pretty_names/field_quoted",
+    "source": "{ 'foo': 1 }",
+    "why": "Only the second step."
+  },
+  {
+    "name": "pretty_names/field_quoted_keyword",
+    "source": "{ 'false': 1 }",
+    "why": "Stays quoted. tests/golden/issue195.jsonnet in the corpus is this case."
+  },
+  {
+    "name": "pretty_names/field_escape_sequence",
+    "why": "The field twin of index_escape_sequence, and the one shape in this pass with no snippet at all: the ObjectFieldStr -> ObjectFieldID step asks IsValidIdentifier of the *stored* value too, so a fully escaped field name keeps its quotes here and EnforceStringStyle unescapes it at step 11. Graded end to end by tests/idempotence.rs.",
+    "source": "{ 'fo\\u006f': 1 }"
+  },
+  {
+    "name": "pretty_names/field_hidden",
+    "source": "{ ['foo']:: 1 }",
+    "why": "Visibility has to survive the kind change."
+  },
+  {
+    "name": "pretty_names/field_super_sugar",
+    "source": "{ ['foo']+: 1 }",
+    "why": "And so does +:."
+  },
+  {
+    "name": "pretty_names/field_local_and_assert",
+    "source": "{ local x = 1, assert true, a: x }",
+    "why": "Neither kind has a name expression, so both must be left exactly alone."
+  },
+  {
+    "name": "pretty_names/nested",
+    "source": "{ ['a']: { ['b']: c['d'] } }",
+    "why": "The traversal has to keep working after the rewrite, since upstream calls the base traversal on the changed node."
+  },
+  {
+    "name": "pretty_names/field_computed_in_object_comp",
+    "source": "{ ['foo']: 1 for x in [1] }",
+    "why": "The pass has no ObjectComp guard, so it promotes this to `foo:` — and a comprehension may only have [e] fields, so the output no longer parses. Phase 4's go-jsonnet testdata set found it end to end on two files; this is the cell that says which pass does it, rather than inferring it from a diff. Do not 'fix' it: `tk fmt` destroys the file and matching that is the contract."
+  },
+  {
+    "name": "pretty_names/field_computed_in_object_comp_not_an_identifier",
+    "source": "{ ['a b']: 1 for x in [1] }",
+    "why": "Written as the negative that would bound the bug above, and it is not one — it widens it. `['a b']` is not an identifier so the name keeps its quotes, but the pass still drops the brackets, and `{ 'a b': 1 for x in [1] }` is refused exactly as the identifier case is. So the damage is not confined to identifier-shaped names: **any string-literal field name in an object comprehension** is destroyed. What survives is a genuinely computed name, `{ [k]: 1 for k in ... }`, which five other snippets in this file already pass the idempotence sweep with — which is why there is no sixth snippet here restating it."
+  },
+  {
+    "name": "string_style/double_to_single",
+    "source": "\"foo\"",
+    "why": "The plain case, and the one the default option asks for: StringStyleSingle with nothing to avoid."
+  },
+  {
+    "name": "string_style/already_single",
+    "source": "'foo'",
+    "why": "Already right. A no-op that still goes through StringUnescape and StringEscape, so it grades the round trip."
+  },
+  {
+    "name": "string_style/empty",
+    "source": "\"\"",
+    "why": "Nothing to count, so the style decides alone."
+  },
+  {
+    "name": "string_style/block_string",
+    "source": "|||\n  foo\n|||",
+    "why": "The first of three early returns: a block string is never restyled, whatever it holds."
+  },
+  {
+    "name": "string_style/block_string_with_both_quotes",
+    "source": "|||\n  it's \"x\"\n|||",
+    "why": "And the early return is unconditional, so a block string holding both quotes is not even examined."
+  },
+  {
+    "name": "string_style/verbatim_single",
+    "source": "@'foo'",
+    "why": "The second early return."
+  },
+  {
+    "name": "string_style/verbatim_double",
+    "source": "@\"foo\"",
+    "why": "The third."
+  },
+  {
+    "name": "string_style/verbatim_doubled_quote",
+    "source": "@'it''s'",
+    "why": "A verbatim string's Value has its doubled quotes already collapsed, so restyling it would need re-doubling. Upstream does not try: it returns."
+  },
+  {
+    "name": "string_style/single_quote_inside_double",
+    "source": "\"it's\"",
+    "why": "numSingle > 0 forces useSingle false, which is what it already is. The value round-trips unchanged, so this must be a no-op."
+  },
+  {
+    "name": "string_style/single_quote_inside_single",
+    "source": "'it\\'s'",
+    "why": "The carve-out doing work: the escape is what the quote choice is avoiding, so this becomes a double-quoted string with no escape at all."
+  },
+  {
+    "name": "string_style/double_quote_inside_single",
+    "source": "'say \"hi\"'",
+    "why": "numDouble > 0 forces useSingle true. Already single, already unescaped: a no-op."
+  },
+  {
+    "name": "string_style/double_quote_inside_double",
+    "source": "\"say \\\"hi\\\"\"",
+    "why": "The carve-out overriding the option in the other direction: StringStyleSingle wanted single anyway, and here it is the escapes that make it worth doing."
+  },
+  {
+    "name": "string_style/both_quotes_in_double",
+    "source": "\"it's \\\"x\\\"\"",
+    "why": "Both present, so neither syntax avoids escaping and upstream returns without touching it. The kind stays Double even though the option says Single."
+  },
+  {
+    "name": "string_style/both_quotes_in_single",
+    "source": "'it\\'s \"x\"'",
+    "why": "The same refusal from the other side."
+  },
+  {
+    "name": "string_style/escaped_single_quote_in_double",
+    "source": "\"a\\'b\"",
+    "why": "A needless escape: \\' is legal in a double-quoted string, and numSingle > 0 keeps the kind Double, so only the value changes. The one snippet where the kind is untouched and the text is not."
+  },
+  {
+    "name": "string_style/escaped_double_quote_in_single",
+    "source": "'a\\\"b'",
+    "why": "The mirror image, and here the kind changes too even though it was already Single-shaped."
+  },
+  {
+    "name": "string_style/escape_newline",
+    "source": "\"a\\nb\"",
+    "why": "StringEscape writes \\n back, so the value survives and only the kind moves."
+  },
+  {
+    "name": "string_style/escape_tab",
+    "source": "\"a\\tb\"",
+    "why": "Same for \\t."
+  },
+  {
+    "name": "string_style/escape_backslash",
+    "source": "\"a\\\\b\"",
+    "why": "And for the backslash, which is the escape that would compound if the round trip were wrong."
+  },
+  {
+    "name": "string_style/escape_solidus",
+    "source": "\"a\\/b\"",
+    "why": "\\/ is accepted by StringUnescape (see json.org) and never written back by StringEscape, so the escape is silently dropped."
+  },
+  {
+    "name": "string_style/escape_unicode_ascii",
+    "source": "\"\\u0041\"",
+    "why": "An escape collapsing to a plain character: \\u0041 is A, and StringEscape leaves A alone."
+  },
+  {
+    "name": "string_style/escape_unicode_latin1",
+    "source": "\"\\u00E9\"",
+    "why": "So does e-acute, which is above the C1 range StringEscape re-escapes."
+  },
+  {
+    "name": "string_style/escape_unicode_c1",
+    "source": "\"\\u009F\"",
+    "why": "But U+009F is inside it, so the escape comes back — in lower case, because StringEscape formats with %04x. A case change with no other difference."
+  },
+  {
+    "name": "string_style/escape_nul",
+    "source": "\"\\u0000\"",
+    "why": "The one character StringEscape spells out explicitly rather than by range."
+  },
+  {
+    "name": "string_style/non_ascii_literal",
+    "source": "\"héllo\"",
+    "why": "A character written as itself rather than escaped stays that way."
+  },
+  {
+    "name": "string_style/import",
+    "source": "import \"foo.libsonnet\"",
+    "why": "THE REASON THIS PASS OVERRIDES LiteralString AND NOT Visit: Base.Import reaches the filename through the LiteralString hook only, so a pass overriding Visit would miss every import in the file."
+  },
+  {
+    "name": "string_style/import_str",
+    "source": "importstr \"a.txt\"",
+    "why": "Same route, different hook on the way in."
+  },
+  {
+    "name": "string_style/import_bin",
+    "source": "importbin \"a.bin\"",
+    "why": "And the third."
+  },
+  {
+    "name": "string_style/import_already_single",
+    "source": "import 'foo.libsonnet'",
+    "why": "The no-op, so the import path is graded in both directions."
+  },
+  {
+    "name": "string_style/field_name",
+    "source": "{ \"foo\": 1 }",
+    "why": "A field name is a LiteralString like any other. In the pipeline PrettyFieldNames has already unquoted this one; in isolation the pass still restyles it."
+  },
+  {
+    "name": "string_style/field_name_keyword",
+    "source": "{ \"false\": 1 }",
+    "why": "The pipeline case: PrettyFieldNames leaves a keyword quoted, so this pass is what decides which quote it keeps. tests/golden/issue195.jsonnet is exactly this."
+  },
+  {
+    "name": "string_style/computed_field_name",
+    "source": "{ [\"foo\"]: 1 }",
+    "why": "Reached through Visit rather than through the field kind, since ObjectFieldExpr's name is an ordinary expression."
+  },
+  {
+    "name": "string_style/index",
+    "source": "a[\"foo\"]",
+    "why": "And an index's string, which PrettyFieldNames would have promoted first."
+  },
+  {
+    "name": "string_style/nested",
+    "source": "[\"a\", { b: \"c\" }, f(\"d\")]",
+    "why": "Several literals in one traversal, in three different positions."
+  },
+  {
+    "name": "comment_style/hash_to_slash",
+    "source": "# c\n1",
+    "why": "The plain case: CommentStyleSlash rewrites the leading # as //, keeping everything after it."
+  },
+  {
+    "name": "comment_style/hash_no_space",
+    "source": "#c\n1",
+    "why": "The rewrite is textual — \"//\" + comment[1:] — so there is no space to preserve."
+  },
+  {
+    "name": "comment_style/hash_empty",
+    "source": "#\n1",
+    "why": "A bare hash. len(*comment) > 1 fails, so the hashbang guard is not even consulted."
+  },
+  {
+    "name": "comment_style/double_hash",
+    "source": "## c\n1",
+    "why": "Only the first character is replaced, so a doubled hash becomes //# and not //."
+  },
+  {
+    "name": "comment_style/slash_left_alone",
+    "source": "// c\n1",
+    "why": "Already slash: the branch asks for comment[0] == '#' and this is not it."
+  },
+  {
+    "name": "comment_style/hashbang_first",
+    "source": "#!/usr/bin/env jsonnet\n1",
+    "why": "The documented carve-out: a #! in the file's first fodder is left alone."
+  },
+  {
+    "name": "comment_style/hashbang_bare",
+    "source": "#!\n1",
+    "why": "The shortest comment the guard can fire on: len 2, and comment[1] is '!'."
+  },
+  {
+    "name": "comment_style/hashbang_with_a_space",
+    "source": "# !c\n1",
+    "why": "Not a hashbang: the guard reads comment[1], which is a space here, so this is rewritten."
+  },
+  {
+    "name": "comment_style/hashbang_twice",
+    "source": "#!a\n#!b\n1",
+    "why": "AN ODDITY, AND WHY seenFirstFodder IS THE STATE IT IS: the guard returns *before* setting seenFirstFodder, so a second #! is still 'first' and is also spared."
+  },
+  {
+    "name": "comment_style/hashbang_after_a_comment",
+    "source": "# a\n#!b\n1",
+    "why": "An ordinary comment does set seenFirstFodder, so the #! after it is rewritten to //!."
+  },
+  {
+    "name": "comment_style/hashbang_after_interstitial",
+    "source": "/* c */ #!b\n1",
+    "why": "seenFirstFodder is assigned inside the `Kind != FodderInterstitial` branch, so an interstitial does not count as having been seen and the #! after it is still spared. Note the #! has to be on the SAME line: a newline between them would emit its own commentless LineEnd, and that would set the flag."
+  },
+  {
+    "name": "comment_style/hashbang_after_paragraph",
+    "source": "/* a\n   b */\n#!c\n1",
+    "why": "Converted, and not for the obvious reason. addFodderSafe puts a synthetic commentless LineEnd in front of a paragraph appended to empty fodder (the FodderAppend rule src/lexer.rs documents), and it is that element which sets the flag before the paragraph is ever examined."
+  },
+  {
+    "name": "comment_style/hashbang_after_blank_line",
+    "source": "\n#!a\n1",
+    "why": "THE FLAG IS SET OUTSIDE THE len(Comment) == 1 CHECK: a leading newline is a commentless LineEnd, nothing about it can be rewritten, and it still counts as fodder seen — so one blank line at the top of a file disables the hashbang carve-out."
+  },
+  {
+    "name": "comment_style/interstitial_c_comment",
+    "source": "local x = /* c */ 1; x",
+    "why": "An interstitial has to be a C comment, so under CommentStyleSlash there is nothing to do — and the element must not set the flag either."
+  },
+  {
+    "name": "comment_style/paragraph_c_comment",
+    "source": "/* a\n   b */\n1",
+    "why": "len(Comment) is 2, so the rewrite is skipped entirely. A multi-line comment is never restyled, in either direction."
+  },
+  {
+    "name": "comment_style/two_hash_lines",
+    "source": "# a\n# b\n1",
+    "why": "Two elements, each with one comment: both rewritten, and neither merged into the other."
+  },
+  {
+    "name": "comment_style/hash_mid_file",
+    "source": "{\n  a: 1,  # c\n  b: 2,\n}",
+    "why": "Not every comment is at the top of the file; this one is in an object field's comma fodder."
+  },
+  {
+    "name": "comment_style/hash_in_final_fodder",
+    "source": "1\n# c\n",
+    "why": "Base.File visits the final fodder after the root node, so a trailing comment is reached."
+  },
+  {
+    "name": "comment_style/hash_in_in_super_fodder",
+    "source": "{ a: 'b' # c\n in super }",
+    "why": "A TRAVERSAL HOLE WITH A VISIBLE CONSEQUENCE: Base.InSuper visits only the index, so InFodder is never reached and this # survives tk fmt."
+  },
+  {
+    "name": "comment_style/hash_in_index_id_fodder",
+    "source": "a.  # c\n  b",
+    "why": "The second hole: Index's RightBracketFodder doubles as the fodder before an identifier, and Base.Index skips it when Id is set. So this # survives too."
+  },
+  {
+    "name": "comment_style/hash_in_super_index_id_fodder",
+    "source": "{ a: super.  # c\n  b }",
+    "why": "The contrast that makes the previous one a hole rather than a rule: Base.SuperIndex visits IdFodder unconditionally, so the same comment in the same position is rewritten here."
+  },
+  {
+    "name": "comment_style/hash_in_parameter_eq_fodder",
+    "source": "function(x  # c\n  = 1) x",
+    "why": "EqFodder is visited only where the parameter has a default, and this one does, so the comment is reached. Without the default there is no = for a comment to sit before."
+  },
+  {
+    "name": "comment_style/hashbang_after_slash_comment",
+    "source": "// a\n#!b\n1",
+    "why": "A comment already in the target style is not rewritten but does set the flag, so the #! after it is converted. The pair with hashbang_after_interstitial: what matters is the element's kind, not whether anything changed."
+  },
+  {
+    "name": "max_blank_lines/three_blanks_between_fields",
+    "source": "{\n  a: 1,\n\n\n\n  b: 2,\n}",
+    "why": "Four newlines are one LineEnd with blanks=3, clamped to 2. The base case."
+  },
+  {
+    "name": "max_blank_lines/exactly_two_blanks",
+    "source": "{\n  a: 1,\n\n\n  b: 2,\n}",
+    "why": "blanks == MaxBlankLines, so the strict `>` leaves it. A graded no-op."
+  },
+  {
+    "name": "max_blank_lines/one_blank",
+    "source": "{\n  a: 1,\n\n  b: 2,\n}",
+    "why": "Under the limit. No-op."
+  },
+  {
+    "name": "max_blank_lines/ten_blanks",
+    "source": "{\n  a: 1,\n\n\n\n\n\n\n\n\n\n\n  b: 2,\n}",
+    "why": "A long run collapses to exactly 2, not to 2 per newline: blanks is a count on one element, not a run of elements."
+  },
+  {
+    "name": "max_blank_lines/leading_blanks",
+    "source": "\n\n\n\n1",
+    "why": "The file's opening fodder. In the pipeline removeInitialNewlines (step 2) deletes this before the pass (step 3) can see it; the oracle runs each pass on a fresh parse, so here it is clamped instead. That difference is the whole reason those two steps' order is load-bearing."
+  },
+  {
+    "name": "max_blank_lines/trailing_blanks_in_final_fodder",
+    "source": "1\n\n\n\n",
+    "why": "base::file visits the final fodder, so it is clamped to 2 — and then removeExtraTrailingNewlines (step 14) zeroes it anyway. Both steps touch this one element, in that order."
+  },
+  {
+    "name": "max_blank_lines/blanks_after_a_paragraph_comment",
+    "source": "// c\n\n\n\n1",
+    "why": "A Paragraph carries the blanks that follow its comment, and the kind guard excludes only interstitials, so a paragraph is clamped like a line end."
+  },
+  {
+    "name": "max_blank_lines/blanks_before_a_paragraph_comment",
+    "source": "{\n  a: 1,\n\n\n\n  // c\n  b: 2,\n}",
+    "why": "Here the blanks are on the LineEnd ahead of the paragraph rather than on it."
+  },
+  {
+    "name": "max_blank_lines/interstitial_between_blank_runs",
+    "source": "[\n\n\n\n  /* c */\n\n\n\n  1,\n]",
+    "why": "The interstitial is skipped by kind and could not carry blanks anyway — the model forbids them. The line ends either side of it are clamped."
+  },
+  {
+    "name": "max_blank_lines/in_super_fodder_is_out_of_reach",
+    "source": "{ a: 'b'\n\n\n\n  in super }",
+    "why": "InSuper's in_fodder is one of the four slots pass::base never visits, so tk fmt leaves this run of blanks exactly as written. FixIndentation does reach it, because it is not an ASTPass and walks the tree itself."
+  },
+  {
+    "name": "max_blank_lines/index_id_fodder_is_out_of_reach",
+    "source": "a.\n\n\n\n  b",
+    "why": "Index's right_bracket_fodder, doubling as the fodder before an identifier: the second of the two unvisited slots that can hold blanks."
+  },
+  {
+    "name": "max_blank_lines/super_index_id_fodder_is_reached",
+    "source": "{ a: super.\n\n\n\n  b }",
+    "why": "The contrast that makes the Index case a hole rather than a rule: base::super_index visits id_fodder unconditionally, so this one is clamped."
+  },
+  {
+    "name": "max_blank_lines/parameter_eq_fodder_is_reached_with_a_default",
+    "source": "function(x\n\n\n\n  = 1) x",
+    "why": "eq_fodder is visited only where there is a default — and without one there is no `=` for fodder to precede, which is why that unvisited slot is unobservable here."
+  },
+  {
+    "name": "max_blank_lines/tail_strict_fodder_is_reached",
+    "source": "f(1)\n\n\n\ntailstrict",
+    "why": "Same shape: tail_strict_fodder is skipped unless `tailstrict` is present, and without it the slot is empty. So only two of the four holes matter to this pass."
+  },
+  {
+    "name": "max_blank_lines/blanks_in_a_local_bind",
+    "source": "local x =\n\n\n\n  1;\nx",
+    "why": "A bind's eq_fodder, reached through base::local."
+  },
+  {
+    "name": "max_blank_lines/blanks_in_call_arguments",
+    "source": "f(\n\n\n\n  1,\n\n\n\n  2\n)",
+    "why": "An argument's opening fodder and the fodder before the closing paren."
+  },
+  {
+    "name": "fix_newlines/array_expand_from_an_element",
+    "source": "[1,\n  2, 3]",
+    "why": "One element on a new line expands them all, and the close bracket too."
+  },
+  {
+    "name": "fix_newlines/array_expand_from_the_close_bracket",
+    "source": "[1, 2, 3\n]",
+    "why": "CloseFodder alone is enough to expand every element."
+  },
+  {
+    "name": "fix_newlines/array_stays_unexpanded",
+    "source": "[1, 2, 3]",
+    "why": "Nothing designated holds a newline, so nothing is added. No-op."
+  },
+  {
+    "name": "fix_newlines/array_shallow_over_a_nested_object",
+    "source": "[{\n  a: 'b',\n  c: 'd',\n}]",
+    "why": "Upstream's own doc-comment example: the outer array stays unexpanded because the newlines are inside the braces, not between `[` and `{`."
+  },
+  {
+    "name": "fix_newlines/array_empty_with_a_newline",
+    "source": "[\n]",
+    "why": "No elements, so only CloseFodder is consulted — and it already has a clean newline, so this is a no-op."
+  },
+  {
+    "name": "fix_newlines/array_element_after_an_interstitial",
+    "source": "[1, /* c */ 2\n]",
+    "why": "FodderEnsureCleanNewline appends to fodder ending in an interstitial rather than replacing it, so the comment keeps its place and the element moves below it."
+  },
+  {
+    "name": "fix_newlines/array_interstitials_only_do_not_count",
+    "source": "[/* a */ 1, /* b */ 2]",
+    "why": "FodderCountNewlines scores an interstitial 0, so a line full of them leaves the array unexpanded. No-op."
+  },
+  {
+    "name": "fix_newlines/array_paragraph_counts",
+    "source": "[1,  // c\n  2, 3]",
+    "why": "A trailing `//` comment is a Paragraph, whose count is comment lines plus blanks and so is at least 1. The array expands."
+  },
+  {
+    "name": "fix_newlines/object_expand_from_a_field",
+    "source": "{ a: 1,\n  b: 2 }",
+    "why": "Fodder1 of a non-first field carries the newline."
+  },
+  {
+    "name": "fix_newlines/object_expand_from_the_close_brace",
+    "source": "{ a: 1, b: 2\n}",
+    "why": "CloseFodder alone expands every field."
+  },
+  {
+    "name": "fix_newlines/object_stays_unexpanded",
+    "source": "{ a: 1, b: 2 }",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/object_field_str_reads_the_expression_fodder",
+    "source": "{ 'a': 1,\n  'b': 2 }",
+    "why": "objectFieldOpenFodder switches on the kind: an ObjectFieldStr has no Fodder1, so it reads openFodder(Expr1) instead. Get that wrong and an object of quoted fields never expands."
+  },
+  {
+    "name": "fix_newlines/object_field_str_mixed_with_an_id",
+    "source": "{ a: 1, 'b': 2\n}",
+    "why": "One field of each kind, so both branches of objectFieldOpenFodder run over the same node."
+  },
+  {
+    "name": "fix_newlines/object_local_field",
+    "source": "{ local x = 1,\n  a: x }",
+    "why": "An ObjectLocal takes the Fodder1 branch."
+  },
+  {
+    "name": "fix_newlines/object_assert_field",
+    "source": "{ assert true,\n  a: 1 }",
+    "why": "So does an ObjectAssert."
+  },
+  {
+    "name": "fix_newlines/local_expand_from_the_first_bind",
+    "source": "local\n  x = 1, y = 2;\nx",
+    "why": "shouldExpand is computed over every bind including the first, but the rewrite skips i == 0 — so the first bind's newline expands the others while the first is left exactly as written."
+  },
+  {
+    "name": "fix_newlines/local_expand_from_a_later_bind",
+    "source": "local x = 1,\n  y = 2, z = 3;\nx",
+    "why": "y's newline expands z; x is skipped by the i > 0 guard even though it has no newline of its own."
+  },
+  {
+    "name": "fix_newlines/local_single_bind_is_a_no_op",
+    "source": "local\n  x = 1;\nx",
+    "why": "shouldExpand is true and the loop body never runs, because the only bind is i == 0. A no-op, and not the same kind of no-op as having nothing to expand."
+  },
+  {
+    "name": "fix_newlines/local_stays_unexpanded",
+    "source": "local x = 1, y = 2; x",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/parens_expand_from_the_inside",
+    "source": "(\n  1)",
+    "why": "The inner expression's newline pulls the close paren onto its own line."
+  },
+  {
+    "name": "fix_newlines/parens_expand_from_the_close",
+    "source": "(1\n)",
+    "why": "And the reverse."
+  },
+  {
+    "name": "fix_newlines/parens_flat",
+    "source": "(1)",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/params_near_parens_from_the_first",
+    "source": "function(\n  a, b) 1",
+    "why": "A newline before the first parameter sets shouldExpandNearParens only, so the close paren moves and `b` does not."
+  },
+  {
+    "name": "fix_newlines/params_between_from_a_later_one",
+    "source": "function(a,\n  b, c) 1",
+    "why": "A newline before a non-first parameter sets shouldExpandBetween only, so b and c expand and neither `a` nor the close paren does."
+  },
+  {
+    "name": "fix_newlines/params_near_parens_from_the_close",
+    "source": "function(a, b\n) 1",
+    "why": "A newline before `)` is the other way into shouldExpandNearParens, and it expands the first parameter but not the second."
+  },
+  {
+    "name": "fix_newlines/params_both",
+    "source": "function(\n  a,\n  b, c) 1",
+    "why": "Both flags set at once: everything expands."
+  },
+  {
+    "name": "fix_newlines/params_none",
+    "source": "function(\n) 1",
+    "why": "With no parameters the loops do nothing and only `r` is consulted — and it already has a clean newline. No-op."
+  },
+  {
+    "name": "fix_newlines/params_default_arg",
+    "source": "function(a,\n  b = 2) 1",
+    "why": "NameFodder is what is measured, never EqFodder."
+  },
+  {
+    "name": "fix_newlines/args_positional_between",
+    "source": "f(1,\n  2, 3)",
+    "why": "Upstream's `f(1, 2,` / `3)` example: the newline is between arguments, so they line up and the close paren stays put."
+  },
+  {
+    "name": "fix_newlines/args_positional_near_parens",
+    "source": "f(\n  1, 2, 3)",
+    "why": "Upstream's `foo(` / `1, 2, 3)` example: the close paren moves instead."
+  },
+  {
+    "name": "fix_newlines/args_named_between",
+    "source": "f(a=1,\n  b=2, c=3)",
+    "why": "The named loop reads NameFodder, and `first` is shared with the positional loop above it."
+  },
+  {
+    "name": "fix_newlines/args_named_only_first",
+    "source": "f(\n  a=1, b=2)",
+    "why": "With no positional arguments the first *named* one is what `first` protects."
+  },
+  {
+    "name": "fix_newlines/args_mixed_newline_before_a_named",
+    "source": "f(1,\n  a=2, b=3)",
+    "why": "`first` is consumed by the positional argument, so the named `a` counts as non-first and sets shouldExpandBetween. The positional stays."
+  },
+  {
+    "name": "fix_newlines/args_mixed_newline_before_the_positional",
+    "source": "f(\n  1, a=2)",
+    "why": "The mirror: the positional is first, so this is nearParens, and the named argument is not expanded."
+  },
+  {
+    "name": "fix_newlines/args_none",
+    "source": "f(\n)",
+    "why": "No arguments, so only `r` is consulted. No-op."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_the_for",
+    "source": "[x\n  for x in [1]]",
+    "why": "ForFodder's newline expands the body, every spec and the close bracket."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_the_body",
+    "source": "[\n  x for x in [1]]",
+    "why": "openFodder(Body) is the other trigger."
+  },
+  {
+    "name": "fix_newlines/array_comp_expand_from_an_if",
+    "source": "[x for x in [1]\n  if x]",
+    "why": "shouldExpandSpec also reads each condition's IfFodder."
+  },
+  {
+    "name": "fix_newlines/array_comp_nested_for_expands_both",
+    "source": "[x for x in [1]\n  for y in [2]]",
+    "why": "The leftmost `for` is the outermost, so the newline here is on the inner spec; shouldExpandSpec recurses through Outer and ensureSpecExpanded then expands both."
+  },
+  {
+    "name": "fix_newlines/array_comp_flat",
+    "source": "[x for x in [1]]",
+    "why": "No-op."
+  },
+  {
+    "name": "fix_newlines/object_comp_expand",
+    "source": "{ [x]: x\n  for x in [1] }",
+    "why": "The object-comprehension path: fields, then the spec, then the brace."
+  },
+  {
+    "name": "fix_newlines/object_comp_flat",
+    "source": "{ [x]: x for x in [1] }",
+    "why": "No-op."
+  },
+  {
+    "name": "indentation/already_correct",
+    "source": "{\n  a: 1,\n}",
+    "why": "The case that matters most for a formatter that writes in place: a tk-fmt-clean file has to come back untouched. No-op."
+  },
+  {
+    "name": "indentation/tab_indented",
+    "source": "{\n\ta: 1,\n}",
+    "why": "The lexer counts a tab as 8, so this arrives as indent=8 and has to become 2. Indentation is the one thing the parse/unparse round trip does not regenerate for free."
+  },
+  {
+    "name": "indentation/over_indented",
+    "source": "{\n      a: 1,\n}",
+    "why": "Six spaces down to two."
+  },
+  {
+    "name": "indentation/under_indented",
+    "source": "{\na: 1,\n}",
+    "why": "Zero up to two."
+  },
+  {
+    "name": "indentation/nested_objects",
+    "source": "{\n a: {\n   b: {\n  c: 1,\n     },\n  },\n}",
+    "why": "Three levels, every one of them wrong, so each `base + Indent` step is observable separately."
+  },
+  {
+    "name": "indentation/array_lines_up_after_the_bracket",
+    "source": "[1,\n2]",
+    "why": "The first element is on the bracket's line, so newIndent lines up at the column after `[` rather than resetting to base + Indent."
+  },
+  {
+    "name": "indentation/array_resets_when_the_first_element_is_on_a_new_line",
+    "source": "[\n1,\n2]",
+    "why": "firstFodder starts with a LineEnd, so newIndent takes the reset branch and nothing lines up."
+  },
+  {
+    "name": "indentation/array_strong_indent",
+    "source": "[1,\n2,\n3]",
+    "why": "A later element preceded by a newline turns on strongIndent, so newIndentStrong makes the line-up column the new *base* as well — which changes what sub-expressions inside the elements indent from."
+  },
+  {
+    "name": "indentation/array_strong_indent_nested",
+    "source": "[{\n  a: 1,\n},\n{\n  b: 2,\n}]",
+    "why": "strongIndent with sub-objects, which is where base != lineUp shows."
+  },
+  {
+    "name": "indentation/array_close_bracket_takes_the_base",
+    "source": "[\n1,\n2\n]",
+    "why": "fillLast gives the closing bracket's own element currIndent.base while every element before it gets newIndent.lineUp. Two answers in one fodder."
+  },
+  {
+    "name": "indentation/array_close_bracket_with_two_comments",
+    "source": "[\n  1,\n  // c\n\n  // d\n]",
+    "why": "Two paragraphs in CloseFodder, so setIndents's all-but-last split is observable: the first takes newIndent.lineUp and only the second takes currIndent.base."
+  },
+  {
+    "name": "indentation/apply_lines_up_under_the_paren",
+    "source": "foobar(1,\n2)",
+    "why": "The `indent` struct's own doc example: at the `2` the indent is base 0, lineUp 11."
+  },
+  {
+    "name": "indentation/apply_resets_after_a_newline",
+    "source": "foobar(\n1, 2)",
+    "why": "firstFodder is the first argument's and it has a newline, so the arguments reset to base + Indent instead of lining up under the paren."
+  },
+  {
+    "name": "indentation/apply_strong_indent",
+    "source": "foobar(1,\n2,\n3)",
+    "why": "A non-first argument with a newline selects newIndentStrong."
+  },
+  {
+    "name": "indentation/apply_named_args",
+    "source": "foobar(a=1,\nb=2)",
+    "why": "firstFodder is taken from Named only when Positional is empty — the Positional loop runs second and overwrites it."
+  },
+  {
+    "name": "indentation/apply_mixed_args_first_fodder",
+    "source": "foobar(1,\na=2)",
+    "why": "With both kinds present the positional wins firstFodder, and `first` is shared across the two strongIndent loops."
+  },
+  {
+    "name": "indentation/apply_close_paren_takes_the_base",
+    "source": "foobar(\n1,\n2\n)",
+    "why": "Apply's fillLast ends on currIndent.base where params ends on currIndent.lineUp. The pair is easy to transpose and this snippet is what tells them apart."
+  },
+  {
+    "name": "indentation/apply_tailstrict",
+    "source": "foobar(1)\n  tailstrict",
+    "why": "TailStrictFodder is filled at currIndent.base, and the column then advances by 10."
+  },
+  {
+    "name": "indentation/apply_chained",
+    "source": "foo(1)(\n2)(\n3)",
+    "why": "Apply is left-recursive, so separateToken is false and align carries the target's own fodder rather than the node's."
+  },
+  {
+    "name": "indentation/params_close_paren_takes_the_line_up",
+    "source": "function(\na,\nb\n) 1",
+    "why": "The other half of the Apply pairing above: params's fillLast ends on currIndent.lineUp."
+  },
+  {
+    "name": "indentation/params_default_arg_has_no_spacing",
+    "source": "function(a,\nb=2) 1",
+    "why": "EqFodder is filled with crowded and separateToken both false and the column advances by exactly 1 — `x=e`, no spaces around it."
+  },
+  {
+    "name": "indentation/params_empty",
+    "source": "function(\n) 1",
+    "why": "With no parameters firstInside is fodderR, so newIndent is computed from the very fodder fillLast is about to rewrite."
+  },
+  {
+    "name": "indentation/binary_align_op_on_the_first_line",
+    "source": "1 +\n2",
+    "why": "OpFodder has no newline but the right side does, so alignStrong is selected rather than align."
+  },
+  {
+    "name": "indentation/binary_align_op_on_the_second_line",
+    "source": "1\n+ 2",
+    "why": "The other half of the same condition: here OpFodder carries the newline."
+  },
+  {
+    "name": "indentation/binary_no_newlines",
+    "source": "1 + 2",
+    "why": "align, taking its reset branch, which returns `old` unchanged. No-op."
+  },
+  {
+    "name": "indentation/binary_chain_keeps_one_indent",
+    "source": "true &&\ntrue &&\ntrue",
+    "why": "Upstream deliberately does not compute a new indent for the right side, so a chain does not stair-step."
+  },
+  {
+    "name": "indentation/binary_deep_left",
+    "source": "1 *\n2 +\n3",
+    "why": "Left-recursive through two Binary nodes, so openFodder has to reach the leftmost leaf."
+  },
+  {
+    "name": "indentation/conditional_uses_the_base",
+    "source": "if a\nthen b\nelse c",
+    "why": "ThenFodder and ElseFodder are filled at currIndent.base, not lineUp, while each branch gets its own newIndent at column + 1."
+  },
+  {
+    "name": "indentation/conditional_nested",
+    "source": "if a then\nif b then\nc else\nd else\ne",
+    "why": "Nested conditionals, where base and lineUp diverge."
+  },
+  {
+    "name": "indentation/conditional_no_else",
+    "source": "if a then\nb",
+    "why": "BranchFalse absent, so ElseFodder is never filled."
+  },
+  {
+    "name": "indentation/local_binds_line_up",
+    "source": "local x = 1,\ny = 2;\nx",
+    "why": "newIndent comes from the *first* bind's VarFodder at column + 1, and every later bind is filled from it."
+  },
+  {
+    "name": "indentation/local_bind_body_indents_from_the_bind",
+    "source": "local x =\n1;\nx",
+    "why": "newIndent2 is computed with `newIndent` as its old rather than currIndent — the one place in this pass that chains instead of resetting from the node."
+  },
+  {
+    "name": "indentation/local_close_fodder_takes_the_base",
+    "source": "local x =\n1\n,\ny = 2;\nx",
+    "why": "fillLast on a bind's CloseFodder: newIndent2.lineUp for all but the last element and currIndent.base for the last."
+  },
+  {
+    "name": "indentation/local_function_bind",
+    "source": "local f(a,\nb) = a;\nf(1, 2)",
+    "why": "A bind's Fun goes through params with `newIndent`, not currIndent."
+  },
+  {
+    "name": "indentation/local_body_takes_the_outer_indent",
+    "source": "local x = 1;\n{\na: x,\n}",
+    "why": "The body is visited with currIndent, so a `local` at the top of a file does not indent what follows it."
+  },
+  {
+    "name": "indentation/object_field_id",
+    "source": "{\na: 1,\nb: 2,\n}",
+    "why": "The ObjectFieldID branch fills Fodder1 at the `newIndent` int, which is the object's newIndent.lineUp — not at currIndent.base."
+  },
+  {
+    "name": "indentation/object_local_field_uses_curr_indent",
+    "source": "{\nlocal x =\n1,\na: x,\n}",
+    "why": "ObjectLocal fills at currIndent.lineUp where ObjectFieldID fills at the `newIndent` int. They happen to agree here, which is exactly why a transposition would survive most inputs."
+  },
+  {
+    "name": "indentation/object_field_expr",
+    "source": "{\n[\n'a'\n]: 1,\n}",
+    "why": "The computed-name branch: Expr1 is visited with currIndent and Fodder2 is filled at newIndent."
+  },
+  {
+    "name": "indentation/object_field_str",
+    "source": "{\n'a': 1,\n'b': 2,\n}",
+    "why": "ObjectFieldStr has no Fodder1 at all; the name expression is visited with currIndent and carries the crowded flag instead."
+  },
+  {
+    "name": "indentation/object_assert_visits_the_condition_with_curr_indent",
+    "source": "{\nassert\ntrue\n: 'm',\n}",
+    "why": "The oddity: newIndent2 is computed from openFodder(Expr2) at column + 1, then Expr2 is visited with **currIndent** and only Expr3 gets newIndent2. The top-level Assert node visits its condition with the new indent, so the two disagree."
+  },
+  {
+    "name": "indentation/object_method",
+    "source": "{\nf(a,\nb): 1,\n}",
+    "why": "fieldParams runs params with currIndent, inside a field whose own fills use the newIndent int."
+  },
+  {
+    "name": "indentation/object_close_brace_takes_the_base",
+    "source": "{\na: 1,\nb: 2\n}",
+    "why": "fillLast on CloseFodder, with PadObjects true so the line-up column is one past the brace."
+  },
+  {
+    "name": "indentation/object_pad_objects_shifts_the_line_up",
+    "source": "{ a: 1,\nb: 2 }",
+    "why": "PadObjects is true under DefaultOptions, so the first field is crowded and newColumn is incremented before newIndent is taken."
+  },
+  {
+    "name": "indentation/object_empty_with_a_newline",
+    "source": "{\n}",
+    "why": "No fields, so firstFodder is CloseFodder and `fields` does nothing."
+  },
+  {
+    "name": "indentation/object_comp",
+    "source": "{\n[x]: x\nfor x in [1]\n}",
+    "why": "ObjectComp passes crowded=true to fillLast unconditionally, where Object passes len(Fields) > 0."
+  },
+  {
+    "name": "indentation/array_comp",
+    "source": "[\nx\nfor x in [1]\n]",
+    "why": "specs walks Outer first, so the fors come out in source order."
+  },
+  {
+    "name": "indentation/array_comp_nested_for",
+    "source": "[\nx\nfor x in [1]\nfor y in [2]\n]",
+    "why": "Two specs, and the recursion in specs is what puts them at one indent rather than stair-stepping."
+  },
+  {
+    "name": "indentation/comp_if_revisits_the_for_expression",
+    "source": "[x for x in [1,\n2] if x]",
+    "why": "UPSTREAM BUG, reproduced. The conditions loop in `specs` computes its indent from openFodder(spec.Expr) and then calls Visit(spec.Expr) — the `for` expression, not cond.Expr. So this array is indented twice, at two different columns, and the second answer wins."
+  },
+  {
+    "name": "indentation/comp_if_condition_is_never_visited",
+    "source": "[x for x in [1] if\n      true]",
+    "why": "The other half of the same bug: cond.Expr is never visited at all, so the six spaces before `true` survive untouched. Only IfFodder is filled."
+  },
+  {
+    "name": "indentation/parens_are_strong",
+    "source": "(1 +\n2)",
+    "why": "Parens is the only node that calls newIndentStrong unconditionally, so everything inside indents from the column after `(`."
+  },
+  {
+    "name": "indentation/parens_close_takes_the_base",
+    "source": "(\n1\n)",
+    "why": "fillLast again: newIndent.lineUp, then currIndent.base for the last element."
+  },
+  {
+    "name": "indentation/index_by_id",
+    "source": "a.\nb",
+    "why": "The Id branch takes newIndent *from* RightBracketFodder and then fills that same slot from it, so the order of those two lines matters."
+  },
+  {
+    "name": "indentation/index_by_expression",
+    "source": "a[\n'b'\n]",
+    "why": "The bracket branch, whose fillLast ends on currIndent.base."
+  },
+  {
+    "name": "indentation/super_index_by_id",
+    "source": "{ a: super.\nb }",
+    "why": "The same doubled slot under a different name — IDFodder here."
+  },
+  {
+    "name": "indentation/super_index_by_expression",
+    "source": "{ a: super[\n'b'\n] }",
+    "why": "And its bracket branch."
+  },
+  {
+    "name": "indentation/in_super_is_reached_here",
+    "source": "{ a: 'b'\n      in super }",
+    "why": "InFodder and SuperFodder are two of the four slots pass::base never visits — but FixIndentation is not an ASTPass, so it fills both. That asymmetry is why a comment there survives EnforceCommentStyle and is still re-indented."
+  },
+  {
+    "name": "indentation/slice_begin_and_end",
+    "source": "a[1:\n2]",
+    "why": "EndColonFodder supplies newIndent when EndIndex is present."
+  },
+  {
+    "name": "indentation/slice_step_without_an_end",
+    "source": "a[1::\n2]",
+    "why": "Step with no EndIndex: the EndColonFodder branch runs inside the Step branch instead, and newIndent is assigned there."
+  },
+  {
+    "name": "indentation/slice_bare_colon",
+    "source": "a[\n:\n]",
+    "why": "All three absent, which is the fourth and otherwise unreachable branch."
+  },
+  {
+    "name": "indentation/slice_all_three",
+    "source": "a[1:\n2:\n3]",
+    "why": "newIndent is reassigned as the branches run, so the step indents from the end index's answer."
+  },
+  {
+    "name": "indentation/slice_right_bracket_is_never_filled",
+    "source": "a[1:2\n      ]",
+    "why": "A hole: the Slice case fills LeftBracketFodder and each colon's fodder and never touches RightBracketFodder, so a newline before a slice's `]` keeps whatever indent it was lexed with. Every other bracketed node calls fillLast there."
+  },
+  {
+    "name": "indentation/unary",
+    "source": "-\n1",
+    "why": "newIndent from the operand's fodder at the column after the operator."
+  },
+  {
+    "name": "indentation/unary_of_dollar_is_crowded",
+    "source": "{ a: -\n$.b }",
+    "why": "leftRecursiveDeep(Expr) is a Dollar, so the operand is visited as crowded — the one place this pass asks what the leftmost leaf *is* rather than what fodder it holds."
+  },
+  {
+    "name": "indentation/unary_of_a_var_is_not_crowded",
+    "source": "{ a: -\nb }",
+    "why": "The contrast: not a Dollar, so crowded is false and the column model differs by one."
+  },
+  {
+    "name": "indentation/error_expression",
+    "source": "error\n'x'",
+    "why": "column += 5, then newIndent at column + 1 for the space after `error`."
+  },
+  {
+    "name": "indentation/assert_expression",
+    "source": "assert\ntrue\n: 'm';\n1",
+    "why": "The top-level Assert: Cond does get newIndent here, unlike the object assert above, and Rest is visited with currIndent."
+  },
+  {
+    "name": "indentation/assert_without_a_message",
+    "source": "assert\ntrue;\n1",
+    "why": "Message absent, so ColonFodder is never filled."
+  },
+  {
+    "name": "indentation/import",
+    "source": "import\n'x.libsonnet'",
+    "why": "column += 6, and the file is then visited as an ordinary node."
+  },
+  {
+    "name": "indentation/importstr",
+    "source": "importstr\n'x'",
+    "why": "column += 9, which importbin shares and import does not."
+  },
+  {
+    "name": "indentation/importbin",
+    "source": "importbin\n'x'",
+    "why": "The third keyword width."
+  },
+  {
+    "name": "indentation/function_body",
+    "source": "function(a)\na",
+    "why": "The body's newIndent is taken at column + 1, after params has advanced the column past the closing paren."
+  },
+  {
+    "name": "indentation/apply_brace",
+    "source": "{ a: 1 }\n{ b: 2 }",
+    "why": "ApplyBrace aligns on the left operand and visits the right as crowded."
+  },
+  {
+    "name": "indentation/block_string_indents_are_rewritten",
+    "source": "{\n  a: |||\n      x\n  |||,\n}",
+    "why": "StringBlock is the only case where this pass edits the AST rather than fodder: BlockIndent becomes base + Indent spaces and BlockTermIndent becomes base spaces, whatever the author wrote. It also *assigns* the column rather than adding to it."
+  },
+  {
+    "name": "indentation/block_string_at_the_top_level",
+    "source": "|||\n  x\n|||",
+    "why": "base is 0 here, so BlockTermIndent becomes the empty string."
+  },
+  {
+    "name": "indentation/block_string_nested_deeper",
+    "source": "{\n  a: {\n    b: |||\n        x\n    |||,\n  },\n}",
+    "why": "base is further along by this point, so the two indents come out larger."
+  },
+  {
+    "name": "indentation/string_column_counts_bytes",
+    "source": "['ééé',\n1]",
+    "why": "StringSingle advances the column by 2 + len(Value) in *bytes*, so three two-byte characters count six. The next element lines up from that."
+  },
+  {
+    "name": "indentation/verbatim_string_column_counts_runes",
+    "source": "[@'ééé',\n1]",
+    "why": "The verbatim branches loop over runes instead, adding 1 each — so the same three characters count three. Bytes there, runes here, in one match."
+  },
+  {
+    "name": "indentation/verbatim_string_doubles_quotes",
+    "source": "[@'a''b',\n1]",
+    "why": "A quote inside a verbatim string costs 2 columns, because the unparser will write it doubled."
+  },
+  {
+    "name": "indentation/interstitial_advances_the_column",
+    "source": "[/* a long comment */ 1,\n2]",
+    "why": "fillLast models the unparser's column bookkeeping: an interstitial adds its comment's byte length, plus one for the space when crowded."
+  },
+  {
+    "name": "indentation/interstitial_then_line_end",
+    "source": "[1, /* c */\n2]",
+    "why": "A LineEnd after an interstitial *assigns* the column from the indent, discarding everything the interstitial added."
+  },
+  {
+    "name": "indentation/final_fodder_is_zeroed",
+    "source": "1\n      // c\n",
+    "why": "VisitFile ends with setIndents(finalFodder, 0, 0), so a comment after the last token is flushed left however it was written."
+  },
+  {
+    "name": "indentation/literal_widths",
+    "source": "[true,\nfalse,\nnull,\n1.25,\n]",
+    "why": "The four fixed column widths — 4, 5, 4, and the number's original string."
+  },
+  {
+    "name": "indentation/deeply_mixed",
+    "source": "local f(x) = {\n  ['k' + x]: [\n  x,\n    {\n y: x,\n  },\n  ],\n};\nf(\n1,\n)",
+    "why": "One snippet through most of the branches at once, as an integration case rather than a unit one."
+  },
+  {
+    "name": "fix_parens/single",
+    "source": "(1)",
+    "why": "One pair of parens is not redundant. The no-op is graded too."
+  },
+  {
+    "name": "fix_parens/double",
+    "source": "((1))",
+    "why": "The pass exists for this: the inner Parens is spliced out and the outer keeps its place."
+  },
+  {
+    "name": "fix_parens/triple",
+    "source": "(((1)))",
+    "why": "The `if` is not a loop, so exactly one level goes: P1.Inner becomes P3 and the walk moves on to P3, which has a literal inside it. So `jsonnetfmt` is not a fixed point here either -- formatting the answer again removes another pair."
+  },
+  {
+    "name": "fix_parens/quad",
+    "source": "((((1))))",
+    "why": "Four levels halve to two: P1 absorbs P2, then the walk reaches P3 and it absorbs P4."
+  },
+  {
+    "name": "fix_parens/double_inner_open_comment",
+    "source": "( /* a */ (1))",
+    "why": "The comment between the two `(` is the *inner* Parens' own fodder, and FodderMoveFront puts it in front of the outer's -- so it ends up outside the surviving paren."
+  },
+  {
+    "name": "fix_parens/double_outer_and_inner_open_comment",
+    "source": "/* x */ ( /* a */ (1))",
+    "why": "Both slots are occupied, so the move concatenates and the two comments come out in the other order."
+  },
+  {
+    "name": "fix_parens/double_close_comments",
+    "source": "((1 /* a */) /* b */)",
+    "why": "The close-fodder move, with both slots occupied."
+  },
+  {
+    "name": "fix_parens/double_inner_close_only",
+    "source": "((1) /* b */)",
+    "why": "The inner close fodder is empty, so the outer's is left as it was. A move from an empty slot is the common case."
+  },
+  {
+    "name": "fix_parens/double_multiline",
+    "source": "(\n  (1)\n)",
+    "why": "A line end before the inner `(` and before the outer `)`, so both moves carry a LineEnd."
+  },
+  {
+    "name": "fix_parens/double_newline_between_opens",
+    "source": "(\n  (1))",
+    "why": "Only the open-fodder move carries anything."
+  },
+  {
+    "name": "fix_parens/double_line_comment_between_opens",
+    "source": "( // a\n(1))",
+    "why": "A paragraph moved into empty fodder, which is where FodderAppend's synthetic LineEnd rule can fire."
+  },
+  {
+    "name": "fix_parens/double_comment_both_sides_of_seam",
+    "source": "// x\n( // a\n(1))",
+    "why": "Concat with a paragraph on each side of the seam: the invariant is enforced at exactly one element."
+  },
+  {
+    "name": "fix_parens/double_blank_lines_between_opens",
+    "source": "(\n\n  (1)\n)",
+    "why": "Blanks are a count on the moved element, not separate elements."
+  },
+  {
+    "name": "fix_parens/inner_not_parens",
+    "source": "((1) + 2)",
+    "why": "The outer's inner is a Binary whose left happens to be a Parens, which is not the shape this pass matches. A no-op."
+  },
+  {
+    "name": "fix_parens/parens_in_binary_left",
+    "source": "((1)) + 2",
+    "why": "The redundant pair is not the root, so the collapse has to happen wherever the walk finds it."
+  },
+  {
+    "name": "fix_parens/parens_in_binary_right",
+    "source": "2 + ((1))",
+    "why": "The same, on the other side."
+  },
+  {
+    "name": "fix_parens/in_object_field",
+    "source": "{ a: ((1)) }",
+    "why": "Reached through the object-field hook rather than from the root."
+  },
+  {
+    "name": "fix_parens/in_array",
+    "source": "[((1)), ((2))]",
+    "why": "Two collapses in one file."
+  },
+  {
+    "name": "fix_parens/apply_target",
+    "source": "((f))(1)",
+    "why": "The Parens is an Apply's target, so the enclosing node is left-recursive."
+  },
+  {
+    "name": "fix_parens/index_target",
+    "source": "((a)).b",
+    "why": "openFodder on a Parens is its own fodder -- Parens is not left-recursive -- even where its parent is."
+  },
+  {
+    "name": "fix_parens/double_around_object",
+    "source": "(({ a: 1 }))",
+    "why": "The inner expression is an Object, which is what the plus-object passes at step 7 will be looking at."
+  },
+  {
+    "name": "fix_parens/nested_deeper_inside",
+    "source": "((1 + (2)))",
+    "why": "The outer pair collapses and the unrelated `(2)` deeper in is untouched."
+  },
+  {
+    "name": "fix_parens/three_opens_with_comments",
+    "source": "( /* a */ ( /* b */ (1)))",
+    "why": "The collapse takes the middle Parens' comment outward and leaves the innermost one where it is."
+  },
+  {
+    "name": "fix_parens/double_in_local_bind",
+    "source": "local x = ((1)); x",
+    "why": "Through the local hook."
+  },
+  {
+    "name": "fix_parens/double_in_function_default",
+    "source": "function(x=((1))) x",
+    "why": "Through the parameters hook, which only descends into a default that exists."
+  },
+  {
+    "name": "remove_plus_object/var_plus_object",
+    "source": "a + { b: 1 }",
+    "why": "The pass's whole purpose: a Var on the left and an Object on the right becomes an ApplyBrace, so the `+` is not written."
+  },
+  {
+    "name": "remove_plus_object/index_plus_object",
+    "source": "a.b + { c: 1 }",
+    "why": "An Index on the left is the other accepted shape."
+  },
+  {
+    "name": "remove_plus_object/bracket_index_plus_object",
+    "source": "a['b'] + { c: 1 }",
+    "why": "The bracket form of Index, which is the same Go type."
+  },
+  {
+    "name": "remove_plus_object/dotted_chain_plus_object",
+    "source": "a.b.c + { d: 1 }",
+    "why": "An Index whose target is an Index."
+  },
+  {
+    "name": "remove_plus_object/index_of_apply_plus_object",
+    "source": "f().a + { b: 1 }",
+    "why": "The test is on the *outermost* node of the left side, so an Index over an Apply is accepted although an Apply is not."
+  },
+  {
+    "name": "remove_plus_object/object_plus_object",
+    "source": "{ a: 1 } + { b: 2 }",
+    "why": "NOT rewritten. Upstream restricts the left side to a Var or an Index -- 'Could relax this to allow more ASTs on the LHS but this seems OK for now' -- so this is the negative case that says the restriction is real."
+  },
+  {
+    "name": "remove_plus_object/apply_plus_object",
+    "source": "f() + { a: 1 }",
+    "why": "NOT rewritten: an Apply on the left is not accepted."
+  },
+  {
+    "name": "remove_plus_object/parens_plus_object",
+    "source": "(a) + { b: 1 }",
+    "why": "NOT rewritten: Parens is not Var, whatever it wraps."
+  },
+  {
+    "name": "remove_plus_object/slice_plus_object",
+    "source": "a[1:2] + { b: 1 }",
+    "why": "NOT rewritten: ast.Slice is a different type from ast.Index, and only Index is accepted."
+  },
+  {
+    "name": "remove_plus_object/super_index_plus_object",
+    "source": "{ x: super.a + { b: 1 } }",
+    "why": "NOT rewritten: ast.SuperIndex is its own type too."
+  },
+  {
+    "name": "remove_plus_object/self_plus_object",
+    "source": "{ x: self + { b: 1 } }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/dollar_plus_object",
+    "source": "{ x: $ + { b: 1 } }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/var_plus_array",
+    "source": "a + [1]",
+    "why": "NOT rewritten: the right side has to be an Object."
+  },
+  {
+    "name": "remove_plus_object/var_plus_object_comp",
+    "source": "a + { [k]: 1 for k in x }",
+    "why": "NOT rewritten: ast.ObjectComp is a different type from ast.Object, so a comprehension keeps its `+`."
+  },
+  {
+    "name": "remove_plus_object/var_plus_parenthesised_object",
+    "source": "a + ({ b: 1 })",
+    "why": "NOT rewritten: the right side is a Parens."
+  },
+  {
+    "name": "remove_plus_object/var_minus_object",
+    "source": "a - { b: 1 }",
+    "why": "NOT rewritten: the operator has to be `+`."
+  },
+  {
+    "name": "remove_plus_object/var_mult_object",
+    "source": "a * { b: 1 }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_interstitial",
+    "source": "a /* c */ + { b: 1 }",
+    "why": "The comment is the Binary's OpFodder, and the `+` it sat in front of is about to disappear -- so it moves to the front of the object's own fodder."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_line_end",
+    "source": "a\n+ { b: 1 }",
+    "why": "The line end before the `+` becomes the line end before the `{`. This is the shape the docsonnet corpus file has."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_and_object_fodder",
+    "source": "a\n+\n{ b: 1 }",
+    "why": "Both slots hold a LineEnd, so the move goes through FodderAppend's merge rule rather than a plain concatenation."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_comment_both",
+    "source": "a // x\n+ // y\n{ b: 1 }",
+    "why": "A comment on each side of the seam."
+  },
+  {
+    "name": "remove_plus_object/object_fodder_only",
+    "source": "a + /* c */ { b: 1 }",
+    "why": "The comment is after the `+`, so it is the object's fodder already and the (empty) move changes nothing."
+  },
+  {
+    "name": "remove_plus_object/chain_left_converts",
+    "source": "a + { b: 1 } + { c: 2 }",
+    "why": "Left-associative, so the outer Binary's left is a Binary and is refused while the inner one converts. The answer is `a { b: 1 } + { c: 2 }`, which is exactly what the docsonnet golden shows."
+  },
+  {
+    "name": "remove_plus_object/chain_right_is_not_object",
+    "source": "a + { b: 1 } + c",
+    "why": "The outer is refused twice over; the inner still converts."
+  },
+  {
+    "name": "remove_plus_object/already_apply_brace",
+    "source": "a { b: 1 }",
+    "why": "Already an ApplyBrace, so there is nothing to do. The pass never looks at one."
+  },
+  {
+    "name": "remove_plus_object/in_object_field",
+    "source": "{ x: a + { b: 1 } }",
+    "why": "Through the object-field hook."
+  },
+  {
+    "name": "remove_plus_object/in_array",
+    "source": "[a + { b: 1 }]",
+    "why": "Through the array hook."
+  },
+  {
+    "name": "remove_plus_object/in_local_bind",
+    "source": "local x = a + { b: 1 }; x",
+    "why": "Through the local hook."
+  },
+  {
+    "name": "remove_plus_object/nested_rhs_also_converts",
+    "source": "a + { b: c + { d: 1 } }",
+    "why": "The walk continues into the replacement's children, so both convert."
+  },
+  {
+    "name": "remove_plus_object/empty_object",
+    "source": "a + {}",
+    "why": "An empty Object is still an Object."
+  },
+  {
+    "name": "remove_plus_object/object_with_local",
+    "source": "a + { local x = 1, y: x }",
+    "why": "An object whose first field is a local, so the replacement has to keep the field list intact."
+  },
+  {
+    "name": "remove_plus_object/hidden_field_object",
+    "source": "a + { b:: 1 }",
+    "why": "A hidden field, to pin that only the node kinds are looked at."
+  },
+  {
+    "name": "add_plus_object/top_level",
+    "source": "{ a: 1 } { b: 2 }",
+    "why": "The root has a nil parent, so no parens: BaseContext returns an empty passCtx."
+  },
+  {
+    "name": "add_plus_object/three",
+    "source": "{ a: 1 } { b: 2 } { c: 3 }",
+    "why": "Two ApplyBraces. The outer becomes a Binary with no parens; the inner is then that Binary's *left*, and `+` is left-associative, so it needs none either."
+  },
+  {
+    "name": "add_plus_object/var_brace",
+    "source": "a { b: 2 }",
+    "why": "The commonest real shape, and the one RemovePlusObject produces."
+  },
+  {
+    "name": "add_plus_object/apply_target",
+    "source": "{ a: 1 } { b: 2 }(42)",
+    "why": "Apply binds tighter than `+`, so the target position needs parens."
+  },
+  {
+    "name": "add_plus_object/apply_positional_arg",
+    "source": "f({ a: 1 } { b: 2 })",
+    "why": "An argument is delimited by the parens that are already there, so none are added."
+  },
+  {
+    "name": "add_plus_object/apply_named_arg",
+    "source": "f(x={ a: 1 } { b: 2 })",
+    "why": "The same, reached through the named-argument slot."
+  },
+  {
+    "name": "add_plus_object/apply_tailstrict",
+    "source": "f({ a: 1 } { b: 2 }) tailstrict",
+    "why": "The tailstrict fodder slot is only visited when the keyword is there, so this exercises the branch."
+  },
+  {
+    "name": "add_plus_object/index_target_dot",
+    "source": "{ a: 1 } { b: 2 }.a",
+    "why": "Upstream's own regression case: without the parens the formatted expression is a runtime error rather than a differently-spelled program."
+  },
+  {
+    "name": "add_plus_object/index_target_bracket",
+    "source": "{ a: 1 } { b: 2 }['a']",
+    "why": "The bracket form of the same."
+  },
+  {
+    "name": "add_plus_object/index_expression",
+    "source": "a[{ b: 1 } { c: 2 }]",
+    "why": "The index expression is delimited by its brackets, so no parens."
+  },
+  {
+    "name": "add_plus_object/index_target_chained",
+    "source": "{ a: 1 } { b: 2 }.a.b",
+    "why": "The ApplyBrace is the target of the *inner* Index, which is where the parens go."
+  },
+  {
+    "name": "add_plus_object/slice_target",
+    "source": "{ a: 1 } { b: 2 }[1:2]",
+    "why": "ast.Slice is not in upstream's switch, so it takes the default branch and NO parens are added -- although Slice binds as tightly as Index. Recorded because it is what the reference implementation does."
+  },
+  {
+    "name": "add_plus_object/binary_left_plus",
+    "source": "{ a: 1 } { b: 2 } + { c: 3 }",
+    "why": "On the left of a `+`: 6 < 6 is false, so no parens -- left-associativity makes the flattened form parse the same."
+  },
+  {
+    "name": "add_plus_object/binary_right_plus",
+    "source": "{ a: 1 } + { b: 2 } { c: 3 }",
+    "why": "On the right of a `+`: 6 <= 6 is true, so parens. The asymmetry is the associativity."
+  },
+  {
+    "name": "add_plus_object/binary_left_minus",
+    "source": "{ a: 1 } { b: 2 } - { c: 3 }",
+    "why": "`-` has the same precedence as `+`, so the left side needs nothing."
+  },
+  {
+    "name": "add_plus_object/binary_right_minus",
+    "source": "{ a: 1 } - { b: 2 } { c: 3 }",
+    "why": "And the right side does."
+  },
+  {
+    "name": "add_plus_object/binary_left_mult",
+    "source": "{ a: 1 } { b: 2 } * { c: 3 }",
+    "why": "`*` binds tighter (5 < 6), so the left side needs parens as well."
+  },
+  {
+    "name": "add_plus_object/binary_right_mult",
+    "source": "{ a: 1 } * { b: 2 } { c: 3 }",
+    "why": "And so does the right."
+  },
+  {
+    "name": "add_plus_object/binary_left_or",
+    "source": "{ a: 1 } { b: 2 } || { c: 3 }",
+    "why": "`||` binds looser (14), so neither side needs parens."
+  },
+  {
+    "name": "add_plus_object/binary_right_or",
+    "source": "{ a: 1 } || { b: 2 } { c: 3 }",
+    "why": "The looser operator on the right: 14 <= 6 is false."
+  },
+  {
+    "name": "add_plus_object/binary_left_in",
+    "source": "{ a: 1 } { b: 2 } in { c: 3 }",
+    "why": "`in` as an ordinary binary operator, precedence 8."
+  },
+  {
+    "name": "add_plus_object/binary_right_in",
+    "source": "{ a: 1 } in { b: 2 } { c: 3 }",
+    "why": "The right of an `in`: still no parens, because `+` binds tighter than `in` and the parse is unchanged."
+  },
+  {
+    "name": "add_plus_object/unary_plus",
+    "source": "+42 { b: 2 }",
+    "why": "Upstream's own case. The parse is `+(implicit-plus 42 {b:2})`, and explicit `+` binds looser than unary `+`, so parens are needed to keep it. The expression does not evaluate; it still has to format."
+  },
+  {
+    "name": "add_plus_object/unary_minus",
+    "source": "-a { b: 2 }",
+    "why": "The same for unary `-`."
+  },
+  {
+    "name": "add_plus_object/unary_not",
+    "source": "!a { b: 2 }",
+    "why": "And for `!`: the branch is a constant comparison, 4 < 6, so every Unary parent needs parens."
+  },
+  {
+    "name": "add_plus_object/unary_bitwise_not",
+    "source": "~a { b: 2 }",
+    "why": "And for `~`."
+  },
+  {
+    "name": "add_plus_object/in_super",
+    "source": "{ x: { a: 1 } { b: 2 } in super }",
+    "why": "InSuper's own branch, which compares precedence(in) <= precedence(+) -- 8 <= 6 -- and so is always false. No parens, and that is correct: `+` binds tighter than `in`."
+  },
+  {
+    "name": "add_plus_object/in_object_field",
+    "source": "{ x: { a: 1 } { b: 2 } }",
+    "why": "An Object parent takes the default branch."
+  },
+  {
+    "name": "add_plus_object/in_array",
+    "source": "[{ a: 1 } { b: 2 }]",
+    "why": "So does an Array."
+  },
+  {
+    "name": "add_plus_object/in_local_bind",
+    "source": "local x = { a: 1 } { b: 2 }; x",
+    "why": "So does a Local."
+  },
+  {
+    "name": "add_plus_object/local_body",
+    "source": "local x = 1; { a: 1 } { b: 2 }",
+    "why": "The body slot of the same Local."
+  },
+  {
+    "name": "add_plus_object/conditional_branches",
+    "source": "if c then { a: 1 } { b: 2 } else { c: 1 } { d: 2 }",
+    "why": "Both branches, and a Conditional parent needs no parens."
+  },
+  {
+    "name": "add_plus_object/conditional_cond",
+    "source": "if { a: 1 } { b: 2 } then 1 else 2",
+    "why": "The condition slot."
+  },
+  {
+    "name": "add_plus_object/error_expr",
+    "source": "error { a: 1 } { b: 2 }",
+    "why": "An Error parent."
+  },
+  {
+    "name": "add_plus_object/assert_cond",
+    "source": "assert { a: 1 } { b: 2 }; 1",
+    "why": "An Assert's condition."
+  },
+  {
+    "name": "add_plus_object/assert_message",
+    "source": "assert c : { a: 1 } { b: 2 }; 1",
+    "why": "An Assert's message, which is only visited when it is there."
+  },
+  {
+    "name": "add_plus_object/function_body",
+    "source": "function(x) { a: 1 } { b: 2 }",
+    "why": "A Function parent."
+  },
+  {
+    "name": "add_plus_object/function_default",
+    "source": "function(x={ a: 1 } { b: 2 }) x",
+    "why": "A parameter default, reached through the parameters hook."
+  },
+  {
+    "name": "add_plus_object/for_spec_expr",
+    "source": "[x for x in { a: 1 } { b: 2 }]",
+    "why": "The `in` expression of a comprehension, reached through for_spec."
+  },
+  {
+    "name": "add_plus_object/if_spec_expr",
+    "source": "[x for x in y if { a: 1 } { b: 2 }]",
+    "why": "A comprehension's condition, reached through the same hook."
+  },
+  {
+    "name": "add_plus_object/object_comp_field",
+    "source": "{ [k]: { a: 1 } { b: 2 } for k in y }",
+    "why": "An ObjectComp parent."
+  },
+  {
+    "name": "add_plus_object/field_name_expr",
+    "source": "{ [{ a: 1 } { b: 2 }]: 1 }",
+    "why": "A computed field name, which is the FieldExpr branch of object_field."
+  },
+  {
+    "name": "add_plus_object/already_parenthesised",
+    "source": "({ a: 1 } { b: 2 }) { c: 3 }",
+    "why": "The inner ApplyBrace's parent is a Parens, which takes the default branch -- so the parens already in the source are the ones that stay."
+  },
+  {
+    "name": "add_plus_object/parens_inner",
+    "source": "({ a: 1 } { b: 2 })",
+    "why": "A Parens parent on its own."
+  },
+  {
+    "name": "add_plus_object/nested_under_inserted_parens",
+    "source": "{ a: 1 } { b: 2 } { c: 3 }.x",
+    "why": "The outer ApplyBrace is an Index target and gets parens; the *replacement* node is handed down as the parent, so the inner ApplyBrace sees the new Parens rather than the Binary, and then the Binary, and needs nothing."
+  },
+  {
+    "name": "add_plus_object/apply_of_index_target",
+    "source": "{ f(x):: x } { a: 1 }.f(99)",
+    "why": "Upstream's `implicit-plus-apply`: the ApplyBrace is the target of an Index which is itself the target of an Apply."
+  },
+  {
+    "name": "add_plus_object/index_then_apply_brace",
+    "source": "a.b { c: 1 }",
+    "why": "An ApplyBrace whose left is an Index, which is the shape RemovePlusObject produces from `a.b + { c: 1 }`."
+  },
+  {
+    "name": "add_plus_object/object_fodder_before_brace",
+    "source": "a\n{ b: 1 }",
+    "why": "The right-hand object carries a LineEnd in its own fodder, which the replacement must leave alone."
+  },
+  {
+    "name": "add_plus_object/super_index_target",
+    "source": "{ x: super.a { b: 1 } }",
+    "why": "A SuperIndex on the left of an implicit plus."
+  },
+  {
+    "name": "add_plus_object/deep_chain_in_field",
+    "source": "{ x: a { b: 1 } { c: 2 }.d }",
+    "why": "Two ApplyBraces under an Index under an object field."
+  },
+  {
+    "name": "sort_imports/single_import",
+    "source": "local a = import 'a';\n1",
+    "why": "One import, nothing to reorder. The whole chain is still rebuilt, so this grades buildGroupAST reproducing exactly what it was handed."
+  },
+  {
+    "name": "sort_imports/two_sorted",
+    "source": "local a = import 'a';\nlocal b = import 'b';\n1",
+    "why": "Already in order. sortGroup must leave it and the rebuild must be invisible -- the no-op that says the fodder bookkeeping is balanced."
+  },
+  {
+    "name": "sort_imports/two_unsorted",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The smallest real swap: two single-bind Locals exchange their binds while each keeps the fodder of the position it lands in."
+  },
+  {
+    "name": "sort_imports/three_rotated",
+    "source": "local c = import 'c';\nlocal a = import 'a';\nlocal b = import 'b';\n1",
+    "why": "Three, so a rotation rather than a swap is graded."
+  },
+  {
+    "name": "sort_imports/three_reversed",
+    "source": "local c = import 'c';\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Fully reversed, which is the shape tests/realworld/entry-graalvm.jsonnet is a large version of."
+  },
+  {
+    "name": "sort_imports/one_import_no_newline",
+    "source": "local a = import 'a';1",
+    "why": "The body is on the same line as the `;`, so the body's open fodder is empty and FodderEnsureCleanNewline has to invent a LineEnd. One import and no reordering, and the file still changes."
+  },
+  {
+    "name": "sort_imports/all_on_one_line",
+    "source": "local b = import 'b';local a = import 'a';1",
+    "why": "No fodder between the locals at all, so groupEndsAfter loops over an empty fodder and returns false: one group. Both seams gain an invented newline."
+  },
+  {
+    "name": "sort_imports/key_is_the_escaped_value",
+    "source": "local a = import '\\u0061';\nlocal u = import '_x';\n1",
+    "why": "The key is the six characters `\\u0061`, not `a`. Backslash is 0x5C and `_` is 0x5F, so the escaped spelling already sorts first and the cell is a no-op -- and THAT is the assertion: a port that unescaped the key first would sort `a` (0x61) after `_x` and swap these two. See key_is_the_escaped_value_swaps for the same fact graded positively."
+  },
+  {
+    "name": "sort_imports/case_is_bytewise",
+    "source": "local i00 = import 'b';\nlocal i01 = import 'B';\nlocal i02 = import 'a';\nlocal i03 = import 'A';\n1",
+    "why": "Go compares with `<` on strings, which is bytewise, and Rust's str Ord is too. Uppercase sorts before lowercase; nothing here is case-insensitive or locale-aware."
+  },
+  {
+    "name": "sort_imports/punctuation_sorts_before_letters",
+    "source": "local i00 = import 'b';\nlocal i01 = import './a';\nlocal i02 = import '../c';\nlocal i03 = import 'a';\n1",
+    "why": "`.` is 0x2E and `/` is 0x2F, so relative paths sort ahead of bare names. Real Jsonnet trees are full of these."
+  },
+  {
+    "name": "sort_imports/quote_kind_does_not_reach_the_key",
+    "source": "local b = import \"b\";\nlocal a = import 'a';\n1",
+    "why": "One path is double-quoted and one single. The key is the value, not the spelling, so the quote kind changes neither the order nor -- at this step -- the literal."
+  },
+  {
+    "name": "sort_imports/verbatim_path",
+    "source": "local b = import @'b';\nlocal a = import 'a';\n1",
+    "why": "A verbatim string import. The parser has already collapsed its doubled quotes, so File.Value is the plain text and sorts as such."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_two",
+    "source": "local second = import 'x';\nlocal first = import 'x';\n1",
+    "why": "Two distinct variables importing the same path. duplicatedVariables keys on the variable, not the path, so this group *is* sorted -- with two equal keys."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_eleven",
+    "source": "local i00 = import 'k';\nlocal i01 = import 'j';\nlocal i02 = import 'dup';\nlocal i03 = import 'h';\nlocal i04 = import 'g';\nlocal i05 = import 'f';\nlocal i06 = import 'e';\nlocal i07 = import 'd';\nlocal i08 = import 'dup';\nlocal i09 = import 'b';\nlocal i10 = import 'a';\n1",
+    "why": "Eleven elements with two equal keys, below Go's insertionSort threshold and so stable by construction."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_twelve",
+    "source": "local i00 = import 'k';\nlocal i01 = import 'j';\nlocal i02 = import 'dup';\nlocal i03 = import 'h';\nlocal i04 = import 'g';\nlocal i05 = import 'f';\nlocal i06 = import 'e';\nlocal i07 = import 'd';\nlocal i08 = import 'c';\nlocal i09 = import 'dup';\nlocal i10 = import 'b';\nlocal i11 = import 'a';\n1",
+    "why": "Twelve elements with two equal keys. Go's `maxInsertion` is 12 tested with `<=`, so twelve is the LAST size that is insertion-sorted, not the first that is not -- which is worth pinning, because reading the constant as a strict bound puts the boundary one out."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_thirteen",
+    "source": "local i00 = import 'm';\nlocal i01 = import 'k';\nlocal i02 = import 'j';\nlocal i03 = import 'dup';\nlocal i04 = import 'h';\nlocal i05 = import 'g';\nlocal i06 = import 'f';\nlocal i07 = import 'e';\nlocal i08 = import 'd';\nlocal i09 = import 'c';\nlocal i10 = import 'dup';\nlocal i11 = import 'b';\nlocal i12 = import 'a';\n1",
+    "why": "Thirteen: the first size at which pdqsort proper runs and ties have no defined answer. Whatever the oracle says here is what decides whether rtk can sort stably."
+  },
+  {
+    "name": "sort_imports/twelve_distinct_reversed",
+    "source": "local i00 = import 'l';\nlocal i01 = import 'k';\nlocal i02 = import 'j';\nlocal i03 = import 'i';\nlocal i04 = import 'h';\nlocal i05 = import 'g';\nlocal i06 = import 'f';\nlocal i07 = import 'e';\nlocal i08 = import 'd';\nlocal i09 = import 'c';\nlocal i10 = import 'b';\nlocal i11 = import 'a';\n1",
+    "why": "Twelve distinct keys, fully reversed. With no ties the answer is the same for any correct sort, so this grades the size-twelve path without depending on stability."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_shadowed",
+    "source": "local b = import 'b';\nlocal b = import 'a';\n1",
+    "why": "The same variable bound twice in one group, which is legal shadowing. duplicatedVariables is true, so the group keeps source order although its keys are out of order. The negative that says the check is real."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_with_a_third",
+    "source": "local x = import 'c';\nlocal y = import 'a';\nlocal x = import 'b';\n1",
+    "why": "Three imports, two of them bound to the same variable. One duplicate disables sorting for every element of the group, not just for the pair."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_in_the_second_group_only",
+    "source": "local c = import 'c';\nlocal a = import 'a';\n\nlocal d = import 'd';\nlocal d = import 'b';\n1",
+    "why": "Two groups, only the second of which has a duplicated variable. The first must still sort: duplicatedVariables is asked per group, and the group is what topLevelImport accumulated."
+  },
+  {
+    "name": "sort_imports/root_is_not_a_local",
+    "source": "{ b: import 'b', a: import 'a' }",
+    "why": "goodLocalOrNull on the root returns nil, so nothing happens. Imports elsewhere in the file are never touched."
+  },
+  {
+    "name": "sort_imports/root_is_a_function",
+    "source": "function(x) local b = import 'b'; local a = import 'a'; x",
+    "why": "Top-level imports are more top-level than top-level functions, says the doc comment. The root is a Function, so the chain beneath it is left exactly as written."
+  },
+  {
+    "name": "sort_imports/root_local_is_not_an_import",
+    "source": "local x = 1;\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The first local binds a number, so the scan stops before it starts and the imports below it are never reached."
+  },
+  {
+    "name": "sort_imports/root_local_has_a_function_bind",
+    "source": "local f(x) = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Fun != nil, so isGoodLocal is false however import-shaped the body is."
+  },
+  {
+    "name": "sort_imports/root_local_is_importstr",
+    "source": "local a = importstr 'z';\nlocal b = import 'a';\n1",
+    "why": "isGoodLocal asserts *ast.Import specifically, so ImportStr fails it. ImportStr and ImportBin are never sorted."
+  },
+  {
+    "name": "sort_imports/root_local_is_importbin",
+    "source": "local a = importbin 'z';\nlocal b = import 'a';\n1",
+    "why": "The ImportBin half of the same rule."
+  },
+  {
+    "name": "sort_imports/mixed_binds_in_one_local",
+    "source": "local b = import 'b', n = 1;\nlocal a = import 'a';\n1",
+    "why": "One bind of the local is not an import, which disqualifies the whole local and so the whole file."
+  },
+  {
+    "name": "sort_imports/group_stops_at_a_non_import_local",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal x = 1;\nx",
+    "why": "The first two are a group and do sort; the third local is not good, so goodLocalOrNull returns nil, the group ends and the non-good local becomes the body whose open fodder is rewritten."
+  },
+  {
+    "name": "sort_imports/group_stops_at_a_function_local",
+    "source": "local b = import 'b';\nlocal f(x) = x;\n1",
+    "why": "One import, then a local that fails isGoodLocal. groupEndsAfter returns true on the nil, and the body is the function local."
+  },
+  {
+    "name": "sort_imports/importstr_ends_the_group",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal s = importstr 'z';\ns",
+    "why": "An ImportStr local terminates the sortable chain rather than joining it, so the two real imports sort and it stays put."
+  },
+  {
+    "name": "sort_imports/blank_line_splits_the_group",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "One blank line means Blanks > 0 on the LineEnd, which ends the group immediately. Each half sorts within itself and nothing crosses."
+  },
+  {
+    "name": "sort_imports/three_groups",
+    "source": "local f = import 'f';\nlocal e = import 'e';\n\nlocal d = import 'd';\nlocal c = import 'c';\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Three groups, so the recursion through topLevelImport is graded more than once and each group's open fodder has to come from the previous group's tail."
+  },
+  {
+    "name": "sort_imports/two_blank_lines_split_the_group",
+    "source": "local b = import 'b';\n\n\nlocal a = import 'a';\n1",
+    "why": "Blanks = 2. splitFodder zeroes the blanks on the first half and builds a fresh LineEnd carrying them at the front of the second, which then becomes the next group's open fodder."
+  },
+  {
+    "name": "sort_imports/comment_line_splits_the_group",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n// the second group\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A comment on its own line is a Paragraph preceded by a LineEnd, so the LineEnd sets newlineReached and the Paragraph ends the group. No blank line is needed."
+  },
+  {
+    "name": "sort_imports/trailing_line_comment_continues_the_group",
+    "source": "local b = import 'b';  // about b\nlocal a = import 'a';\n1",
+    "why": "A `//` comment that is not on a fresh line is a LineEnd *carrying* a comment, and a single LineEnd with no blanks continues the group. So this sorts -- and the comment travels with the import it trails."
+  },
+  {
+    "name": "sort_imports/trailing_comments_travel_with_their_imports",
+    "source": "local c = import 'c';  // about c\nlocal a = import 'a';  // about a\nlocal b = import 'b';  // about b\n1",
+    "why": "Each import's adjacent fodder is what follows it, and buildGroupAST puts imports[i-1].adjacentFodder in front of import i -- so every trailing comment moves with the line it was written on."
+  },
+  {
+    "name": "sort_imports/interstitial_then_newline_continues_the_group",
+    "source": "local b = import 'b'; /* c */\nlocal a = import 'a';\n1",
+    "why": "An interstitial does not set newlineReached, so the LineEnd after it is still the first non-interstitial and the group continues."
+  },
+  {
+    "name": "sort_imports/interstitial_only_continues_the_group",
+    "source": "local b = import 'b'; /* c */ local a = import 'a';\n1",
+    "why": "Fodder of nothing but an interstitial: splitFodder never flips into its second half, and FodderEnsureCleanNewline then has to add the newline that puts the next local on its own line."
+  },
+  {
+    "name": "sort_imports/two_interstitials_continue_the_group",
+    "source": "local b = import 'b'; /* c */ /* d */ local a = import 'a';\n1",
+    "why": "Two interstitials in a row, so the first half of the split has to keep both in order before the invented newline."
+  },
+  {
+    "name": "sort_imports/comment_after_a_blank_line_ends_the_group",
+    "source": "local b = import 'b';\n\n// header of the next group\nlocal a = import 'a';\n1",
+    "why": "The LineEnd has Blanks = 1, which ends the group on the first element, and the Paragraph after it is appended to a second half that already has a clean ending."
+  },
+  {
+    "name": "sort_imports/multiline_c_comment_between_groups",
+    "source": "local b = import 'b';\n/* one\n   two */\nlocal a = import 'a';\n1",
+    "why": "A multi-line C comment is a Paragraph appended with addFodderSafe, so FodderAppend may have put a synthetic LineEnd in front of it. That is the fodder splitFodder then has to divide."
+  },
+  {
+    "name": "sort_imports/two_comment_lines_between_groups",
+    "source": "local b = import 'b';\n// one\n// two\nlocal a = import 'a';\n1",
+    "why": "Two Paragraphs, so the second half of the split takes more than one element through FodderAppend."
+  },
+  {
+    "name": "sort_imports/file_header_comment",
+    "source": "// what this file is\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The group's open fodder is the root local's own fodder, which here holds the file's header comment. It must stay in front of whichever import sorts first."
+  },
+  {
+    "name": "sort_imports/file_header_comment_and_blank_line",
+    "source": "// what this file is\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The same, with the blank line that makes the header a paragraph of its own rather than a comment on the first import."
+  },
+  {
+    "name": "sort_imports/one_local_two_binds",
+    "source": "local b = import 'b', a = import 'a';\n1",
+    "why": "One local with two binds becomes two nested single-bind locals. The comma goes and a `;` plus a newline appear, all from the rebuild."
+  },
+  {
+    "name": "sort_imports/one_local_two_binds_sorted",
+    "source": "local a = import 'a', b = import 'b';\n1",
+    "why": "Already in order, and still split into two locals -- so the split is unconditional rather than a consequence of reordering."
+  },
+  {
+    "name": "sort_imports/one_local_three_binds_multiline",
+    "source": "local b = import 'b',\n      a = import 'a',\n      c = import 'c';\n1",
+    "why": "Each bind's VarFodder is a LineEnd indented to line up under `local`. The rotation moves each one to the *previous* bind, and FixIndentation at step 13 is what later puts the columns right."
+  },
+  {
+    "name": "sort_imports/bind_comment_before_the_variable",
+    "source": "local b = import 'b',\n      // about a\n      a = import 'a';\n1",
+    "why": "A comment inside the bind list. splitFodder leaves the LineEnd with the previous bind and carries the Paragraph over, so the comment stays attached to `a` -- and ends up between `local` and `a` once a sorts first."
+  },
+  {
+    "name": "sort_imports/bind_interstitial_after_the_comma",
+    "source": "local b = import 'b', /* c */ a = import 'a';\n1",
+    "why": "VarFodder of nothing but an interstitial, which never flips the split and so lands entirely on the preceding bind, before its invented newline."
+  },
+  {
+    "name": "sort_imports/two_locals_each_with_two_binds",
+    "source": "local d = import 'd', c = import 'c';\nlocal b = import 'b', a = import 'a';\n1",
+    "why": "Four imports reaching one group through two locals, so the group is the concatenation extractImportElems appends rather than one local's binds."
+  },
+  {
+    "name": "sort_imports/multi_bind_local_across_a_group_boundary",
+    "source": "local d = import 'd', c = import 'c';\n\nlocal b = import 'b', a = import 'a';\n1",
+    "why": "The same, with a blank line between them: two groups of two, and the blank line has to survive being moved from a bind's VarFodder to a rebuilt local's own fodder."
+  },
+  {
+    "name": "sort_imports/body_is_left_recursive",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n1 + 2",
+    "why": "The body's open fodder lives on the leftmost leaf of the Binary, not on the Binary, so the assignment has to go through openFodder."
+  },
+  {
+    "name": "sort_imports/body_is_an_index_chain",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nb.x.y",
+    "why": "A deeper left-recursive spine: openFodder reaches the Var at the bottom of two Indexes."
+  },
+  {
+    "name": "sort_imports/body_after_blank_lines",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n\n\n{}",
+    "why": "Blank lines between the last import and the body, which splitFodder moves into the second half and FodderConcat then merges back onto the group's tail."
+  },
+  {
+    "name": "sort_imports/body_preceded_by_a_comment",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n// what follows\n{}",
+    "why": "The last import's adjacent fodder keeps the LineEnd and the comment goes to the second half, so the comment stays with the body."
+  },
+  {
+    "name": "sort_imports/trailing_comment_on_the_last_import",
+    "source": "local b = import 'b';\nlocal a = import 'a';  // about a\n1",
+    "why": "The last import in source order carries a trailing comment, and it is the first in sorted order -- so the comment moves up a line while the import it trails moves up with it."
+  },
+  {
+    "name": "sort_imports/import_with_a_comment_before_its_path",
+    "source": "local b = import /* c */ 'b';\nlocal a = import 'a';\n1",
+    "why": "Fodder inside the import expression, which SortImports never touches: the bind is carried whole and the comment travels with it."
+  },
+  {
+    "name": "sort_imports/key_is_the_escaped_value_swaps",
+    "source": "local u = import '_x';\nlocal a = import '\\u0061';\n1",
+    "why": "The mirror of key_is_the_escaped_value, with the escaped path written second so the answer is a swap rather than a no-op. Sorting by the unescaped value would leave this alone; sorting by the stored value moves the escaped one first, because backslash is 0x5C and `_` is 0x5F."
+  },
+  {
+    "name": "sort_imports/two_blank_lines_split_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Blanks = 2 between two groups that both need sorting, so the blanks move splitFodder performs is graded by a changed tree rather than by a no-op."
+  },
+  {
+    "name": "sort_imports/comment_after_a_blank_line_splits_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\n// the second group\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A blank line and then a comment. The LineEnd's blanks end the group on the first element and the Paragraph is appended to a second half that already has a clean ending -- so no synthetic LineEnd is inserted."
+  },
+  {
+    "name": "sort_imports/two_comment_lines_split_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n// one\n// two\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Two Paragraphs with no blank line, so the second half of the split starts empty and FodderAppend *does* insert a synthetic LineEnd in front of the first Paragraph. The contrast with the case above is the point."
+  },
+  {
+    "name": "sort_imports/multiline_c_comment_splits_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n/* one\n   two */\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A multi-line C comment between two groups that both sort."
+  },
+  {
+    "name": "sort_imports/group_ends_at_a_function_local_after_two",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal f(x) = x;\nf(1)",
+    "why": "Two imports that sort, then a local that fails isGoodLocal and becomes the body whose open fodder is overwritten. The first batch's version had one import and so changed nothing."
+  },
+  {
+    "name": "sort_imports/ties_eleven_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\n1",
+    "why": "Eleven imports of one path. Below the insertion-sort threshold, so this one is stable by construction and is the control for the rest."
+  },
+  {
+    "name": "sort_imports/ties_twelve_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\n1",
+    "why": "Twelve, which is still insertionSort: Go's threshold is `maxInsertion = 12` tested with `<=`, so twelve is the last stable size and not the first unstable one."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\n1",
+    "why": "Thirteen of one path: the first size at which pdqsort proper runs, and an all-equal input is what its partitionEqual path exists for. If sort.Slice reorders ties at all, this is where it shows."
+  },
+  {
+    "name": "sort_imports/ties_sixteen_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\n1",
+    "why": "Sixteen, so the recursion partitions into subranges that are themselves insertion-sorted."
+  },
+  {
+    "name": "sort_imports/ties_fifty_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\nlocal i16 = import 'same';\nlocal i17 = import 'same';\nlocal i18 = import 'same';\nlocal i19 = import 'same';\nlocal i20 = import 'same';\nlocal i21 = import 'same';\nlocal i22 = import 'same';\nlocal i23 = import 'same';\nlocal i24 = import 'same';\nlocal i25 = import 'same';\nlocal i26 = import 'same';\nlocal i27 = import 'same';\nlocal i28 = import 'same';\nlocal i29 = import 'same';\nlocal i30 = import 'same';\nlocal i31 = import 'same';\nlocal i32 = import 'same';\nlocal i33 = import 'same';\nlocal i34 = import 'same';\nlocal i35 = import 'same';\nlocal i36 = import 'same';\nlocal i37 = import 'same';\nlocal i38 = import 'same';\nlocal i39 = import 'same';\nlocal i40 = import 'same';\nlocal i41 = import 'same';\nlocal i42 = import 'same';\nlocal i43 = import 'same';\nlocal i44 = import 'same';\nlocal i45 = import 'same';\nlocal i46 = import 'same';\nlocal i47 = import 'same';\nlocal i48 = import 'same';\nlocal i49 = import 'same';\n1",
+    "why": "Fifty is `shortestNinther`, where choosePivot stops taking a plain median of three and takes a median of medians instead. A different pivot is a different permutation of the ties."
+  },
+  {
+    "name": "sort_imports/ties_fifty_one_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\nlocal i16 = import 'same';\nlocal i17 = import 'same';\nlocal i18 = import 'same';\nlocal i19 = import 'same';\nlocal i20 = import 'same';\nlocal i21 = import 'same';\nlocal i22 = import 'same';\nlocal i23 = import 'same';\nlocal i24 = import 'same';\nlocal i25 = import 'same';\nlocal i26 = import 'same';\nlocal i27 = import 'same';\nlocal i28 = import 'same';\nlocal i29 = import 'same';\nlocal i30 = import 'same';\nlocal i31 = import 'same';\nlocal i32 = import 'same';\nlocal i33 = import 'same';\nlocal i34 = import 'same';\nlocal i35 = import 'same';\nlocal i36 = import 'same';\nlocal i37 = import 'same';\nlocal i38 = import 'same';\nlocal i39 = import 'same';\nlocal i40 = import 'same';\nlocal i41 = import 'same';\nlocal i42 = import 'same';\nlocal i43 = import 'same';\nlocal i44 = import 'same';\nlocal i45 = import 'same';\nlocal i46 = import 'same';\nlocal i47 = import 'same';\nlocal i48 = import 'same';\nlocal i49 = import 'same';\nlocal i50 = import 'same';\n1",
+    "why": "One past the ninther threshold, in case fifty sits exactly on a boundary that happens to be stable."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'f';\nlocal i02 = import 'b';\nlocal i03 = import 'e';\nlocal i04 = import 'c';\nlocal i05 = import 'd';\nlocal i06 = import 'd';\nlocal i07 = import 'c';\nlocal i08 = import 'e';\nlocal i09 = import 'b';\nlocal i10 = import 'f';\nlocal i11 = import 'a';\nlocal i12 = import 'z';\n1",
+    "why": "Thirteen elements, six keys appearing twice and one alone, arranged so each pair straddles the middle. A partition that swaps across the midpoint inverts them."
+  },
+  {
+    "name": "sort_imports/ties_fourteen_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'g';\nlocal i02 = import 'b';\nlocal i03 = import 'f';\nlocal i04 = import 'c';\nlocal i05 = import 'e';\nlocal i06 = import 'd';\nlocal i07 = import 'd';\nlocal i08 = import 'e';\nlocal i09 = import 'c';\nlocal i10 = import 'f';\nlocal i11 = import 'b';\nlocal i12 = import 'g';\nlocal i13 = import 'a';\n1",
+    "why": "Fourteen elements, seven keys each twice, no unique key at all."
+  },
+  {
+    "name": "sort_imports/ties_twenty_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'j';\nlocal i02 = import 'b';\nlocal i03 = import 'i';\nlocal i04 = import 'c';\nlocal i05 = import 'h';\nlocal i06 = import 'd';\nlocal i07 = import 'g';\nlocal i08 = import 'e';\nlocal i09 = import 'f';\nlocal i10 = import 'f';\nlocal i11 = import 'e';\nlocal i12 = import 'g';\nlocal i13 = import 'd';\nlocal i14 = import 'h';\nlocal i15 = import 'c';\nlocal i16 = import 'i';\nlocal i17 = import 'b';\nlocal i18 = import 'j';\nlocal i19 = import 'a';\n1",
+    "why": "Twenty elements, ten keys each twice."
+  },
+  {
+    "name": "sort_imports/ties_fifty_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'y';\nlocal i02 = import 'b';\nlocal i03 = import 'x';\nlocal i04 = import 'c';\nlocal i05 = import 'w';\nlocal i06 = import 'd';\nlocal i07 = import 'v';\nlocal i08 = import 'e';\nlocal i09 = import 'u';\nlocal i10 = import 'f';\nlocal i11 = import 't';\nlocal i12 = import 'g';\nlocal i13 = import 's';\nlocal i14 = import 'h';\nlocal i15 = import 'r';\nlocal i16 = import 'i';\nlocal i17 = import 'q';\nlocal i18 = import 'j';\nlocal i19 = import 'p';\nlocal i20 = import 'k';\nlocal i21 = import 'o';\nlocal i22 = import 'l';\nlocal i23 = import 'n';\nlocal i24 = import 'm';\nlocal i25 = import 'm';\nlocal i26 = import 'n';\nlocal i27 = import 'l';\nlocal i28 = import 'o';\nlocal i29 = import 'k';\nlocal i30 = import 'p';\nlocal i31 = import 'j';\nlocal i32 = import 'q';\nlocal i33 = import 'i';\nlocal i34 = import 'r';\nlocal i35 = import 'h';\nlocal i36 = import 's';\nlocal i37 = import 'g';\nlocal i38 = import 't';\nlocal i39 = import 'f';\nlocal i40 = import 'u';\nlocal i41 = import 'e';\nlocal i42 = import 'v';\nlocal i43 = import 'd';\nlocal i44 = import 'w';\nlocal i45 = import 'c';\nlocal i46 = import 'x';\nlocal i47 = import 'b';\nlocal i48 = import 'y';\nlocal i49 = import 'a';\n1",
+    "why": "Fifty elements, twenty-five keys each twice, across the ninther threshold."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_at_the_ends",
+    "source": "local i00 = import 'dup';\nlocal i01 = import 'b';\nlocal i02 = import 'c';\nlocal i03 = import 'd';\nlocal i04 = import 'e';\nlocal i05 = import 'f';\nlocal i06 = import 'g';\nlocal i07 = import 'h';\nlocal i08 = import 'i';\nlocal i09 = import 'j';\nlocal i10 = import 'k';\nlocal i11 = import 'l';\nlocal i12 = import 'dup';\n1",
+    "why": "The tie is the first and last element, which is the arrangement a median-of-three pivot is least likely to keep in order."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_adjacent",
+    "source": "local i00 = import 'm';\nlocal i01 = import 'l';\nlocal i02 = import 'dup';\nlocal i03 = import 'dup';\nlocal i04 = import 'k';\nlocal i05 = import 'j';\nlocal i06 = import 'h';\nlocal i07 = import 'g';\nlocal i08 = import 'f';\nlocal i09 = import 'e';\nlocal i10 = import 'd';\nlocal i11 = import 'b';\nlocal i12 = import 'a';\n1",
+    "why": "The two equal keys are already adjacent and already in order, so any inversion is a swap of neighbours rather than a long-range move."
+  },
+  {
+    "name": "sort_imports/ties_seventeen_three_of_a_kind",
+    "source": "local i00 = import 't';\nlocal i01 = import 'dup';\nlocal i02 = import 's';\nlocal i03 = import 'r';\nlocal i04 = import 'dup';\nlocal i05 = import 'q';\nlocal i06 = import 'p';\nlocal i07 = import 'n';\nlocal i08 = import 'm';\nlocal i09 = import 'dup';\nlocal i10 = import 'l';\nlocal i11 = import 'k';\nlocal i12 = import 'j';\nlocal i13 = import 'h';\nlocal i14 = import 'g';\nlocal i15 = import 'f';\nlocal i16 = import 'e';\n1",
+    "why": "Three elements share a key rather than two, so a stable answer has to keep a run of three in source order."
+  }
+]

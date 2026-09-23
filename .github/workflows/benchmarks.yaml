@@ -125,12 +125,13 @@ jobs:
       - name: Make binaries executable
         run: chmod +x bin/*
 
+      # Pinned, and asserted, for the same reason test.yaml is: these jobs
+      # validate that rtk's output still matches tk's, so an unpinned tk
+      # retargets them exactly as it would the goldens. A timing ratio against
+      # a moving tk is not a comparison either.
       - name: Install Tanka
         if: matrix.benchmark.id != 'export-large'
-        run: |
-          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
-          chmod +x /usr/local/bin/tk
-          tk --version
+        uses: ./.github/actions/install-tk
 
       - name: Install Helm
         run: |

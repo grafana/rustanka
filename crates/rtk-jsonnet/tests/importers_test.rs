@@ -52,9 +52,19 @@ fn indexes_files_in_directories_that_also_have_subdirectories() {
 	let importers = index
 		.find_importers(&[TargetFile::Existing(root.path().join("common.libsonnet"))])
 		.unwrap();
+	// The expectation is canonicalized because `ImporterIndex::build` does the
+	// same to its root, and on macOS `/var` is a symlink to `/private/var` — so
+	// `tempfile`'s path and the indexed one are the same directory spelled two
+	// ways. Every other test here goes through `abs_path`, which canonicalizes;
+	// this one built its expectation by hand and so passed only on Linux.
 	assert_eq!(
 		importers,
-		vec![root.path().join("environment/main.jsonnet")]
+		vec![
+			root.path()
+				.canonicalize()
+				.unwrap()
+				.join("environment/main.jsonnet")
+		]
 	);
 }
 

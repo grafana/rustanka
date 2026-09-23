@@ -74,13 +74,13 @@ where
 fn path_is(path: &Path, needed: &str) -> bool {
 	path.leading_colon.is_none()
 		&& !path.segments.is_empty()
-		&& path.segments.iter().last().unwrap().ident == needed
+		&& path.segments.iter().next_back().unwrap().ident == needed
 }
 
 fn type_is_path<'ty>(ty: &'ty Type, needed: &str) -> Option<&'ty PathArguments> {
 	match ty {
 		Type::Path(path) if path.qself.is_none() && path_is(&path.path, needed) => {
-			let args = &path.path.segments.iter().last().unwrap().arguments;
+			let args = &path.path.segments.iter().next_back().unwrap().arguments;
 			Some(args)
 		}
 		_ => None,

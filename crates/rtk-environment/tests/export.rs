@@ -1809,9 +1809,18 @@ fn stops_the_whole_export_once_one_environment_cannot_be_written() {
 	// The rest were either already done or never started; none of them failed on
 	// their own account. How many of each depends on how far the pool had got,
 	// so only the total is fixed — but exactly one environment actually failed.
+	//
+	// `skipped()` on its own is deliberately *not* asserted. A machine fast
+	// enough to finish all four before `b`'s failure stops the pool reports
+	// none skipped, and that is a fact about scheduling rather than about the
+	// environments — the same reasoning the paragraph above and `CLAUDE.md`
+	// already give for not pinning the split. Asserting it made this test fail
+	// on a fast machine and pass in CI. What is deterministic is *which*
+	// environment failed, so that is what is checked.
 	assert!(
-		exported.skipped() > 0,
-		"nothing was reported as skipped: {exported:?}"
+		fatal[0].identifier.contains('b'),
+		"`b` is the environment with no name to build a filename from, not {}",
+		fatal[0].identifier
 	);
 	assert_eq!(exported.failed(), 1, "only `b` failed on its own account");
 	assert_eq!(
