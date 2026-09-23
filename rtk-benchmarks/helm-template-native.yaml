@@ -1,0 +1,14 @@
+name: "Helm Template (Native renderer)"
+id: "helm-template-native"
+description: "Comparing native Rust Helm rendering with tk and base rtk. Base versions without renderer selection continue to use Helm."
+
+fixtures_dir: "rtk-benchmarks/helm-template"
+env:
+  RTK_HELM_RENDERER: "rust"
+
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Full Export"
+    description: "Exporting 60 inline environments using the native Rust Helm renderer."
+    command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"
