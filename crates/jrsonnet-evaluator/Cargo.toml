@@ -95,15 +95,5 @@ drop_bomb.workspace = true
 rustversion.workspace = true
 
 [dev-dependencies]
-criterion.workspace = true
-stats_alloc = "0.1.10"
 insta.workspace = true
 strip-ansi-escapes.workspace = true
-
-[[bench]]
-name = "prepared_imports"
-harness = false
-
-[[bench]]
-name = "prepared_imports_memory"
-harness = false
