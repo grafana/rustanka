@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fmt::{self, Formatter, Write};
@@ -502,34 +502,49 @@ impl rtk_jsonnet_core::EvaluatorError for EvaluatorError {
 }
 
 #[derive(Debug)]
-pub struct Evaluation(pub(crate) Option<Value>, pub(crate) StdRc<Evaluator>);
+pub struct Evaluation {
+	value: Option<Value>,
+	context: Option<StdRc<Evaluator>>,
+}
 
 impl Evaluation {
 	pub fn new(context: Evaluator, value: Value) -> Self {
-		Self(Some(value), StdRc::new(context))
+		Self {
+			value: Some(value),
+			context: Some(StdRc::new(context)),
+		}
 	}
 
 	/// Pair a value with a context that is already shared, as
 	/// [`Evaluator::current`] hands it out.
 	pub fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
-		Self(Some(value), context)
+		Self {
+			value: Some(value),
+			context: Some(context),
+		}
 	}
 
 	pub fn context(&self) -> &Evaluator {
-		&self.1
+		self.context
+			.as_deref()
+			.expect("the evaluation is only empty while being dropped")
 	}
 
 	pub fn value(&self) -> &Value {
-		self.0
+		self.value
 			.as_ref()
 			.expect("the evaluation is only empty while being dropped")
 	}
 
 	pub fn with_context<T>(&self, callback: impl FnOnce(&Evaluator) -> T) -> T {
+		let evaluator = self
+			.context
+			.as_ref()
+			.expect("the evaluation is only empty while being dropped");
 		Evaluator::CURRENT.with(|current| {
-			let _guard = CurrentEvaluatorGuard::new(current, StdRc::clone(&self.1));
-			let _state_guard = self.1.state.as_ref().and_then(State::try_enter);
-			callback(&self.1)
+			let _guard = CurrentEvaluatorGuard::new(current, StdRc::clone(evaluator));
+			let _state_guard = evaluator.state.as_ref().and_then(State::try_enter);
+			callback(evaluator)
 		})
 	}
 }
@@ -542,13 +557,36 @@ impl From<(Evaluator, Value)> for Evaluation {
 
 impl Drop for Evaluation {
 	fn drop(&mut self) {
-		self.0 = None;
-		{
+		self.value = None;
+		self.context = None;
+		let collect = EVALUATIONS_UNTIL_COLLECTION.with(|counter| {
+			let remaining = counter.get() - 1;
+			if remaining == 0 {
+				counter.set(EVALUATION_GC_INTERVAL.get());
+				true
+			} else {
+				counter.set(remaining);
+				false
+			}
+		});
+		if collect {
 			let span = tracing::span!(Level::TRACE, "jrsonnet_gcmodule::collect_thread_cycles");
 			let _entered = span.enter();
 			let _ = jrsonnet_gcmodule::collect_thread_cycles();
 		}
 	}
+}
+
+thread_local! {
+	static EVALUATION_GC_INTERVAL: Cell<usize> = const { Cell::new(1) };
+	static EVALUATIONS_UNTIL_COLLECTION: Cell<usize> = const { Cell::new(1) };
+}
+
+/// Pace cycle collection on a worker whose object space is collected at thread exit.
+pub fn set_evaluation_gc_interval_for_thread(interval: usize) {
+	assert!(interval > 0);
+	EVALUATION_GC_INTERVAL.set(interval);
+	EVALUATIONS_UNTIL_COLLECTION.set(interval);
 }
 
 #[derive(Clone, Debug)]

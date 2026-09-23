@@ -11,3 +11,4 @@ pub use crate::engine::{
 };
 #[doc(inline)]
 pub use rtk_jsonnet_core::*;
+pub use rtk_jsonnet_jrsonnet::set_evaluation_gc_interval_for_thread;

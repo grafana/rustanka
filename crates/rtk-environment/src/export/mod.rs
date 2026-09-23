@@ -875,6 +875,9 @@ impl Engine {
 			.num_threads(parallelism)
 			// Jsonnet evaluation recurses deeply.
 			.stack_size(8 * 1024 * 1024)
+			// These workers live for this export alone. Collect every other evaluation
+			// and let worker teardown collect anything left between intervals.
+			.start_handler(|_| rtk_jsonnet::set_evaluation_gc_interval_for_thread(2))
 			.build()
 			.map_err(|source| Error::Pool {
 				parallelism,
