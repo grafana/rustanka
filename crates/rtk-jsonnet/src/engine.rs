@@ -393,8 +393,10 @@ impl serde::Serialize for Evaluation {
 #[derive(Clone, Debug)]
 pub enum EvaluationValue {
 	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
+		// Drop the value before the evaluation: dropping the evaluation collects
+		// cycles, and a live root makes it traverse the whole graph for nothing.
 		value: rtk_jsonnet_jrsonnet::Value,
+		evaluation: StdRc<JrsonnetEvaluation>,
 	},
 }
 
@@ -1214,10 +1216,10 @@ mod tests {
 		);
 	}
 
-	/// An import inside a memoized value is resolved when it is forced, not when
-	/// it is cached, so it resolves against whichever evaluation forces it.
+	/// A cache miss manifests the value before sharing it with other workers, so
+	/// imports are resolved by the evaluation that computes the value.
 	#[test]
-	fn imports_resolve_against_the_evaluation_that_forces_them() {
+	fn imports_resolve_against_the_evaluation_that_computes_them() {
 		let first = tempfile::tempdir().unwrap();
 		let second = tempfile::tempdir().unwrap();
 		fs::write(first.path().join("shared.libsonnet"), r#""from the first""#).unwrap();
@@ -1237,16 +1239,15 @@ mod tests {
 			serde_json::to_value(evaluator.evaluate_snippet(snippet).unwrap()).unwrap()
 		};
 
-		// Cached without reading the field, so the import stays unresolved.
 		assert_eq!(
 			evaluate_from(
 				first.path(),
-				r#"std.type(std.native("rtkMemoize")(
+				r#"std.native("rtkMemoize")(
 					"lazy-import",
 					{ imported: import "shared.libsonnet" },
-				))"#
+				).imported"#
 			),
-			serde_json::json!("object")
+			serde_json::json!("from the first")
 		);
 
 		assert_eq!(
@@ -1257,7 +1258,7 @@ mod tests {
 					error "must not evaluate",
 				).imported"#
 			),
-			serde_json::json!("from the second")
+			serde_json::json!("from the first")
 		);
 	}
 

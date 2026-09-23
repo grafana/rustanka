@@ -287,39 +287,29 @@ image provides, so an image bump that changes helm's output breaks them.
 
 `std.native('rtkMemoize')` cannot use the serde-based native-function ABI:
 deserializing its second argument would evaluate it even on a cache hit. Each
-Jsonnet implementation therefore registers this native manually and stores its
-own native value type.
+Jsonnet implementation therefore registers this native manually.
 
 **It exists to cross evaluations.** Jsonnet already memoizes within one — a
 thunk is computed once, and an object caches its fields — so a cache scoped to
-a single evaluation would do nothing at all. What it saves is the work a worker
-would otherwise repeat for every environment it exports, which is why the cache
-outlives the evaluator that filled it.
+a single evaluation would do nothing at all. What it saves is work every worker
+would otherwise repeat for the environments it exports, which is why the cache
+is process-global and outlives the evaluator that filled it.
 
 So a memoized value must not depend on *which* environment computed it.
 Anything that varies per environment belongs in the key, the way a caller
-already writes `per_cluster-<hash of the labels>`. Two things make that concrete,
-and both are pinned by tests:
-
-- The value keeps the external variables, native functions and YAML formatting
-  of the environment that computed it, so one reading `std.extVar` reports that
-  environment's answer to every later one.
-- An `import` inside it is resolved when the value is *forced*, so it resolves
-  against whichever evaluation forces it, with that evaluation's import paths.
-  Float formatting and the stack limit follow the same rule.
+already writes `per_cluster-<hash of the labels>`. The worker that misses fully
+manifests the value as JSON; every worker then deserializes that same projection.
+This makes imports and external variables those of the computing environment.
+Hidden fields are rejected because JSON would silently discard them.
 
 There is deliberately no evaluator fingerprint in the key. Environments differ
 in their import paths by construction, so a key that accounted for them would
 never hit, leaving only what Jsonnet does for free.
 
-The jrsonnet implementation caches `Val` directly for the lifetime of the OS
-thread. This preserves object identity, lazy fields, functions and assertions;
-it also means separate evaluator instances on one worker share entries, while
-different workers do not, so an N-worker export computes each key up to N
-times. Nothing is ever evicted: entries are bounded by how many distinct keys
-are used, and the process is a short-lived CLI. Its TLS cache must initialize
-jrsonnet's thread-local GC object space before itself so cached values are
-dropped before that object space during thread teardown.
+The cache coordinates each key with a condition variable, so one worker computes
+while concurrent callers wait. Failed and panicking computations remove their
+slot and wake waiters to retry. Nothing is evicted: entries are bounded by how
+many distinct keys are used, and the process is a short-lived CLI.
 
 ## Version Expectations
 
@@ -399,24 +389,20 @@ Compare against a binary built from the commit before the change rather than
 against the PR base: the ratio CI prints is against the base, so a regression
 introduced mid-branch is diluted by everything else on it.
 
-### The evaluation GC, and why export pays for it
+### The evaluation GC
 
-`Drop for Evaluation` runs a full `collect_thread_cycles()`
-(`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Measured on a 200-environment
-recursive export, that collection costs **17% of wall time** (130 ms against
-111 ms without it) and saves **32% of peak RSS** (23 MB against 30 MB).
+`Drop for Evaluation` clears the live value and evaluator context before it runs
+`collect_thread_cycles()` (`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Both are
+roots: the context owns the evaluator state and its import cache, so collecting
+before either has gone traverses the entire evaluated graph without reclaiming
+it.
 
-**Memory is the deliberate choice here**, so the collection stays. Do not
-"optimize" it away without a decision about the memory budget; the speed is
-already accounted for and was not judged worth the resident set.
-
-It also explains why `eval` costs about 18% more than it did before it started
-binding `tanka.dev/environment` and materializing through `process::materialize`.
-`materialize` forces and caches the whole object graph before that single
-collection runs, so the collection has the largest possible graph to traverse;
-the previous serde round-trip left much less behind. `materialize`'s own logic is
-only 5% of eval's runtime, so there is nothing to win by micro-optimizing it —
-the cost is the collection, and it is being paid on purpose.
+Bulk export is the exception. Its Rayon pool is created for one export and then
+destroyed, so those workers collect every other evaluation and their
+thread-local object spaces collect anything left at worker exit. Collecting
+after every environment consumed 26% of CPU in a representative recursive
+export, while waiting until worker exit allowed cyclic garbage to accumulate
+and made that export much slower. Single evaluations keep eager collection.
 
 ## Testing
 
