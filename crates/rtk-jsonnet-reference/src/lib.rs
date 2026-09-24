@@ -64,7 +64,11 @@ pub enum Error {
 	Nul { what: &'static str },
 	#[error("reference Jsonnet returned non-UTF-8 output: {0}")]
 	Utf8(#[from] std::string::FromUtf8Error),
-	#[error("reference Jsonnet evaluation failed: {0}")]
+	/// libjsonnet's own report, which already says what kind of error it is
+	/// (`RUNTIME ERROR: …`, `STATIC ERROR: …`). It is shown as it is: this is
+	/// also what an [`EvaluatorError`] turns back into, so a prefix here would
+	/// be repeated every time an error crosses that boundary.
+	#[error("{0}")]
 	Evaluation(String),
 }
 
@@ -101,6 +105,7 @@ struct Api {
 	array_append: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void),
 	make_object: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
 	object_append: unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_char, *mut c_void),
+	json_destroy: unsafe extern "C" fn(*mut c_void, *mut c_void),
 }
 
 /// The reference interpreter and its dynamically loaded C API.
@@ -273,11 +278,37 @@ impl Implementation {
 					"jsonnet_json_object_append",
 					unsafe extern "C" fn(*mut c_void, *mut c_void, *const c_char, *mut c_void)
 				),
+				json_destroy: symbol!(
+					"jsonnet_json_destroy",
+					unsafe extern "C" fn(*mut c_void, *mut c_void)
+				),
 			};
 			Ok(Self {
 				library: Arc::new(library),
 				api,
 			})
+		}
+	}
+
+	/// Test support: the installed library, or [`None`] when there is none to
+	/// test against.
+	///
+	/// A missing or differently versioned library is an ordinary machine and
+	/// skips, unless `RTK_REQUIRE_REFERENCE_JSONNET` is set, which is how CI
+	/// makes sure these tests ran rather than silently passing. A library that
+	/// is the right version but lacks part of the API always fails.
+	#[doc(hidden)]
+	pub fn installed_for_tests() -> Option<Self> {
+		match Self::new() {
+			Ok(implementation) => Some(implementation),
+			Err(error @ (Error::Load { .. } | Error::Version { .. })) => {
+				assert!(
+					std::env::var_os("RTK_REQUIRE_REFERENCE_JSONNET").is_none(),
+					"RTK_REQUIRE_REFERENCE_JSONNET is set, but reference Jsonnet is unavailable: {error}"
+				);
+				None
+			}
+			Err(error) => panic!("installed reference Jsonnet has an incomplete API: {error}"),
 		}
 	}
 
@@ -506,10 +537,8 @@ mod tests {
 
 	#[test]
 	fn native_callbacks_use_the_reference_library() {
-		let implementation = match Implementation::new() {
-			Ok(implementation) => implementation,
-			Err(Error::Load { .. } | Error::Version { .. }) => return,
-			Err(error) => panic!("installed reference Jsonnet has an incomplete API: {error}"),
+		let Some(implementation) = Implementation::installed_for_tests() else {
+			return;
 		};
 		// SAFETY: the installed version matches the header whose signatures are
 		// written here; the loaded library outlives both pointers and the VM.
@@ -572,10 +601,8 @@ mod tests {
 
 	#[test]
 	fn evaluates_using_installed_reference_library() {
-		let implementation = match Implementation::new() {
-			Ok(implementation) => implementation,
-			Err(Error::Load { .. } | Error::Version { .. }) => return, // Matching Jsonnet is optional.
-			Err(error) => panic!("installed reference Jsonnet has an incomplete API: {error}"),
+		let Some(implementation) = Implementation::installed_for_tests() else {
+			return;
 		};
 		let mut evaluator = implementation.create_evaluator().expect("VM");
 		evaluator

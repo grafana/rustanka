@@ -5,7 +5,6 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::Args;
 use rtk_environments::export::LabelSelector;
-use rtk_spec::canonical::JsonentImplementationOrConfig;
 use tabwriter::TabWriter;
 
 use crate::commands::common::{EvaluatorImplementation, JsonnetArgs};
@@ -27,7 +26,7 @@ pub struct ListArgs {
 	#[arg(long)]
 	pub json: bool,
 
-	/// Jsonnet implementation to use (c++, jrsonnet, or binary:<path>); defaults to the project's configuration
+	/// Jsonnet implementation to use (c++, jrsonnet, or binary:<path>); defaults to the project's configuration. `go` is accepted for tk compatibility and expresses no preference
 	#[arg(long)]
 	pub jsonnet_implementation: Option<EvaluatorImplementation>,
 
@@ -74,12 +73,10 @@ impl ListArgs {
 				.transpose()?,
 			..rtk_jsonnet::Options::default()
 		};
-		options.rc.spec.jsonnet_implementation =
-			self.jsonnet_implementation.as_ref().map(|implementation| {
-				JsonentImplementationOrConfig::JsonnetImplementation(
-					implementation.spec_implementation(),
-				)
-			});
+		options.rc.spec.jsonnet_implementation = self
+			.jsonnet_implementation
+			.as_ref()
+			.and_then(EvaluatorImplementation::rc_implementation);
 		Ok(options)
 	}
 }
@@ -167,6 +164,7 @@ mod tests {
 
 	use assert_matches::assert_matches;
 	use clap::Parser;
+	use rtk_spec::canonical::JsonentImplementationOrConfig;
 	use tempfile::TempDir;
 
 	use super::*;
@@ -208,15 +206,18 @@ mod tests {
 			Some(&rtk_spec::canonical::JsonnetImplementation::Reference)
 		);
 
-		let args = Cli::try_parse_from(["rtk"]).expect("default implementation");
-		assert!(args
-			.args
-			.jsonnet_options()
-			.unwrap()
-			.rc
-			.spec
-			.jsonnet_implementation
-			.is_none());
+		// Omitting the flag and giving tk's default are the same request.
+		for args in [&["rtk"][..], &["rtk", "--jsonnet-implementation", "go"][..]] {
+			let args = Cli::try_parse_from(args).expect("default implementation");
+			assert!(args
+				.args
+				.jsonnet_options()
+				.unwrap()
+				.rc
+				.spec
+				.jsonnet_implementation
+				.is_none());
+		}
 		assert!(Cli::try_parse_from(["rtk", "--jsonnet-implementation", "not-jsonnet"]).is_err());
 	}
 

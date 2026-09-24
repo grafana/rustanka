@@ -1,14 +1,16 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ffi::{CStr, CString, c_int, c_void};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc as Shared;
+use std::sync::{LazyLock, Mutex, PoisonError};
 
 use rtk_jsonnet_core as core;
 use rtk_jsonnet_core::FlagsExt;
-use rtk_spec::canonical::{EnvironmentSpec, Rc};
+use rtk_spec::canonical::{
+	EnvironmentSpec, JsonentImplementationOrConfig, JsonnetImplementation, Rc,
+};
 use serde_json::Value as Json;
 
 use crate::native::{Arguments, Value};
@@ -151,6 +153,9 @@ impl CallbackContext {
 	}
 
 	/// Construct a result using only JSON constructors owned by this VM.
+	///
+	/// A container takes ownership of what is appended to it, so a failure part
+	/// way through destroys the container built so far rather than leaking it.
 	fn result(&self, value: &Json) -> Result<*mut c_void, EvaluatorError> {
 		let api = self.api;
 		let vm = self.vm;
@@ -161,28 +166,39 @@ impl CallbackContext {
 				Json::Bool(b) => (api.make_bool)(vm, i32::from(*b)),
 				Json::Number(n) => (api.make_number)(vm, n.as_f64().expect("JSON number")),
 				Json::String(s) => {
-					let text = CString::new(s.as_str())
-						.map_err(|_| EvaluatorError("native result contains NUL".into()))?;
+					let text = Self::c_string(s, "native result contains NUL")?;
 					(api.make_string)(vm, text.as_ptr())
 				}
 				Json::Array(values) => {
-					let array = (api.make_array)(vm);
+					let array = Self::non_null((api.make_array)(vm))?;
 					for value in values {
-						(api.array_append)(vm, array, self.result(value)?);
+						let element = self
+							.result(value)
+							.inspect_err(|_| (api.json_destroy)(vm, array))?;
+						(api.array_append)(vm, array, element);
 					}
 					array
 				}
 				Json::Object(fields) => {
-					let object = (api.make_object)(vm);
+					let object = Self::non_null((api.make_object)(vm))?;
 					for (key, value) in fields {
-						let key = CString::new(key.as_str())
-							.map_err(|_| EvaluatorError("native object key contains NUL".into()))?;
-						(api.object_append)(vm, object, key.as_ptr(), self.result(value)?);
+						let field = Self::c_string(key, "native object key contains NUL")
+							.and_then(|key| Ok((key, self.result(value)?)))
+							.inspect_err(|_| (api.json_destroy)(vm, object))?;
+						(api.object_append)(vm, object, field.0.as_ptr(), field.1);
 					}
 					object
 				}
 			}
 		};
+		Self::non_null(ptr)
+	}
+
+	fn c_string(text: &str, failure: &str) -> Result<CString, EvaluatorError> {
+		CString::new(text).map_err(|_| EvaluatorError(failure.into()))
+	}
+
+	fn non_null(ptr: *mut c_void) -> Result<*mut c_void, EvaluatorError> {
 		if ptr.is_null() {
 			return Err(EvaluatorError(
 				"reference Jsonnet returned a null JSON value pointer".into(),
@@ -232,9 +248,15 @@ unsafe extern "C" fn native_callback(
 	}
 }
 
-thread_local! {
-	static MEMO: RefCell<HashMap<String, Json>> = RefCell::new(HashMap::new());
-}
+/// Process-global, as the jrsonnet implementation's is: the cache exists to
+/// cross evaluations, and a per-thread one would make which value a key holds
+/// depend on which worker happened to evaluate an environment.
+///
+/// libjsonnet forces native arguments before the call, so nothing is saved
+/// here — the value has been computed either way. What is kept is the meaning:
+/// the first value stored under a key is the one every later call receives.
+static MEMO: LazyLock<Mutex<HashMap<String, Json>>> = LazyLock::new(Mutex::default);
+
 struct Memoize;
 impl core::Function<Evaluator> for Memoize {
 	fn argv(&self) -> (usize, Option<usize>) {
@@ -250,16 +272,27 @@ impl core::Function<Evaluator> for Memoize {
 			.0
 			.as_str()
 			.ok_or_else(|| EvaluatorError("rtkMemoize key must be a string".into()))?;
-		Ok(Value(MEMO.with(|memo| {
-			memo.borrow_mut()
-				.entry(key.to_owned())
-				.or_insert(value.0)
-				.clone()
-		})))
+		let mut memo = MEMO.lock().unwrap_or_else(PoisonError::into_inner);
+		Ok(Value(memo.entry(key.to_owned()).or_insert(value.0).clone()))
 	}
 }
 
 impl Evaluator {
+	/// Whether flags configured with `implementation` are addressed to this one.
+	///
+	/// A project or environment may configure another implementation's flags
+	/// and still be evaluated here, when something more specific chose the
+	/// reference interpreter. Those flags are not this implementation's to
+	/// refuse.
+	fn configures_reference(implementation: Option<&JsonentImplementationOrConfig>) -> bool {
+		implementation.is_some_and(|implementation| {
+			matches!(
+				implementation.implementation(),
+				JsonnetImplementation::Reference
+			)
+		})
+	}
+
 	fn evaluate(
 		self,
 		run: impl FnOnce(&mut Vm<'_>) -> Result<String, Error>,
@@ -271,7 +304,10 @@ impl Evaluator {
 		if let Some(depth) = self.max_stack {
 			vm.max_stack(depth);
 		}
-		for path in &self.import_paths {
+		// `import_paths` is in order of precedence, first wins. libjsonnet searches
+		// the path it was given last first (the `jsonnet` CLI's "right-most wins"),
+		// so the paths are handed over reversed.
+		for path in self.import_paths.iter().rev() {
 			vm.add_import_path(path)?;
 		}
 		for (key, value) in &self.external_code {
@@ -339,9 +375,11 @@ impl core::Evaluator for Evaluator {
 		}
 	}
 	fn with_rc(&mut self, rc: Rc) -> Result<&mut Self, EvaluatorError> {
-		let _ = rc
-			.flags::<Flag>()
-			.map_err(|error| EvaluatorError(error.to_string()))?;
+		if Self::configures_reference(rc.spec.jsonnet_implementation.as_ref()) {
+			let _ = rc
+				.flags::<Flag>()
+				.map_err(|error| EvaluatorError(error.to_string()))?;
+		}
 		if let Some(depth) = rc.spec.max_stack_depth {
 			self.max_stack = Some(
 				u32::try_from(depth)
@@ -355,9 +393,11 @@ impl core::Evaluator for Evaluator {
 		&mut self,
 		environment: &EnvironmentSpec,
 	) -> Result<&mut Self, EvaluatorError> {
-		let _ = environment
-			.flags::<Flag>()
-			.map_err(|error| EvaluatorError(error.to_string()))?;
+		if Self::configures_reference(environment.export_jsonnet_implementation.as_ref()) {
+			let _ = environment
+				.flags::<Flag>()
+				.map_err(|error| EvaluatorError(error.to_string()))?;
+		}
 		Ok(self)
 	}
 	fn with_import_paths(&mut self, paths: Vec<PathBuf>) -> Result<&mut Self, EvaluatorError> {
@@ -447,11 +487,7 @@ mod tests {
 	use serde::{Deserialize, Serialize};
 
 	fn implementation() -> Option<Implementation> {
-		match <Implementation as core::Implementation>::new(std::iter::empty()) {
-			Ok(implementation) => Some(implementation),
-			Err(Error::Load { .. } | Error::Version { .. }) => None,
-			Err(error) => panic!("reference Jsonnet unavailable: {error}"),
-		}
+		Implementation::installed_for_tests()
 	}
 
 	#[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -607,6 +643,107 @@ mod tests {
 			.unwrap();
 		let choices = Vec::<Choice>::deserialize(context.create_deserializer(value)).unwrap();
 		assert_eq!(choices, vec![Choice::One, Choice::Two { count: 2 }]);
+	}
+
+	#[test]
+	fn the_first_import_path_wins() {
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let directory = tempfile::tempdir().unwrap();
+		let paths = ["first", "second", "third"].map(|name| {
+			let path = directory.path().join(name);
+			std::fs::create_dir(&path).unwrap();
+			std::fs::write(path.join("x.libsonnet"), format!("'{name}'")).unwrap();
+			path
+		});
+		let mut evaluator = core::Implementation::create_evaluator(&implementation);
+		evaluator.with_import_paths(paths.to_vec()).unwrap();
+		let (_, value) = evaluator.evaluate_snippet("import 'x.libsonnet'").unwrap();
+		assert_eq!(value.as_str().as_deref(), Some("first"));
+	}
+
+	#[test]
+	fn errors_are_libjsonnets_own_report() {
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let error = core::Implementation::create_evaluator(&implementation)
+			.evaluate_snippet("error 'boom'")
+			.err()
+			.expect("an error");
+		let error = Error::from(error).to_string();
+		assert!(error.starts_with("RUNTIME ERROR: boom"), "{error}");
+	}
+
+	struct Nested;
+	impl core::Function<Evaluator> for Nested {
+		fn argv(&self) -> (usize, Option<usize>) {
+			(0, None)
+		}
+		fn call(&self, _: &Evaluator, _: Arguments) -> Result<Value, EvaluatorError> {
+			Ok(Value(serde_json::json!({"good": [1], "bad\u{0}key": 2})))
+		}
+	}
+
+	#[test]
+	fn a_result_that_cannot_be_built_is_an_error() {
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let mut evaluator = core::Implementation::create_evaluator(&implementation);
+		evaluator.with_native_function("nested", Nested).unwrap();
+		let error = evaluator
+			.evaluate_snippet("std.native('nested')()")
+			.err()
+			.expect("a NUL in a key cannot cross the C API");
+		assert!(error.to_string().contains("contains NUL"), "{error}");
+	}
+
+	#[test]
+	fn memoized_values_are_shared_across_threads() {
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let evaluate = move |value: u32| {
+			let mut evaluator = core::Implementation::create_evaluator(&implementation);
+			evaluator.with_rtk_memoize().unwrap();
+			let (_, value) = evaluator
+				.evaluate_snippet(format!(
+					"std.native('rtkMemoize')('reference-memo-threads', {value})"
+				))
+				.unwrap();
+			value.as_number()
+		};
+		let first = evaluate(1);
+		let second = std::thread::spawn(move || evaluate(2)).join().unwrap();
+		assert_eq!(first, Some(1.0));
+		assert_eq!(second, Some(1.0));
+	}
+
+	#[test]
+	fn another_implementations_flags_are_not_refused() {
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let configured = |implementation: &str| -> EnvironmentSpec {
+			serde_json::from_value(serde_json::json!({
+				"exportJsonnetImplementation": {
+					"type": implementation,
+					"flags": {"some-flag": "value"},
+				},
+			}))
+			.unwrap()
+		};
+		let mut evaluator = core::Implementation::create_evaluator(&implementation);
+		evaluator
+			.with_environment(&configured("jrsonnet"))
+			.expect("jrsonnet's flags are not the reference interpreter's to refuse");
+		let error = evaluator
+			.with_environment(&configured("c++"))
+			.err()
+			.expect("a flag addressed to the reference interpreter is refused");
+		assert!(error.to_string().contains("some-flag"), "{error}");
 	}
 
 	#[test]

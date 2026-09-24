@@ -151,7 +151,6 @@ rtk-jsonnet-native-functions = { path = "./crates/rtk-jsonnet-native-functions",
 rtk-jsonnet-regex = { path = "./crates/rtk-jsonnet-regex", version = "0.5.0-pre99" }
 rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
 
-libloading = "0.8.9"
 either = { version = "1.15.0", features = [ "serde" ] }
 rayon = "1.10"
 kube = { version = "4.2.0", features = ["runtime", "derive", "client"] }
@@ -169,6 +168,8 @@ tokio = { version = "1.49.0", features = [
 schemars = { version = "1.2.1", features = ["url2"] }
 semver = { version = "1.0.28", features = ["serde"] }
 walkdir = "2.5"
+# Opens the reference interpreter's libjsonnet at runtime.
+libloading = "0.8.9"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
