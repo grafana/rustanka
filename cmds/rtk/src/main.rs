@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use commands::common::BrokenPipeGuard;
 
 mod commands;
@@ -74,6 +74,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+	clap_complete::CompleteEnv::with_factory(Cli::command).complete();
 	let cli = Cli::parse();
 
 	// Initialize telemetry (tracing + optional OpenTelemetry)

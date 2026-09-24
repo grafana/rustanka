@@ -12,6 +12,7 @@ use crate::k8s::{client::ClusterConnection, diff::DiffStrategy};
 #[derive(Args)]
 pub struct StatusArgs {
 	/// Path to check status
+	#[arg(add = clap_complete::engine::ArgValueCompleter::new(super::complete::environment_candidates))]
 	pub path: PathBuf,
 
 	/// String that only a single inline environment contains in its name
