@@ -145,11 +145,13 @@ rtk-masterminds = { path = "./crates/rtk-masterminds", version = "0.5.0-pre99" }
 rtk-jsonnet-core = { path = "./crates/rtk-jsonnet-core", version = "0.5.0-pre99" }
 rtk-jsonnet-helm = { path = "./crates/rtk-jsonnet-helm", version = "0.5.0-pre99" }
 rtk-jsonnet-jrsonnet = { path = "./crates/rtk-jsonnet-jrsonnet", version = "0.5.0-pre99" }
+rtk-jsonnet-reference = { path = "./crates/rtk-jsonnet-reference", version = "0.5.0-pre99" }
 rtk-jsonnet-kustomize = { path = "./crates/rtk-jsonnet-kustomize", version = "0.5.0-pre99" }
 rtk-jsonnet-native-functions = { path = "./crates/rtk-jsonnet-native-functions", version = "0.5.0-pre99" }
 rtk-jsonnet-regex = { path = "./crates/rtk-jsonnet-regex", version = "0.5.0-pre99" }
 rtk-spec = { path = "./crates/rtk-spec", version = "0.5.0-pre99" }
 
+libloading = "0.8.9"
 either = { version = "1.15.0", features = [ "serde" ] }
 rayon = "1.10"
 kube = { version = "4.2.0", features = ["runtime", "derive", "client"] }

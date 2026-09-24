@@ -5,9 +5,10 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::Args;
 use rtk_environments::export::LabelSelector;
+use rtk_spec::canonical::JsonentImplementationOrConfig;
 use tabwriter::TabWriter;
 
-use crate::commands::common::{JsonnetArgs, UnimplementedArgs};
+use crate::commands::common::{EvaluatorImplementation, JsonnetArgs};
 
 #[derive(Args)]
 pub struct ListArgs {
@@ -26,9 +27,9 @@ pub struct ListArgs {
 	#[arg(long)]
 	pub json: bool,
 
-	/// Use `go` to use native go-jsonnet implementation and `binary:<path>` to delegate evaluation to a binary (with the same API as the regular `jsonnet` binary)
-	#[arg(long, default_value = "go")]
-	pub jsonnet_implementation: String,
+	/// Jsonnet implementation to use (c++, jrsonnet, or binary:<path>); defaults to the project's configuration
+	#[arg(long)]
+	pub jsonnet_implementation: Option<EvaluatorImplementation>,
 
 	/// Jsonnet VM max stack. Increase this if you get: max stack frames exceeded
 	///
@@ -62,7 +63,7 @@ impl ListArgs {
 				.collect()
 		}
 
-		Ok(rtk_jsonnet::Options {
+		let mut options = rtk_jsonnet::Options {
 			ext_code: values(&self.ext_code)?,
 			ext_variables: values(&self.ext_str)?,
 			top_level_code: values(&self.tla_code)?,
@@ -72,13 +73,19 @@ impl ListArgs {
 				.map(|max_stack| max_stack.try_into().context("max stack must be positive"))
 				.transpose()?,
 			..rtk_jsonnet::Options::default()
-		})
+		};
+		options.rc.spec.jsonnet_implementation =
+			self.jsonnet_implementation.as_ref().map(|implementation| {
+				JsonentImplementationOrConfig::JsonnetImplementation(
+					implementation.spec_implementation(),
+				)
+			});
+		Ok(options)
 	}
 }
 
 /// Run the env list subcommand.
 pub fn run<W: Write>(args: ListArgs, mut writer: W) -> Result<()> {
-	UnimplementedArgs::warn_jsonnet_impl(&args.jsonnet_implementation);
 	let search_path = args
 		.path
 		.as_deref()
@@ -159,6 +166,7 @@ mod tests {
 	use std::fs;
 
 	use assert_matches::assert_matches;
+	use clap::Parser;
 	use tempfile::TempDir;
 
 	use super::*;
@@ -170,13 +178,46 @@ mod tests {
 			ext_code: vec![],
 			ext_str: vec![],
 			json: false,
-			jsonnet_implementation: "go".to_string(),
+			jsonnet_implementation: None,
 			max_stack: Some(500),
 			names: false,
 			selector: None,
 			tla_code: vec![],
 			tla_str: vec![],
 		}
+	}
+
+	#[derive(clap::Parser)]
+	struct Cli {
+		#[command(flatten)]
+		args: ListArgs,
+	}
+
+	#[test]
+	fn implementation_flag_reaches_env_list_options() {
+		let args = Cli::try_parse_from(["rtk", "--jsonnet-implementation", "c++"])
+			.expect("c++ implementation");
+		let options = args.args.jsonnet_options().expect("valid options");
+		assert_eq!(
+			options
+				.rc
+				.spec
+				.jsonnet_implementation
+				.as_ref()
+				.map(JsonentImplementationOrConfig::implementation),
+			Some(&rtk_spec::canonical::JsonnetImplementation::Reference)
+		);
+
+		let args = Cli::try_parse_from(["rtk"]).expect("default implementation");
+		assert!(args
+			.args
+			.jsonnet_options()
+			.unwrap()
+			.rc
+			.spec
+			.jsonnet_implementation
+			.is_none());
+		assert!(Cli::try_parse_from(["rtk", "--jsonnet-implementation", "not-jsonnet"]).is_err());
 	}
 
 	#[test]

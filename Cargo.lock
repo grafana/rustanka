@@ -3503,6 +3503,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "libmimalloc-sys"
 version = "0.1.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4756,6 +4766,7 @@ dependencies = [
  "regex",
  "rtk-jsonnet",
  "rtk-jsonnet-core",
+ "rtk-jsonnet-reference",
  "rtk-masterminds",
  "rtk-spec",
  "rtk-yaml",
@@ -4784,6 +4795,7 @@ dependencies = [
  "rtk-jsonnet-jrsonnet",
  "rtk-jsonnet-kustomize",
  "rtk-jsonnet-native-functions",
+ "rtk-jsonnet-reference",
  "rtk-jsonnet-regex",
  "rtk-masterminds",
  "rtk-spec",
@@ -4861,6 +4873,18 @@ dependencies = [
  "serde-saphyr 1.2.0",
  "serde_json",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "rtk-jsonnet-reference"
+version = "0.5.0-pre99"
+dependencies = [
+ "libloading",
+ "rtk-jsonnet-core",
+ "rtk-spec",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
