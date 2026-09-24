@@ -1,0 +1,80 @@
+# Fixtures known to fail.
+#
+# THIS LIST MAY ONLY EVER SHRINK. `tests/fixtures.rs` asserts the ratchet in
+# three directions, and each failure mode tells you what to do:
+#
+#   * a fixture fails and is not listed here  -> fix it, or add it with a reason
+#   * a fixture listed here now passes        -> delete its entry
+#   * an entry names no fixture at all        -> delete its entry (it is stale)
+#
+# The third check is skipped for a namespace that was not graded on this run —
+# `go_jsonnet/` needs `GO_JSONNET_FOR_TESTS` pointing at a go-jsonnet checkout,
+# so its entries cannot be reconciled without one.
+#
+# This is the mechanism for landing the formatter passes one at a time without
+# deleting cases, which `CLAUDE.md` forbids. It is not a dumping ground: every
+# entry carries a `reason`, and the ratchet is what stops the list growing.
+#
+# There is deliberately no `fmt_golden_override/` directory to go with it.
+# `tests/go_testdata_golden_override/` is legitimate because rtk's *evaluation*
+# genuinely differs from Go's in documented places. For fmt, every override
+# would be a divergence from `tk fmt` — that is, a bug.
+
+# ---------------------------------------------------------------------------
+# Phase 2e: `FixParens` and the two `*PlusObject` passes are not written yet.
+# These nine are upstream's own `TestFormatNoImplicitPlus` cases, ported in
+# Phase 0, and they are the only fixtures whose bugs would change what a file
+# *evaluates to* — `{ a: 1 } { b: 2 }.a` must become `({ a: 1 } + { b: 2 }).a`.
+# They all go away in Phase 2e; none of them is an accepted divergence.
+#
+# Note they run with `use_implicit_plus: false`, which is not what `tk fmt`
+# passes: that branch is `AddPlusObject`, and `Options::default` takes
+# `RemovePlusObject` instead. They are kept because upstream keeps them.
+# ---------------------------------------------------------------------------
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-apply"
+reason = "`FixParens` is not implemented (Phase 2e), so no parens are inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-index"
+reason = "`FixParens` is not implemented (Phase 2e), so no parens are inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-three"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-left"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-right"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-unary"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-mul-right"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+[[entry]]
+id = "no_implicit_plus/implicit-plus-mul-left"
+reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
+
+# The three `parse_errors/` entries were removed when the parser landed in
+# Phase 2a: `format` now parses, so it refuses these files with go-jsonnet's
+# own messages. That is what the ratchet is for — an entry that starts passing
+# is deleted in the same commit.
+#
+# Phase 2b removed none, which is expected: `FixTrailingCommas`,
+# `NoRedundantSliceColon` and `PrettyFieldNames` have nothing to do with these
+# nine. Its progress shows up in `testdata/corpus-baseline.toml` (118 -> 120)
+# and, for the two passes the corpus cannot see at all, in
+# `tests/pass_parity.rs`.
