@@ -33,7 +33,16 @@ impl fmt::Display for Location {
 ///
 /// Go keeps the filename on the `Source` the range points at; there is no
 /// source here, so it is held directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// [`Default`] is Go's zero value — an unset range with no filename, which
+/// [`LocationRange::is_set`] reports as unset and [`Display`](fmt::Display)
+/// renders as the empty string. It exists for the one caller that needs a
+/// location it will never look at: `EnforceStringStyle` hands one to
+/// [`string_unescape`](crate::string_util::string_unescape) and discards the
+/// error, exactly as upstream does. Do not reach for it anywhere a real
+/// position could be had — an error carrying this one prints without a
+/// position at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocationRange {
 	/// go-jsonnet's `DiagnosticFileName` — the name `Format` was called with.
 	pub diagnostic_filename: String,
