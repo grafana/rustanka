@@ -2,12 +2,10 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::Path;
 
 use anyhow::Result;
 use clap::Args;
 use jrsonnet_lint::{apply_fixes, lint_snippet, Diagnostic, LintConfig, ParseError};
-use walkdir::WalkDir;
 
 /// Exit code when lint problems were found (for process::exit)
 pub const EXIT_CODE_PROBLEMS: i32 = 2;
@@ -15,10 +13,14 @@ pub const EXIT_CODE_PROBLEMS: i32 = 2;
 #[derive(Args)]
 pub struct LintArgs {
 	/// Files or directories to lint
+	// `ArgsMin(1)`, as `tk lint` is. This used to default to `"."`, which was
+	// a divergence carried with a note pointing at the `fmt` CLI; the two
+	// commands share Tanka's discovery and now share its argument rule too.
+	#[arg(required = true)]
 	pub paths: Vec<String>,
 
 	/// Globs to exclude
-	#[arg(short = 'e', long, default_values_t = vec!["**/.*".to_string(), ".*".to_string(), "**/vendor/**".to_string(), "vendor/**".to_string()])]
+	#[arg(short = 'e', long, default_values_t = rtk_gobwas_glob::TANKA_DEFAULT_EXCLUDES.map(String::from).to_vec())]
 	pub exclude: Vec<String>,
 
 	/// Amount of workers
@@ -40,35 +42,15 @@ pub fn run<W: Write>(args: LintArgs, _writer: W) -> Result<()> {
 		.with_disabled_checks(&args.disable_checks)
 		.map_err(anyhow::Error::msg)?;
 
-	let paths = if args.paths.is_empty() {
-		vec![".".to_string()]
-	} else {
-		args.paths
-	};
-
-	let mut all_files: Vec<String> = Vec::new();
-	for path in &paths {
-		let p = Path::new(path);
-		if p.is_file() {
-			if is_jsonnet_file(p) {
-				all_files.push(p.display().to_string());
-			}
-		} else if p.is_dir() {
-			for entry in WalkDir::new(p)
-				.follow_links(true)
-				.into_iter()
-				.filter_entry(|e| !is_excluded(e.path(), &args.exclude))
-			{
-				let entry = entry?;
-				let path = entry.path();
-				if path.is_file() && is_jsonnet_file(path) {
-					all_files.push(path.display().to_string());
-				}
-			}
-		} else {
-			anyhow::bail!("no such file or directory: {}", path);
-		}
-	}
+	// `tk lint` and `tk fmt` share Tanka's `jsonnet.FindFiles`, so rtk shares
+	// the port of it. What this replaced got three things wrong: it pruned
+	// excluded directories (`FindFiles` returns `nil`, not `fs.SkipDir`, so a
+	// `**/vendor/**` exclude walks the whole tree and discards it file by
+	// file), it followed symlinks where `filepath.WalkDir` does not, and it
+	// sniffed at the exclude patterns instead of compiling them — so `*` did
+	// not cross `/` and anything but the four default patterns was ignored.
+	let excludes = rtk_gobwas_glob::compile_all(&args.exclude)?;
+	let all_files = rtk_jsonnetfmt::find_files_all(&args.paths, &excludes)?;
 
 	let mut had_problems = false;
 	for file in &all_files {
@@ -102,45 +84,6 @@ pub fn run<W: Write>(args: LintArgs, _writer: W) -> Result<()> {
 		std::process::exit(EXIT_CODE_PROBLEMS);
 	}
 	Ok(())
-}
-
-fn is_jsonnet_file(p: &Path) -> bool {
-	p.extension()
-		.map(|e| e == "jsonnet" || e == "libsonnet")
-		.unwrap_or(false)
-}
-
-/// Simple exclude: path matches if any exclude pattern matches.
-/// Patterns: "**/vendor/**", "vendor/**", "**/.*", ".*" (path contains or path component).
-fn is_excluded(path: &Path, exclude: &[String]) -> bool {
-	let path_str = path.to_string_lossy();
-	for pat in exclude {
-		if pat == ".*" {
-			if path
-				.file_name()
-				.map_or(false, |n| n.to_string_lossy().starts_with('.'))
-			{
-				return true;
-			}
-		} else if pat == "**/.*" {
-			if path
-				.components()
-				.any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-			{
-				return true;
-			}
-		} else if pat.ends_with("/**") {
-			let prefix = pat.trim_end_matches("/**");
-			if path_str.contains(prefix) {
-				return true;
-			}
-		} else if pat == "**/vendor/**" || pat == "vendor/**" {
-			if path_str.contains("/vendor/") || path_str.contains("vendor/") {
-				return true;
-			}
-		}
-	}
-	false
 }
 
 fn emit_parse_error(filename: &str, code: &str, e: &ParseError) {
@@ -256,10 +199,39 @@ mod tests {
 	}
 
 	#[test]
-	fn is_jsonnet_file_extensions() {
-		assert!(is_jsonnet_file(std::path::Path::new("a.jsonnet")));
-		assert!(is_jsonnet_file(std::path::Path::new("b.libsonnet")));
-		assert!(!is_jsonnet_file(std::path::Path::new("c.json")));
-		assert!(!is_jsonnet_file(std::path::Path::new("d.txt")));
+	fn run_rejects_an_uncompilable_exclude_pattern() {
+		// `tk lint` returns whatever `glob.Compile` says, before it looks at a
+		// single file. The message is gobwas' own.
+		let args = LintArgs {
+			paths: vec![".".to_string()],
+			exclude: vec!["[a".to_string()],
+			parallelism: 4,
+			disable_checks: vec![],
+			fix: false,
+		};
+		let err = run(args, sink()).expect_err("a malformed glob is an error");
+		assert!(err.to_string().contains("unexpected end of input"), "{err}");
+	}
+
+	#[test]
+	fn run_does_not_prune_an_excluded_directory() {
+		// The behaviour the hand-rolled exclude matcher got wrong: `FindFiles`
+		// skips directories before consulting the excludes, so a pattern that
+		// matches a directory's own path prunes nothing under it.
+		let dir = tempfile::Builder::new()
+			.prefix("rtk-lint-exclude")
+			.tempdir()
+			.unwrap();
+		std::fs::create_dir(dir.path().join("lib")).unwrap();
+		std::fs::write(dir.path().join("lib/main.jsonnet"), "local x = 1;\nx\n").unwrap();
+
+		let args = LintArgs {
+			paths: vec![dir.path().to_string_lossy().to_string()],
+			exclude: vec!["**/lib".to_string()],
+			parallelism: 4,
+			disable_checks: vec![],
+			fix: true,
+		};
+		assert!(run(args, sink()).is_ok());
 	}
 }

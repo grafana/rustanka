@@ -3,7 +3,7 @@
 //!
 //! Nine of the twelve passes are an override of one or two methods on this
 //! traversal, so its shape decides theirs. It is ported rather than
-//! re-derived, for the reason `docs/rtk-fmt-plan.md` gives: in
+//! re-derived, for the reason the fmt port plan gives: in
 //! `rtk-gobwas-glob`, the two files that mirrored Go's structure had zero
 //! divergences against a generated oracle and the one that departed from it
 //! shipped nine.

@@ -78,7 +78,7 @@
 //!
 //! # Where the near-misses are
 //!
-//! `docs/rtk-fmt-plan.md` calls this the pass where they will cluster, and
+//! the fmt port plan called this the pass where near-misses would cluster, and
 //! the shapes are specific. Five worth knowing before changing anything:
 //!
 //! 1. **`fill_last`'s last element takes a different indent from the rest**,
