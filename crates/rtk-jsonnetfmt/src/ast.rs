@@ -778,6 +778,33 @@ impl UnaryOp {
 	}
 }
 
+/// `internal/ast.Precedence`: how tightly an operator binds, lower being
+/// tighter.
+///
+/// Ported from `internal/ast/ast.go` rather than from `ast/ast.go`, which is
+/// where the rest of this module comes from — the two are separate packages
+/// upstream and only this table lives in the internal one.
+pub type Precedence = u8;
+
+/// `iast.MinPrecedence`: Var, Self, Parens, literals.
+///
+/// **Nothing upstream reads this.** It is consulted only by `ExprPrecedence`
+/// and `TighterPrecedence`, and a grep over go-jsonnet v0.22.0 finds no caller
+/// for either outside `internal/ast` itself — neither the parser nor any
+/// formatter pass uses them. The constant is carried because the table only
+/// makes sense read whole, and so that a future upstream change that does
+/// reach for it does not find a gap here.
+pub const MIN_PRECEDENCE: Precedence = 1;
+/// `iast.ApplyPrecedence`: function calls and indexing.
+pub const APPLY_PRECEDENCE: Precedence = 2;
+/// `iast.UnaryPrecedence`: logical and bitwise negation, unary `+` and `-`.
+///
+/// Read by the parser and by `AddPlusObject`, which compares it against the
+/// precedence of `+`.
+pub const UNARY_PRECEDENCE: Precedence = 4;
+/// `iast.MaxPrecedence`: local, if, import, function, error.
+pub const MAX_PRECEDENCE: Precedence = 16;
+
 /// `ast.BinaryOp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
@@ -803,6 +830,34 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
+	/// `iast.BinaryOpPrecedence`, which is a lookup in `bopPrecedence`.
+	///
+	/// An inherent method rather than a free function beside the parser: how
+	/// tightly an operator binds is a property of the operator, and two
+	/// unrelated places need it. The parser decides where to stop climbing with
+	/// it, and `AddPlusObject` decides whether replacing `e {}` with `e + {}`
+	/// needs parentheses by comparing the enclosing operator's answer against
+	/// [`BinaryOp::Plus`]'s.
+	///
+	/// Go's map has no entry for an operator it does not list and Go returns
+	/// the zero value, `0`, for a miss. That cannot happen here: the map covers
+	/// every `ast.BinaryOp` there is, so this match is total and needs no
+	/// fallback.
+	pub const fn precedence(self) -> Precedence {
+		match self {
+			Self::Mult | Self::Div | Self::Percent => 5,
+			Self::Plus | Self::Minus => 6,
+			Self::ShiftL | Self::ShiftR => 7,
+			Self::Greater | Self::GreaterEq | Self::Less | Self::LessEq | Self::In => 8,
+			Self::ManifestEqual | Self::ManifestUnequal => 9,
+			Self::BitwiseAnd => 10,
+			Self::BitwiseXor => 11,
+			Self::BitwiseOr => 12,
+			Self::And => 13,
+			Self::Or => 14,
+		}
+	}
+
 	/// Go's `bopStrings`, which is also what the unparser writes.
 	pub fn as_str(self) -> &'static str {
 		match self {
@@ -892,6 +947,41 @@ mod tests {
 				.unwrap_or_else(|| panic!("{text} should be a unary operator"));
 			assert_eq!(op.as_str(), text);
 		}
+	}
+
+	#[test]
+	fn the_precedence_table_is_go_jsonnets() {
+		// Transcribed from `bopPrecedence` in internal/ast/ast.go. The absolute
+		// numbers matter and not just their order, because `AddPlusObject`
+		// compares `UNARY_PRECEDENCE` — which is not in this table — against
+		// `BinaryOp::Plus`.
+		for (op, want) in [
+			(BinaryOp::Mult, 5),
+			(BinaryOp::Div, 5),
+			(BinaryOp::Percent, 5),
+			(BinaryOp::Plus, 6),
+			(BinaryOp::Minus, 6),
+			(BinaryOp::ShiftL, 7),
+			(BinaryOp::ShiftR, 7),
+			(BinaryOp::Greater, 8),
+			(BinaryOp::GreaterEq, 8),
+			(BinaryOp::Less, 8),
+			(BinaryOp::LessEq, 8),
+			(BinaryOp::In, 8),
+			(BinaryOp::ManifestEqual, 9),
+			(BinaryOp::ManifestUnequal, 9),
+			(BinaryOp::BitwiseAnd, 10),
+			(BinaryOp::BitwiseXor, 11),
+			(BinaryOp::BitwiseOr, 12),
+			(BinaryOp::And, 13),
+			(BinaryOp::Or, 14),
+		] {
+			assert_eq!(op.precedence(), want, "{}", op.as_str());
+		}
+		assert_eq!(MIN_PRECEDENCE, 1);
+		assert_eq!(APPLY_PRECEDENCE, 2);
+		assert_eq!(UNARY_PRECEDENCE, 4);
+		assert_eq!(MAX_PRECEDENCE, 16);
 	}
 
 	#[test]
