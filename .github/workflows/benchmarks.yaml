@@ -20,6 +20,10 @@ jobs:
             id: "rtk-current"
             package: "rtk"
             ref: ""
+          - name: "rtk (linked Go Helm)"
+            id: "rtk-go"
+            package: "rtk"
+            ref: ""
           - name: "rtk (base)"
             id: "rtk-base"
             package: "rtk"
@@ -40,10 +44,25 @@ jobs:
         if: matrix.build.id != 'rtk-base' || github.event_name == 'pull_request'
         uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
 
+      - name: Set up Go
+        if: matrix.build.id == 'rtk-go'
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.23.12'
+
+      - name: Test Go bridge
+        if: matrix.build.id == 'rtk-go'
+        working-directory: crates/rtk-jsonnet-helm
+        run: go test -race ./go-bridge
+
       - name: Build ${{ matrix.build.package }}
         if: matrix.build.id != 'rtk-base' || github.event_name == 'pull_request'
         run: |
-          cargo build --release -p ${{ matrix.build.package }}
+          if [ "${{ matrix.build.id }}" = "rtk-go" ]; then
+            cargo build --release -p rtk --features go-helm
+          else
+            cargo build --release -p ${{ matrix.build.package }}
+          fi
           cp target/release/${{ matrix.build.package }} ${{ matrix.build.id }}
 
       - name: Upload binary
@@ -99,6 +118,15 @@ jobs:
           - name: "Helm Template"
             config: "rtk-benchmarks/helm-template.yaml"
             id: "helm-template"
+          - name: "Helm Template (Linked Go)"
+            config: "rtk-benchmarks/helm-template-go.yaml"
+            id: "helm-template-go"
+          - name: "Helm Template (Linked Go, Uncached)"
+            config: "rtk-benchmarks/helm-template-go-uncached.yaml"
+            id: "helm-template-go-uncached"
+          - name: "Helm Template (Linked Go, Small Chart)"
+            config: "rtk-benchmarks/helm-template-go-light-uncached.yaml"
+            id: "helm-template-go-light-uncached"
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
@@ -107,6 +135,13 @@ jobs:
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
           name: rtk-current
+          path: bin
+
+      - name: Download rtk-go
+        if: startsWith(matrix.benchmark.id, 'helm-template-go')
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          name: rtk-go
           path: bin
 
       - name: Download rtk-base
@@ -133,7 +168,12 @@ jobs:
           tk --version
 
       - name: Install Helm
+        env:
+          BENCHMARK_ID: ${{ matrix.benchmark.id }}
         run: |
+          if [[ "$BENCHMARK_ID" == helm-template-go* ]]; then
+            export DESIRED_VERSION=v3.17.4
+          fi
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
           helm version
 
@@ -153,19 +193,29 @@ jobs:
 
       - name: Run benchmark
         env:
+          BENCHMARK_ID: ${{ matrix.benchmark.id }}
+          RTK_HELM_RENDERER: ${{ startsWith(matrix.benchmark.id, 'helm-template-go') && 'go' || '' }}
           BENCHMARK_MARKDOWN_OUTPUT: benchmark-results.md
           BENCHMARK_SUMMARY_OUTPUT: benchmark-summary.json
         run: |
           # Use pipefail to ensure the exit code from the benchmark script is preserved
           set -o pipefail
 
+          if [[ "$BENCHMARK_ID" == *uncached ]]; then
+            export RTK_HELM_DISABLE_MEMOIZATION=1
+          fi
+
           # Build args for benchmark script
-          ARGS="--rtk-binary-path bin/rtk-current"
+          if [[ "$BENCHMARK_ID" == helm-template-go* ]]; then
+            ARGS="--rtk-binary-path bin/rtk-go"
+          else
+            ARGS="--rtk-binary-path bin/rtk-current"
+          fi
           if [ -f bin/rtk-base ]; then
             ARGS="$ARGS --rtk-base-binary-path bin/rtk-base"
           fi
 
-          if [ "${{ matrix.benchmark.id }}" = "export-large" ]; then
+          if [ "$BENCHMARK_ID" = "export-large" ] || [[ "$BENCHMARK_ID" == *uncached ]]; then
             ARGS="$ARGS -- --runs 3"
           fi
           ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md

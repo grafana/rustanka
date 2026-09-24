@@ -1,0 +1,11 @@
+name: "Helm Template (Linked Go, Uncached)"
+id: "helm-template-go-uncached"
+description: "Compare each linked Go render against each Helm process render without memoization."
+
+fixtures_dir: "rtk-benchmarks/helm-template"
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Full Export"
+    description: "Export 60 inline environments rendering the same local Helm chart without memoization."
+    command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"

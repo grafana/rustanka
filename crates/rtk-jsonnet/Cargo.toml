@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+go-helm = ["rtk-jsonnet-helm/go-helm"]
+
 [dependencies]
 clap.workspace = true
 rayon.workspace = true
