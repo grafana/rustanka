@@ -143,7 +143,6 @@ pub fn run_in<W: Write>(
 	working_directory: Option<PathBuf>,
 ) -> Result<()> {
 	UnimplementedArgs {
-		jsonnet_implementation: None,
 		cache_envs: Some(&args.cache_envs),
 		cache_path: Some(&args.cache_path),
 		mem_ballast_size_bytes: Some(&args.mem_ballast_size_bytes),

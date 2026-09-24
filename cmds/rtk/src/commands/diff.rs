@@ -489,8 +489,6 @@ mod tests {
 
 	#[test]
 	fn test_build_eval_opts() {
-		use crate::commands::common::EvaluatorImplementation;
-
 		let args = DiffArgs {
 			path: PathBuf::from("test"),
 			color: ColorMode::Auto,
@@ -501,7 +499,7 @@ mod tests {
 				helm_cache: false,
 				ext_code: vec![("code1".into(), "{}".into())],
 				ext_str: vec![("str1".into(), "value1".into())],
-				implementation: EvaluatorImplementation::default(),
+				implementation: None,
 				max_stack: Some(500),
 				tla_code: vec![("tla1".into(), "true".into())],
 				tla_str: vec![("tla2".into(), "hello".into())],
