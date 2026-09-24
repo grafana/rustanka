@@ -70,6 +70,8 @@ where
 #[derive(Debug)]
 struct State {
 	cache: cache::Cache,
+	#[cfg(feature = "go-helm")]
+	go_cache: cache::Cache,
 	helm_binary: PathBuf,
 	helm_identity: OnceLock<Result<Box<[u8]>, Box<str>>>,
 	helm_namespace: OnceLock<Result<Box<str>, Box<str>>>,
@@ -79,6 +81,8 @@ impl State {
 	fn new(cache_directory: Option<CacheDirectoryResolver>) -> State {
 		State {
 			cache: cache::Cache::new(cache_directory),
+			#[cfg(feature = "go-helm")]
+			go_cache: cache::Cache::new(None),
 			helm_binary: env::var_os("RTK_HELM_PATH")
 				.map_or_else(|| PathBuf::from("helm"), PathBuf::from),
 			helm_identity: OnceLock::new(),

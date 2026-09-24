@@ -41,6 +41,10 @@ Faster in every case, up to:
 | `diff` | 51× faster | kubectl operations have been replaced with native Kubernetes API calls |
 | `tool importers` | 8× faster | |
 
+For experimental in-process Helm rendering, build with `cargo build -p rtk --features go-helm`
+and set `RTK_HELM_RENDERER=go`. This links Helm v3.17.4 and requires Go during the build.
+The standard Helm executable remains the default.
+
 ## Feature compatibility with Tanka
 
 Status is relative to [Tanka](https://github.com/grafana/tanka) (`tk`). ✅ implemented,

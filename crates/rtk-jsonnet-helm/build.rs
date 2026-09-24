@@ -14,6 +14,8 @@
 use std::process::Command;
 
 fn main() {
+	#[cfg(feature = "go-helm")]
+	build_go_bridge();
 	// A moved HEAD or ref changes the commit. A changed source file can change
 	// whether the tree is dirty, and without watching that this script would
 	// not rerun and would keep reporting a clean tree.
@@ -22,6 +24,33 @@ fn main() {
 	println!("cargo:rerun-if-changed=src");
 
 	println!("cargo:rustc-env=RTK_HELM_BUILD={}", build_identity());
+}
+
+#[cfg(feature = "go-helm")]
+fn build_go_bridge() {
+	let output_directory = std::env::var("OUT_DIR").expect("Cargo sets OUT_DIR");
+	let output = Command::new("go")
+		.args([
+			"build",
+			"-tags",
+			"netgo,osusergo",
+			"-buildmode=c-archive",
+			"-o",
+		])
+		.arg(format!("{output_directory}/libgo_helm.a"))
+		.arg("./go-bridge")
+		.output()
+		.expect("Go is required for the go-helm feature");
+	assert!(
+		output.status.success(),
+		"Go Helm build failed: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	println!("cargo:rerun-if-changed=go-bridge");
+	println!("cargo:rerun-if-changed=go.mod");
+	println!("cargo:rerun-if-changed=go.sum");
+	println!("cargo:rustc-link-search=native={output_directory}");
+	println!("cargo:rustc-link-lib=static=go_helm");
 }
 
 /// The version, plus the commit and dirtiness where git can say.

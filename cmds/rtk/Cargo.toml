@@ -74,6 +74,7 @@ urlencoding = "2.1.3"
 k8s-mock = { path = "../../crates/k8s-mock" }
 
 [features]
+go-helm = ["rtk-jsonnet/go-helm"]
 default = ["mimalloc"]
 # Use mimalloc as allocator (enabled by default)
 mimalloc = ["dep:mimalloc"]

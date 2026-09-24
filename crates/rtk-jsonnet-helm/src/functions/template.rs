@@ -13,7 +13,11 @@ use rustc_hash::{FxBuildHasher, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::State;
+use crate::cache::Cache;
 use crate::cache::{Key, KeyBuilder};
+
+#[cfg(feature = "go-helm")]
+mod go;
 
 #[derive(Debug)]
 pub struct Function {
@@ -117,21 +121,33 @@ impl Function {
 	where
 		E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 	{
-		self.cached_or_compute(name, chart_path, options, || {
+		#[cfg(feature = "go-helm")]
+		let cache = if env::var_os("RTK_HELM_RENDERER").as_deref() == Some(std::ffi::OsStr::new("go")) {
+			if options.namespace.is_none() {
+				// The Go bridge resolves its own namespace; asking the Helm executable
+				// for a cache key would reintroduce the process dependency.
+				return self.render::<E>(name, chart_path, options);
+			}
+			&self.state.go_cache
+		} else {
+			&self.state.cache
+		};
+		#[cfg(not(feature = "go-helm"))]
+		let cache = &self.state.cache;
+		self.cached_or_compute(cache, name, chart_path, options, || {
 			self.render::<E>(name, chart_path, options)
 		})
 	}
 
 	fn cached_or_compute<T>(
 		&self,
+		cache: &Cache,
 		name: &str,
 		chart_path: &Path,
 		options: &Options,
 		render: impl FnOnce() -> Result<serde_json::Value, T>,
 	) -> Result<serde_json::Value, T> {
-		let mut directory = self
-			.state
-			.cache
+		let mut directory = cache
 			.directory(Path::new(&options.called_from))
 			.map(|path| crate::cache::canonicalize_with_missing(&path));
 		if let Some(cache_directory) = &directory {
@@ -173,15 +189,15 @@ impl Function {
 			}
 		};
 
-		if let Some(value) = self.state.cache.get(key) {
+		if let Some(value) = cache.get(key) {
 			return Ok(value);
 		}
 
-		let computation = self.state.cache.computation(key);
+		let computation = cache.computation(key);
 		let _guard = computation
 			.lock()
 			.unwrap_or_else(std::sync::PoisonError::into_inner);
-		if let Some(value) = self.state.cache.get(key) {
+		if let Some(value) = cache.get(key) {
 			return Ok(value);
 		}
 
@@ -194,7 +210,7 @@ impl Function {
 			// The one externally visible sign that the cache did its job, and
 			// the first thing worth looking at when it appears not to have.
 			tracing::debug!(chart = ?chart_path, "helm render served from the disk cache");
-			self.state.cache.insert(key, value.clone());
+			cache.insert(key, value.clone());
 			return Ok(value);
 		}
 
@@ -212,7 +228,7 @@ impl Function {
 			tracing::warn!(chart = ?chart_path, "helm inputs changed while rendering; result was not cached");
 			return Ok(value);
 		}
-		self.state.cache.insert(key, value.clone());
+		cache.insert(key, value.clone());
 		if let (Some(directory), Some(helm_identity)) = (directory.as_deref(), helm_identity) {
 			crate::cache::Cache::write_disk(key, directory, helm_identity, &value);
 		}
@@ -228,6 +244,12 @@ impl Function {
 	where
 		E: jsonnet::Evaluator<Context = E> + Context<Evaluator = E>,
 	{
+		#[cfg(feature = "go-helm")]
+		if env::var_os("RTK_HELM_RENDERER").as_deref() == Some(std::ffi::OsStr::new("go")) {
+			let yaml = go::render(name, chart_path, options).map_err(E::Error::custom)?;
+			return parse_helm_yaml_output(&yaml, options.name_format.as_deref())
+				.map_err(E::Error::custom);
+		}
 		let mut command = self.state.helm_command();
 		command.arg("template");
 		command.arg(name);
@@ -673,17 +695,31 @@ mod tests {
 		let options = cache_options(&called_from);
 		let renders = AtomicUsize::new(0);
 
-		let first = function(true)
-			.cached_or_compute("release", &chart, &options, || {
-				renders.fetch_add(1, Ordering::SeqCst);
-				Ok::<_, ()>(json!({ "rendered": true }))
-			})
+		let first_function = function(true);
+		let first = first_function
+			.cached_or_compute(
+				&first_function.state.cache,
+				"release",
+				&chart,
+				&options,
+				|| {
+					renders.fetch_add(1, Ordering::SeqCst);
+					Ok::<_, ()>(json!({ "rendered": true }))
+				},
+			)
 			.unwrap();
-		let second = function(true)
-			.cached_or_compute("release", &chart, &options, || {
-				renders.fetch_add(1, Ordering::SeqCst);
-				Ok::<_, ()>(json!({ "rendered": false }))
-			})
+		let second_function = function(true);
+		let second = second_function
+			.cached_or_compute(
+				&second_function.state.cache,
+				"release",
+				&chart,
+				&options,
+				|| {
+					renders.fetch_add(1, Ordering::SeqCst);
+					Ok::<_, ()>(json!({ "rendered": false }))
+				},
+			)
 			.unwrap();
 
 		assert_eq!(first, json!({ "rendered": true }));
@@ -700,13 +736,19 @@ mod tests {
 		let options = cache_options(&called_from);
 		let function = function(true);
 
-		let failed = function.cached_or_compute("release", &chart, &options, || {
-			Err::<serde_json::Value, _>("render failed")
-		});
+		let failed =
+			function.cached_or_compute(&function.state.cache, "release", &chart, &options, || {
+				Err::<serde_json::Value, _>("render failed")
+			});
 		assert_eq!(failed, Err("render failed"));
 		assert_eq!(
 			function
-				.cached_or_compute("release", &chart, &options, || Ok::<_, &str>(json!("ok")))
+				.cached_or_compute(&function.state.cache, "release", &chart, &options, || Ok::<
+					_,
+					&str,
+				>(
+					json!("ok")
+				))
 				.unwrap(),
 			json!("ok")
 		);
@@ -723,14 +765,14 @@ mod tests {
 		let renders = AtomicUsize::new(0);
 
 		let first = function
-			.cached_or_compute("release", &chart, &options, || {
+			.cached_or_compute(&function.state.cache, "release", &chart, &options, || {
 				renders.fetch_add(1, Ordering::SeqCst);
 				fs::write(&chart, "after").unwrap();
 				Ok::<_, ()>(json!("first"))
 			})
 			.unwrap();
 		let second = function
-			.cached_or_compute("release", &chart, &options, || {
+			.cached_or_compute(&function.state.cache, "release", &chart, &options, || {
 				renders.fetch_add(1, Ordering::SeqCst);
 				Ok::<_, ()>(json!("second"))
 			})
@@ -751,8 +793,9 @@ mod tests {
 		let renders = AtomicUsize::new(0);
 
 		for _ in 0..2 {
-			function(false)
-				.cached_or_compute("release", &chart, &options, || {
+			let function = function(false);
+			function
+				.cached_or_compute(&function.state.cache, "release", &chart, &options, || {
 					renders.fetch_add(1, Ordering::SeqCst);
 					Ok::<_, ()>(json!("rendered"))
 				})
@@ -776,11 +819,18 @@ mod tests {
 		let renders = AtomicUsize::new(0);
 
 		for _ in 0..2 {
-			function(true)
-				.cached_or_compute("release", temp.path(), &options, || {
-					renders.fetch_add(1, Ordering::SeqCst);
-					Ok::<_, ()>(json!("rendered"))
-				})
+			let function = function(true);
+			function
+				.cached_or_compute(
+					&function.state.cache,
+					"release",
+					temp.path(),
+					&options,
+					|| {
+						renders.fetch_add(1, Ordering::SeqCst);
+						Ok::<_, ()>(json!("rendered"))
+					},
+				)
 				.unwrap();
 		}
 
