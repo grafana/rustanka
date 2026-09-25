@@ -58,18 +58,18 @@ Status is relative to [Tanka](https://github.com/grafana/tanka) (`tk`). ✅ impl
 | `eval` | ✅ | ✅ | |
 | `lint` | ✅ | ✅ | `rtk lint` uses jrsonnet-lint (`--fix`, `--disable-checks`) |
 | `env add` / `list` / `remove` / `set` | ✅ | ✅ | |
-| `delete` | ✅ | ❌ | Tracking: [#14](https://github.com/grafana/rustanka/issues/14) |
-| `status` | ✅ | ❌ | Tracking: [#13](https://github.com/grafana/rustanka/issues/13) |
+| `delete` | ✅ | ✅ | |
+| `status` | ✅ | ✅ | |
 | `fmt` | ✅ | ❌ | Tracking: [#11](https://github.com/grafana/rustanka/issues/11) |
-| `init` | ✅ | ❌ | Tracking: [#12](https://github.com/grafana/rustanka/issues/12) |
-| `complete` | ✅ | ❌ | Tracking: [#15](https://github.com/grafana/rustanka/issues/15) |
+| `init` | ✅ | ✅ | |
+| `complete` | ✅ | ✅ | |
 
 ### Tools
 
 | Feature | `tk` | `rtk` | Notes |
 | --- | --- | --- | --- |
 | `tool imports` | ✅ | ✅ | |
-| `tool imports --check` | ✅ | ❌ | Tracking: [#17](https://github.com/grafana/rustanka/issues/17) |
+| `tool imports --check` | ✅ | ✅ | |
 | `tool importers` | ✅ | ✅ | |
 | `tool charts` (`init`, `add`, `add-repo`, `vendor`, `config`, `version-check`) | ✅ | ✅ | |
 | `tool jpath` | ✅ | ✅ | |

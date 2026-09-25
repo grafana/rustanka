@@ -63,6 +63,8 @@ impl std::fmt::Debug for ClusterConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ClusterConnection")
 			.field("cluster_identifier", &self.cluster_identifier)
+			.field("context_name", &self.context_name)
+			.field("cluster_name", &self.cluster_name)
 			.field("server_version", &self.server_version)
 			.finish_non_exhaustive()
 	}

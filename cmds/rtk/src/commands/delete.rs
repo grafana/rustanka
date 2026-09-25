@@ -23,6 +23,7 @@ use crate::k8s::{
 #[derive(Args)]
 pub struct DeleteArgs {
 	/// Path to delete
+	#[arg(add = clap_complete::engine::ArgValueCompleter::new(super::complete::environment_candidates))]
 	pub path: PathBuf,
 
 	/// Skip interactive approval. Only for automation! Allowed values: 'always', 'never', 'if-no-changes'
