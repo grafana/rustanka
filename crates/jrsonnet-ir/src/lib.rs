@@ -8,6 +8,7 @@ use std::{cmp::Ordering, fmt, ops::Deref};
 pub use expr::*;
 use jrsonnet_gcmodule::Acyclic;
 pub use jrsonnet_interner::IStr;
+use serde::{Deserialize, Serialize};
 pub mod function;
 mod location;
 mod source;
@@ -21,7 +22,7 @@ pub use source::{
 
 /// Represents jsonnet number
 /// Jsonnet numbers are finite f64, with NaNs disallowed
-#[derive(Acyclic, Clone, Copy)]
+#[derive(Acyclic, Clone, Copy, Serialize, Deserialize)]
 pub struct NumValue(f64);
 impl NumValue {
 	/// Maximum safe integer value (`2**53 - 1`), see [`NumValue::truncate_for_bitwise`]

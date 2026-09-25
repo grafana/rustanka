@@ -53,7 +53,7 @@ clap = "4.5"
 clap_complete = "4.5"
 
 # Parsing, manifestification is implemented manually everywhere
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 ciborium = "0.2.2"
 serde-saphyr = { version = "1.2.0", default-features = false, features = ["deserialize"] }

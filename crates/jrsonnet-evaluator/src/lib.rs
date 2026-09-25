@@ -452,7 +452,10 @@ impl State {
 		let cached = prepared
 			.filter(|prepared| prepared.externals == externals)
 			.map(|prepared| prepared.lir)
-			.or_else(|| prepared_cache.and_then(|cache| cache.get(&path, &code, &externals)));
+			.or_else(|| {
+				prepared_cache
+					.and_then(|cache| cache.get(&path, &code, &externals, file_name.clone()))
+			});
 		let lir = if let Some(lir) = cached {
 			lir
 		} else {
@@ -462,7 +465,7 @@ impl State {
 				let parsed = Rc::new(parse_jsonnet(&code, file_name.clone()).map_err(|e| {
 					let span = e.location.clone();
 					let mut err = Error::from(ImportSyntaxError {
-						path: file_name,
+						path: file_name.clone(),
 						error: Box::new(e),
 					});
 					err.trace_mut().0.push(StackTraceElement {
@@ -487,7 +490,13 @@ impl State {
 			debug_assert!(report.root_shape.captures.is_empty());
 			let lir = Rc::new(report.lir);
 			if let Some(cache) = prepared_cache {
-				cache.insert(path.clone(), code, externals.clone(), lir.clone());
+				cache.insert(
+					path.clone(),
+					code,
+					externals.clone(),
+					lir.clone(),
+					file_name.clone(),
+				);
 			}
 			lir
 		};

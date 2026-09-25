@@ -17,6 +17,7 @@ use std::{
 use hashbrown::{HashMap, hash_map::RawEntryMut};
 use jrsonnet_gcmodule::{Acyclic, Trace};
 use rustc_hash::FxBuildHasher;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod inner;
 use inner::Inner;
@@ -28,6 +29,16 @@ mod names;
 /// Provides O(1) comparsions and hashing, cheap copy, and cheap conversion to [`IBytes`]
 #[derive(Clone, PartialOrd, Ord, Eq)]
 pub struct IStr(Inner);
+impl Serialize for IStr {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_str(self.as_str())
+	}
+}
+impl<'de> Deserialize<'de> for IStr {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		String::deserialize(deserializer).map(Into::into)
+	}
+}
 impl Trace for IStr {
 	fn is_type_tracked() -> bool {
 		false

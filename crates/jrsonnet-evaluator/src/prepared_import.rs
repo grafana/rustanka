@@ -4,9 +4,17 @@ use jrsonnet_gcmodule::Acyclic;
 use rustc_hash::FxHashMap;
 
 use crate::{
-	IStr, SourcePath,
+	IStr, Source, SourcePath,
 	analyze::{LExpr, LocalId},
 };
+
+#[cfg(unix)]
+mod shared_memory;
+
+#[cfg(unix)]
+thread_local! {
+	static SHARED: Option<shared_memory::SharedMemoryCache> = shared_memory::SharedMemoryCache::open();
+}
 
 /// Reusable import code, without evaluated values or environment bindings.
 ///
@@ -54,13 +62,50 @@ impl PreparedImportCache {
 		path: &SourcePath,
 		code: &IStr,
 		externals: &[(IStr, LocalId)],
+		source: Source,
 	) -> Option<Rc<LExpr>> {
-		let cache = self.0.borrow();
-		let entry = cache.entries.get(path)?;
-		(entry.code == *code && entry.externals == externals).then(|| entry.lir.clone())
+		if let Some(lir) = {
+			let cache = self.0.borrow();
+			cache.entries.get(path).and_then(|entry| {
+				(entry.code == *code && entry.externals == externals).then(|| entry.lir.clone())
+			})
+		} {
+			return Some(lir);
+		}
+		#[cfg(unix)]
+		{
+			let lir = SHARED.with(|shared| shared.as_ref()?.get(path, code, externals, source))?;
+			let lir = Rc::new(lir);
+			self.insert_local(path.clone(), code.clone(), externals.to_vec(), lir.clone());
+			Some(lir)
+		}
+		#[cfg(not(unix))]
+		{
+			let _ = source;
+			None
+		}
 	}
 
 	pub(crate) fn insert(
+		&self,
+		path: SourcePath,
+		code: IStr,
+		externals: Vec<(IStr, LocalId)>,
+		lir: Rc<LExpr>,
+		source: Source,
+	) {
+		#[cfg(unix)]
+		SHARED.with(|shared| {
+			if let Some(shared) = shared {
+				shared.insert(&path, &code, &externals, source, &lir);
+			}
+		});
+		#[cfg(not(unix))]
+		let _ = source;
+		self.insert_local(path, code, externals, lir);
+	}
+
+	fn insert_local(
 		&self,
 		path: SourcePath,
 		code: IStr,

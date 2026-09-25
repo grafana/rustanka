@@ -6,6 +6,62 @@ use crate::{
 	SourceVirtual, State, Thunk, Val,
 };
 
+#[cfg(unix)]
+#[test]
+fn shared_memory_cache_survives_process() {
+	use super::shared_memory::SharedMemoryCache;
+	use std::process::Command;
+
+	let namespace = std::env::var("RTK_PREPARED_IMPORT_SHM_TEST")
+		.unwrap_or_else(|_| format!("test-{}", std::process::id()));
+	let path = SourcePath::new(SourceVirtual("library".into()));
+	let code: IStr = "{ answer: 42 }".into();
+	let source = Source::new(path.clone(), code.clone());
+	let cache = SharedMemoryCache::open_named(&namespace).expect("shared memory available");
+	if std::env::var_os("RTK_PREPARED_IMPORT_SHM_TEST").is_some() {
+		assert!(cache.get(&path, &code, &[], source.clone()).is_some());
+		assert!(
+			cache
+				.get(&path, &"{ answer: 43 }".into(), &[], source.clone())
+				.is_none()
+		);
+		assert!(
+			cache
+				.get(&path, &code, &[("other".into(), LocalId(0))], source)
+				.is_none()
+		);
+		let files = Files::default();
+		files.write("library", "{ answer: 42 }");
+		let Val::Obj(value) = files.eval(&PreparedImportCache::default(), &[]).unwrap() else {
+			panic!("expected object")
+		};
+		assert_eq!(
+			value.get("answer".into()).unwrap().unwrap().as_num(),
+			Some(42.0)
+		);
+		return;
+	}
+	let parsed = crate::parse_jsonnet(&code, source.clone()).unwrap();
+	let report = crate::analyze::analyze_root(&parsed, Vec::new());
+	assert!(!report.errored);
+	cache.insert(&path, &code, &[], source, &report.lir);
+	let result = Command::new(std::env::current_exe().unwrap())
+		.args([
+			"--exact",
+			"prepared_import::tests::shared_memory_cache_survives_process",
+		])
+		.env("RTK_PREPARED_IMPORT_SHM_TEST", &namespace)
+		.env("RTK_PREPARED_IMPORT_SHM", &namespace)
+		.output()
+		.unwrap();
+	SharedMemoryCache::unlink_named(&namespace);
+	assert!(
+		result.status.success(),
+		"{}",
+		String::from_utf8_lossy(&result.stdout)
+	);
+}
+
 #[derive(Clone, Default, Acyclic)]
 struct Files {
 	contents: Rc<RefCell<FxHashMap<String, String>>>,

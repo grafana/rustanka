@@ -20,6 +20,7 @@ exp-object-iteration = []
 [dependencies]
 jrsonnet-interner.workspace = true
 jrsonnet-gcmodule.workspace = true
+serde.workspace = true
 
 static_assertions.workspace = true
 

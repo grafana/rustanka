@@ -3027,6 +3027,7 @@ name = "jrsonnet-evaluator"
 version = "0.5.0-pre99"
 dependencies = [
  "anyhow",
+ "bincode",
  "drop_bomb",
  "educe",
  "hi-doc",
@@ -3038,11 +3039,13 @@ dependencies = [
  "jrsonnet-macros",
  "jrsonnet-peg-parser",
  "jrsonnet-types",
+ "libc",
  "num-bigint",
  "pathdiff",
  "rustc-hash 2.1.1",
  "rustversion",
  "serde",
+ "sha2 0.11.0",
  "smallvec",
  "stacker",
  "static_assertions",
@@ -3102,6 +3105,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "jrsonnet-gcmodule",
  "rustc-hash 2.1.1",
+ "serde",
 ]
 
 [[package]]
@@ -3112,6 +3116,7 @@ dependencies = [
  "jrsonnet-gcmodule",
  "jrsonnet-interner",
  "peg",
+ "serde",
  "static_assertions",
  "thiserror 2.0.18",
  "url",

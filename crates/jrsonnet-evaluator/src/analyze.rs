@@ -14,6 +14,7 @@
 //! }
 //! ```
 
+use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
 use drop_bomb::DropBomb;
@@ -81,7 +82,9 @@ impl AnalysisResult {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Acyclic)]
+#[derive(
+	Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Acyclic, Serialize, Deserialize,
+)]
 pub struct LocalId(pub u32);
 
 impl LocalId {
@@ -93,7 +96,7 @@ impl LocalId {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Acyclic)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Acyclic, Serialize, Deserialize)]
 pub enum LSlot {
 	/// Enclosing frame locals (sibling letrec, params, etc.).
 	Local(LocalSlot),
@@ -101,7 +104,7 @@ pub enum LSlot {
 	Capture(CaptureSlot),
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct ClosureShape {
 	pub captures: Box<[LSlot]>,
 	pub n_locals: u16,
@@ -148,7 +151,7 @@ impl LocalDefinition {
 	}
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub enum LExpr {
 	Slot(LSlot),
 	Trivial(TrivialVal),
@@ -198,17 +201,18 @@ pub enum LExpr {
 
 	/// Allows partial evaluation of broken expression tree,
 	/// expressions with failed static analysis end up here
-	BadLocal(&'static str),
+	#[serde(skip)]
+	BadLocal(IStr),
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LLocalExpr {
 	pub frame_shape: ClosureShape,
 	pub binds: Vec<LBind>,
 	pub body: LExpr,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LFunction {
 	pub name: Option<IStr>,
 	pub params: Vec<LParam>,
@@ -218,7 +222,7 @@ pub struct LFunction {
 	pub body: Rc<LExpr>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LParam {
 	pub name: Option<IStr>,
 	pub destruct: LDestruct,
@@ -226,19 +230,19 @@ pub struct LParam {
 	pub default: Option<(ClosureShape, Rc<LExpr>)>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LBind {
 	pub destruct: LDestruct,
 	pub value_shape: ClosureShape,
 	pub value: Rc<LExpr>,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic, Serialize, Deserialize)]
 pub struct CaptureSlot(pub(crate) u16);
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Acyclic, Serialize, Deserialize)]
 pub struct LocalSlot(pub(crate) u16);
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub enum LDestruct {
 	Full(LocalSlot),
 	#[cfg(feature = "exp-destruct")]
@@ -256,13 +260,13 @@ pub enum LDestruct {
 	},
 }
 
-#[derive(Debug, Clone, Copy, Acyclic)]
+#[derive(Debug, Clone, Copy, Acyclic, Serialize, Deserialize)]
 pub enum LDestructRest {
 	Keep(LocalSlot),
 	Drop,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LDestructField {
 	pub name: IStr,
 	pub into: Option<LDestruct>,
@@ -310,7 +314,7 @@ impl LDestruct {
 	}
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LSliceExpr {
 	pub value: LExpr,
 	pub start: Option<LExpr>,
@@ -318,20 +322,20 @@ pub struct LSliceExpr {
 	pub step: Option<LExpr>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LArgsDesc {
 	pub unnamed: Vec<Rc<LExpr>>,
 	pub names: Vec<IStr>,
 	pub values: Vec<Rc<LExpr>>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LAssertStmt {
 	pub cond: Spanned<LExpr>,
 	pub message: Option<LExpr>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LIndexPart {
 	pub span: Span,
 	pub value: LExpr,
@@ -339,14 +343,14 @@ pub struct LIndexPart {
 	pub null_coaelse: bool,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub enum LObjBody {
 	MemberList(LObjMembers),
 	StaticMembers(Box<LObjStaticMembers>),
 	ObjComp(Box<LObjComp>),
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LObjMembers {
 	pub frame_shape: ClosureShape,
 	/// If current object identity (`super`/`this`/`$`) is used, `this` should
@@ -362,7 +366,7 @@ pub struct LObjMembers {
 	pub fields: Vec<LFieldMember>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LObjStaticMembers {
 	pub frame_shape: ClosureShape,
 	pub this: Option<LocalSlot>,
@@ -376,7 +380,7 @@ pub struct LObjStaticMembers {
 	pub bindings: Vec<Rc<(ClosureShape, LExpr)>>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LObjComp {
 	pub frame_shape: Rc<ClosureShape>,
 	pub this: Option<LocalSlot>,
@@ -388,7 +392,7 @@ pub struct LObjComp {
 	pub compspecs: Vec<LCompSpec>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LFieldMember {
 	pub name: LFieldName,
 	pub plus: bool,
@@ -396,19 +400,19 @@ pub struct LFieldMember {
 	pub value: Rc<(ClosureShape, LExpr)>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LClosure<T: Acyclic> {
 	pub shape: ClosureShape,
 	pub value: T,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LObjAsserts {
 	pub shape: ClosureShape,
 	pub asserts: Vec<LAssertStmt>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub enum LFieldName {
 	Fixed(IStr),
 	Dyn(LExpr),
@@ -422,14 +426,14 @@ impl LFieldName {
 	}
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub struct LArrComp {
 	pub value_shape: ClosureShape,
 	pub value: Rc<LExpr>,
 	pub compspecs: Vec<LCompSpec>,
 }
 
-#[derive(Debug, Acyclic)]
+#[derive(Debug, Acyclic, Serialize, Deserialize)]
 pub enum LCompSpec {
 	If(LExpr),
 	For {
@@ -1398,7 +1402,7 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 			IdentityKind::This => stack.use_this(taint).map_or_else(
 				|| {
 					stack.report_error("`self` used outside of object", Some(span.clone()));
-					LExpr::BadLocal("self")
+					LExpr::BadLocal("self".into())
 				},
 				LExpr::Slot,
 			),
@@ -1407,13 +1411,13 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 					LExpr::Super
 				} else {
 					stack.report_error("`super` used outside of object", Some(span.clone()));
-					LExpr::BadLocal("super")
+					LExpr::BadLocal("super".into())
 				}
 			}
 			IdentityKind::Dollar => stack.use_dollar(taint).map_or_else(
 				|| {
 					stack.report_error("`$` used outside of object", Some(span.clone()));
-					LExpr::BadLocal("$")
+					LExpr::BadLocal("$".into())
 				},
 				LExpr::Slot,
 			),
@@ -1421,7 +1425,7 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 		Expr::Trivial(tv) => LExpr::Trivial(tv.clone()),
 		Expr::Var(v) => stack
 			.use_local(&v.value, v.span.clone(), taint)
-			.map_or_else(|| LExpr::BadLocal("ref"), LExpr::Slot),
+			.map_or_else(|| LExpr::BadLocal("ref".into()), LExpr::Slot),
 		Expr::Arr(a) => {
 			if a.iter().all(|i| matches!(i, Expr::Trivial(_))) {
 				let trivials: Vec<_> = a
@@ -1475,7 +1479,7 @@ pub fn analyze(expr: &Expr, stack: &mut AnalysisStack, taint: &mut AnalysisResul
 					"import path must be a string literal",
 					Some(kind.span.clone()),
 				);
-				return LExpr::BadLocal("bad import");
+				return LExpr::BadLocal("bad import".into());
 			};
 			LExpr::Import {
 				kind: kind.clone(),

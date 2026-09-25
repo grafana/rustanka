@@ -15,6 +15,7 @@ use jrsonnet_gcmodule::{Acyclic, Cc, Trace, Weak, cc_dyn};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde::{Deserialize, Serialize};
 
 mod oop;
 mod static_shape;
@@ -41,8 +42,11 @@ pub mod ordering {
 	)]
 
 	use jrsonnet_gcmodule::Trace;
+	use serde::{Deserialize, Serialize};
 
-	#[derive(Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord)]
+	#[derive(
+		Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+	)]
 	pub struct FieldIndex(());
 	impl FieldIndex {
 		pub fn absolute(_v: u32) -> Self {
@@ -64,8 +68,11 @@ pub mod ordering {
 #[cfg(feature = "exp-preserve-order")]
 pub mod ordering {
 	use jrsonnet_gcmodule::Trace;
+	use serde::{Deserialize, Serialize};
 
-	#[derive(Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord)]
+	#[derive(
+		Clone, Copy, Default, Debug, Trace, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+	)]
 	pub struct FieldIndex(u32);
 	impl FieldIndex {
 		pub fn absolute(v: u32) -> Self {
@@ -98,7 +105,7 @@ impl FieldSortKey {
 
 // 0 - add
 //  12 - visibility
-#[derive(Clone, Copy, Acyclic)]
+#[derive(Clone, Copy, Acyclic, Serialize, Deserialize)]
 pub struct ObjFieldFlags(u8);
 impl ObjFieldFlags {
 	pub fn new(add: bool, visibility: Visibility) -> Self {

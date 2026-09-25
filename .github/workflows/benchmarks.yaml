@@ -57,6 +57,8 @@ jobs:
     name: ${{ matrix.benchmark.name }}
     runs-on: ubuntu-x64
     needs: build
+    env:
+      RTK_PREPARED_IMPORT_SHM: ${{ matrix.benchmark.id == 'export-libraries-shm' && format('ci-{0}-{1}', github.run_id, github.run_attempt) || '' }}
     # Always run even if rtk-base build was skipped (non-PR)
     if: always() && needs.build.result != 'failure'
     strategy:
@@ -81,6 +83,9 @@ jobs:
           - name: "Export (Shared Libraries)"
             config: "rtk-benchmarks/export-libraries.yaml"
             id: "export-libraries"
+          - name: "Export (Shared Libraries, Shared Memory)"
+            config: "rtk-benchmarks/export-libraries.yaml"
+            id: "export-libraries-shm"
           - name: "Export (Replace)"
             config: "rtk-benchmarks/export-replace.yaml"
             id: "export-replace"
@@ -170,7 +175,7 @@ jobs:
 
           if [ "${{ matrix.benchmark.id }}" = "export-large" ]; then
             ARGS="$ARGS -- --runs 3"
-          elif [ "${{ matrix.benchmark.id }}" = "export-libraries" ]; then
+          elif [ "${{ matrix.benchmark.id }}" = "export-libraries" ] || [ "${{ matrix.benchmark.id }}" = "export-libraries-shm" ]; then
             ARGS="$ARGS -- --runs 5"
           fi
           ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
@@ -184,6 +189,10 @@ jobs:
             benchmark-results.md
             benchmark-summary.json
           if-no-files-found: warn
+
+      - name: Release shared-memory cache
+        if: always() && matrix.benchmark.id == 'export-libraries-shm'
+        run: python3 rtk-benchmarks/clear-shared-import-cache.py
 
   summary:
     name: Post Summary Comment

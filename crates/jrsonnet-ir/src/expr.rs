@@ -1,12 +1,14 @@
 //! Jrsonnet AST expression types.
 
 use std::{
+	cell::RefCell,
 	fmt::{self, Debug, Display},
 	ops::{Deref, RangeInclusive},
 };
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _, ser::Error as _};
 
 use crate::{
 	NumValue,
@@ -24,7 +26,7 @@ pub enum FieldName {
 }
 
 /// Field visibility in object/obj-comp/exp-object-iteration definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Visibility {
 	/// `:` - normal visibility, visible by default, but inherits field visibility from `super`.
@@ -38,7 +40,7 @@ pub enum Visibility {
 
 /// Trivial values are passed from the AST to the evaluator as-is and have trivial conversions from and to
 /// jsonnet runtime values.
-#[derive(Debug, Clone, PartialEq, Acyclic)]
+#[derive(Debug, Clone, PartialEq, Acyclic, Serialize, Deserialize)]
 pub enum TrivialVal {
 	/// Jsonnet `null`.
 	Null,
@@ -92,7 +94,7 @@ pub struct FieldMember {
 }
 
 /// Unary operator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic, Serialize, Deserialize)]
 pub enum UnaryOpType {
 	/// `+v`
 	Plus,
@@ -125,7 +127,7 @@ impl Display for UnaryOpType {
 /// ```jsonnet
 /// a + b
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Acyclic, Serialize, Deserialize)]
 pub enum BinaryOpType {
 	/// `*`
 	Mul,
@@ -588,7 +590,7 @@ pub struct BinaryOp {
 /// Import expression kind.
 ///
 /// `str` in `importstr "path"`.
-#[derive(Debug, PartialEq, Acyclic, Clone, Copy)]
+#[derive(Debug, PartialEq, Acyclic, Clone, Copy, Serialize, Deserialize)]
 pub enum ImportKind {
 	/// `import`
 	Normal,
@@ -755,6 +757,53 @@ pub struct IndexPart {
 #[derive(Clone, PartialEq, Eq, Acyclic)]
 #[repr(C)]
 pub struct Span(pub Source, pub u32, pub u32);
+
+thread_local! {
+	static SPAN_SOURCE: RefCell<Option<Source>> = const { RefCell::new(None) };
+}
+
+struct SpanSourceGuard(Option<Source>);
+
+impl Drop for SpanSourceGuard {
+	fn drop(&mut self) {
+		SPAN_SOURCE.with(|slot| {
+			slot.replace(self.0.take());
+		});
+	}
+}
+
+/// Keeps cached span offsets tied to the source that produced them.
+pub fn with_span_source<T>(source: Source, f: impl FnOnce() -> T) -> T {
+	let previous = SPAN_SOURCE.with(|slot| slot.replace(Some(source)));
+	let _guard = SpanSourceGuard(previous);
+	f()
+}
+
+impl Serialize for Span {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		let source_matches = SPAN_SOURCE.with(|slot| slot.borrow().as_ref() == Some(&self.0));
+		if !source_matches {
+			return Err(S::Error::custom("span has a different source"));
+		}
+		(self.1, self.2).serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for Span {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		let (start, end) = <(u32, u32)>::deserialize(deserializer)?;
+		SPAN_SOURCE.with(|slot| {
+			let source = slot
+				.borrow()
+				.clone()
+				.ok_or_else(|| D::Error::custom("missing span source"))?;
+			if start > end || end as usize > source.code().len() {
+				return Err(D::Error::custom("span lies outside its source"));
+			}
+			Ok(Self(source, start, end))
+		})
+	}
+}
 impl Span {
 	/// Is this span a substring of the other span?
 	pub fn belongs_to(&self, other: &Span) -> bool {
@@ -782,7 +831,7 @@ impl Debug for Span {
 }
 
 /// Spanned expression.
-#[derive(Clone, PartialEq, Acyclic)]
+#[derive(Clone, PartialEq, Acyclic, Serialize, Deserialize)]
 pub struct Spanned<T: Acyclic> {
 	/// Spanned expression.
 	pub value: T,

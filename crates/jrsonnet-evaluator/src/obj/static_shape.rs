@@ -3,6 +3,7 @@ use std::{fmt, ops::ControlFlow, rc::Rc};
 use jrsonnet_gcmodule::{Acyclic, Trace, TraceBox};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::Span;
+use serde::{Deserialize, Serialize};
 
 use super::{
 	CcObjectAssertion, EnumFields, EnumFieldsHandler, FieldVisibility, GetFor,
@@ -11,7 +12,7 @@ use super::{
 };
 use crate::{MaybeUnbound, Result};
 
-#[derive(Acyclic, Debug)]
+#[derive(Acyclic, Debug, Serialize, Deserialize)]
 pub struct ShapeField {
 	pub name: IStr,
 	pub flags: ObjFieldFlags,
@@ -19,7 +20,7 @@ pub struct ShapeField {
 	pub index: FieldIndex,
 }
 
-#[derive(Acyclic, Debug)]
+#[derive(Acyclic, Debug, Serialize, Deserialize)]
 pub struct ObjShape {
 	fields: Vec<ShapeField>,
 }

@@ -3,13 +3,14 @@
 //! TODO: To be moved to analyzer.
 //! TODO: Unify the anonymous/unnamed/positional naming.
 
+use serde::{Deserialize, Serialize};
 use std::{fmt, ops::Deref, rc::Rc};
 
 use jrsonnet_gcmodule::Acyclic;
 use jrsonnet_interner::IStr;
 
 /// Function parameter name.
-#[derive(Clone, Acyclic, Debug, PartialEq, Eq)]
+#[derive(Clone, Acyclic, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ParamName {
 	/// Unnamed (only possible with `exp-destruct`).
 	Unnamed,
@@ -61,6 +62,26 @@ pub enum ParamDefault {
 	/// Default exists, stringified.
 	Literal(&'static str),
 }
+impl Serialize for ParamDefault {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		match self {
+			Self::None => serializer.serialize_u8(0),
+			Self::Exists => serializer.serialize_u8(1),
+			Self::Literal(_) => Err(serde::ser::Error::custom(
+				"literal defaults cannot be cached",
+			)),
+		}
+	}
+}
+impl<'de> Deserialize<'de> for ParamDefault {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		match u8::deserialize(deserializer)? {
+			0 => Ok(Self::None),
+			1 => Ok(Self::Exists),
+			_ => Err(serde::de::Error::custom("invalid parameter default")),
+		}
+	}
+}
 impl ParamDefault {
 	/// Createn optional [`ParamDefault`] without the stringified value for the error messages.
 	pub const fn exists(is_exists: bool) -> Self {
@@ -78,7 +99,7 @@ impl fmt::Display for ParamDefault {
 }
 
 /// Function parameter for argument matching purposes.
-#[derive(Clone, Acyclic, Debug, PartialEq, Eq)]
+#[derive(Clone, Acyclic, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParamParse {
 	name: ParamName,
 	default: ParamDefault,
@@ -108,7 +129,7 @@ impl fmt::Display for ParamParse {
 }
 
 /// Function definition signature internals.
-#[derive(Debug, Clone, Acyclic, PartialEq, Eq)]
+#[derive(Debug, Clone, Acyclic, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionSignature(Rc<[ParamParse]>);
 impl Deref for FunctionSignature {
 	type Target = [ParamParse];
