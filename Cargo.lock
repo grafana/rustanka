@@ -3051,7 +3051,6 @@ dependencies = [
  "jrsonnet-macros",
  "jrsonnet-peg-parser",
  "jrsonnet-types",
- "libc",
  "num-bigint",
  "pathdiff",
  "rustc-hash 2.1.1",

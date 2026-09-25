@@ -57,8 +57,6 @@ jobs:
     name: ${{ matrix.benchmark.name }}
     runs-on: ubuntu-x64
     needs: build
-    env:
-      RTK_PREPARED_IMPORT_SHM: ${{ matrix.benchmark.id == 'export-libraries' && format('ci-{0}-{1}', github.run_id, github.run_attempt) || '' }}
     # Always run even if rtk-base build was skipped (non-PR)
     if: always() && needs.build.result != 'failure'
     strategy:
@@ -186,10 +184,6 @@ jobs:
             benchmark-results.md
             benchmark-summary.json
           if-no-files-found: warn
-
-      - name: Release shared-memory cache
-        if: always() && matrix.benchmark.id == 'export-libraries'
-        run: python3 rtk-benchmarks/clear-shared-import-cache.py
 
   summary:
     name: Post Summary Comment

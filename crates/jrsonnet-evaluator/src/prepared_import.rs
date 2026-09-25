@@ -8,13 +8,7 @@ use crate::{
 	analyze::{LExpr, LocalId},
 };
 
-#[cfg(unix)]
-mod shared_memory;
-
-#[cfg(unix)]
-thread_local! {
-	static SHARED: Option<shared_memory::SharedMemoryCache> = shared_memory::SharedMemoryCache::open();
-}
+mod shared_threads;
 
 /// Reusable import code, without evaluated values or environment bindings.
 ///
@@ -25,9 +19,8 @@ thread_local! {
 /// FIFO eviction bounds local retention to 4096 files and 32 MiB of source text.
 /// Lowered code and map overhead consume additional memory. Oversized files are
 /// evaluated without local retention, and dropping all clones frees the local cache.
-/// On Unix, a bounded POSIX shared-memory cache also reuses code across processes.
-/// `RTK_PREPARED_IMPORT_SHM` chooses its namespace; `RTK_PREPARED_IMPORT_SHM_DISABLE`
-/// disables it. An unavailable shared-memory segment leaves local reuse intact.
+/// Serialized lowered code is also shared across worker threads in this process.
+/// It is released when the process exits; evaluated values remain thread-local.
 #[derive(Clone, Default, Acyclic)]
 pub struct PreparedImportCache(Rc<RefCell<Cache>>);
 
@@ -75,18 +68,9 @@ impl PreparedImportCache {
 		} {
 			return Some(lir);
 		}
-		#[cfg(unix)]
-		{
-			let lir = SHARED.with(|shared| shared.as_ref()?.get(path, code, externals, source))?;
-			let lir = Rc::new(lir);
-			self.insert_local(path.clone(), code.clone(), externals.to_vec(), lir.clone());
-			Some(lir)
-		}
-		#[cfg(not(unix))]
-		{
-			let _ = source;
-			None
-		}
+		let lir = Rc::new(shared_threads::get(path, code, externals, source)?);
+		self.insert_local(path.clone(), code.clone(), externals.to_vec(), lir.clone());
+		Some(lir)
 	}
 
 	pub(crate) fn insert(
@@ -97,14 +81,7 @@ impl PreparedImportCache {
 		lir: Rc<LExpr>,
 		source: Source,
 	) {
-		#[cfg(unix)]
-		SHARED.with(|shared| {
-			if let Some(shared) = shared {
-				shared.insert(&path, &code, &externals, source, &lir);
-			}
-		});
-		#[cfg(not(unix))]
-		let _ = source;
+		shared_threads::insert(&path, &code, &externals, source, &lir);
 		self.insert_local(path, code, externals, lir);
 	}
 

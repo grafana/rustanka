@@ -15,18 +15,18 @@ using a small portion of a large shared API or inventory. Generation happens onc
 outside timing, in the runner's temporary directory; no private deployment data
 or downloads are required.
 
-Three cases distinguish reuse across processes and workers:
+Three cases distinguish cold preparation, reuse within one worker, and reuse
+across workers:
 
-- One environment, one worker: repeated processes can reuse the prepared
-  libraries through shared memory.
+- One environment, one worker: each timed process prepares the libraries cold.
 - 64 environments, one worker: preparation can be reused for subsequent
-  environments in the same process and by later processes.
-- 64 environments, eight workers: workers reuse libraries locally and across
-  processes through shared memory.
+  environments in the same process.
+- 64 environments, eight workers: serialized prepared imports are shared by
+  worker threads in the same process.
 
 Every timed command starts a fresh process. Filesystem caches may be warm, but
-the bounded POSIX shared-memory cache stays warm across commands. Output
-directories are cleared outside timing. The runner checks exported filenames
+the prepared-import cache starts cold and disappears when that process exits.
+Output directories are cleared outside timing. The runner checks exported filenames
 and contents against Tanka byte for byte before timing, including
 `manifest.json`. Timings compare current rtk, Tanka, and the base binary when
 supplied.
