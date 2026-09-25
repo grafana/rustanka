@@ -70,6 +70,7 @@ class BenchmarkConfig:
     mode: Literal["generated", "static", "diff"]
     # Generated fixtures mode
     fixtures: GeneratedFixtures | None = None
+    fixture_generator: str | None = None
     setup: str | None = None
     prepare: str | None = None
     # Diff mode
@@ -110,6 +111,7 @@ class BenchmarkConfig:
             tests=tests,
             mode=mode,
             fixtures=fixtures,
+            fixture_generator=data.get("fixture_generator"),
             fixtures_dir=fixtures_dir,
             setup=data.get("setup"),
             prepare=data.get("prepare"),
@@ -293,6 +295,14 @@ class BenchmarkRunner:
         """Generate test fixtures for generated mode."""
         assert self.config.fixtures is not None
         self.fixtures_dir = fixtures_dir
+
+        if self.config.fixture_generator:
+            subprocess.run(
+                ["sh", "-c", self.expand_command(self.config.fixture_generator)],
+                cwd=self.repo_root,
+                check=True,
+            )
+            return
 
         script = f"""
         set -euo pipefail
@@ -493,7 +503,8 @@ class BenchmarkRunner:
             self._fail_validation(f"tk command failed: {tk_command}")
 
         if test.command.startswith("export "):
-            pass
+            assert self.export_dir_tk
+            self._validate_export_files(self.export_dir_tk, "tk", test.name)
         elif "--json" in test.command or test.command.startswith("eval "):
             if not self._json_equal(tk_result.stdout, rtk_result.stdout):
                 print("JSON MISMATCH!", file=sys.stderr)
@@ -513,27 +524,33 @@ class BenchmarkRunner:
             self._fail_validation(
                 f"rtk-base failed for {test.name}: {base.stderr}")
         if test.command.startswith("export "):
-            assert self.export_dir_rtk and self.export_dir_rtk_base
-            files = {p.relative_to(self.export_dir_rtk) for p in
-                     self.export_dir_rtk.rglob("*") if p.is_file()}
-            base_files = {p.relative_to(self.export_dir_rtk_base) for p in
-                          self.export_dir_rtk_base.rglob("*") if p.is_file()}
-            if files != base_files:
-                self._fail_validation(f"rtk exported file names differ from rtk-base for {test.name}")
-            for path in sorted(files):
-                # Compare incrementally: large exports must not inflate the runner's memory.
-                with (self.export_dir_rtk / path).open("rb") as current, \
-                        (self.export_dir_rtk_base / path).open("rb") as previous:
-                    while chunk := current.read(1024 * 1024):
-                        if chunk != previous.read(len(chunk)):
-                            self._fail_validation(f"rtk export differs from rtk-base: {path}")
-                    if previous.read(1):
-                        self._fail_validation(f"rtk export differs from rtk-base: {path}")
+            assert self.export_dir_rtk_base
+            self._validate_export_files(self.export_dir_rtk_base, "rtk-base", test.name)
         elif "--json" in test.command or test.command.startswith("eval "):
             if not self._json_equal(result.stdout, base.stdout):
                 self._fail_validation(f"rtk JSON output differs from rtk-base for {test.name}")
         elif result.stdout != base.stdout:
             self._fail_validation(f"rtk output differs from rtk-base for {test.name}")
+
+    def _validate_export_files(self, reference_dir: Path, reference_name: str,
+                               test_name: str) -> None:
+        assert self.export_dir_rtk
+        files = {p.relative_to(self.export_dir_rtk) for p in
+                 self.export_dir_rtk.rglob("*") if p.is_file()}
+        reference_files = {p.relative_to(reference_dir) for p in
+                           reference_dir.rglob("*") if p.is_file()}
+        if files != reference_files:
+            self._fail_validation(
+                f"rtk exported file names differ from {reference_name} for {test_name}")
+        for path in sorted(files):
+            # Compare incrementally: large exports must not inflate the runner's memory.
+            with (self.export_dir_rtk / path).open("rb") as current, \
+                    (reference_dir / path).open("rb") as reference:
+                while chunk := current.read(1024 * 1024):
+                    if chunk != reference.read(len(chunk)):
+                        self._fail_validation(f"rtk export differs from {reference_name}: {path}")
+                if reference.read(1):
+                    self._fail_validation(f"rtk export differs from {reference_name}: {path}")
 
     def _json_equal(self, json1: str, json2: str) -> bool:
         try:
@@ -806,8 +823,9 @@ class BenchmarkRunner:
                   f"{self.config.fixtures.inline_files * self.config.fixtures.envs_per_inline_file} total)", flush=True)
             print(
                 f"- Resources per environment: {self.config.fixtures.resources_per_env}", flush=True)
-            print(f"- Lib files: {self.config.fixtures.total_lib_files} "
-                  f"(1 global + {self.config.fixtures.total_env_libs} env-specific)", flush=True)
+            if not self.config.fixture_generator:
+                print(f"- Lib files: {self.config.fixtures.total_lib_files} "
+                      f"(1 global + {self.config.fixtures.total_env_libs} env-specific)", flush=True)
             print(
                 f"- Total environments: {self.config.fixtures.total_envs}", flush=True)
         else:

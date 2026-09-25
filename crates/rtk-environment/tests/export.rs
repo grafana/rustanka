@@ -1804,15 +1804,12 @@ fn stops_the_whole_export_once_one_environment_cannot_be_written() {
 		})
 		.collect();
 	assert_eq!(fatal.len(), 1, "expected exactly one environment to fail");
+	assert_eq!(fatal[0].identifier, "environments/b/main.jsonnet");
 	assert!(fatal[0].error.as_ref().expect("an error").fatal());
 
 	// The rest were either already done or never started; none of them failed on
 	// their own account. How many of each depends on how far the pool had got,
 	// so only the total is fixed — but exactly one environment actually failed.
-	assert!(
-		exported.skipped() > 0,
-		"nothing was reported as skipped: {exported:?}"
-	);
 	assert_eq!(exported.failed(), 1, "only `b` failed on its own account");
 	assert_eq!(
 		exported.successful() + exported.skipped(),
