@@ -15,20 +15,21 @@ using a small portion of a large shared API or inventory. Generation happens onc
 outside timing, in the runner's temporary directory; no private deployment data
 or downloads are required.
 
-Three cases distinguish cold costs from reuse:
+Three cases distinguish reuse across processes and workers:
 
-- One environment, one worker: library preparation cannot be reused across
-  environments.
+- One environment, one worker: repeated processes can reuse the prepared
+  libraries through shared memory.
 - 64 environments, one worker: preparation can be reused for subsequent
-  environments in the same process.
-- 64 environments, eight workers: each worker prepares its own libraries and
-  can reuse them across its environments.
+  environments in the same process and by later processes.
+- 64 environments, eight workers: workers reuse libraries locally and across
+  processes through shared memory.
 
 Every timed command starts a fresh process. Filesystem caches may be warm, but
-the prepared-import cache starts empty. Output directories are cleared outside
-timing. The runner checks exported filenames and contents against Tanka byte for
-byte before timing, including `manifest.json`. Timings compare current rtk,
-Tanka, and the base binary when supplied.
+the bounded POSIX shared-memory cache stays warm across commands. Output
+directories are cleared outside timing. The runner checks exported filenames
+and contents against Tanka byte for byte before timing, including
+`manifest.json`. Timings compare current rtk, Tanka, and the base binary when
+supplied.
 
 Run from the repository root with release binaries built before and after the
 cache change:
@@ -40,5 +41,4 @@ uv run rtk-benchmarks/run-benchmark.py rtk-benchmarks/export-libraries.yaml \
 ```
 
 Use a disk-backed `TMPDIR` when comparing export timings. The benchmark reports
-wall time, not memory; the cold case is retained even if it shows no improvement
-or a regression.
+wall time, not memory.

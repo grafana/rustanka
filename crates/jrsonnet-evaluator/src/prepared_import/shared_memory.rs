@@ -74,7 +74,13 @@ impl Drop for SharedMemoryCache {
 
 impl SharedMemoryCache {
 	pub(super) fn open() -> Option<Self> {
-		let namespace = env::var("RTK_PREPARED_IMPORT_SHM").ok()?;
+		if env::var_os("RTK_PREPARED_IMPORT_SHM_DISABLE").is_some() {
+			return None;
+		}
+		let namespace = env::var("RTK_PREPARED_IMPORT_SHM")
+			.ok()
+			.filter(|value| !value.is_empty())
+			.unwrap_or_else(|| "default".to_owned());
 		Self::open_named(&namespace)
 	}
 

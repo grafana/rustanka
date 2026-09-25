@@ -22,9 +22,12 @@ thread_local! {
 /// its own context; reuse requires the same resolved path, contents and ordered
 /// root binding names/slots. Changed files replace the previous entry.
 ///
-/// FIFO eviction bounds retention to 4096 files and 32 MiB of source text.
+/// FIFO eviction bounds local retention to 4096 files and 32 MiB of source text.
 /// Lowered code and map overhead consume additional memory. Oversized files are
-/// evaluated without shared retention, and dropping all clones frees the cache.
+/// evaluated without local retention, and dropping all clones frees the local cache.
+/// On Unix, a bounded POSIX shared-memory cache also reuses code across processes.
+/// `RTK_PREPARED_IMPORT_SHM` chooses its namespace; `RTK_PREPARED_IMPORT_SHM_DISABLE`
+/// disables it. An unavailable shared-memory segment leaves local reuse intact.
 #[derive(Clone, Default, Acyclic)]
 pub struct PreparedImportCache(Rc<RefCell<Cache>>);
 

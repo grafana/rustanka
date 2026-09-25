@@ -12,8 +12,8 @@ fixture_generator: 'python3 "{repo_root}/rtk-benchmarks/lib/generate-library-fix
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
 
 tests:
-  - name: "Cold Single Environment"
-    description: "One environment importing eight libraries (4,096 constructors total) and 8,192 inventory records; no cross-environment reuse."
+  - name: "Single Environment, Repeated Process"
+    description: "One environment importing eight libraries (4,096 constructors total) and 8,192 inventory records; repeated processes can share preparation."
     command: "export {export_dir} {single_static_dir} --parallel 1 --merge-strategy=fail-on-conflicts"
 
   - name: "Shared Libraries, One Worker"
