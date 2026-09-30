@@ -94,6 +94,11 @@ mod tests {
 	}
 
 	#[test]
+	fn tls_has_one_crypto_provider() {
+		let _ = rustls::ClientConfig::builder();
+	}
+
+	#[test]
 	fn credentials_require_an_endpoint_and_a_complete_pair() {
 		assert!(Config::new(None, Some("user".into()), Some("token".into())).is_err());
 		assert!(Config::new(Some("".into()), None, None).is_err());
