@@ -4,6 +4,7 @@ use commands::common::BrokenPipeGuard;
 
 mod commands;
 mod k8s;
+mod profiling;
 mod telemetry;
 #[cfg(test)]
 pub mod test_utils;
@@ -77,42 +78,53 @@ fn main() -> Result<()> {
 	clap_complete::CompleteEnv::with_factory(Cli::command).complete();
 	let cli = Cli::parse();
 
-	// Initialize telemetry (tracing + optional OpenTelemetry)
-	// Guard ensures traces are flushed on exit
-	let _telemetry_guard = telemetry::init(cli.log_level)?;
+	let telemetry_guard = telemetry::init(cli.log_level)?;
+	let profiling_guard = profiling::init()?;
+	let result = run(cli);
+	let shutdown_result = profiling_guard.shutdown();
+	drop(telemetry_guard);
+	let exit_code = result?;
+	shutdown_result?;
+	if exit_code != 0 {
+		std::process::exit(exit_code);
+	}
+	Ok(())
+}
 
+fn run(cli: Cli) -> Result<i32> {
 	let stdout = BrokenPipeGuard::new(std::io::stdout());
 
 	match cli.command {
-		Commands::Apply(args) => commands::apply::run(args, stdout),
-		Commands::Show(args) => commands::show::run(args, stdout),
+		Commands::Apply(args) => commands::apply::run(args, stdout).map(|_| 0),
+		Commands::Show(args) => commands::show::run(args, stdout).map(|_| 0),
 		Commands::Diff(args) => {
 			if commands::diff::run(args, stdout)? {
-				std::process::exit(commands::diff::EXIT_CODE_DIFF_FOUND);
+				return Ok(commands::diff::EXIT_CODE_DIFF_FOUND);
 			}
-			Ok(())
+			Ok(0)
 		}
-		Commands::Prune(args) => commands::prune::run(args, stdout),
-		Commands::Delete(args) => commands::delete::run(args, stdout),
-		Commands::Env(args) => commands::env::run(args, stdout),
-		Commands::Status(args) => commands::status::run(args, stdout),
-		Commands::Export(args) => commands::export::run(args, stdout),
-		Commands::Fmt(args) => commands::fmt::run(args, stdout),
-		Commands::Lint(args) => commands::lint::run(args, stdout),
+		Commands::Prune(args) => commands::prune::run(args, stdout).map(|_| 0),
+		Commands::Delete(args) => commands::delete::run(args, stdout).map(|_| 0),
+		Commands::Env(args) => commands::env::run(args, stdout).map(|_| 0),
+		Commands::Status(args) => commands::status::run(args, stdout).map(|_| 0),
+		Commands::Export(args) => commands::export::run(args, stdout).map(|_| 0),
+		Commands::Fmt(args) => commands::fmt::run(args, stdout).map(|_| 0),
+		Commands::Lint(args) => commands::lint::run(args, stdout).map(|_| 0),
 		Commands::Eval(args) => commands::eval::run(
 			args.path.as_ref(),
 			args.jsonnet.into_options(),
 			args.eval.as_deref(),
 			stdout,
-		),
-		Commands::Init(args) => commands::init::run(args, stdout),
+		)
+		.map(|_| 0),
+		Commands::Init(args) => commands::init::run(args, stdout).map(|_| 0),
 		Commands::Tool(args) => {
 			if commands::tool::run(args, stdout)? {
-				std::process::exit(commands::tool::imports::EXIT_CODE_REBUILD_REQUIRED);
+				return Ok(commands::tool::imports::EXIT_CODE_REBUILD_REQUIRED);
 			}
-			Ok(())
+			Ok(0)
 		}
-		Commands::Validate(args) => commands::validate::run(args, stdout),
-		Commands::Complete(args) => commands::complete::run(args, stdout),
+		Commands::Validate(args) => commands::validate::run(args, stdout).map(|_| 0),
+		Commands::Complete(args) => commands::complete::run(args, stdout).map(|_| 0),
 	}
 }
