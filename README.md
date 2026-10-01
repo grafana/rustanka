@@ -30,6 +30,19 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 
 ## Performance vs Tanka
 
+### CPU profiles
+
+Set `PYROSCOPE_URL` to send CPU profiles from `rtk` to Pyroscope. Profiling is
+disabled when the variable is unset. For Grafana Cloud Profiles, also set
+`PYROSCOPE_BASIC_AUTH_USER` and `PYROSCOPE_BASIC_AUTH_PASSWORD` to the Profiles
+user ID and an access policy token. The application name is `rtk`, and the
+sampling rate is 100 Hz. The profiler sends its final samples when the command
+finishes, including commands shorter than the regular upload interval.
+
+```sh
+PYROSCOPE_URL=http://localhost:4040 rtk show path/to/environment
+```
+
 `rtk` vs `tk` on Grafana Labs' CI benchmarks ([sample run](https://github.com/grafana/rustanka/pull/38)).
 Faster in every case, up to:
 

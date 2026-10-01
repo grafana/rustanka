@@ -56,8 +56,10 @@ dirs = "6.0.0"
 http = "1.4.0"
 tempfile = "3.10"
 mimalloc = { workspace = true, optional = true }
+pyroscope = { version = "2.1.1", default-features = false, features = ["backend-pprof-rs", "rustls-no-provider"] }
 
 [dev-dependencies]
+rustls = { version = "0.23", default-features = false }
 tempfile = "3.10"
 assert_matches = "1.5.0"
 rstest = "0.26.1"
