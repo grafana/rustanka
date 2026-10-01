@@ -444,7 +444,7 @@ make test
 
 In tk's `spec.json`, `exportJsonnetImplementation: binary:/usr/local/bin/jrsonnet` configures tk to use jrsonnet for Jsonnet evaluation instead of go-jsonnet. tk still handles manifest exporting.
 
-**rtk does not hand over to another implementation, but it does imitate one.** It always evaluates with its own jrsonnet, and when an environment asks for a jrsonnet binary it formats the result the way that binary would have:
+**rtk does not hand over to another binary, but it does imitate one.** Unless the reference interpreter was asked for (below), it evaluates with its own jrsonnet, and when an environment asks for a jrsonnet binary it formats the result the way that binary would have:
 
 - `std.manifestYamlDoc` quotes values only when it quotes keys, rather than always
 - `std.manifestYamlStream` renders an empty stream as `...` rather than `---`
@@ -454,6 +454,30 @@ In tk's `spec.json`, `exportJsonnetImplementation: binary:/usr/local/bin/jrsonne
 An environment is recognised as asking for this when the implementation is `jrsonnet`, or a `binary:` path *ending* in `jrsonnet`. It is applied per environment, so one inline environment can ask for it while its neighbour does not. There is no way to ask for the individual formatting choices on their own: an environment either asks for a jrsonnet binary or it does not.
 
 Two golden fixtures depend on all of this: `yaml_output_env_jrsonnet` and `inline_env_export_impl_mixed`.
+
+### The reference interpreter
+
+`crates/rtk-jsonnet-reference` evaluates with the C++ interpreter's libjsonnet,
+opened at runtime through its published C API. It is chosen by, most specific
+first: `--jsonnet-implementation c++` (or `reference`), a project's
+`tkrc.yaml`, then an environment's `exportJsonnetImplementation: c++`. A
+missing library, or any version but `v0.22.0`, fails the command; it never falls
+back to jrsonnet. `go` and `go-jsonnet` are accepted on the command line because
+`go` is tk's default, and mean no preference at all. A `binary:` path that is not
+jrsonnet is warned about once per engine and evaluated by jrsonnet.
+
+The C API returns manifested JSON, so the backend is eager: every visible field
+is forced, hidden fields are gone, and native functions only ever receive
+primitives. That last one is why `helmTemplate` and `kustomizeBuild` cannot work
+under it. The crate's README lists the rest.
+
+Import paths are first-wins everywhere in rtk, while libjsonnet searches the
+path it was given last first, so the backend hands them over reversed. Getting
+this wrong swaps `lib/` and `vendor/` without any error at all.
+
+Its tests skip when the library is unavailable. CI builds `v0.22.0` from source
+and sets `RTK_REQUIRE_REFERENCE_JSONNET=1`, which turns a skip into a failure;
+set it locally too when working on this backend.
 
 ## Common Issues
 

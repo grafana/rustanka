@@ -33,5 +33,22 @@ jobs:
           curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
           chmod +x /usr/local/bin/tk
           tk --version
+      # The reference backend loads libjsonnet at runtime and accepts exactly
+      # the version it was written against. Ubuntu's package is older, so it is
+      # built from source; without it every reference test would skip.
+      - name: Install libjsonnet (reference Jsonnet)
+        env:
+          JSONNET_VERSION: v0.22.0
+        run: |
+          mkdir -p /tmp/libjsonnet
+          curl -fsSL "https://github.com/google/jsonnet/archive/refs/tags/${JSONNET_VERSION}.tar.gz" \
+            | tar -xz -C /tmp/libjsonnet --strip-components=1
+          make -C /tmp/libjsonnet -j"$(nproc)" libjsonnet.so
+          sudo install -m 0755 "/tmp/libjsonnet/libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/
+          sudo ln -sf "libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/libjsonnet.so.0
+          sudo ldconfig
       - run: cargo test --all
+        env:
+          # Fail, rather than skip, any reference test that cannot find it.
+          RTK_REQUIRE_REFERENCE_JSONNET: "1"
 
