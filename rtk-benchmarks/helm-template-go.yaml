@@ -1,0 +1,11 @@
+name: "Helm Template (Linked Go)"
+id: "helm-template-go"
+description: "Compare linked Helm Go rendering against Helm process rendering on the same chart and export."
+
+fixtures_dir: "rtk-benchmarks/helm-template"
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Full Export"
+    description: "Export 60 inline environments rendering the same local Helm chart."
+    command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"

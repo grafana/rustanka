@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+go-helm = []
+
 [dependencies]
 ciborium.workspace = true
 hex.workspace = true

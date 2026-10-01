@@ -1,0 +1,11 @@
+name: "Helm Template (Linked Go, Small Chart)"
+id: "helm-template-go-light-uncached"
+description: "Compare linked Go and Helm process rendering when a small chart makes startup cost significant."
+
+fixtures_dir: "rtk-benchmarks/helm-template-light"
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Full Export"
+    description: "Export 60 inline environments rendering a small chart without memoization."
+    command: "export {export_dir} {env_dir} --recursive --format '{{env.metadata.labels.cluster_name}}/{{.metadata.namespace}}/{{.kind}}-{{.metadata.name}}'"
