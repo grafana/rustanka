@@ -31,7 +31,7 @@
 
     // The tenant override that exposed an extra rounding step in scientific notation.
     activeSeriesLimit: 40000000 * 2 / 3,
-    nativeOverridesYaml: std.native('manifestYamlFromJson')(std.manifestJson({
+    nativeOverridesYaml: std.native('manifestYamlFromJson')(std.toString({
       overrides: {
         tenant: {
           max_active_series_per_user: 40000000 * 2 / 3,
