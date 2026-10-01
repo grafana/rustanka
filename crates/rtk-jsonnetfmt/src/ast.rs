@@ -38,7 +38,10 @@
 //!    reads it: `EnforceStringStyle` hands it to `StringUnescape`, which puts
 //!    it in an error message.
 
-use crate::{fodder::Fodder, location::LocationRange};
+use crate::{
+	fodder::{Fodder, FodderKind},
+	location::LocationRange,
+};
 
 /// `ast.Identifier`.
 ///
@@ -137,6 +140,39 @@ impl Node {
 				.opening_fodder_mut();
 		}
 		&mut self.fodder
+	}
+
+	/// `openFodder`, read-only.
+	///
+	/// Both `FixNewlines` and `FixIndentation` ask *whether* a sub-expression
+	/// starts on a new line before deciding what to do about it, so the
+	/// question is asked far more often than the answer is written to. A loop
+	/// is fine here, unlike in [`Node::opening_fodder_mut`]: a shared reborrow
+	/// of the cursor is something NLL will give.
+	pub fn opening_fodder(&self) -> &Fodder {
+		self.left_recursive_deep().open_fodder()
+	}
+
+	/// `formatter.removeInitialNewlines`: step 2 of `FormatNode`.
+	///
+	/// A step of the pipeline rather than a pass — Go has it as an unexported
+	/// four-line function in `jsonnetfmt.go`, which the staged pass dumper
+	/// cannot reach, so it lives on the type it mutates.
+	///
+	/// Three things about the four lines:
+	///
+	/// - It drops **only** `LineEnd`s, so a comment on its own line at the top
+	///   of a file is a `Paragraph` and stops the run — which is how a file
+	///   keeps its header comment while losing the blank lines above it.
+	/// - It truncates the slice rather than going through [`Fodder::append`],
+	///   so the dropped element's `blanks` and `indent` go with it. That is why
+	///   `EnforceMaxBlankLines` at step 3 never sees a leading blank run at
+	///   all, and why the order of those two steps is load-bearing.
+	/// - It goes through `openFodder`, so on a left-recursive root the fodder
+	///   it truncates is several levels down the leftmost spine.
+	pub fn remove_initial_newlines(&mut self) {
+		self.opening_fodder_mut()
+			.drop_leading_while(|element| element.kind == FodderKind::LineEnd);
 	}
 }
 
@@ -598,6 +634,47 @@ pub struct ObjectField {
 	pub expr2: Option<Box<Node>>,
 	/// An assert's message.
 	pub expr3: Option<Box<Node>>,
+}
+
+impl ObjectField {
+	/// `formatter.objectFieldOpenFodder`: the fodder before this field's first
+	/// token, wherever the kind keeps it.
+	///
+	/// For four of the five kinds that is [`ObjectField::fodder1`]. For
+	/// [`ObjectFieldKind::FieldStr`] there is no `fodder1` at all — the field
+	/// name is an expression and carries its own opening fodder — so this is
+	/// `openFodder(expr1)` instead. Get that wrong and an object of quoted
+	/// fields never expands, which is `FixNewlines`' whole job.
+	///
+	/// `None` only where a `FieldStr` has no name expression, which the parser
+	/// cannot produce; Go would crash there. Reading it as "no fodder" gives
+	/// the same answer for every tree there is, and the callers are the two
+	/// passes that ask how many newlines it holds.
+	///
+	/// Upstream declares this beside `FixNewlines`, which is the only pass to
+	/// call it — `FixIndentation` inlines the same three lines twice, once for
+	/// `Object` and once for `ObjectComp`. It is a property of the field's
+	/// kind, so it lives on the field.
+	pub fn open_fodder(&self) -> Option<&Fodder> {
+		match self.kind {
+			ObjectFieldKind::FieldStr => self.expr1.as_deref().map(Node::opening_fodder),
+			_ => Some(&self.fodder1),
+		}
+	}
+
+	/// [`ObjectField::open_fodder`], for the passes that rewrite it.
+	pub fn open_fodder_mut(&mut self) -> Option<&mut Fodder> {
+		match self.kind {
+			ObjectFieldKind::FieldStr => self.expr1.as_deref_mut().map(Node::opening_fodder_mut),
+			_ => Some(&mut self.fodder1),
+		}
+	}
+
+	/// How many newlines [`ObjectField::open_fodder`] holds, counting an
+	/// absent one as none.
+	pub fn open_fodder_newlines(&self) -> usize {
+		self.open_fodder().map_or(0, Fodder::count_newlines)
+	}
 }
 
 /// `ast.Object`.
