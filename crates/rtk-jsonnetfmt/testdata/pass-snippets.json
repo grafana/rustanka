@@ -278,5 +278,290 @@
     "name": "pretty_names/nested",
     "source": "{ ['a']: { ['b']: c['d'] } }",
     "why": "The traversal has to keep working after the rewrite, since upstream calls the base traversal on the changed node."
+  },
+  {
+    "name": "string_style/double_to_single",
+    "source": "\"foo\"",
+    "why": "The plain case, and the one the default option asks for: StringStyleSingle with nothing to avoid."
+  },
+  {
+    "name": "string_style/already_single",
+    "source": "'foo'",
+    "why": "Already right. A no-op that still goes through StringUnescape and StringEscape, so it grades the round trip."
+  },
+  {
+    "name": "string_style/empty",
+    "source": "\"\"",
+    "why": "Nothing to count, so the style decides alone."
+  },
+  {
+    "name": "string_style/block_string",
+    "source": "|||\n  foo\n|||",
+    "why": "The first of three early returns: a block string is never restyled, whatever it holds."
+  },
+  {
+    "name": "string_style/block_string_with_both_quotes",
+    "source": "|||\n  it's \"x\"\n|||",
+    "why": "And the early return is unconditional, so a block string holding both quotes is not even examined."
+  },
+  {
+    "name": "string_style/verbatim_single",
+    "source": "@'foo'",
+    "why": "The second early return."
+  },
+  {
+    "name": "string_style/verbatim_double",
+    "source": "@\"foo\"",
+    "why": "The third."
+  },
+  {
+    "name": "string_style/verbatim_doubled_quote",
+    "source": "@'it''s'",
+    "why": "A verbatim string's Value has its doubled quotes already collapsed, so restyling it would need re-doubling. Upstream does not try: it returns."
+  },
+  {
+    "name": "string_style/single_quote_inside_double",
+    "source": "\"it's\"",
+    "why": "numSingle > 0 forces useSingle false, which is what it already is. The value round-trips unchanged, so this must be a no-op."
+  },
+  {
+    "name": "string_style/single_quote_inside_single",
+    "source": "'it\\'s'",
+    "why": "The carve-out doing work: the escape is what the quote choice is avoiding, so this becomes a double-quoted string with no escape at all."
+  },
+  {
+    "name": "string_style/double_quote_inside_single",
+    "source": "'say \"hi\"'",
+    "why": "numDouble > 0 forces useSingle true. Already single, already unescaped: a no-op."
+  },
+  {
+    "name": "string_style/double_quote_inside_double",
+    "source": "\"say \\\"hi\\\"\"",
+    "why": "The carve-out overriding the option in the other direction: StringStyleSingle wanted single anyway, and here it is the escapes that make it worth doing."
+  },
+  {
+    "name": "string_style/both_quotes_in_double",
+    "source": "\"it's \\\"x\\\"\"",
+    "why": "Both present, so neither syntax avoids escaping and upstream returns without touching it. The kind stays Double even though the option says Single."
+  },
+  {
+    "name": "string_style/both_quotes_in_single",
+    "source": "'it\\'s \"x\"'",
+    "why": "The same refusal from the other side."
+  },
+  {
+    "name": "string_style/escaped_single_quote_in_double",
+    "source": "\"a\\'b\"",
+    "why": "A needless escape: \\' is legal in a double-quoted string, and numSingle > 0 keeps the kind Double, so only the value changes. The one snippet where the kind is untouched and the text is not."
+  },
+  {
+    "name": "string_style/escaped_double_quote_in_single",
+    "source": "'a\\\"b'",
+    "why": "The mirror image, and here the kind changes too even though it was already Single-shaped."
+  },
+  {
+    "name": "string_style/escape_newline",
+    "source": "\"a\\nb\"",
+    "why": "StringEscape writes \\n back, so the value survives and only the kind moves."
+  },
+  {
+    "name": "string_style/escape_tab",
+    "source": "\"a\\tb\"",
+    "why": "Same for \\t."
+  },
+  {
+    "name": "string_style/escape_backslash",
+    "source": "\"a\\\\b\"",
+    "why": "And for the backslash, which is the escape that would compound if the round trip were wrong."
+  },
+  {
+    "name": "string_style/escape_solidus",
+    "source": "\"a\\/b\"",
+    "why": "\\/ is accepted by StringUnescape (see json.org) and never written back by StringEscape, so the escape is silently dropped."
+  },
+  {
+    "name": "string_style/escape_unicode_ascii",
+    "source": "\"\\u0041\"",
+    "why": "An escape collapsing to a plain character: \\u0041 is A, and StringEscape leaves A alone."
+  },
+  {
+    "name": "string_style/escape_unicode_latin1",
+    "source": "\"\\u00E9\"",
+    "why": "So does e-acute, which is above the C1 range StringEscape re-escapes."
+  },
+  {
+    "name": "string_style/escape_unicode_c1",
+    "source": "\"\\u009F\"",
+    "why": "But U+009F is inside it, so the escape comes back — in lower case, because StringEscape formats with %04x. A case change with no other difference."
+  },
+  {
+    "name": "string_style/escape_nul",
+    "source": "\"\\u0000\"",
+    "why": "The one character StringEscape spells out explicitly rather than by range."
+  },
+  {
+    "name": "string_style/non_ascii_literal",
+    "source": "\"héllo\"",
+    "why": "A character written as itself rather than escaped stays that way."
+  },
+  {
+    "name": "string_style/import",
+    "source": "import \"foo.libsonnet\"",
+    "why": "THE REASON THIS PASS OVERRIDES LiteralString AND NOT Visit: Base.Import reaches the filename through the LiteralString hook only, so a pass overriding Visit would miss every import in the file."
+  },
+  {
+    "name": "string_style/import_str",
+    "source": "importstr \"a.txt\"",
+    "why": "Same route, different hook on the way in."
+  },
+  {
+    "name": "string_style/import_bin",
+    "source": "importbin \"a.bin\"",
+    "why": "And the third."
+  },
+  {
+    "name": "string_style/import_already_single",
+    "source": "import 'foo.libsonnet'",
+    "why": "The no-op, so the import path is graded in both directions."
+  },
+  {
+    "name": "string_style/field_name",
+    "source": "{ \"foo\": 1 }",
+    "why": "A field name is a LiteralString like any other. In the pipeline PrettyFieldNames has already unquoted this one; in isolation the pass still restyles it."
+  },
+  {
+    "name": "string_style/field_name_keyword",
+    "source": "{ \"false\": 1 }",
+    "why": "The pipeline case: PrettyFieldNames leaves a keyword quoted, so this pass is what decides which quote it keeps. tests/golden/issue195.jsonnet is exactly this."
+  },
+  {
+    "name": "string_style/computed_field_name",
+    "source": "{ [\"foo\"]: 1 }",
+    "why": "Reached through Visit rather than through the field kind, since ObjectFieldExpr's name is an ordinary expression."
+  },
+  {
+    "name": "string_style/index",
+    "source": "a[\"foo\"]",
+    "why": "And an index's string, which PrettyFieldNames would have promoted first."
+  },
+  {
+    "name": "string_style/nested",
+    "source": "[\"a\", { b: \"c\" }, f(\"d\")]",
+    "why": "Several literals in one traversal, in three different positions."
+  },
+  {
+    "name": "comment_style/hash_to_slash",
+    "source": "# c\n1",
+    "why": "The plain case: CommentStyleSlash rewrites the leading # as //, keeping everything after it."
+  },
+  {
+    "name": "comment_style/hash_no_space",
+    "source": "#c\n1",
+    "why": "The rewrite is textual — \"//\" + comment[1:] — so there is no space to preserve."
+  },
+  {
+    "name": "comment_style/hash_empty",
+    "source": "#\n1",
+    "why": "A bare hash. len(*comment) > 1 fails, so the hashbang guard is not even consulted."
+  },
+  {
+    "name": "comment_style/double_hash",
+    "source": "## c\n1",
+    "why": "Only the first character is replaced, so a doubled hash becomes //# and not //."
+  },
+  {
+    "name": "comment_style/slash_left_alone",
+    "source": "// c\n1",
+    "why": "Already slash: the branch asks for comment[0] == '#' and this is not it."
+  },
+  {
+    "name": "comment_style/hashbang_first",
+    "source": "#!/usr/bin/env jsonnet\n1",
+    "why": "The documented carve-out: a #! in the file's first fodder is left alone."
+  },
+  {
+    "name": "comment_style/hashbang_bare",
+    "source": "#!\n1",
+    "why": "The shortest comment the guard can fire on: len 2, and comment[1] is '!'."
+  },
+  {
+    "name": "comment_style/hashbang_with_a_space",
+    "source": "# !c\n1",
+    "why": "Not a hashbang: the guard reads comment[1], which is a space here, so this is rewritten."
+  },
+  {
+    "name": "comment_style/hashbang_twice",
+    "source": "#!a\n#!b\n1",
+    "why": "AN ODDITY, AND WHY seenFirstFodder IS THE STATE IT IS: the guard returns *before* setting seenFirstFodder, so a second #! is still 'first' and is also spared."
+  },
+  {
+    "name": "comment_style/hashbang_after_a_comment",
+    "source": "# a\n#!b\n1",
+    "why": "An ordinary comment does set seenFirstFodder, so the #! after it is rewritten to //!."
+  },
+  {
+    "name": "comment_style/hashbang_after_interstitial",
+    "source": "/* c */ #!b\n1",
+    "why": "seenFirstFodder is assigned inside the `Kind != FodderInterstitial` branch, so an interstitial does not count as having been seen and the #! after it is still spared. Note the #! has to be on the SAME line: a newline between them would emit its own commentless LineEnd, and that would set the flag."
+  },
+  {
+    "name": "comment_style/hashbang_after_paragraph",
+    "source": "/* a\n   b */\n#!c\n1",
+    "why": "Converted, and not for the obvious reason. addFodderSafe puts a synthetic commentless LineEnd in front of a paragraph appended to empty fodder (the FodderAppend rule src/lexer.rs documents), and it is that element which sets the flag before the paragraph is ever examined."
+  },
+  {
+    "name": "comment_style/hashbang_after_blank_line",
+    "source": "\n#!a\n1",
+    "why": "THE FLAG IS SET OUTSIDE THE len(Comment) == 1 CHECK: a leading newline is a commentless LineEnd, nothing about it can be rewritten, and it still counts as fodder seen — so one blank line at the top of a file disables the hashbang carve-out."
+  },
+  {
+    "name": "comment_style/interstitial_c_comment",
+    "source": "local x = /* c */ 1; x",
+    "why": "An interstitial has to be a C comment, so under CommentStyleSlash there is nothing to do — and the element must not set the flag either."
+  },
+  {
+    "name": "comment_style/paragraph_c_comment",
+    "source": "/* a\n   b */\n1",
+    "why": "len(Comment) is 2, so the rewrite is skipped entirely. A multi-line comment is never restyled, in either direction."
+  },
+  {
+    "name": "comment_style/two_hash_lines",
+    "source": "# a\n# b\n1",
+    "why": "Two elements, each with one comment: both rewritten, and neither merged into the other."
+  },
+  {
+    "name": "comment_style/hash_mid_file",
+    "source": "{\n  a: 1,  # c\n  b: 2,\n}",
+    "why": "Not every comment is at the top of the file; this one is in an object field's comma fodder."
+  },
+  {
+    "name": "comment_style/hash_in_final_fodder",
+    "source": "1\n# c\n",
+    "why": "Base.File visits the final fodder after the root node, so a trailing comment is reached."
+  },
+  {
+    "name": "comment_style/hash_in_in_super_fodder",
+    "source": "{ a: 'b' # c\n in super }",
+    "why": "A TRAVERSAL HOLE WITH A VISIBLE CONSEQUENCE: Base.InSuper visits only the index, so InFodder is never reached and this # survives tk fmt."
+  },
+  {
+    "name": "comment_style/hash_in_index_id_fodder",
+    "source": "a.  # c\n  b",
+    "why": "The second hole: Index's RightBracketFodder doubles as the fodder before an identifier, and Base.Index skips it when Id is set. So this # survives too."
+  },
+  {
+    "name": "comment_style/hash_in_super_index_id_fodder",
+    "source": "{ a: super.  # c\n  b }",
+    "why": "The contrast that makes the previous one a hole rather than a rule: Base.SuperIndex visits IdFodder unconditionally, so the same comment in the same position is rewritten here."
+  },
+  {
+    "name": "comment_style/hash_in_parameter_eq_fodder",
+    "source": "function(x  # c\n  = 1) x",
+    "why": "EqFodder is visited only where the parameter has a default, and this one does, so the comment is reached. Without the default there is no = for a comment to sit before."
+  },
+  {
+    "name": "comment_style/hashbang_after_slash_comment",
+    "source": "// a\n#!b\n1",
+    "why": "A comment already in the target style is not rewritten but does set the flag, so the #! after it is converted. The pair with hashbang_after_interstitial: what matters is the element's kind, not whether anything changed."
   }
 ]
