@@ -29,12 +29,12 @@ use std::collections::HashSet;
 use crate::{
 	Error,
 	ast::{
-		Apply, ApplyBrace, Arguments, Array, ArrayComp, Assert, Binary, BinaryOp,
+		APPLY_PRECEDENCE, Apply, ApplyBrace, Arguments, Array, ArrayComp, Assert, Binary, BinaryOp,
 		CommaSeparatedExpr, Conditional, Error as ErrorExpr, ForSpec, Function, FunctionSugar,
 		Identifier, IfSpec, Import, InSuper, Index, LiteralNumber, LiteralString,
-		LiteralStringKind, Local, LocalBind, NamedArgument, Node, NodeKind, Object, ObjectComp,
-		ObjectField, ObjectFieldHide, ObjectFieldKind, Parameter, Parens, Slice, SuperIndex, Unary,
-		UnaryOp,
+		LiteralStringKind, Local, LocalBind, MAX_PRECEDENCE, NamedArgument, Node, NodeKind, Object,
+		ObjectComp, ObjectField, ObjectFieldHide, ObjectFieldKind, Parameter, Parens, Precedence,
+		Slice, SuperIndex, UNARY_PRECEDENCE, Unary, UnaryOp,
 	},
 	fodder::Fodder,
 	lexer::lex,
@@ -42,43 +42,6 @@ use crate::{
 	string_util::string_unescape,
 	token::{Token, TokenKind},
 };
-
-/// `internal/ast.Precedence`.
-type Precedence = u8;
-
-/// Var, Self, Parens, literals.
-///
-/// Unused until `FixParens` lands in Phase 2e, which needs `ExprPrecedence` and
-/// `TighterPrecedence`; the table is carried whole because it only makes sense
-/// read that way.
-#[allow(dead_code)]
-const MIN_PRECEDENCE: Precedence = 1;
-/// Function calls and indexing.
-const APPLY_PRECEDENCE: Precedence = 2;
-/// Logical and bitwise negation, unary `+` and `-`.
-const UNARY_PRECEDENCE: Precedence = 4;
-/// Local, if, import, function, error.
-const MAX_PRECEDENCE: Precedence = 16;
-
-/// `internal/ast.BinaryOpPrecedence`.
-fn binary_op_precedence(op: BinaryOp) -> Precedence {
-	match op {
-		BinaryOp::Mult | BinaryOp::Div | BinaryOp::Percent => 5,
-		BinaryOp::Plus | BinaryOp::Minus => 6,
-		BinaryOp::ShiftL | BinaryOp::ShiftR => 7,
-		BinaryOp::Greater
-		| BinaryOp::GreaterEq
-		| BinaryOp::Less
-		| BinaryOp::LessEq
-		| BinaryOp::In => 8,
-		BinaryOp::ManifestEqual | BinaryOp::ManifestUnequal => 9,
-		BinaryOp::BitwiseAnd => 10,
-		BinaryOp::BitwiseXor => 11,
-		BinaryOp::BitwiseOr => 12,
-		BinaryOp::And => 13,
-		BinaryOp::Or => 14,
-	}
-}
 
 /// `locFromTokens`.
 fn loc_from_tokens(begin: &Token, end: &Token) -> LocationRange {
@@ -1133,7 +1096,7 @@ impl<'a> Parser<'a> {
 			// postfix forms, or we are done at this level.
 			let bop = match self.peek().kind {
 				TokenKind::In => {
-					if binary_op_precedence(BinaryOp::In) != prec {
+					if BinaryOp::In.precedence() != prec {
 						return Ok(lhs);
 					}
 					Some(BinaryOp::In)
@@ -1155,7 +1118,7 @@ impl<'a> Parser<'a> {
 							&format!("Not a binary operator: {}", self.peek().data),
 						));
 					};
-					if binary_op_precedence(op) != prec {
+					if op.precedence() != prec {
 						return Ok(lhs);
 					}
 					Some(op)
