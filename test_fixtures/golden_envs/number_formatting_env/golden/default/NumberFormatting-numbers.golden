@@ -19,10 +19,6 @@ spec:
   - -0
   manyDigits: 1.2345678901234567
   million: 1e+06
-  nativeOverridesYaml: |
-    overrides:
-        tenant:
-            max_active_series_per_user: 2.6666666666666668e+07
   negativeFraction: -0.5
   negativeOne: -1
   negativeZero: -0

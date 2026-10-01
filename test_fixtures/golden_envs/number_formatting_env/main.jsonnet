@@ -29,15 +29,9 @@
     pointOnePlusPointTwo: 0.1 + 0.2,
     oneThird: 1 / 3,
 
-    // The tenant override that exposed an extra rounding step in scientific notation.
+    // Direct manifest scalars use Go formatting independently of embedded YAML.
     activeSeriesLimit: 40000000 * 2 / 3,
-    nativeOverridesYaml: std.native('manifestYamlFromJson')(std.toString({
-      overrides: {
-        tenant: {
-          max_active_series_per_user: 40000000 * 2 / 3,
-        },
-      },
-    })),
+
 
     // Go's 'g' formatting switches to an exponent once the decimal exponent
     // reaches 6, and below -4. These sit either side of both edges.

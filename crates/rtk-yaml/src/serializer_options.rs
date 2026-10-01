@@ -124,6 +124,9 @@ pub struct SerializerOptions {
 	///
 	/// Default: `None` (preserves backwards compatibility)
 	pub scientific_notation_small_threshold: Option<f64>,
+	/// Preserve rtk v0.0.34's division-based scientific mantissas for embedded YAML.
+	/// Embedded configuration bytes feed hashes, so changing them triggers rollouts.
+	pub legacy_scientific_notation: bool,
 	/// Spell a negative zero the way Go does, as `-0` rather than `-0.0`.
 	///
 	/// A negative zero is the one float whose sign cannot survive being written
@@ -227,6 +230,7 @@ impl Default for SerializerOptions {
 			line_width: None,
 			scientific_notation_threshold: Some(1_000_000),
 			scientific_notation_small_threshold: None,
+			legacy_scientific_notation: false,
 			go_style_negative_zero: false,
 			block_scalar_chomp: None,
 			quote_numeric_strings: false,

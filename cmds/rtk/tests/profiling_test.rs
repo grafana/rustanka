@@ -42,6 +42,6 @@ fn exporter_profiling_configuration_works_in_fresh_processes() {
 				.join("example.com-v1.NumberFormatting-numbers.yaml"),
 		)
 		.unwrap();
-		assert!(manifest.contains("max_active_series_per_user: 2.6666666666666668e+07"));
+		assert!(manifest.contains("activeSeriesLimit: 2.6666666666666668e+07"));
 	}
 }
