@@ -78,6 +78,9 @@ jobs:
           - name: "Export (Memoize)"
             config: "rtk-benchmarks/export-memoize.yaml"
             id: "export-memoize"
+          - name: "Export (Shared Libraries)"
+            config: "rtk-benchmarks/export-libraries.yaml"
+            id: "export-libraries"
           - name: "Export (Replace)"
             config: "rtk-benchmarks/export-replace.yaml"
             id: "export-replace"
@@ -167,6 +170,8 @@ jobs:
 
           if [ "${{ matrix.benchmark.id }}" = "export-large" ]; then
             ARGS="$ARGS -- --runs 3"
+          elif [ "${{ matrix.benchmark.id }}" = "export-libraries" ]; then
+            ARGS="$ARGS -- --runs 5"
           fi
           ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
 

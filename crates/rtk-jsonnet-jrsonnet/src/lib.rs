@@ -16,7 +16,7 @@ use jrsonnet_evaluator::manifest::set_use_go_style_floats;
 use jrsonnet_evaluator::stack::set_stack_depth_limit;
 use jrsonnet_evaluator::tla::TlaArg;
 use jrsonnet_evaluator::trace::PathResolver;
-use jrsonnet_evaluator::{FileImportResolver, IStr, State, Thunk, Val};
+use jrsonnet_evaluator::{FileImportResolver, IStr, PreparedImportCache, State, Thunk, Val};
 use jrsonnet_gcmodule::Trace;
 pub use jrsonnet_stdlib::ContextInitializer;
 use jrsonnet_stdlib::{
@@ -151,6 +151,7 @@ impl Evaluator {
 
 	thread_local! {
 		static CURRENT: RefCell<Option<StdRc<Evaluator>>> = const { RefCell::new(None) };
+		static PREPARED_IMPORTS: PreparedImportCache = PreparedImportCache::default();
 	}
 
 	/// The evaluator whose context is in effect on this thread, if any.
@@ -202,6 +203,7 @@ impl Evaluator {
 		set_stack_depth_limit(self.max_stack);
 
 		let mut builder = State::builder();
+		builder.prepared_import_cache(Self::PREPARED_IMPORTS.with(Clone::clone));
 		builder.context_initializer(self.context_initializer.clone());
 
 		if !self.import_paths.is_empty() {

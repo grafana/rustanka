@@ -1,0 +1,25 @@
+name: "Export (Shared Libraries)"
+id: "export-libraries"
+description: "Synthetic library-heavy exports: large shared source, small environment-specific output."
+
+fixtures:
+  static_envs: 64
+  inline_files: 0
+  envs_per_inline_file: 0
+  resources_per_env: 8
+
+fixture_generator: 'python3 "{repo_root}/rtk-benchmarks/lib/generate-library-fixtures.py" "{fixtures_dir}" --environments {static_envs}'
+prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
+
+tests:
+  - name: "Cold Single Environment"
+    description: "One environment importing eight libraries (4,096 constructors total) and 8,192 inventory records; no cross-environment reuse."
+    command: "export {export_dir} {single_static_dir} --parallel 1 --merge-strategy=fail-on-conflicts"
+
+  - name: "Shared Libraries, One Worker"
+    description: "{static_envs} environments sharing the libraries, producing eight ConfigMaps each; one worker reuses preparation across evaluations."
+    command: "export {export_dir} {all_static_env_paths} --recursive --parallel 1 --merge-strategy=fail-on-conflicts"
+
+  - name: "Shared Libraries, Eight Workers"
+    description: "The same {static_envs} environments with eight workers; each worker must prepare its own copy of the libraries."
+    command: "export {export_dir} {all_static_env_paths} --recursive --parallel 8 --merge-strategy=fail-on-conflicts"

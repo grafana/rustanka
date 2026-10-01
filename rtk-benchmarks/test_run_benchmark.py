@@ -15,6 +15,39 @@ sys.modules[spec.name] = benchmark
 spec.loader.exec_module(benchmark)
 
 
+class FixtureGeneratorTests(unittest.TestCase):
+    def test_custom_generator_expands_paths_and_runs_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "generate.py"
+            script.write_text(
+                "import pathlib, sys\n"
+                "pathlib.Path(sys.argv[1], 'generated').write_text(sys.argv[2])\n")
+            config = root / "bench.yaml"
+            config.write_text("""name: Test
+id: test
+description: test
+fixtures:
+  static_envs: 64
+  inline_files: 0
+  envs_per_inline_file: 0
+  resources_per_env: 8
+fixture_generator: 'python3 "{repo_root}/generate.py" "{fixtures_dir}" {static_envs}'
+tests: []
+""")
+            runner = benchmark.BenchmarkRunner(
+                benchmark.BenchmarkConfig.from_yaml(config, root), root, [])
+            fixtures = root / "fixtures with spaces"
+            fixtures.mkdir()
+            runner.generate_fixtures(fixtures)
+            self.assertEqual((fixtures / "generated").read_text(), "64")
+            self.assertEqual(list(fixtures.iterdir()), [fixtures / "generated"])
+
+            runner.config.fixture_generator = "exit 23"
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.generate_fixtures(fixtures)
+
+
 class BaseOnlyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -142,6 +175,24 @@ class BaseOnlyTests(unittest.TestCase):
             self.runner.validate_test(benchmark.Test("show", command="show ."))
         self.assertEqual([call.args[0] for call in run.call_args_list],
                          [str(self.runner.rtk), "tk"])
+
+    def test_tanka_export_comparison_rejects_missing_or_different_files(self):
+        self.runner.config.skip_tk = False
+        self.runner.export_dir_tk = self.root / "tk"
+        self.runner.export_dir_tk.mkdir()
+        current = self.runner.export_dir_rtk / "resource.yaml"
+        reference = self.runner.export_dir_tk / "resource.yaml"
+        current.write_bytes(b"value: 1\n")
+        reference.write_bytes(current.read_bytes())
+        test = benchmark.Test("export", command="export {export_dir} .")
+        with patch.object(self.runner, "run_command", return_value=self.result()):
+            self.runner.validate_test(test)
+            reference.write_bytes(b"value: 2\n")
+            with self.assertRaises(SystemExit):
+                self.runner.validate_test(test)
+            reference.unlink()
+            with self.assertRaises(SystemExit):
+                self.runner.validate_test(test)
 
     def test_cli_enables_skip_tk(self):
         config = self.root / "bench.yaml"

@@ -18,6 +18,7 @@ mod import;
 mod integrations;
 pub mod manifest;
 mod obj;
+mod prepared_import;
 pub mod stack;
 pub mod stdlib;
 pub mod tla;
@@ -49,6 +50,7 @@ pub use jrsonnet_ir::{
 };
 #[doc(hidden)]
 pub use jrsonnet_macros;
+pub use prepared_import::PreparedImportCache;
 
 #[cfg(not(any(feature = "ir-parser", feature = "peg-parser")))]
 compile_error!("at least one of `ir-parser` or `peg-parser` features must be enabled");
@@ -62,7 +64,7 @@ pub use tla::apply_tla;
 pub use val::{Thunk, Val};
 
 pub mod analyze;
-use self::analyze::{LExpr, analyze_root};
+use self::analyze::{LExpr, LocalId, analyze_root};
 use crate::gc::WithCapacityExt as _;
 
 #[allow(clippy::needless_return)]
@@ -250,11 +252,18 @@ enum CachedEvaluation {
 	Other(Val),
 }
 
+#[derive(Clone, Trace)]
+struct PreparedImport {
+	externals: Vec<(IStr, LocalId)>,
+	lir: Rc<LExpr>,
+}
+
 #[derive(Trace)]
 struct FileData {
 	string: Option<IStr>,
 	bytes: Option<IBytes>,
 	parsed: Option<Rc<Expr>>,
+	prepared: Option<PreparedImport>,
 	evaluated: Option<CachedEvaluation>,
 
 	evaluating: bool,
@@ -265,6 +274,7 @@ impl FileData {
 			string: Some(data),
 			bytes: None,
 			parsed: None,
+			prepared: None,
 			evaluated: None,
 			evaluating: false,
 		}
@@ -274,6 +284,7 @@ impl FileData {
 			string: None,
 			bytes: Some(data),
 			parsed: None,
+			prepared: None,
 			evaluated: None,
 			evaluating: false,
 		}
@@ -296,6 +307,7 @@ impl FileData {
 pub struct EvaluationStateInternals {
 	/// Internal state
 	file_cache: RefCell<FxHashMap<SourcePath, FileData>>,
+	prepared_import_cache: Option<PreparedImportCache>,
 	/// Context initializer, which will be used for imports and everything
 	/// [`NoopContextInitializer`] is used by default, most likely you want to have `jrsonnet-stdlib`
 	context_initializer: CcContextInitializer,
@@ -418,25 +430,8 @@ impl State {
 			.get_string()
 			.ok_or_else(|| ImportBadFileUtf8(path.clone()))?;
 		let file_name = Source::new(path.clone(), code.clone());
-		if file.parsed.is_none() {
-			file.parsed = Some(
-				parse_jsonnet(&code, file_name.clone())
-					.map(Rc::new)
-					.map_err(|e| {
-						let span = e.location.clone();
-						let mut err = Error::from(ImportSyntaxError {
-							path: file_name.clone(),
-							error: Box::new(e),
-						});
-						err.trace_mut().0.push(StackTraceElement {
-							location: Some(span),
-							desc: "parse imported".to_string(),
-						});
-						err
-					})?,
-			);
-		}
-		let parsed = file.parsed.as_ref().expect("just set").clone();
+		let parsed = file.parsed.clone();
+		let prepared = file.prepared.clone();
 		// RELAXED: Allow re-importing files during evaluation to support lazy evaluation patterns.
 		// In Jsonnet, it's valid to have apparent "circular" imports as long as they're in lazy
 		// thunks that don't get evaluated. For example:
@@ -452,15 +447,63 @@ impl State {
 		file.evaluating = true;
 		// Dropping file cache guard here, as evaluation may use this map too
 		drop(file_cache);
-		let (externals, thunks) = self.create_default_context(file_name).build();
-		let report = analyze_root(&parsed, externals);
-		if report.errored {
-			return Err(StaticAnalysisError(report.diagnostics_list).into());
+		let (externals, thunks) = self.create_default_context(file_name.clone()).build();
+		let prepared_cache = self.0.prepared_import_cache.as_ref();
+		let cached = prepared
+			.filter(|prepared| prepared.externals == externals)
+			.map(|prepared| prepared.lir)
+			.or_else(|| prepared_cache.and_then(|cache| cache.get(&path, &code, &externals)));
+		let lir = if let Some(lir) = cached {
+			lir
+		} else {
+			let parsed = if let Some(parsed) = parsed {
+				parsed
+			} else {
+				let parsed = Rc::new(parse_jsonnet(&code, file_name.clone()).map_err(|e| {
+					let span = e.location.clone();
+					let mut err = Error::from(ImportSyntaxError {
+						path: file_name,
+						error: Box::new(e),
+					});
+					err.trace_mut().0.push(StackTraceElement {
+						location: Some(span),
+						desc: "parse imported".to_string(),
+					});
+					err
+				})?);
+				if prepared_cache.is_none() {
+					self.file_cache()
+						.get_mut(&path)
+						.expect("file is loaded")
+						.parsed = Some(parsed.clone());
+				}
+				parsed
+			};
+			let report = analyze_root(&parsed, externals.clone());
+			if report.errored {
+				return Err(StaticAnalysisError(report.diagnostics_list).into());
+			}
+			debug_assert_eq!(report.root_shape.n_locals as usize, thunks.len());
+			debug_assert!(report.root_shape.captures.is_empty());
+			let lir = Rc::new(report.lir);
+			if let Some(cache) = prepared_cache {
+				cache.insert(path.clone(), code, externals.clone(), lir.clone());
+			}
+			lir
+		};
+		if prepared_cache.is_some() {
+			// Shared eviction must not make weak-object reimports in this state
+			// repeat parsing and analysis of a file it already loaded.
+			self.file_cache()
+				.get_mut(&path)
+				.expect("file is loaded")
+				.prepared = Some(PreparedImport {
+				externals,
+				lir: lir.clone(),
+			});
 		}
-		debug_assert_eq!(report.root_shape.n_locals as usize, thunks.len());
-		debug_assert!(report.root_shape.captures.is_empty());
 		let ctx = Context::root(thunks);
-		let res = evaluate::evaluate(ctx, &report.lir);
+		let res = evaluate::evaluate(ctx, &lir);
 
 		let mut file_cache = self.file_cache();
 		let mut file = file_cache.entry(path);
@@ -656,10 +699,18 @@ impl Default for State {
 
 #[derive(Default)]
 pub struct StateBuilder {
+	prepared_import_cache: Option<PreparedImportCache>,
 	import_resolver: Option<Rc<dyn ImportResolver>>,
 	context_initializer: Option<CcContextInitializer>,
 }
 impl StateBuilder {
+	/// Reuse parsed and analyzed imports across states on this thread.
+	/// Runtime values and import resolution remain local to each state.
+	pub fn prepared_import_cache(&mut self, cache: PreparedImportCache) -> &mut Self {
+		self.prepared_import_cache = Some(cache);
+		self
+	}
+
 	pub fn import_resolver(&mut self, import_resolver: impl ImportResolver) -> &mut Self {
 		let _ = self.import_resolver.insert(Rc::new(import_resolver));
 		self
@@ -676,6 +727,7 @@ impl StateBuilder {
 	pub fn build(mut self) -> State {
 		State(Cc::new(EvaluationStateInternals {
 			file_cache: RefCell::new(FxHashMap::new()),
+			prepared_import_cache: self.prepared_import_cache.take(),
 			context_initializer: self
 				.context_initializer
 				.take()
