@@ -7,6 +7,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+gtmpl-ng = { git = "https://github.com/julienduchesne/gtmpl-rust", rev = "f649faaac5ad9549ecc238d344b6eb1da86c92e1" }
+rtk-yaml.workspace = true
 ciborium.workspace = true
 hex.workspace = true
 rtk-jsonnet-core.workspace = true
@@ -18,6 +21,23 @@ sha2.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
+
+[dev-dependencies]
+criterion = "0.7"
+stats_alloc = "0.1.10"
+
+[features]
+benchmarking = []
+
+[[bench]]
+name = "native_render"
+harness = false
+required-features = ["benchmarking"]
+
+[[bench]]
+name = "native_render_memory"
+harness = false
+required-features = ["benchmarking"]
 
 [lints]
 workspace = true
