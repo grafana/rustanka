@@ -46,6 +46,12 @@ jobs:
           cargo build --release -p ${{ matrix.build.package }}
           cp target/release/${{ matrix.build.package }} ${{ matrix.build.id }}
 
+      - name: Check profiling symbols
+        if: matrix.build.id == 'rtk-current'
+        run: |
+          readelf --sections --wide rtk-current | grep -F .debug_info
+          readelf --sections --wide rtk-current | grep -F .symtab
+
       - name: Upload binary
         if: matrix.build.id != 'rtk-base' || github.event_name == 'pull_request'
         uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4
