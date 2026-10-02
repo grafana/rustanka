@@ -253,8 +253,14 @@ opt-level = 3
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-debug = 2
+debug = 0
 panic = "abort"
+strip = true
+
+[profile.symbolicated]
+inherits = "release"
+debug = 2
+split-debuginfo = "off"
 strip = false
 
 [profile.release-fast]

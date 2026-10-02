@@ -32,6 +32,11 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 
 ### CPU profiles
 
+Use the `rustanka-symbolicated` release binary or Docker image for readable
+profiles. `rustanka` is the smaller, stripped build. Both use release optimizations;
+`rustanka-symbolicated` retains debug information and function symbols.
+Build it locally with `cargo build --profile symbolicated -p rtk`.
+
 Set `PYROSCOPE_URL` to send CPU profiles from `rtk` to Pyroscope. Profiling is
 disabled when the variable is unset. `PYROSCOPE_ENABLED=false` disables profiling
 even when the URL and credentials are inherited; `PYROSCOPE_ENABLED=true` requires
