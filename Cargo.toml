@@ -257,6 +257,12 @@ debug = 0
 panic = "abort"
 strip = true
 
+[profile.symbolicated]
+inherits = "release"
+debug = 2
+split-debuginfo = "off"
+strip = false
+
 [profile.release-fast]
 inherits = "release"
 lto = "thin"

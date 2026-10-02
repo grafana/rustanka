@@ -4,6 +4,7 @@ metadata:
   name: numbers
   namespace: default
 spec:
+  activeSeriesLimit: 2.6666666666666668e+07
   belowSmallBoundary: 1e-05
   beyondInt64: 9.223372036854776e+18
   int64Max: 9.223372036854776e+18

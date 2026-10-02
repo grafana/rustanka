@@ -29,7 +29,10 @@ fn manifest(json: &str) -> Result<String, String> {
 	let parsed: serde_json::Value =
 		serde_json::from_str(json).map_err(|error| format!("failed to parse json: {error}"))?;
 	let sorted = sort_json_keys_numerically(parsed);
-	let options = rtk_yaml::SerializerOptions::tanka_v3();
+	let options = rtk_yaml::SerializerOptions {
+		legacy_scientific_notation: true,
+		..rtk_yaml::SerializerOptions::tanka_v3()
+	};
 	let mut output = String::new();
 	rtk_yaml::to_fmt_writer_with_options(&mut output, &sorted, options)
 		.map_err(|error| format!("failed to serialize yaml: {error}"))?;
@@ -61,6 +64,18 @@ where
 #[cfg(test)]
 mod tests {
 	use super::manifest;
+
+	#[test]
+	fn preserves_v0034_scientific_mantissas() {
+		let output = manifest(
+			r#"{"max_active_series_per_user":26666666.666666668,"negative":-26666666.666666668,"small":0.00002}"#,
+		)
+		.unwrap();
+		assert_eq!(
+			output,
+			"max_active_series_per_user: 2.666666666666667e+07\nnegative: -2.666666666666667e+07\nsmall: 2e-05\n",
+		);
+	}
 
 	#[test]
 	fn naturally_sorts_keys_recursively_and_keeps_trailing_newline() {

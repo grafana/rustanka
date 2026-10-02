@@ -473,6 +473,7 @@ pub struct YamlSer<'a, W: Write> {
 	/// Threshold for scientific notation of small numbers. When Some(threshold), numbers with
 	/// abs > 0 and < threshold use scientific notation (e.g., 2e-05). When None, plain decimal is used.
 	scientific_notation_small_threshold: Option<f64>,
+	legacy_scientific_notation: bool,
 	go_style_negative_zero: bool,
 	/// Override for block scalar chomp indicator. When Some, forces the specified
 	/// chomp behavior instead of auto-detecting based on trailing newlines.
@@ -531,6 +532,7 @@ impl<'a, W: Write> YamlSer<'a, W> {
 			line_width: None,
 			scientific_notation_threshold: Some(1_000_000),
 			scientific_notation_small_threshold: None,
+			legacy_scientific_notation: false,
 			go_style_negative_zero: false,
 			block_scalar_chomp: None,
 			last_key_len: 0,
@@ -565,6 +567,7 @@ impl<'a, W: Write> YamlSer<'a, W> {
 		s.line_width = options.line_width;
 		s.scientific_notation_threshold = options.scientific_notation_threshold;
 		s.scientific_notation_small_threshold = options.scientific_notation_small_threshold;
+		s.legacy_scientific_notation = options.legacy_scientific_notation;
 		s.go_style_negative_zero = options.go_style_negative_zero;
 		s.block_scalar_chomp = options.block_scalar_chomp;
 		s.quote_numeric_strings = options.quote_numeric_strings;
@@ -638,6 +641,19 @@ impl<'a, W: Write> YamlSer<'a, W> {
 			write!(self.out, "a{}", id)?;
 		}
 		Ok(())
+	}
+
+	fn write_scientific(&mut self, value: f64) -> fmt::Result {
+		if !self.legacy_scientific_notation || value == 0.0 {
+			return write_go_scientific(self.out, value);
+		}
+		let exponent = value.abs().log10().floor() as i32;
+		let mantissa = value / 10f64.powi(exponent);
+		if exponent >= 0 {
+			write!(self.out, "{mantissa}e+{exponent:02}")
+		} else {
+			write!(self.out, "{mantissa}e{exponent:03}")
+		}
 	}
 
 	/// If a mapping key has just been written (':' emitted) and we determined the value is a scalar,
@@ -1425,7 +1441,7 @@ impl<'a, 'b, W: Write> Serializer for &'a mut YamlSer<'b, W> {
 			if v.unsigned_abs() >= threshold {
 				// Format as scientific notation to match Go's yaml.v3
 				// Go uses "+07" for positive exponents, Rust uses "7", so we format manually
-				write_go_scientific(self.out, v as f64)?;
+				self.write_scientific(v as f64)?;
 			} else {
 				write!(self.out, "{}", v)?;
 			}
@@ -1467,7 +1483,7 @@ impl<'a, 'b, W: Write> Serializer for &'a mut YamlSer<'b, W> {
 			if v >= threshold {
 				// Format as scientific notation to match Go's yaml.v3
 				// Go uses "+07" for positive exponents, Rust uses "7", so we format manually
-				write_go_scientific(self.out, v as f64)?;
+				self.write_scientific(v as f64)?;
 			} else {
 				write!(self.out, "{}", v)?;
 			}
@@ -1517,12 +1533,12 @@ impl<'a, 'b, W: Write> Serializer for &'a mut YamlSer<'b, W> {
 			if abs_v >= threshold as f64 {
 				// Format as scientific notation to match Go's yaml.v3
 				// Go uses "+06" for positive exponents, Rust uses "6", so we format manually
-				write_go_scientific(self.out, v)?;
+				self.write_scientific(v)?;
 			} else if let Some(small_threshold) = self.scientific_notation_small_threshold {
 				// Check for small numbers that should use scientific notation
 				// This matches Go yaml.v3 behavior where small floats like 0.00002 become 2e-05
 				if abs_v > 0.0 && abs_v < small_threshold {
-					write_go_scientific(self.out, v)?;
+					self.write_scientific(v)?;
 				} else {
 					// Below large threshold and above small threshold: use ryu for fast formatting
 					let mut buf = ryu::Buffer::new();

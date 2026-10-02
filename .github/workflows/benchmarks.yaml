@@ -19,14 +19,22 @@ jobs:
           - name: "rtk (current)"
             id: "rtk-current"
             package: "rtk"
+            profile: "release"
+            ref: ""
+          - name: "rtk (symbolicated)"
+            id: "rtk-symbolicated"
+            package: "rtk"
+            profile: "symbolicated"
             ref: ""
           - name: "rtk (base)"
             id: "rtk-base"
             package: "rtk"
+            profile: "release"
             ref: "${{ github.event.pull_request.base.ref }}"
           - name: "mock-k8s-server"
             id: "mock-k8s-server"
             package: "mock-k8s-server"
+            profile: "release"
             ref: ""
     steps:
       - name: Checkout
@@ -43,8 +51,22 @@ jobs:
       - name: Build ${{ matrix.build.package }}
         if: matrix.build.id != 'rtk-base' || github.event_name == 'pull_request'
         run: |
-          cargo build --release -p ${{ matrix.build.package }}
-          cp target/release/${{ matrix.build.package }} ${{ matrix.build.id }}
+          cargo build --profile ${{ matrix.build.profile }} -p ${{ matrix.build.package }}
+          cp target/${{ matrix.build.profile }}/${{ matrix.build.package }} ${{ matrix.build.id }}
+
+      - name: Check profiling symbols
+        if: matrix.build.id == 'rtk-symbolicated'
+        run: |
+          readelf --sections --wide rtk-symbolicated | grep -F .debug_info
+          readelf --sections --wide rtk-symbolicated | grep -F .symtab
+
+      - name: Check default binary is stripped
+        if: matrix.build.id == 'rtk-current'
+        run: |
+          if readelf --sections --wide rtk-current | grep -E '\.(debug_info|symtab)'; then
+            echo 'Default release binary must be stripped'
+            exit 1
+          fi
 
       - name: Upload binary
         if: matrix.build.id != 'rtk-base' || github.event_name == 'pull_request'
