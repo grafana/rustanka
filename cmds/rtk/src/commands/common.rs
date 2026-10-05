@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
 use rtk_environments::export::Error as EnvironmentError;
-use rtk_spec::canonical::EnvironmentSpec;
+use rtk_spec::canonical::{EnvironmentSpec, JsonentImplementationOrConfig, JsonnetImplementation};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -21,16 +21,38 @@ use crate::k8s::{
 
 #[derive(Clone, Debug, Default)]
 pub enum EvaluatorImplementation {
+	/// tk's own default, spelled out. rtk has no go-jsonnet, and asking for
+	/// tk's default is taken as asking for rtk's: no preference at all, so the
+	/// project's configuration still applies.
+	Go,
+	Reference,
 	#[default]
 	Jrsonnet,
-	Binary(String),
+	Binary(PathBuf),
+}
+
+impl EvaluatorImplementation {
+	/// The preference this choice puts in the options, if it expresses one.
+	pub(crate) fn rc_implementation(&self) -> Option<JsonentImplementationOrConfig> {
+		let implementation = match self {
+			Self::Go => return None,
+			Self::Reference => JsonnetImplementation::Reference,
+			Self::Jrsonnet => JsonnetImplementation::Jrsonnet,
+			Self::Binary(path) => JsonnetImplementation::Binary(path.clone()),
+		};
+		Some(JsonentImplementationOrConfig::JsonnetImplementation(
+			implementation,
+		))
+	}
 }
 
 impl fmt::Display for EvaluatorImplementation {
 	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			EvaluatorImplementation::Jrsonnet => formatter.write_str("jrsonnet"),
-			EvaluatorImplementation::Binary(path) => write!(formatter, "binary:{path}"),
+			Self::Go => formatter.write_str("go"),
+			Self::Reference => formatter.write_str("reference"),
+			Self::Jrsonnet => formatter.write_str("jrsonnet"),
+			Self::Binary(path) => write!(formatter, "binary:{}", path.display()),
 		}
 	}
 }
@@ -40,15 +62,25 @@ impl FromStr for EvaluatorImplementation {
 
 	fn from_str(value: &str) -> Result<Self, Self::Err> {
 		match value {
+			"go" | "go-jsonnet" => {
+				tracing::warn!(
+					"rtk has no go-jsonnet implementation; --jsonnet-implementation {value} \
+					 uses the project's configured implementation, or jrsonnet"
+				);
+				Ok(Self::Go)
+			}
+			"c++" | "cxx" | "reference" => Ok(Self::Reference),
 			"jrsonnet" => Ok(Self::Jrsonnet),
 			value if value.starts_with("binary:") && value.ends_with("jrsonnet") => {
 				tracing::warn!("Treating {value} as the local jrsonnet implementation");
 				Ok(Self::Jrsonnet)
 			}
 			value if value.starts_with("binary:") => {
-				Ok(Self::Binary(value["binary:".len()..].to_owned()))
+				Ok(Self::Binary(value["binary:".len()..].into()))
 			}
-			_ => anyhow::bail!("invalid value '{value}': expected 'jrsonnet' or 'binary:<path>'"),
+			_ => anyhow::bail!(
+				"invalid value '{value}': expected 'go', 'c++', 'reference', 'jrsonnet' or 'binary:<path>'"
+			),
 		}
 	}
 }
@@ -106,9 +138,9 @@ pub struct JsonnetArgs {
 	#[arg(short = 'V', long, value_parser = JsonnetArgs::parse_key_value)]
 	pub ext_str: Vec<(Box<str>, Box<str>)>,
 
-	/// This argument is ignored- it will always be "jrsonnet".
-	#[arg(long = "jsonnet-implementation", default_value_t)]
-	pub implementation: EvaluatorImplementation,
+	/// Jsonnet implementation to use (c++, jrsonnet, or binary:<path>); defaults to the project's configuration. `go` is accepted for tk compatibility and expresses no preference
+	#[arg(long = "jsonnet-implementation")]
+	pub implementation: Option<EvaluatorImplementation>,
 
 	/// Cache helmTemplate results across runs in each project's `target/helm` directory
 	///
@@ -143,7 +175,7 @@ impl JsonnetArgs {
 	}
 
 	pub fn options(&self) -> rtk_jsonnet::Options {
-		rtk_jsonnet::Options {
+		let mut options = rtk_jsonnet::Options {
 			ext_code: self.ext_code.iter().cloned().collect(),
 			ext_variables: self.ext_str.iter().cloned().collect(),
 			top_level_arguments: self.tla_str.iter().cloned().collect(),
@@ -151,7 +183,12 @@ impl JsonnetArgs {
 			helm_cache: self.helm_cache,
 			max_stack: self.max_stack,
 			..rtk_jsonnet::Options::default()
-		}
+		};
+		options.rc.spec.jsonnet_implementation = self
+			.implementation
+			.as_ref()
+			.and_then(EvaluatorImplementation::rc_implementation);
+		options
 	}
 }
 
@@ -168,7 +205,6 @@ impl JsonnetArgs {
 /// Warn about unimplemented CLI arguments that are accepted for Tanka compatibility
 /// but don't do anything in Rustanka.
 pub struct UnimplementedArgs<'a> {
-	pub jsonnet_implementation: Option<&'a str>,
 	pub cache_envs: Option<&'a [String]>,
 	pub cache_path: Option<&'a Option<PathBuf>>,
 	pub mem_ballast_size_bytes: Option<&'a Option<i64>>,
@@ -177,15 +213,6 @@ pub struct UnimplementedArgs<'a> {
 impl<'a> UnimplementedArgs<'a> {
 	/// Log warnings for any unimplemented arguments that were provided.
 	pub fn warn_if_set(&self) {
-		if let Some(impl_str) = self.jsonnet_implementation {
-			if impl_str != "go" {
-				warn!(
-					"--jsonnet-implementation is unimplemented in rtk and has no effect; \
-					 rtk always uses the built-in jrsonnet evaluator"
-				);
-			}
-		}
-
 		if let Some(envs) = self.cache_envs {
 			if !envs.is_empty() {
 				warn!("--cache-envs is unimplemented in rtk and has no effect");
@@ -199,20 +226,6 @@ impl<'a> UnimplementedArgs<'a> {
 		if let Some(Some(_)) = self.mem_ballast_size_bytes {
 			warn!("--mem-ballast-size-bytes is unimplemented in rtk and has no effect");
 		}
-	}
-
-	/// Convenience method to warn only about jsonnet_implementation.
-	///
-	/// Most commands only have the jsonnet_implementation flag as an unimplemented
-	/// option. This helper avoids the boilerplate of constructing the full struct.
-	pub fn warn_jsonnet_impl(jsonnet_implementation: &str) {
-		UnimplementedArgs {
-			jsonnet_implementation: Some(jsonnet_implementation),
-			cache_envs: None,
-			cache_path: None,
-			mem_ballast_size_bytes: None,
-		}
-		.warn_if_set();
 	}
 }
 
@@ -405,4 +418,117 @@ pub async fn setup_diff_engine(config: DiffEngineConfig<'_>) -> Result<DiffEngin
 		strategy,
 		default_namespace,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use clap::Parser;
+
+	use super::*;
+
+	#[derive(Parser)]
+	struct Cli {
+		#[command(flatten)]
+		jsonnet: JsonnetArgs,
+	}
+
+	#[test]
+	fn implementation_flag_reaches_options() {
+		for (flag, expected) in [
+			("reference", JsonnetImplementation::Reference),
+			("c++", JsonnetImplementation::Reference),
+			("jrsonnet", JsonnetImplementation::Jrsonnet),
+			(
+				"binary:/usr/local/bin/jsonnet",
+				JsonnetImplementation::Binary("/usr/local/bin/jsonnet".into()),
+			),
+		] {
+			let args = Cli::try_parse_from(["rtk", "--jsonnet-implementation", flag])
+				.expect("valid implementation");
+			let options = args.jsonnet.into_options();
+			assert_eq!(
+				options
+					.rc
+					.spec
+					.jsonnet_implementation
+					.as_ref()
+					.map(JsonentImplementationOrConfig::implementation),
+				Some(&expected),
+				"{flag}"
+			);
+		}
+	}
+
+	#[test]
+	fn omitted_implementation_uses_project_configuration() {
+		let directory = tempfile::tempdir().unwrap();
+		std::fs::write(
+			directory.path().join("tkrc.yaml"),
+			"spec:\n  jsonnetImplementation: jrsonnet\n",
+		)
+		.unwrap();
+		std::fs::write(directory.path().join("main.jsonnet"), "{}").unwrap();
+		let jpath =
+			rtk_jsonnet::jpath::JPath::resolve(directory.path().join("main.jsonnet")).unwrap();
+
+		let args = Cli::try_parse_from(["rtk"]).unwrap();
+		let options = args.jsonnet.into_options().for_project(&jpath).unwrap();
+		assert_eq!(
+			options
+				.rc
+				.spec
+				.jsonnet_implementation
+				.as_ref()
+				.map(JsonentImplementationOrConfig::implementation),
+			Some(&JsonnetImplementation::Jrsonnet)
+		);
+	}
+
+	#[test]
+	fn implementation_defaults_to_project_configuration_and_rejects_unknown_values() {
+		let args = Cli::try_parse_from(["rtk"]).expect("default implementation");
+		assert!(args
+			.jsonnet
+			.options()
+			.rc
+			.spec
+			.jsonnet_implementation
+			.is_none());
+		assert!(Cli::try_parse_from(["rtk", "--jsonnet-implementation", "unknown"]).is_err());
+	}
+
+	/// tk's default, spelled out, is accepted rather than refused, and is no
+	/// preference at all: it neither selects a Go backend rtk does not have nor
+	/// overrides what the project asked for.
+	#[test]
+	fn tks_default_implementation_leaves_the_choice_to_the_project() {
+		let directory = tempfile::tempdir().unwrap();
+		std::fs::write(
+			directory.path().join("tkrc.yaml"),
+			"spec:\n  jsonnetImplementation: c++\n",
+		)
+		.unwrap();
+		std::fs::write(directory.path().join("main.jsonnet"), "{}").unwrap();
+		let jpath =
+			rtk_jsonnet::jpath::JPath::resolve(directory.path().join("main.jsonnet")).unwrap();
+
+		for go in ["go", "go-jsonnet"] {
+			let args = Cli::try_parse_from(["rtk", "--jsonnet-implementation", go])
+				.expect("tk's default implementation");
+			let options = args.jsonnet.into_options();
+			assert!(options.rc.spec.jsonnet_implementation.is_none(), "{go}");
+			assert_eq!(
+				options
+					.for_project(&jpath)
+					.unwrap()
+					.rc
+					.spec
+					.jsonnet_implementation
+					.as_ref()
+					.map(JsonentImplementationOrConfig::implementation),
+				Some(&JsonnetImplementation::Reference),
+				"{go}"
+			);
+		}
+	}
 }

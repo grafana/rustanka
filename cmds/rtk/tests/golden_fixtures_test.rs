@@ -239,7 +239,7 @@ fn run_env_list_golden_test(env_path: &Path, golden_path: &Path) {
 			ext_code: Vec::new(),
 			ext_str: Vec::new(),
 			json: true,
-			jsonnet_implementation: "go".to_owned(),
+			jsonnet_implementation: None,
 			max_stack: Some(500),
 			names: false,
 			selector: None,
