@@ -4,3 +4,6 @@
 /crates/rtk-jsonnetfmt/testdata/lexer-snippet-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/node-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/node-snippet-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/pass-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/pass-snippet-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/corpus/*.golden linguist-generated=true
