@@ -1,0 +1,16 @@
+# How many of the 138 corpus files the lexer port lexes **identically** to
+# go-jsonnet — same tokens, same data, same fodder, same block-string indents.
+#
+# Ratcheted the same way as `corpus-baseline.toml`: exact match required in both
+# directions, so an improvement is a reviewed number rather than a silent drift.
+# Unlike the corpus, `tests/lexer_oracle.rs` reports the first divergence per
+# file in detail, because the point of this oracle is to say *where* the lexer
+# is wrong.
+#
+# All 138 match. Read that for what it is: the lexer agrees with go-jsonnet on
+# every construct these 138 files happen to contain, which is not every
+# construct Jsonnet has. `importbin`, verbatim strings, `|||-` chomping and the
+# `+++` operator wind-back are not necessarily in here, so the unit tests in
+# `src/lexer.rs` pin those separately — the oracle's reach is bounded by the
+# corpus, and the corpus is whatever this repository happens to contain.
+matching = 138
