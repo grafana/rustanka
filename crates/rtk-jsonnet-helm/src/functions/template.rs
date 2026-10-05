@@ -40,6 +40,7 @@ where
 
 	fn call<'b>(&self, evaluator: &E, arguments: E::Arguments) -> Result<E::Value, E::Error> {
 		let (name, chart, options) = <(String, String, Options)>::deserialize(arguments)?;
+		validate_release_name(&name).map_err(E::Error::custom)?;
 
 		let called_from = &options.called_from;
 
@@ -91,6 +92,33 @@ where
 		let serializer = evaluator.create_serializer();
 		Ok(value.serialize(serializer)?)
 	}
+}
+
+fn validate_release_name(name: &str) -> Result<(), String> {
+	if name.len() > 53 {
+		return Err("first argument 'name' is too long (max: 53 characters)".to_owned());
+	}
+
+	let is_alphanumeric = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+	let valid = name.split('.').all(|label| {
+		let bytes = label.as_bytes();
+		bytes.first().is_some_and(|&byte| is_alphanumeric(byte))
+			&& bytes.last().is_some_and(|&byte| is_alphanumeric(byte))
+			&& bytes
+				.iter()
+				.all(|&byte| is_alphanumeric(byte) || byte == b'-')
+	});
+	if !valid {
+		return Err(concat!(
+			"first argument 'name' is invalid: a lowercase RFC 1123 subdomain must consist of ",
+			"lower case alphanumeric characters, '-' or '.', and must start and end with an ",
+			"alphanumeric character (e.g. 'example.com', regex used for validation is ",
+			"'[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')"
+		)
+		.to_owned());
+	}
+
+	Ok(())
 }
 
 fn relative_chart_path(chart: &Path) -> Cow<'_, Path> {
@@ -571,9 +599,39 @@ mod tests {
 
 	use super::{
 		Function, Options, normalize_helm_multiline_quotes, parse_helm_yaml_output,
-		relative_chart_path,
+		relative_chart_path, validate_release_name,
 	};
 	use crate::State;
+
+	#[test]
+	fn release_names_match_tanka_validation() {
+		for name in ["test", "this.shouldwork", "a-1.b-2", &"a".repeat(53)] {
+			assert_eq!(validate_release_name(name), Ok(()), "{name}");
+		}
+
+		for name in [
+			"",
+			"./hello-somewhere",
+			"--hello-somewhere",
+			"A",
+			"a_b",
+			"a..b",
+			"a-",
+			"é",
+		] {
+			assert!(
+				validate_release_name(name).unwrap_err().starts_with(
+					"first argument 'name' is invalid: a lowercase RFC 1123 subdomain"
+				),
+				"{name}"
+			);
+		}
+
+		assert_eq!(
+			validate_release_name(&"a".repeat(54)),
+			Err("first argument 'name' is too long (max: 53 characters)".to_owned())
+		);
+	}
 
 	#[test]
 	fn normalizes_helm_multiline_quoted_scalars() {

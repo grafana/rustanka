@@ -1107,6 +1107,32 @@ mod tests {
 	}
 
 	#[test]
+	fn helm_template_validates_release_name_before_loading_chart() {
+		let temp = tempfile::tempdir().unwrap();
+		let called_from = serde_json::to_string(&temp.path().join("main.jsonnet")).unwrap();
+		let invalid = "first argument 'name' is invalid: a lowercase RFC 1123 subdomain";
+		let too_long = "first argument 'name' is too long (max: 53 characters)";
+		for (name, expected) in [
+			("test", "chart path does not exist"),
+			("./hello-somewhere", invalid),
+			("--hello-somewhere", invalid),
+			("this.shouldwork", "chart path does not exist"),
+			(&"a".repeat(54), too_long),
+			("", invalid),
+		] {
+			let snippet = format!(
+				r#"std.native("helmTemplate")({}, "missing-chart", {{ calledFrom: {called_from} }})"#,
+				serde_json::to_string(name).unwrap()
+			);
+			let error = Engine::new(Options::default())
+				.create_evaluator()
+				.evaluate_snippet(snippet)
+				.unwrap_err();
+			assert!(error.to_string().contains(expected), "{name}: {error}");
+		}
+	}
+
+	#[test]
 	fn helm_cache_directory_follows_each_tanka_project_root() {
 		let temp = tempfile::tempdir().unwrap();
 		let first = temp.path().join("first");
