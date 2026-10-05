@@ -1,0 +1,317 @@
+[
+  {
+    "name": "verbatim_string_double",
+    "why": "the corpus holds no @\"...\" at all, so VerbatimStringDouble and the doubled-quote unescape are graded by nothing else",
+    "source": "local s = @\"a\"\"b\";\ns\n"
+  },
+  {
+    "name": "verbatim_string_single",
+    "why": "one corpus file has @'...'; the unparser puts the doubled quote back, so it is worth pinning directly",
+    "source": "local s = @'a''b';\ns\n"
+  },
+  {
+    "name": "verbatim_string_field",
+    "why": "a verbatim string as a field name is an ObjectFieldStr whose Expr1 is the literal",
+    "source": "{ @'a': 1 }\n"
+  },
+  {
+    "name": "tailstrict",
+    "why": "one corpus file uses tailstrict; TailStrictFodder is read only when TailStrict is set",
+    "source": "local f(x) = x;\nf(1) tailstrict\n"
+  },
+  {
+    "name": "tailstrict_fodder",
+    "why": "TailStrictFodder with something in it, which nothing in the corpus reaches",
+    "source": "local f(x) = x;\nf(1) /* before */ tailstrict\n"
+  },
+  {
+    "name": "importbin",
+    "why": "one corpus file uses importbin",
+    "source": "importbin 'data.bin'\n"
+  },
+  {
+    "name": "import_all_three",
+    "why": "Import, ImportStr and ImportBin side by side, each with a LiteralString child",
+    "source": "[\n  import 'a.libsonnet',\n  importstr 'b.txt',\n  importbin 'c.bin',\n]\n"
+  },
+  {
+    "name": "visible_field",
+    "why": "::: appears in two corpus files; all three Hide values in one object",
+    "source": "{\n  a: 1,\n  b:: 2,\n  c::: 3,\n}\n"
+  },
+  {
+    "name": "super_sugar_all_hides",
+    "why": "+: with each visibility, which sets both SuperSugar and Hide",
+    "source": "{\n  a+: 1,\n  b+:: 2,\n  c+::: 3,\n}\n"
+  },
+  {
+    "name": "slice_colon_only",
+    "why": "a[:] - every index nil and StepColonFodder empty, so no step colon is written",
+    "source": "local a = [1, 2, 3];\na[:]\n"
+  },
+  {
+    "name": "slice_begin_only",
+    "why": "a[1:]",
+    "source": "local a = [1, 2, 3];\na[1:]\n"
+  },
+  {
+    "name": "slice_end_only",
+    "why": "a[:2]",
+    "source": "local a = [1, 2, 3];\na[:2]\n"
+  },
+  {
+    "name": "slice_double_colon_no_step",
+    "why": "a[::] parses to exactly the same AST as a[:]: the lexer makes '::' one operator token, so the parser's '::' branch fills fodders[0] and bumps colonsConsumed by 2, never assigning fodders[1]. So jsonnetfmt rewrites a[::] to a[:]. This snippet pins that collapse",
+    "source": "local a = [1, 2, 3];\na[::]\n"
+  },
+  {
+    "name": "slice_step_only",
+    "why": "a[::2]",
+    "source": "local a = [1, 2, 3];\na[::2]\n"
+  },
+  {
+    "name": "slice_full",
+    "why": "a[1:2:3]",
+    "source": "local a = [1, 2, 3];\na[1:2:3]\n"
+  },
+  {
+    "name": "slice_every_slot_commented",
+    "why": "an interstitial in each of LeftBracketFodder, EndColonFodder, StepColonFodder and RightBracketFodder at once",
+    "source": "local a = [1, 2, 3];\na/*lb*/[/*b*/1/*ec*/:/*e*/2/*sc*/:/*s*/3/*rb*/]\n"
+  },
+  {
+    "name": "index_dot_commented",
+    "why": "on e.f, LeftBracketFodder is the fodder before the '.' and RightBracketFodder is the fodder before the id - one slot, two jobs",
+    "source": "local o = { a: 1 };\no/*dot*/./*id*/a\n"
+  },
+  {
+    "name": "index_bracket_commented",
+    "why": "on e[e], the same two slots mean the fodder before '[' and before ']'",
+    "source": "local o = { a: 1 };\no/*lb*/[/*idx*/'a'/*rb*/]\n"
+  },
+  {
+    "name": "super_dot_commented",
+    "why": "SuperIndex spells the same doubling DotFodder / IDFodder",
+    "source": "{ a: 1 } + { b: super/*dot*/./*id*/a }\n"
+  },
+  {
+    "name": "super_bracket_commented",
+    "why": "super[e], where IDFodder is the fodder before the ']'",
+    "source": "{ a: 1 } + { b: super/*lb*/[/*idx*/'a'/*rb*/] }\n"
+  },
+  {
+    "name": "in_super",
+    "why": "InSuper, four corpus files",
+    "source": "{\n  a: 1,\n  b: 'a' in super,\n}\n"
+  },
+  {
+    "name": "in_super_commented",
+    "why": "InFodder and SuperFodder both filled",
+    "source": "{ b: 'a' /*in*/ in /*super*/ super }\n"
+  },
+  {
+    "name": "objcomp_two_fors_two_ifs",
+    "why": "ForSpec.Outer chaining plus IfSpec attachment, which the unparser walks outermost-first",
+    "source": "{\n  ['k' + x]: y\n  for x in ['a', 'b']\n  if x != ''\n  for y in [1, 2]\n  if y > 0\n}\n"
+  },
+  {
+    "name": "arraycomp_two_fors_two_ifs",
+    "why": "the same chaining in an array comprehension",
+    "source": "[\n  x + y\n  for x in [1]\n  if x > 0\n  for y in [2]\n  if y > 1\n]\n"
+  },
+  {
+    "name": "arraycomp_trailing_comma",
+    "why": "ArrayComp.TrailingComma and TrailingCommaFodder, which only exist on a comprehension",
+    "source": "[\n  x,\n  for x in [1, 2]\n]\n"
+  },
+  {
+    "name": "objcomp_trailing_comma",
+    "why": "ObjectComp.TrailingCommaFodder",
+    "source": "{\n  [x]: x,\n  for x in ['a']\n}\n"
+  },
+  {
+    "name": "forspec_commented",
+    "why": "an interstitial in ForFodder, VarFodder, InFodder and IfFodder",
+    "source": "[x /*for*/ for /*var*/ x /*in*/ in [1] /*if*/ if x > 0]\n"
+  },
+  {
+    "name": "function_expr_defaults_trailing_comma",
+    "why": "a Function node with a defaulted parameter and a trailing comma",
+    "source": "function(x, y=1,) x + y\n"
+  },
+  {
+    "name": "method_sugar",
+    "why": "a field method: Method carries the parens and parameters, and has no opening fodder of its own",
+    "source": "{\n  f(x, y=2,): x + y,\n}\n"
+  },
+  {
+    "name": "local_fun_bind",
+    "why": "LocalBind.Fun, the same shape as a method and equally fodder-less at the front",
+    "source": "local f(x, y=1,) = x + y;\nf(1)\n"
+  },
+  {
+    "name": "params_commented",
+    "why": "NameFodder, EqFodder and CommaFodder on parameters",
+    "source": "function(/*n*/x/*c*/, /*n2*/y/*eq*/=/*d*/1/*c2*/) x\n"
+  },
+  {
+    "name": "local_multiple_binds",
+    "why": "several binds, so CloseFodder is the fodder before a ',' for all but the last and before the ';' for it",
+    "source": "local a = 1,\n      b = 2;\na + b\n"
+  },
+  {
+    "name": "object_field_kinds",
+    "why": "ObjectFieldID, ObjectFieldStr, ObjectFieldExpr, ObjectLocal and ObjectAssert in one object",
+    "source": "{\n  local x = 1,\n  assert true,\n  assert x == 1 : 'msg',\n  a: 1,\n  'b': 2,\n  \"c\": 3,\n  ['d' + 'e']: 4,\n}\n"
+  },
+  {
+    "name": "object_local_method",
+    "why": "a local method inside an object",
+    "source": "{\n  local f(x) = x,\n  a: f(1),\n}\n"
+  },
+  {
+    "name": "object_assert_no_message",
+    "why": "ObjectAssert with Expr3 nil, so OpFodder is never read",
+    "source": "{ assert true, a: 1 }\n"
+  },
+  {
+    "name": "object_every_slot_commented",
+    "why": "Fodder1, Fodder2, OpFodder and CommaFodder on one computed field, plus CloseFodder",
+    "source": "{/*f1*/[/*e1*/'a'/*f2*/]/*op*/:/*v*/1/*comma*/,/*close*/}\n"
+  },
+  {
+    "name": "object_empty_commented",
+    "why": "CloseFodder on an object with no fields, where the unparser passes crowded=false",
+    "source": "{/*empty*/}\n"
+  },
+  {
+    "name": "array_empty_commented",
+    "why": "the same for an array",
+    "source": "[/*empty*/]\n"
+  },
+  {
+    "name": "array_every_slot_commented",
+    "why": "CommaFodder on each element and CloseFodder after a trailing comma",
+    "source": "[/*open*/1/*c1*/,/*two*/2/*c2*/,/*close*/]\n"
+  },
+  {
+    "name": "apply_named_and_positional",
+    "why": "positional then named arguments, a trailing comma, and FodderLeft / FodderRight",
+    "source": "local f(a, b) = a + b;\nf(1, b=2,)\n"
+  },
+  {
+    "name": "apply_every_slot_commented",
+    "why": "FodderLeft, each CommaFodder, NameFodder, EqFodder and FodderRight",
+    "source": "local f(a, b) = a + b;\nf/*left*/(/*a*/1/*c1*/, /*n*/b/*eq*/=/*v*/2/*c2*/,/*right*/)\n"
+  },
+  {
+    "name": "apply_brace",
+    "why": "ApplyBrace, e { }, which the formatter may rewrite to e + { } under AddPlusObject",
+    "source": "{ a: 1 } { b: 2 }\n"
+  },
+  {
+    "name": "assert_expr_with_message",
+    "why": "a standalone Assert with ColonFodder and SemicolonFodder",
+    "source": "assert 1 == 1 : 'boom';\n42\n"
+  },
+  {
+    "name": "assert_expr_no_message",
+    "why": "Assert with Message nil",
+    "source": "assert true;\n1\n"
+  },
+  {
+    "name": "conditional_commented",
+    "why": "ThenFodder and ElseFodder",
+    "source": "if /*c*/ true /*then*/ then /*t*/ 1 /*else*/ else /*f*/ 2\n"
+  },
+  {
+    "name": "conditional_no_else",
+    "why": "Conditional with BranchFalse nil, so ElseFodder is never read",
+    "source": "if true then 1\n"
+  },
+  {
+    "name": "error_expr",
+    "why": "Error",
+    "source": "error 'x'\n"
+  },
+  {
+    "name": "parens_commented",
+    "why": "Parens.CloseFodder, and the inner expression unparsed with crowded=false",
+    "source": "(/*open*/1/*close*/)\n"
+  },
+  {
+    "name": "unary_ops",
+    "why": "all four unary operators",
+    "source": "[-1, +2, !true, ~3]\n"
+  },
+  {
+    "name": "dollar",
+    "why": "Dollar",
+    "source": "{\n  a: 1,\n  b: $.a,\n}\n"
+  },
+  {
+    "name": "self",
+    "why": "Self",
+    "source": "{\n  a: 1,\n  b: self.a,\n}\n"
+  },
+  {
+    "name": "binary_left_recursion",
+    "why": "a left-recursive chain: the leading fodder must be stored on the leftmost leaf, not on the outermost Binary",
+    "source": "/* lead */ 1 + 2 * 3 - 4\n"
+  },
+  {
+    "name": "binary_op_fodder",
+    "why": "OpFodder on each operator of a chain",
+    "source": "1 /*plus*/ + 2 /*times*/ * 3\n"
+  },
+  {
+    "name": "all_binary_ops",
+    "why": "every binary operator, so BopMap is graded rather than assumed",
+    "source": "[\n  1 * 2,\n  1 / 2,\n  1 % 2,\n  1 + 2,\n  1 - 2,\n  1 << 2,\n  1 >> 2,\n  1 > 2,\n  1 >= 2,\n  1 < 2,\n  1 <= 2,\n  1 == 2,\n  1 != 2,\n  1 & 2,\n  1 ^ 2,\n  1 | 2,\n  true && false,\n  true || false,\n  'a' in { a: 1 },\n]\n"
+  },
+  {
+    "name": "number_original_string",
+    "why": "LiteralNumber keeps OriginalString, so these are four different programs to the formatter",
+    "source": "[1, 1.0, 1.000, 1e3, 1E+3, 0.5]\n"
+  },
+  {
+    "name": "block_string",
+    "why": "a block string, with BlockIndent and BlockTermIndent",
+    "source": "{\n  a: |||\n    line one\n    line two\n  |||,\n}\n"
+  },
+  {
+    "name": "block_string_chomped",
+    "why": "a block string whose value does not end in a newline, which the unparser writes as |||-",
+    "source": "{\n  a: |||-\n    no trailing newline\n  |||,\n}\n"
+  },
+  {
+    "name": "paragraph_and_interstitial_at_top",
+    "why": "a multi-line C comment at the start of a file, which FodderAppend precedes with a synthetic LineEnd - the exact shape two hand-written lexer expectations got wrong",
+    "source": "/* first\n   second */\n1\n"
+  },
+  {
+    "name": "line_end_comment_slots",
+    "why": "line-end comments in fodder slots, which the unparser always precedes with exactly two spaces",
+    "source": "{\n  a: 1,  // one\n  b: 2,  # two\n}\n"
+  },
+  {
+    "name": "literals",
+    "why": "LiteralNull, LiteralBoolean and both fully escaped string kinds in one place, so no node kind depends on the corpus happening to contain one",
+    "source": "[null, true, false, 'single', \"double\", 1]\n"
+  },
+  {
+    "name": "named_arg_eq_fodder_is_dropped",
+    "why": "NamedArgument.EqFodder is filled by the parser and never read by the unparser, so this comment is dropped from the output - the port must store it anyway or the AST will not match",
+    "source": "local f(a, b) = a + b;\nf(1, b /* dropped */ = 2)\n"
+  },
+  {
+    "name": "slice_step_colon_fodder_without_step",
+    "why": "the only shape where the unparser's `Step != nil || len(StepColonFodder) > 0` can take its second branch: a comment before a step colon that has no step after it. With no passes it round-trips as written; under DefaultOptions NoRedundantSliceColon moves the fodder to the front of RightBracketFodder and drops the colon",
+    "source": "local a = [1, 2, 3];\na[1:2/*sc*/:]\n"
+  },
+  {
+    "name": "slice_step_colon_no_fodder_no_step",
+    "why": "a step colon consumed with no fodder before it, which leaves StepColonFodder empty - so the unparser cannot tell a[1:2:] from a[1:2] and writes the latter. The pair with the snippet above is what makes the emptiness of that slot meaningful rather than incidental",
+    "source": "local a = [1, 2, 3];\na[1:2:]\n"
+  }
+]
