@@ -1,79 +1,25 @@
-//! Phase 5's acceptance gate for `rtk fmt`: real Grafana Jsonnet, measured.
+//! Acceptance checks for `rtk fmt` over real Grafana Jsonnet.
 //!
-//! the fmt port plan's Phase 5 asks for four things, and this is all four
-//! in one pass over one corpus, because they are four readings of the same
-//! formatting run and splitting them would mean formatting a few thousand files
-//! four times:
+//! One corpus measures four properties:
+//! 1. Per-file stdout, stderr, and exit-code parity with `tk fmt -`.
+//! 2. Whether tk-formatted files remain unchanged under `rtk fmt --test`.
+//! 3. Whether formatted output reparses and settles on a second run.
+//! 4. Discovery order, compared through each tool's `fmt --test --verbose`.
 //!
-//! 1. **Parity.** For every file, `tk fmt -` and `rtk fmt -` must agree on
-//!    stdout, stderr and the exit code, byte for byte.
-//! 2. **The already-formatted gate**, which is the one that matters to a user:
-//!    over a corpus tk has already formatted, `rtk fmt --test` must exit 0 and
-//!    list nothing. Strictly stronger than parity, which can pass while both
-//!    tools rewrite every file.
-//! 3. **The destructive mechanisms, measured over outputs.** Every formatted
-//!    result is handed back to the parser, and every file whose output the
-//!    parser refuses is named. `CLAUDE.md` records twice that a grep over
-//!    inputs is the wrong instrument — Phase 4 predicted five non-convergent
-//!    snippets by grepping for `((` and missed six whose shape is `(\n  (1)`.
-//!    An instrument that reads outputs finds mechanisms nobody has thought of;
-//!    a pattern search can only find the ones already known.
-//! 4. **Discovery over a real tree**, which nothing else grades: the per-file
-//!    comparison above deliberately says nothing about which files were found
-//!    or in what order, so each root is also put through
-//!    `fmt --test --verbose` in both tools and the listings compared.
+//! Files are compared individually through stdin so one parse failure cannot
+//! truncate the corpus while both tools appear to agree. This also preserves
+//! the source corpus and produces output without filename headers or summaries.
+//! Discovery is checked separately over each root.
 //!
-//! # Why `-` and not in-place formatting
+//! The second-run outcomes (`already_formatted`, `non_convergent`, and
+//! `refusing_to_reparse`) must sum to `formatted`. Tk's formattable outputs are
+//! also staged for an end-to-end tree check: exit 0, the clean stderr summary,
+//! and one `ok  ` stdout line per staged file. The line count prevents an empty
+//! discovery result from passing.
 //!
-//! The plan offered two routes: a `[[tests]]` entry running `fmt` in place with
-//! `workspace = true` plus a directory comparison, or comparing the two tools'
-//! `--stdout` streams. This takes the second, one step further — per file
-//! through `-` rather than per tree through `--stdout` — for four reasons, in
-//! descending order of how much they matter:
-//!
-//! - **A parse failure aborts the whole run.** `tk fmt` and `rtk fmt` both
-//!   return on the first file the parser refuses, so one bad file in a corpus
-//!   of thousands truncates a whole-tree comparison to however many files
-//!   preceded it — and the two tools would *agree* about aborting, so the gate
-//!   would pass having compared almost nothing. That is precisely the shape
-//!   this phase was told to design against. Per file, a refusal is one file's
-//!   verdict and the denominator stays whole.
-//! - **Attribution.** A directory comparison after in-place formatting says a
-//!   tree differs. This says which file, and holds both answers.
-//! - **Nothing is written to the corpus**, so the parity measurement cannot
-//!   contaminate the already-formatted one. In-place mode also **rewrites every
-//!   discovered file whether it changed or not**, so a directory comparison
-//!   cannot tell "both formatters agreed" from "neither changed anything".
-//! - `-` has no wrapper text at all: no `// {name}` header, no per-file blank
-//!   line on stderr, no summary. The bytes on stdout are the formatted file.
-//!
-//! What the per-file route gives up is discovery, and item 4 buys it back.
-//!
-//! # The already-formatted property is measured twice, on purpose
-//!
-//! Per file it is an identity rather than a separate run: a file is already
-//! formatted exactly when formatting tk's own output again changes nothing, so
-//! `already_formatted`, `non_convergent` and `refusing_to_reparse` are the three
-//! outcomes of one second run and must sum to `formatted`. The harness checks
-//! that sum, because a counter that stopped being incremented would otherwise
-//! read as good news.
-//!
-//! Then it is measured again end to end, through the real binary: tk's output
-//! for every formattable file is staged into a tree, and `rtk fmt --test
-//! --verbose` is run over it. That run has to exit 0, print the clean summary on
-//! stderr, and print **one `ok  ` line per staged file** on stdout — the last of
-//! those being the assertion that it graded the tree rather than an empty
-//! directory.
-//!
-//! # What this refuses to do
-//!
-//! **Skip, or pass unmeasured.** A missing corpus is an error naming the
-//! Makefile target. A corpus smaller than [`MINIMUM_FILES`] is a broken
-//! checkout rather than a small corpus. A baseline count left at `-1` is a
-//! failure, not a default of zero. Both `[known]` lists ratchet in both
-//! directions, as `tests/corpus.rs`'s two lists do. And every count is printed
-//! on stdout on every run, pass or fail, because a number printed only on
-//! failure is invisible in a green log.
+//! Missing or undersized corpora fail, as do unmeasured baseline counts (`-1`).
+//! Known-case lists are checked both for new failures and entries that no longer
+//! reproduce. Counts are printed on success as well as failure.
 
 use std::{
 	collections::BTreeSet,
