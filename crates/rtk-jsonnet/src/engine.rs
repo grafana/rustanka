@@ -1107,6 +1107,22 @@ mod tests {
 	}
 
 	#[test]
+	fn helm_template_rejects_invalid_release_name_before_loading_chart() {
+		let error = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet(
+				r#"std.native("helmTemplate")("Bad_Name", "missing-chart", { calledFrom: "/tmp/main.jsonnet" })"#,
+			)
+			.unwrap_err();
+		assert!(
+			error
+				.to_string()
+				.contains("first argument 'name' is invalid: a lowercase RFC 1123 subdomain"),
+			"{error}"
+		);
+	}
+
+	#[test]
 	fn helm_cache_directory_follows_each_tanka_project_root() {
 		let temp = tempfile::tempdir().unwrap();
 		let first = temp.path().join("first");
