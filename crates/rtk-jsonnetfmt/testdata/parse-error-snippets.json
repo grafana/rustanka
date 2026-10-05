@@ -1,0 +1,222 @@
+[
+  {
+    "name": "expected_token_bracket_r.jsonnet",
+    "why": "parser.go:66 unexpectedTokenError, reached through popExpect(tokenBracketR) on an unclosed index. The token is formatted with %v, so this also pins how an end-of-file token prints inside a message.",
+    "source": "a[1\n"
+  },
+  {
+    "name": "expected_token_operator_in_field.jsonnet",
+    "why": "parser.go:66, reached through parseObjectAssignmentOp's popExpect(tokenOperator): the field name parsed but no `:` followed.",
+    "source": "{ a 1 }\n"
+  },
+  {
+    "name": "expected_token_identifier_parsing_parameter.jsonnet",
+    "why": "parser.go:66 wrapped by the WithContext at parser.go:179, which is the only route to `while parsing parameter`.",
+    "source": "function(1) x\n"
+  },
+  {
+    "name": "expected_operator_eq_in_local_bind.jsonnet",
+    "why": "parser.go:80 popExpectOp(\"=\"), from the local bind at parser.go:264. Graded by nothing before this file.",
+    "source": "local a : 1; a\n"
+  },
+  {
+    "name": "expected_operator_eq_in_object_local.jsonnet",
+    "why": "parser.go:80, from the *object* local at parser.go:529 - a second call site whose location differs.",
+    "source": "{ local a : 1, x: 1 }\n"
+  },
+  {
+    "name": "expected_comma_before_function_argument.jsonnet",
+    "why": "parser.go:132 with elementKind \"function argument\" (the only caller is parser.go:1323).",
+    "source": "f(1 2)\n"
+  },
+  {
+    "name": "expected_comma_before_function_parameter.jsonnet",
+    "why": "parser.go:213 with elementKind \"function parameter\" (parser.go:251/:524/:1074).",
+    "source": "function(a b) a\n"
+  },
+  {
+    "name": "expected_comma_before_method_parameter.jsonnet",
+    "why": "parser.go:213 with elementKind \"method parameter\" (parser.go:440) - the same template with the other string, which is how a swapped elementKind would show up.",
+    "source": "{ f(a b): 1 }\n"
+  },
+  {
+    "name": "positional_argument_after_named.jsonnet",
+    "why": "parser.go:150. Note the location is `next.loc` - the token at the *start* of the offending argument, captured before it was parsed.",
+    "source": "f(a=1, 2)\n"
+  },
+  {
+    "name": "duplicate_local_var_in_binds.jsonnet",
+    "why": "parser.go:244, two binds of one local sharing a name. This is also what makes SortImports' duplicatedVariables unreachable by that route, so it is worth pinning that the parser refuses it first.",
+    "source": "local a = 1, a = 2; a\n"
+  },
+  {
+    "name": "duplicate_local_var_in_object.jsonnet",
+    "why": "parser.go:510, the object-local route to the same message, at a different location.",
+    "source": "{ local a = 1, local a = 2, x: 1 }\n"
+  },
+  {
+    "name": "expected_comma_or_semicolon_after_bind.jsonnet",
+    "why": "parser.go:275. `]` is chosen because no precedence level consumes it, so the failure is the delimiter test rather than an earlier one.",
+    "source": "local a = 1 ]\n"
+  },
+  {
+    "name": "object_op_not_colons.jsonnet",
+    "why": "parser.go:319 - the loop branch, reached when the operator's first character is neither `+` nor `:`.",
+    "source": "{ a * 1 }\n"
+  },
+  {
+    "name": "object_op_plus_with_no_colons.jsonnet",
+    "why": "parser.go:335 - the numColons switch default with numColons == 0, reached because `+` is stripped as plusSugar and nothing follows it.",
+    "source": "{ a + 1 }\n"
+  },
+  {
+    "name": "object_op_four_colons.jsonnet",
+    "why": "parser.go:335 with numColons == 4, the other side of that default arm. `::::` lexes as one operator token.",
+    "source": "{ a:::: 1 }\n"
+  },
+  {
+    "name": "object_comprehension_with_assert.jsonnet",
+    "why": "parser.go:373. The four checks are ordered, and an assert beats a field count, so this input has both.",
+    "source": "{ [k]: 1, assert true for k in [] }\n"
+  },
+  {
+    "name": "object_comprehension_two_fields.jsonnet",
+    "why": "parser.go:376.",
+    "source": "{ [k]: 1, [k]: 2 for k in [] }\n"
+  },
+  {
+    "name": "object_comprehension_hidden_field.jsonnet",
+    "why": "parser.go:379.",
+    "source": "{ [k]:: 1 for k in [] }\n"
+  },
+  {
+    "name": "object_comprehension_id_field.jsonnet",
+    "why": "parser.go:382.",
+    "source": "{ a: 1 for k in [] }\n"
+  },
+  {
+    "name": "plus_sugar_in_method.jsonnet",
+    "why": "parser.go:454.",
+    "source": "{ f(x)+: 1 }\n"
+  },
+  {
+    "name": "duplicate_field.jsonnet",
+    "why": "parser.go:460. The corpus grades this text once, on complex_comments.jsonnet; this is a second, independent location.",
+    "source": "{ a: 1, a: 2 }\n"
+  },
+  {
+    "name": "expected_comma_before_field.jsonnet",
+    "why": "parser.go:635. The unclosed_brace fixture grades this text at the synthetic end-of-file token; here the offending token is real, so the location is derived differently.",
+    "source": "{ a: 1 b: 2 }\n"
+  },
+  {
+    "name": "unexpected_token_parsing_field_definition.jsonnet",
+    "why": "parser.go:661 makeUnexpectedError, the only route to `while parsing field definition`.",
+    "source": "{ 1: 2 }\n"
+  },
+  {
+    "name": "expected_for_if_or_bracket_after_for.jsonnet",
+    "why": "parser.go:722 with end == tokenBracketR. The message interpolates the *token kind* as well as the token, so both spellings are graded here.",
+    "source": "[x for x in y z]\n"
+  },
+  {
+    "name": "expected_for_if_or_brace_after_for.jsonnet",
+    "why": "parser.go:722 with end == tokenBraceR - the same site reached from an object comprehension.",
+    "source": "{ [k]: 1 for k in y z }\n"
+  },
+  {
+    "name": "expected_comma_before_array_element.jsonnet",
+    "why": "parser.go:786.",
+    "source": "[1 2]\n"
+  },
+  {
+    "name": "bad_escape_reports_its_location_twice.jsonnet",
+    "why": "parser.go:862 wraps StringUnescape's already-rendered error in a fresh one at the same token, so the location appears twice. Written over three lines because the inner location is a *range* (begin-end columns) and the outer is the token's - the range shape is what go-jsonnet's own regular_expression.fmt.golden grades and nothing in rtk's default test run does.",
+    "source": "{\n  x: 'a\\qb',\n}\n"
+  },
+  {
+    "name": "bad_unicode_escape_reports_first_four_bytes.jsonnet",
+    "why": "parser.go:862 again, over the malformed-unicode message, which interpolates s[0:4] - the first four bytes of the *whole string* rather than of the offending escape.",
+    "source": "'ab\\uZZZZ'\n"
+  },
+  {
+    "name": "bad_escape_in_field_name.jsonnet",
+    "why": "parser.go:862 reached from the object-field name call site at parser.go:413 rather than from a terminal, so the token and its location differ.",
+    "source": "{ 'a\\q': 1 }\n"
+  },
+  {
+    "name": "unexpected_token_parsing_terminal.jsonnet",
+    "why": "parser.go:875 makeUnexpectedError, the only route to `while parsing terminal`.",
+    "source": "]\n"
+  },
+  {
+    "name": "unexpected_token_parsing_terminal_comma.jsonnet",
+    "why": "parser.go:875 with a different token kind, so the token's own %v formatting is graded on more than one kind.",
+    "source": ",\n"
+  },
+  {
+    "name": "unexpected_end_of_file_after_operator.jsonnet",
+    "why": "parser.go:878.",
+    "source": "1 +\n"
+  },
+  {
+    "name": "unexpected_end_of_file_whitespace_only.jsonnet",
+    "why": "parser.go:878 on a file with no tokens at all, which is what `tk fmt` meets on an empty or whitespace-only file. The location is the synthetic end-of-file token's, and final whitespace is discarded at lex time, so it is not where a reader would guess.",
+    "source": "\n\n  \n"
+  },
+  {
+    "name": "expected_dot_or_bracket_after_super.jsonnet",
+    "why": "parser.go:965. The corpus grades this text once, on object_super_standalone.jsonnet; this is a second location.",
+    "source": "{ a: super }\n"
+  },
+  {
+    "name": "expected_paren_after_function.jsonnet",
+    "why": "parser.go:1072.",
+    "source": "function x\n"
+  },
+  {
+    "name": "import_block_string.jsonnet",
+    "why": "parser.go:1099. The location is *body.Loc() - the literal's range, not the import token's.",
+    "source": "import |||\n  a\n|||\n"
+  },
+  {
+    "name": "computed_import.jsonnet",
+    "why": "parser.go:1106. Graded by the corpus once, on realworld/bin.jsonnet; a second location.",
+    "source": "import ('a' + 'b')\n"
+  },
+  {
+    "name": "importstr_computed.jsonnet",
+    "why": "parser.go:1123, the importstr arm of the same pair.",
+    "source": "importstr ('a' + 'b')\n"
+  },
+  {
+    "name": "importbin_block_string.jsonnet",
+    "why": "parser.go:1133, the importbin arm. No corpus file has an importbin at all, let alone a refused one.",
+    "source": "importbin |||\n  a\n|||\n"
+  },
+  {
+    "name": "not_a_unary_operator.jsonnet",
+    "why": "parser.go:1169: an operator token at the head of an expression that is not in UopMap.",
+    "source": "*1\n"
+  },
+  {
+    "name": "not_a_binary_operator.jsonnet",
+    "why": "parser.go:1228: an operator token in the infix position that is not in BopMap. `!` is unary-only, and is not one of the two operators (`:` and `::`) the switch special-cases before this test.",
+    "source": "1 ! 2\n"
+  },
+  {
+    "name": "invalid_slice_too_many_colons.jsonnet",
+    "why": "parser.go:1280 through parsingFailure, whose location is the *closing bracket* rather than the offending colon.",
+    "source": "a[1:2:3:4]\n"
+  },
+  {
+    "name": "index_requires_an_expression.jsonnet",
+    "why": "parser.go:1284 through parsingFailure, likewise located at the closing bracket.",
+    "source": "a[]\n"
+  },
+  {
+    "name": "did_not_expect_trailing_token.jsonnet",
+    "why": "parser.go:1394, in Parse rather than in any parse function: the expression parsed cleanly and something followed it.",
+    "source": "1 2\n"
+  }
+]
