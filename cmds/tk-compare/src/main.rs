@@ -32,6 +32,9 @@ async fn main() -> Result<()> {
 		Some(Commands::GoldenFixtures(golden_fixtures)) => {
 			subcommands::golden_fixtures::execute(golden_fixtures, &global)
 		}
+		Some(Commands::FmtAcceptance(fmt_acceptance)) => {
+			subcommands::fmt_acceptance::execute(fmt_acceptance, &global)
+		}
 		None => {
 			let config = cli.config.context("missing required argument <CONFIG>")?;
 			subcommands::run::execute(

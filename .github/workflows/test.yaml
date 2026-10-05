@@ -7,12 +7,10 @@ jobs:
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
-      - name: Install tk (tanka)
-        run: |
-          TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
-          chmod +x /usr/local/bin/tk
-          tk --version
+      # Pinned to the tanka rtk answers for, and asserted. The goldens are tk's
+      # output, so an unpinned tk retargets every one of them with no rtk
+      # change at all.
+      - uses: ./.github/actions/install-tk
       - name: Install jrsonnet
         run: |
           cargo build --release -p jrsonnet
@@ -27,11 +25,99 @@ jobs:
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
-      - name: Install tk (tanka)
-        run: |
-          TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
-          chmod +x /usr/local/bin/tk
-          tk --version
+      - uses: ./.github/actions/install-tk
+      # The `go_jsonnet/` fixture family reads go-jsonnet's own
+      # `formatter/testdata/*.fmt.golden`, and without a checkout it grades 12
+      # of 15 — silently, in an eprintln.
+      #
+      # This step is in *this* job on purpose. `check-fmt-corpus` also needs the
+      # checkout, but it runs in `check-generated`, on a different runner with a
+      # different filesystem, so it does nothing for the suite. Getting that
+      # wrong is how the family would have gone on grading 12 in CI while the
+      # commit that "fixed" it said otherwise.
+      - run: make go-jsonnet-checkout
       - run: cargo test --all
+        env:
+          # Absence is a failure here rather than a skip, for the same reason
+          # RTK_REQUIRE_TK is set: this job is the one place the family can be
+          # graded, and a clone that half-failed would leave the suite green
+          # and three fixtures ungraded.
+          RTK_REQUIRE_GO_JSONNET: "1"
+          # `tk_agrees_on_the_streams_and_the_exit_codes` compares fifteen
+          # scenarios against the real tk and prints how many it compared; with
+          # no tk on PATH it prints a loud SKIPPED naming zero and passes. In a
+          # job nobody reads the log of, that turns the whole CLI cross-check
+          # into a green no-op, so here the skip is a failure.
+          RTK_REQUIRE_TK: "1"
 
+  # Everything whose committed answer comes out of a Go library.
+  #
+  # Nothing ran these before. `cargo test --all` grades the formatter against
+  # the *committed* corpus, so correctness was covered — what was not is
+  # whether the committed corpus and the two truth tables still equal what the
+  # Go libraries produce. A go-jsonnet bump, or a hand edit to a golden, drifted
+  # with every fmt test green.
+  #
+  # A job of its own rather than steps on `test`, for three reasons: these need
+  # Go and no Rust, so bolting them onto a Rust job doubles its toolchain for
+  # work unrelated to it; they are independent of each other, so three steps
+  # here report three independent red checks instead of one; and they run in
+  # parallel with the suite, so the wall time is free.
+  check-generated:
+    name: Check generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+
+      # Go comes from the sort truth table, which records the toolchain that
+      # produced it.
+      #
+      # This is not fussiness. `check-go-sort-truth-table` is a plain `diff -u`
+      # over a file whose first field is `"goVersion"`, so any other Go fails it
+      # on that field alone, before a single permutation is compared. Installing
+      # exactly the recorded one makes the diff a real reproducibility check,
+      # and makes a deliberate regeneration under a newer Go carry CI with it —
+      # which is the right coupling, since a Go that reorders pdqsort ties is
+      # precisely what would move `tk fmt`'s output and not rtk's.
+      #
+      # Installed by hand rather than with setup-go because that would mean
+      # pinning another action by SHA to install a version this file has to
+      # compute anyway.
+      - name: Install Go, as the truth table records it
+        run: |
+          set -euo pipefail
+          table=crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json
+          version=$(jq -r '.goVersion // empty' "$table")
+          if [ -z "$version" ]; then
+            echo "::error::$table records no goVersion"
+            exit 1
+          fi
+          echo "installing $version, as recorded in $table"
+          curl -fsSL -o /tmp/go.tar.gz "https://go.dev/dl/${version}.linux-amd64.tar.gz"
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+          echo /usr/local/go/bin >> "$GITHUB_PATH"
+      - name: Confirm the Go on PATH is the one the table records
+        run: |
+          set -euo pipefail
+          table=crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json
+          expected=$(jq -r .goVersion "$table")
+          reported=$(go version)
+          echo "go version: ${reported}"
+          # Without this, a failed install would leave the runner's own Go on
+          # PATH and the sort table would fail on its version field with a diff
+          # that looks like drift in the permutations.
+          if ! printf '%s' "${reported}" | grep -qF "${expected}"; then
+            echo "::error::expected ${expected}, got: ${reported}"
+            exit 1
+          fi
+
+      # Regenerates the corpus into a temporary directory and diffs, so it also
+      # needs the pinned go-jsonnet checkout the second corpus set is read from.
+      # `make` clones it.
+      - name: Check the formatter corpus is up to date
+        run: make check-fmt-corpus
+      - name: Check the Go sort.Slice truth table is up to date
+        run: make check-go-sort-truth-table
+      - name: Check the gobwas/glob truth table is up to date
+        run: make check-glob-truth-table
