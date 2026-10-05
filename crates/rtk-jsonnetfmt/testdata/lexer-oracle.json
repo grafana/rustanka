@@ -77950,11 +77950,58 @@
       },
       {
         "kind": "IDENTIFIER",
-        "data": "justBelowMillion",
+        "data": "activeSeriesLimit",
         "fodder": [
           {
             "kind": "LineEnd",
             "blanks": 1,
+            "indent": 4
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 4,
+            "comment": [
+              "// Direct manifest scalars use Go formatting independently of embedded YAML."
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "OPERATOR",
+        "data": ":"
+      },
+      {
+        "kind": "NUMBER",
+        "data": "40000000"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "*"
+      },
+      {
+        "kind": "NUMBER",
+        "data": "2"
+      },
+      {
+        "kind": "OPERATOR",
+        "data": "/"
+      },
+      {
+        "kind": "NUMBER",
+        "data": "3"
+      },
+      {
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "kind": "IDENTIFIER",
+        "data": "justBelowMillion",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 2,
             "indent": 4
           },
           {
