@@ -298,3 +298,40 @@ fn environments_sharing_a_chart_render_it_once() {
 		"{ENVIRONMENTS} environments share one chart, so it should be rendered once"
 	);
 }
+
+#[test]
+fn native_renderer_exports_without_helm_or_cache_entries() {
+	let environment = staged_environment();
+	let output_dir = environment.path().join("native-output");
+	let output = Command::new(env!("CARGO_BIN_EXE_rtk"))
+		.current_dir(environment.path())
+		.args([
+			"export",
+			"native-output",
+			".",
+			"--helm-cache",
+			"--format",
+			"{{ .metadata.namespace | default \"_cluster\" }}/{{.kind}}-{{.metadata.name}}",
+			"--extension",
+			"golden",
+			"--recursive",
+		])
+		.env("RTK_HELM_RENDERER", "rust")
+		.env("RTK_HELM_PATH", "/nonexistent/helm")
+		.output()
+		.unwrap();
+	assert!(
+		output.status.success(),
+		"{}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	assert!(entries(environment.path()).is_empty());
+	let golden = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("../../test_fixtures/golden_envs/helm_template_env/golden");
+	let comparison = rtk_diff::directory::compare_directories_detailed(
+		golden.to_str().unwrap(),
+		output_dir.to_str().unwrap(),
+	)
+	.unwrap();
+	assert!(comparison.matched, "{}", comparison.differences.join("\n"));
+}
