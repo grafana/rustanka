@@ -2449,14 +2449,15 @@ dependencies = [
 
 [[package]]
 name = "gtmpl-ng"
-version = "0.7.7"
-source = "git+https://github.com/julienduchesne/gtmpl-rust?rev=f649faaac5ad9549ecc238d344b6eb1da86c92e1#f649faaac5ad9549ecc238d344b6eb1da86c92e1"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe530486407b50f5829aec90ec27f8b3c5da181b328e3aa562b058caf5fad051"
 dependencies = [
  "anyhow",
- "gtmpl_value",
+ "gtmpl_value_ng",
  "lazy_static",
- "percent-encoding",
  "thiserror 1.0.69",
+ "unicode-general-category",
 ]
 
 [[package]]
@@ -2464,6 +2465,16 @@ name = "gtmpl_value"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d61bf6605eabca491ef6db6ed194e0aa82900ccc8bdea4c56ac277102152dd5"
+dependencies = [
+ "anyhow",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "gtmpl_value_ng"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3773dfc79ca272cdd43704bb1d3c89f507441a338bcc1037bc84aa1bcaa6cbd3"
 dependencies = [
  "anyhow",
  "thiserror 1.0.69",
@@ -6417,6 +6428,12 @@ name = "unicode-box-drawing"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a1f97719cf40224391201fc11e7f5b0cc0ba21416367cfc914e2d45af4e42ef"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"
