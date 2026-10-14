@@ -29,6 +29,7 @@ No automatic fallback occurs on errors.
   `trimSuffix`, `trunc`, `indent`, `nindent`, `toYaml`, `fromYaml`, `toJson`,
   `fromJson`, `dict`, `list`, `sha256sum`, `int`, `until` and `add`, plus gtmpl's built-ins.
 - CRD inclusion, hook exclusion and Tanka manifest naming.
+- Helm-compatible `.helmignore` rules and default exclusion of dotfiles in `templates/`.
 
 Every call must provide a non-empty `namespace`. The prototype does not resolve
 namespaces through kubeconfig. A project's `expectVersions.helm` is rejected
@@ -40,7 +41,7 @@ major version.
 This is a prototype, not a drop-in replacement for Helm. The test corpus is
 small, and successful rendering does not establish parity for other charts.
 
-Archives, subcharts, dependencies, library charts, `.helmignore`, schema
+Archives, subcharts, dependencies, library charts, schema
 validation and explicit `apiVersions` are rejected. `.Capabilities`, `.Files`,
 `lookup`, and unregistered Sprig functions are unavailable. Chart metadata is
 exposed with its top-level Go-style field names; nested metadata is not fully

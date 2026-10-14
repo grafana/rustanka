@@ -8,11 +8,11 @@ use std::rc::Rc;
 use anyhow::{Context as _, Result, bail, ensure};
 use gtmpl_ng::{Context, Template, Value};
 use serde_json::{Value as Json, json};
-use walkdir::WalkDir;
 
 use super::{Options, name_documents};
 
 mod functions;
+mod ignore;
 
 pub(super) struct Chart {
 	metadata: Json,
@@ -24,18 +24,23 @@ pub(super) struct Chart {
 impl Chart {
 	pub(super) fn load(path: &Path) -> Result<Self> {
 		ensure!(path.is_dir(), "only unpacked local charts are supported");
-		for unsupported in ["values.schema.json", ".helmignore"] {
-			ensure!(
-				!path.join(unsupported).exists(),
-				"{unsupported} is not supported"
-			);
-		}
+		let rules = ignore::Rules::load(path)?;
+		ensure!(
+			!path.join("values.schema.json").exists() || rules.ignores("values.schema.json", false),
+			"values.schema.json is not supported"
+		);
 		if path.join("charts").exists() {
-			ensure!(
-				fs::read_dir(path.join("charts"))?.next().is_none(),
-				"subcharts are not supported"
-			);
+			for entry in rules.walk(path, "charts") {
+				ensure!(
+					entry?.path() == path.join("charts"),
+					"subcharts are not supported"
+				);
+			}
 		}
+		ensure!(
+			!rules.ignores("Chart.yaml", false),
+			"Chart.yaml is required"
+		);
 		let metadata = Self::read_yaml(&path.join("Chart.yaml"))?;
 		ensure!(
 			metadata["apiVersion"] == "v2",
@@ -59,14 +64,14 @@ impl Chart {
 			metadata["dependencies"].is_null() || metadata["dependencies"] == json!([]),
 			"chart dependencies are not supported"
 		);
-		let values = if path.join("values.yaml").exists() {
+		let values = if path.join("values.yaml").exists() && !rules.ignores("values.yaml", false) {
 			Self::read_yaml(&path.join("values.yaml"))?
 		} else {
 			json!({})
 		};
 		ensure!(values.is_object(), "values.yaml must contain a mapping");
-		let templates = Rc::new(Sources(Self::read_directory(path, "templates")?));
-		let crds = Self::read_directory(path, "crds")?
+		let templates = Rc::new(Sources(Self::read_directory(path, "templates", &rules)?));
+		let crds = Self::read_directory(path, "crds", &rules)?
 			.into_iter()
 			.filter(|(name, _)| {
 				matches!(
@@ -96,13 +101,17 @@ impl Chart {
 		.with_context(|| format!("parsing {}", path.display()))
 	}
 
-	fn read_directory(root: &Path, directory: &str) -> Result<Vec<(String, String)>> {
+	fn read_directory(
+		root: &Path,
+		directory: &str,
+		rules: &ignore::Rules,
+	) -> Result<Vec<(String, String)>> {
 		let path = root.join(directory);
 		if !path.exists() {
 			return Ok(Vec::new());
 		}
 		let mut files = Vec::new();
-		for entry in WalkDir::new(&path).sort_by_file_name() {
+		for entry in rules.walk(root, directory) {
 			let entry = entry?;
 			ensure!(
 				!entry.file_type().is_symlink(),
@@ -115,7 +124,7 @@ impl Chart {
 					.strip_prefix(root)?
 					.to_str()
 					.context("non-UTF-8 template path")?
-					.replace('\\', "/");
+					.replace(std::path::MAIN_SEPARATOR, "/");
 				files.push((name, fs::read_to_string(entry.path())?));
 			}
 		}

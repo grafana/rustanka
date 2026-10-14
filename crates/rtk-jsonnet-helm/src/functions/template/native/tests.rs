@@ -57,17 +57,15 @@ fn rejects_unsupported_chart_features() {
 		"apiVersion: v2\nname: example\nversion: 1.0.0\n",
 	)
 	.unwrap();
-	for filename in ["values.schema.json", ".helmignore"] {
-		fs::write(temp.path().join(filename), "{}").unwrap();
-		assert!(
-			Chart::load(temp.path())
-				.err()
-				.unwrap()
-				.to_string()
-				.contains(filename)
-		);
-		fs::remove_file(temp.path().join(filename)).unwrap();
-	}
+	fs::write(temp.path().join("values.schema.json"), "{}").unwrap();
+	assert!(
+		Chart::load(temp.path())
+			.err()
+			.unwrap()
+			.to_string()
+			.contains("values.schema.json")
+	);
+	fs::remove_file(temp.path().join("values.schema.json")).unwrap();
 	fs::create_dir_all(temp.path().join("charts/dependency")).unwrap();
 	assert!(
 		Chart::load(temp.path())
@@ -246,4 +244,145 @@ fn heavy_benchmark_chart_matches_helm() {
 		.render("bench", &options)
 		.unwrap();
 	assert_eq!(actual, expected);
+}
+
+struct IgnoreFixture(tempfile::TempDir);
+
+impl IgnoreFixture {
+	fn new() -> Self {
+		let temp = tempfile::tempdir().unwrap();
+		fs::write(
+			temp.path().join("Chart.yaml"),
+			"apiVersion: v2\nname: example\nversion: 1.0.0\n",
+		)
+		.unwrap();
+		for directory in [
+			"templates/discard",
+			"templates/nested/discard",
+			"templates/.hidden",
+			"crds/discard",
+		] {
+			fs::create_dir_all(temp.path().join(directory)).unwrap();
+			fs::write(
+				temp.path().join(directory).join("bad.yaml"),
+				"{{ undefined_function }}",
+			)
+			.unwrap();
+		}
+		fs::write(
+			temp.path().join("templates/.bad.yaml"),
+			"{{ undefined_function }}",
+		)
+		.unwrap();
+		fs::write(
+			temp.path().join("templates/excluded.yaml"),
+			"{{ undefined_function }}",
+		)
+		.unwrap();
+		fs::write(
+			temp.path().join("templates/kept.yaml"),
+			"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: kept\n",
+		)
+		.unwrap();
+		fs::write(temp.path().join("crds/excluded.yaml"), "not: [valid yaml").unwrap();
+		fs::write(
+		temp.path().join(".helmignore"),
+		"\u{feff}# ignored chart files\r\n  discard/  \r\n/templates/excluded.yaml\ncrds/excluded.yaml\n",
+	)
+	.unwrap();
+		Self(temp)
+	}
+
+	fn path(&self) -> &Path {
+		self.0.path()
+	}
+
+	fn render(&self) -> Value {
+		Chart::load(self.path())
+			.unwrap()
+			.render("example", &options())
+			.unwrap()
+	}
+}
+
+#[test]
+fn helmignore_skips_invalid_templates_crds_and_directories() {
+	let chart = IgnoreFixture::new();
+	assert_eq!(
+		chart.render(),
+		json!({"config_map_kept": {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "kept"}}})
+	);
+}
+
+#[test]
+fn helmignore_can_exclude_values_schema_and_subcharts() {
+	let chart = IgnoreFixture::new();
+	fs::write(chart.path().join("values.yaml"), "not: [valid yaml").unwrap();
+	fs::write(chart.path().join("values.schema.json"), "not json").unwrap();
+	fs::create_dir_all(chart.path().join("charts/dependency")).unwrap();
+	fs::write(
+		chart.path().join("charts/dependency/Chart.yaml"),
+		"not: [valid yaml",
+	)
+	.unwrap();
+	let rules = fs::read_to_string(chart.path().join(".helmignore")).unwrap();
+	fs::write(
+		chart.path().join(".helmignore"),
+		rules + "values.yaml\n/values.schema.json\n/charts/\n",
+	)
+	.unwrap();
+	assert_eq!(chart.render().as_object().unwrap().len(), 1);
+}
+
+#[test]
+fn helmignore_rejects_invalid_rules_and_ignored_metadata() {
+	let chart = IgnoreFixture::new();
+	for rule in ["**", "[z-", "Chart.yaml"] {
+		fs::write(chart.path().join(".helmignore"), rule).unwrap();
+		let error = Chart::load(chart.path()).err().unwrap();
+		assert!(format!("{error:#}").contains(if rule == "Chart.yaml" {
+			"Chart.yaml is required"
+		} else {
+			".helmignore"
+		}));
+	}
+}
+
+#[test]
+#[ignore = "requires Helm; compares ignored templates, CRDs, values, schemas and subcharts"]
+fn helmignore_matches_real_helm() {
+	let chart = IgnoreFixture::new();
+	for extra_rules in [
+		"",
+		"values.yaml\n",
+		"values.yaml\n/values.schema.json\n/charts/\n",
+	] {
+		if !extra_rules.is_empty() {
+			fs::write(chart.path().join("values.yaml"), "not: [valid yaml").unwrap();
+		}
+		if extra_rules.contains("schema") {
+			fs::write(chart.path().join("values.schema.json"), "not json").unwrap();
+			fs::create_dir_all(chart.path().join("charts/dependency")).unwrap();
+			fs::write(
+				chart.path().join("charts/dependency/Chart.yaml"),
+				"not: [valid yaml",
+			)
+			.unwrap();
+		}
+		fs::write(chart.path().join(".helmignore"), format!("\u{feff}# ignored files\r\n discard/ \r\n/templates/excluded.yaml\ncrds/excluded.yaml\n{extra_rules}")).unwrap();
+		let output = Command::new("helm")
+			.args(["template", "example"])
+			.arg(chart.path())
+			.args(["--namespace", "testing", "--include-crds"])
+			.output()
+			.unwrap();
+		assert!(
+			output.status.success(),
+			"{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		let expected =
+			parse_helm_yaml_output(&String::from_utf8(output.stdout).unwrap(), None).unwrap();
+		assert_eq!(chart.render(), expected, "extra rules {extra_rules:?}");
+	}
 }

@@ -178,3 +178,22 @@ fn native_key_separates_renderers_and_all_options() {
 		);
 	}
 }
+
+#[test]
+fn native_cache_respects_changed_helmignore_rules() {
+	let (directory, function, options) = fixture();
+	let render = || {
+		function
+			.native_render("release", directory.path(), &options, false)
+			.unwrap()
+	};
+	let original = render();
+	fs::write(
+		directory.path().join(".helmignore"),
+		"templates/config.yaml\n",
+	)
+	.unwrap();
+	assert_eq!(render(), json!({}));
+	fs::write(directory.path().join(".helmignore"), "").unwrap();
+	assert_eq!(render(), original);
+}
