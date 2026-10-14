@@ -1,8 +1,8 @@
 {
   "KubeVersion": {
-    "Version": "v1.37.0",
+    "Version": "v1.34.0",
     "Major": "1",
-    "Minor": "37"
+    "Minor": "34"
   },
   "APIVersions": [
     "v1",
@@ -20,6 +20,8 @@
     "authorization.k8s.io/v1beta1",
     "autoscaling/v1",
     "autoscaling/v2",
+    "autoscaling/v2beta1",
+    "autoscaling/v2beta2",
     "batch/v1",
     "batch/v1beta1",
     "certificates.k8s.io/v1",
@@ -37,7 +39,6 @@
     "flowcontrol.apiserver.k8s.io/v1beta1",
     "flowcontrol.apiserver.k8s.io/v1beta2",
     "flowcontrol.apiserver.k8s.io/v1beta3",
-    "lifecycle.k8s.io/v1alpha1",
     "networking.k8s.io/v1",
     "networking.k8s.io/v1beta1",
     "node.k8s.io/v1",
@@ -52,22 +53,20 @@
     "resource.k8s.io/v1beta2",
     "resource.k8s.io/v1beta1",
     "resource.k8s.io/v1alpha3",
-    "scheduling.k8s.io/v1alpha3",
+    "scheduling.k8s.io/v1alpha1",
     "scheduling.k8s.io/v1beta1",
     "scheduling.k8s.io/v1",
     "storage.k8s.io/v1beta1",
     "storage.k8s.io/v1",
     "storage.k8s.io/v1alpha1",
-    "storagemigration.k8s.io/v1",
-    "storagemigration.k8s.io/v1beta1",
+    "storagemigration.k8s.io/v1alpha1",
     "apiextensions.k8s.io/v1beta1",
     "apiextensions.k8s.io/v1"
   ],
   "HelmVersion": {
-    "version": "v4.3.0",
-    "git_commit": "bec5b06ed841fe5269972d864d5177944fd5970f",
+    "version": "v3.19.2",
+    "git_commit": "8766e718a0119851f10ddbe4577593a45fadf544",
     "git_tree_state": "clean",
-    "go_version": "go1.27.1",
-    "kube_client_version": "v1.37"
+    "go_version": "go1.24.9"
   }
 }

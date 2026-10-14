@@ -5775,6 +5775,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "walkdir",
+ "x509-parser",
  "yasna",
 ]
 

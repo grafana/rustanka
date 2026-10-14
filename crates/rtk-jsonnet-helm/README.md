@@ -44,7 +44,8 @@ major version.
 This is a prototype, not a drop-in replacement for Helm. The test corpus is
 small, and successful rendering does not establish parity for other charts.
 
-Default capabilities are pinned to the checked-in Helm capability snapshot.
+Default capabilities match Helm 3.19.2 (Kubernetes 1.34), the full-export CI runner,
+and are pinned in the checked-in snapshot.
 Live cluster lookups and unregistered functions are unavailable. Dictionary mutation
 through aliases does not reproduce Go template reference semantics. Chart metadata is
 exposed with its top-level Go-style field names; nested metadata is not fully

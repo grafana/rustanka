@@ -7,6 +7,7 @@ use super::{Scope, from_json, to_json};
 pub(super) fn install(template: &mut Template) {
 	template.add_funcs(gtmpl_ng::helm_functions::HELM_FUNCTIONS);
 	super::methods::install(template);
+	super::clock::install(template);
 
 	template.add_func("tuple", |args| Ok(Value::Array(args.to_vec())));
 	for name in ["has", "mustHas"] {
@@ -169,6 +170,13 @@ pub(super) fn install(template: &mut Template) {
 	for name in ["mergeOverwrite", "mustMergeOverwrite"] {
 		template.add_func(name, |args| Ok(Arguments(args).merge(true)?));
 	}
+	template.add_func("buildCustomCert", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(from_json(&super::crypto::Key::certificate(
+			args.text(0)?,
+			args.text(1)?,
+		)?))
+	});
 	template.add_func("genPrivateKey", |args| {
 		let args = Arguments::new(args, 1)?;
 		Ok(super::crypto::Key::generate(args.text(0)?)?.into())
@@ -292,11 +300,15 @@ pub(super) fn install(template: &mut Template) {
 	});
 	template.add_func("fromYaml", |args| {
 		let args = Arguments::new(args, 1)?;
-		let value: serde_json::Value = serde_saphyr::from_str_with_options(
+		let values: Vec<serde_json::Value> = serde_saphyr::from_multiple_with_options(
 			args.text(0)?,
 			serde_saphyr::options! { legacy_octal_numbers: true },
 		)
 		.map_err(anyhow::Error::from)?;
+		let value = values.into_iter().next().unwrap_or(serde_json::Value::Null);
+		if value.is_null() {
+			return Ok(from_json(&serde_json::json!({})));
+		}
 		if !value.is_object() {
 			return Err(FuncError::Generic("fromYaml expects a mapping".into()));
 		}

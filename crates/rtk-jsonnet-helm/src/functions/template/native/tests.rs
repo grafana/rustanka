@@ -356,7 +356,13 @@ fn helmignore_matches_real_helm() {
 		let output = Command::new("helm")
 			.args(["template", "example"])
 			.arg(chart.path())
-			.args(["--namespace", "testing", "--include-crds"])
+			.args([
+				"--namespace",
+				"testing",
+				"--include-crds",
+				"--kube-version",
+				"1.34.0",
+			])
 			.output()
 			.unwrap();
 		assert!(
@@ -428,7 +434,14 @@ impl FeatureChart {
 		command
 			.args(["template", "example"])
 			.arg(self.path())
-			.args(["--namespace", "testing", "--include-crds", "--values"])
+			.args([
+				"--namespace",
+				"testing",
+				"--include-crds",
+				"--kube-version",
+				"1.34.0",
+				"--values",
+			])
 			.arg(values_file.path());
 		for version in api_versions {
 			command.args(["--api-versions", version]);
@@ -734,13 +747,25 @@ fn external_chart_corpus_renders_with_native_helm() {
 			paths.push(path.to_owned());
 		}
 	}
+	let filter = std::env::var("RTK_NATIVE_CHART_FILTER")
+		.ok()
+		.map(|pattern| regex::Regex::new(&pattern).unwrap());
+	if let Some(filter) = filter {
+		paths.retain(|path| filter.is_match(&path.to_string_lossy()));
+	}
 	let mut failures = Vec::new();
 	let mut successful = 0;
 	for path in paths.into_iter().take(limit) {
 		let helm = Command::new("helm")
 			.args(["template", "example"])
 			.arg(&path)
-			.args(["--namespace", "testing", "--include-crds"])
+			.args([
+				"--namespace",
+				"testing",
+				"--include-crds",
+				"--kube-version",
+				"1.34.0",
+			])
 			.output()
 			.unwrap();
 		if !helm.status.success() {
@@ -831,16 +856,49 @@ kind: ConfigMap
 metadata:
   name: syntax
 data:
+  slash: {{ "\\" | quote }}
   raw: {{ regexMatch `^v[0-9]+\.[0-9]+$` "v1.2" | quote }}
   member: {{ has "present" (tuple "present" "other") | quote }}
   absent: {{ has "absent" .Values.missing | quote }}
   nil: {{ kindIs "invalid" .Values.missing | quote }}
   fallback: {{ default "fallback" | quote }}
+  root: {{ .missing | default "fallback" | quote }}
   optional: {{ (.Values.missing).field | default "fallback" | quote }}
 "#,
 	);
 	assert_eq!(
 		chart.render(json!({}))["config_map_syntax"]["data"],
-		json!({"raw":"true", "member":"true", "absent":"false", "nil":"true", "fallback":"fallback", "optional":"fallback"})
+		json!({"slash":"\\", "raw":"true", "member":"true", "absent":"false", "nil":"true", "fallback":"fallback", "optional":"fallback", "root":"fallback"})
 	);
+}
+
+#[test]
+fn custom_certificate_and_empty_yaml_helpers() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"templates/config.yaml",
+		r#"{{ $ca := genCA "testing" 1 }}
+{{ $copy := buildCustomCert ($ca.Cert | b64enc) ($ca.Key | b64enc) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conversions
+data:
+  cert: {{ eq $ca.Cert $copy.Cert | quote }}
+  key: {{ eq $ca.Key $copy.Key | quote }}
+  empty: {{ "" | fromYaml | toJson | quote }}
+  first: {{ "one: 1\n---\ntwo: 2\n" | fromYaml | toJson | quote }}
+---# Helm splits separators before YAML parsing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: second
+"#,
+	);
+	let output = chart.render(json!({}));
+	assert_eq!(
+		output["config_map_conversions"]["data"],
+		json!({"cert":"true", "key":"true", "empty":"{}", "first":"{\"one\":1}"})
+	);
+	assert!(output.get("config_map_second").is_some());
 }

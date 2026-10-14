@@ -11,6 +11,7 @@ use serde_json::{Value as Json, json};
 
 use super::{Options, name_documents};
 
+mod clock;
 mod crypto;
 mod functions;
 mod ignore;
@@ -605,11 +606,21 @@ impl Chart {
 	}
 
 	fn documents(source: &str, no_hooks: bool, output: &mut Vec<Json>) -> Result<()> {
-		let source = super::normalize_helm_multiline_quotes(source);
-		let documents: Vec<Json> = serde_saphyr::from_multiple_with_options(
-			&source,
-			serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
-		)?;
+		static SEPARATORS: std::sync::LazyLock<regex::Regex> =
+			std::sync::LazyLock::new(|| regex::Regex::new(r"(?:^|\s*\n)---\s*").unwrap());
+		let mut documents = Vec::new();
+		// Helm splits rendered templates before passing each manifest to YAML.
+		for source in SEPARATORS
+			.split(source)
+			.filter(|source| !source.trim().is_empty())
+		{
+			let source = super::normalize_helm_multiline_quotes(source);
+			documents.push(serde_saphyr::from_str_with_options::<Json>(
+				&source,
+				serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
+			)?);
+		}
+
 		for document in documents {
 			if document.is_null() {
 				continue;
@@ -711,7 +722,7 @@ impl Sources {
 		let Value::Map(root) = context else {
 			unreachable!();
 		};
-		Value::Object(root)
+		Value::Map(root)
 	}
 
 	fn render(&self, name: &str, context: Value, dynamic: Option<&str>) -> Result<String> {

@@ -4,6 +4,16 @@ use anyhow::{Result, ensure};
 use gtmpl_ng::{FuncError, Template, Value};
 
 pub(super) fn install(template: &mut Template) {
+	template.add_func("__rtkLiteral", |args| {
+		use base64::Engine as _;
+		let args = Arguments::new(args, 1)?;
+		let decoded = base64::engine::general_purpose::STANDARD
+			.decode(args.0[0].to_string())
+			.map_err(anyhow::Error::from)?;
+		Ok(String::from_utf8(decoded)
+			.map_err(anyhow::Error::from)?
+			.into())
+	});
 	template.add_func("__rtkField", |args| {
 		let args = Arguments::new(args, 2)?;
 		let mut value = args.0[0].clone();
@@ -316,6 +326,20 @@ impl Action {
 				changed = true;
 			}
 		}
+		for token in &mut self.tokens {
+			if token.text.starts_with('"')
+				&& token.text.contains("\\\\")
+				&& let Ok(decoded) = serde_json::from_str::<String>(&token.text)
+			{
+				use base64::Engine as _;
+				token.text = format!(
+					"(__rtkLiteral {:?})",
+					base64::engine::general_purpose::STANDARD.encode(decoded)
+				);
+				changed = true;
+			}
+		}
+
 		while index < self.tokens.len() {
 			let token = &self.tokens[index];
 			if !token.starts_with(['.', '$'])

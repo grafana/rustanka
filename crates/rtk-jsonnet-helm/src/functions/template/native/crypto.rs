@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use rsa::pkcs1::{EncodeRsaPrivateKey, LineEnding};
@@ -6,6 +6,29 @@ use rsa::pkcs1::{EncodeRsaPrivateKey, LineEnding};
 pub(super) struct Key;
 
 impl Key {
+	pub(super) fn certificate(certificate: &str, key: &str) -> Result<serde_json::Value> {
+		use base64::Engine as _;
+		use ed25519_dalek::pkcs8::DecodePrivateKey as _;
+		use rsa::pkcs1::DecodeRsaPrivateKey as _;
+		let certificate =
+			String::from_utf8(base64::engine::general_purpose::STANDARD.decode(certificate)?)?;
+		let key = String::from_utf8(base64::engine::general_purpose::STANDARD.decode(key)?)?;
+		let certificate_der = pem::parse(&certificate)?;
+		ensure!(
+			x509_parser::parse_x509_certificate(certificate_der.contents()).is_ok(),
+			"invalid certificate"
+		);
+		ensure!(
+			rsa::RsaPrivateKey::from_pkcs1_pem(&key).is_ok()
+				|| rsa::RsaPrivateKey::from_pkcs8_pem(&key).is_ok()
+				|| p256::SecretKey::from_sec1_pem(&key).is_ok()
+				|| p256::SecretKey::from_pkcs8_pem(&key).is_ok()
+				|| ed25519_dalek::SigningKey::from_pkcs8_pem(&key).is_ok(),
+			"invalid private key"
+		);
+		Ok(serde_json::json!({"Cert":certificate, "Key":key}))
+	}
+
 	pub(super) fn generate(kind: &str) -> Result<String> {
 		Ok(match kind {
 			"" | "rsa" => rsa::RsaPrivateKey::new(&mut OsRng, 4096)?

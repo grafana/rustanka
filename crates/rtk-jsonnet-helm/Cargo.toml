@@ -20,6 +20,7 @@ ed25519-dalek = { version = "2.2.0", features = ["rand_core", "pkcs8", "pem"] }
 dsa = "0.6.3"
 yasna = "0.5.2"
 pem = "3.0"
+x509-parser = "0.16"
 jsonschema = { version = "0.58.6", default-features = false }
 rtk-masterminds.workspace = true
 semver.workspace = true
