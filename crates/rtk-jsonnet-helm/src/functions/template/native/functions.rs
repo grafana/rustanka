@@ -181,8 +181,26 @@ pub(super) fn install(template: &mut Template) {
 		let args = Arguments::new(args, 1)?;
 		Ok(super::crypto::Key::generate(args.text(0)?)?.into())
 	});
-	template.add_func("int", |args| {
-		Ok(Arguments::new(args, 1)?.cast_integer(0).into())
+	for name in ["int", "int64", "atoi"] {
+		template.add_func(name, |args| {
+			Ok(Arguments::new(args, 1)?.cast_integer(0).into())
+		});
+	}
+	template.add_func("float64", |args| {
+		let args = Arguments::new(args, 1)?;
+		let number = match &args.0[0] {
+			Value::Number(number) => number.as_f64().unwrap_or_default(),
+			Value::String(text) => text.parse::<f64>().unwrap_or_default(),
+			Value::Bool(value) => {
+				if *value {
+					1.0
+				} else {
+					0.0
+				}
+			}
+			_ => 0.0,
+		};
+		Ok(number.into())
 	});
 	template.add_func("until", |args| {
 		let count = Arguments::new(args, 1)?.integer(0)?;

@@ -54,7 +54,8 @@ modeled.
 Go formatting, missing values,
 YAML formatting and conversion error behavior are not fully compatible. In
 particular, `fromYaml` accepts mappings only and conversion failures are errors.
-`until` is limited to one million elements.
+`until` is limited to one million elements. Clock helpers support duration
+validation; Go `time.Time` formatting remains unsupported.
 Manifest ordering does not reproduce Helm's kind/hook ordering; avoid resources
 that produce duplicate Tanka manifest keys. `include` and `tpl` reparse the chart
 and have a 64-call nesting limit. No performance improvement is claimed.

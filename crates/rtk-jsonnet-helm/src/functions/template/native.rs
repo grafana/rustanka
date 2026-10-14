@@ -672,7 +672,7 @@ impl Sources {
 		api_versions.extend_from_slice(extra_versions);
 		capabilities["APIVersions"] = json!(api_versions);
 		let helm = capabilities["HelmVersion"].clone();
-		capabilities["HelmVersion"] = json!({"Version": helm["version"], "GitCommit": helm["git_commit"], "GitTreeState": helm["git_tree_state"], "GoVersion": helm["go_version"], "KubeClientVersion": helm["kube_client_version"]});
+		capabilities["HelmVersion"] = json!({"Version": helm["version"], "GitCommit": helm["git_commit"], "GitTreeState": helm["git_tree_state"], "GoVersion": helm["go_version"]});
 		Ok(Self {
 			templates: Vec::new(),
 			files: std::collections::BTreeMap::new(),

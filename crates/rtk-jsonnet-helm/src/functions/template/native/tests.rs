@@ -862,13 +862,15 @@ data:
   absent: {{ has "absent" .Values.missing | quote }}
   nil: {{ kindIs "invalid" .Values.missing | quote }}
   fallback: {{ default "fallback" | quote }}
+  float: {{ float64 .Values.missing | quote }}
+  integer: {{ int64 "invalid" | quote }}
   root: {{ .missing | default "fallback" | quote }}
   optional: {{ (.Values.missing).field | default "fallback" | quote }}
 "#,
 	);
 	assert_eq!(
 		chart.render(json!({}))["config_map_syntax"]["data"],
-		json!({"slash":"\\", "raw":"true", "member":"true", "absent":"false", "nil":"true", "fallback":"fallback", "optional":"fallback", "root":"fallback"})
+		json!({"slash":"\\", "raw":"true", "member":"true", "absent":"false", "nil":"true", "fallback":"fallback", "optional":"fallback", "root":"fallback", "float":"0", "integer":"0"})
 	);
 }
 
