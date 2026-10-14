@@ -50,34 +50,27 @@ fn excludes_hooks_and_crds_on_request() {
 }
 
 #[test]
-fn rejects_unsupported_chart_features() {
-	let temp = tempfile::tempdir().unwrap();
-	fs::write(
-		temp.path().join("Chart.yaml"),
-		"apiVersion: v2\nname: example\nversion: 1.0.0\n",
-	)
-	.unwrap();
-	fs::write(temp.path().join("values.schema.json"), "{}").unwrap();
-	assert!(
-		Chart::load(temp.path())
-			.err()
-			.unwrap()
-			.to_string()
-			.contains("values.schema.json")
+fn validates_schema_and_dependency_metadata() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"values.schema.json",
+		r#"{"type":"object","required":["requiredValue"]}"#,
 	);
-	fs::remove_file(temp.path().join("values.schema.json")).unwrap();
-	fs::create_dir_all(temp.path().join("charts/dependency")).unwrap();
+	let error = Chart::load(chart.path())
+		.unwrap()
+		.render("example", &chart.options(json!({})))
+		.unwrap_err();
+	assert!(format!("{error:#}").contains("requiredValue"));
+	fs::remove_file(chart.path().join("values.schema.json")).unwrap();
+	chart.write("charts/dependency/README.md", "incomplete dependency");
 	assert!(
-		Chart::load(temp.path())
-			.err()
-			.unwrap()
-			.to_string()
-			.contains("subcharts")
+		format!("{:#}", Chart::load(chart.path()).err().unwrap())
+			.contains("Chart.yaml is required")
 	);
 }
 
 #[test]
-fn rejects_unresolved_namespace_and_api_versions() {
+fn rejects_unresolved_namespace() {
 	let mut options = options();
 	options.namespace = None;
 	assert!(
@@ -87,16 +80,6 @@ fn rejects_unresolved_namespace_and_api_versions() {
 			.unwrap_err()
 			.to_string()
 			.contains("explicit namespace")
-	);
-	options.namespace = Some("testing".into());
-	options.api_versions.push("apps/v1".into());
-	assert!(
-		Chart::load(&fixture().join("chart"))
-			.unwrap()
-			.render("example", &options)
-			.unwrap_err()
-			.to_string()
-			.contains("apiVersions")
 	);
 }
 
@@ -124,7 +107,7 @@ fn failed_include_does_not_leak_context_into_next_render() {
 }
 
 #[test]
-fn unsupported_functions_and_objects_fail() {
+fn non_manifest_template_output_is_rejected() {
 	let temp = tempfile::tempdir().unwrap();
 	fs::write(
 		temp.path().join("Chart.yaml"),
@@ -385,4 +368,479 @@ fn helmignore_matches_real_helm() {
 			parse_helm_yaml_output(&String::from_utf8(output.stdout).unwrap(), None).unwrap();
 		assert_eq!(chart.render(), expected, "extra rules {extra_rules:?}");
 	}
+}
+
+struct FeatureChart {
+	directory: tempfile::TempDir,
+}
+
+impl FeatureChart {
+	fn new(version: &str) -> Self {
+		let chart = Self {
+			directory: tempfile::tempdir().unwrap(),
+		};
+		chart.write(
+			"Chart.yaml",
+			&format!("apiVersion: {version}\nname: parent\nversion: 1.0.0\n"),
+		);
+		chart
+	}
+	fn path(&self) -> &Path {
+		self.directory.path()
+	}
+	fn write(&self, name: &str, content: &str) {
+		let path = self.path().join(name);
+		fs::create_dir_all(path.parent().unwrap()).unwrap();
+		fs::write(path, content).unwrap();
+	}
+	fn options(&self, values: Value) -> Options {
+		serde_json::from_value(json!({"calledFrom": self.path().join("main.jsonnet"), "namespace": "testing", "values": values})).unwrap()
+	}
+	fn render(&self, values: Value) -> Value {
+		Chart::load(self.path())
+			.unwrap()
+			.render("example", &self.options(values))
+			.unwrap()
+	}
+	fn dependency(&self) {
+		self.write("Chart.yaml", "apiVersion: v2\nname: parent\nversion: 1.0.0\ndependencies:\n- name: child\n  version: 1.0.0\n  alias: renamed\n  condition: renamed.enabled\n  tags: [optional]\n  import-values:\n  - child: exports.settings\n    parent: settings\n");
+		self.write("values.yaml", "global:\n  shared: parent\nsettings:\n  preferred: parent\nrenamed:\n  nested:\n    parent: true\n");
+		self.write(
+			"charts/child/Chart.yaml",
+			"apiVersion: v1\nname: child\nversion: 1.0.0\n",
+		);
+		self.write("charts/child/values.yaml", "enabled: true\nvalue: original\nglobal:\n  local: child\n  shared: child\nnested:\n  remove: true\n  keep: true\nexports:\n  settings:\n    imported: child\n    preferred: child\n");
+		self.write("charts/child/templates/config.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Chart.Name }}\ndata:\n  value: {{ .Values.value | quote }}\n  global: {{ .Values.global.shared | quote }}\n  local: {{ .Values.global.local | quote }}\n  nested: {{ toJson .Values.nested | quote }}\n  helper: {{ include \"shared.name\" . | quote }}\n");
+		self.write(
+			"charts/child/templates/_helpers.tpl",
+			"{{ define \"shared.name\" }}child{{ end }}",
+		);
+		self.write(
+			"templates/_helpers.tpl",
+			"{{ define \"shared.name\" }}parent{{ end }}",
+		);
+		self.write("templates/config.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: parent\ndata:\n  imported: {{ .Values.settings.imported | quote }}\n  preferred: {{ .Values.settings.preferred | quote }}\n  childValue: {{ .Subcharts.renamed.Values.value | quote }}\n");
+	}
+	fn helm(&self, values: &Value, api_versions: &[String]) -> Value {
+		let values_file = tempfile::NamedTempFile::new().unwrap();
+		fs::write(values_file.path(), serde_json::to_vec(values).unwrap()).unwrap();
+		let mut command = Command::new("helm");
+		command
+			.args(["template", "example"])
+			.arg(self.path())
+			.args(["--namespace", "testing", "--include-crds", "--values"])
+			.arg(values_file.path());
+		for version in api_versions {
+			command.args(["--api-versions", version]);
+		}
+		let output = command.output().unwrap();
+		assert!(
+			output.status.success(),
+			"{}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		parse_helm_yaml_output(&String::from_utf8(output.stdout).unwrap(), None).unwrap()
+	}
+}
+
+#[test]
+fn subcharts_inherit_values_globals_aliases_and_imports() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	let actual =
+		chart.render(json!({"renamed": {"value": "override", "nested": {"remove": null}}}));
+	assert_eq!(
+		actual["config_map_renamed"]["data"],
+		json!({"value":"override", "global":"parent", "local":"child", "nested":"{\"keep\":true,\"parent\":true}", "helper":"parent"})
+	);
+	assert_eq!(
+		actual["config_map_parent"]["data"],
+		json!({"imported":"child", "preferred":"parent", "childValue":"override"})
+	);
+}
+
+#[test]
+fn dependency_conditions_override_tags() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	// A disabled dependency contributes no templates, so the parent cannot refer to its helpers or Subcharts scope.
+	chart.write(
+		"templates/config.yaml",
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: parent\n",
+	);
+	assert_eq!(
+		chart
+			.render(json!({"tags": {"optional": false}, "renamed": {"enabled": true}}))
+			.as_object()
+			.unwrap()
+			.len(),
+		2
+	);
+	assert_eq!(
+		chart
+			.render(json!({"tags": {"optional": true}, "renamed": {"enabled": false}}))
+			.as_object()
+			.unwrap()
+			.len(),
+		1
+	);
+}
+
+#[test]
+fn v1_charts_and_library_helpers_render() {
+	let chart = FeatureChart::new("v1");
+	chart.write(
+		"requirements.yaml",
+		"dependencies:\n- name: helpers\n  version: 1.0.0\n",
+	);
+	chart.write(
+		"charts/helpers/Chart.yaml",
+		"apiVersion: v2\nname: helpers\nversion: 1.0.0\ntype: library\n",
+	);
+	chart.write(
+		"charts/helpers/templates/_helpers.tpl",
+		"{{ define \"library.name\" }}from-library{{ end }}",
+	);
+	chart.write(
+		"charts/helpers/templates/ignored.yaml",
+		"{{ unsupported_library_template }}",
+	);
+	chart.write(
+		"templates/config.yaml",
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ include \"library.name\" . }}\n",
+	);
+	assert_eq!(chart.render(json!({})).as_object().unwrap().len(), 1);
+	assert_eq!(
+		chart.render(json!({}))["config_map_from_library"]["metadata"]["name"],
+		"from-library"
+	);
+}
+
+#[test]
+fn values_schema_checks_merged_root_and_child_values() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	chart.write(
+		"charts/child/values.schema.json",
+		r#"{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}"#,
+	);
+	assert!(
+		Chart::load(chart.path())
+			.unwrap()
+			.render("example", &chart.options(json!({"renamed":{"value":42}})))
+			.is_err()
+	);
+	assert_eq!(
+		chart.render(json!({"renamed":{"value":"valid"}}))["config_map_renamed"]["data"]["value"],
+		"valid"
+	);
+	chart.write(
+		"templates/config.yaml",
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: parent\n",
+	);
+	assert!(
+		Chart::load(chart.path())
+			.unwrap()
+			.render(
+				"example",
+				&chart.options(json!({"renamed":{"enabled":false,"value":42}}))
+			)
+			.is_ok()
+	);
+}
+
+#[test]
+fn native_functions_capabilities_and_files_are_scoped() {
+	let chart = FeatureChart::new("v2");
+	chart.write("config.txt", "parent file\n");
+	chart.write("templates/config.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: parent\ndata:\n  api: {{ .Capabilities.APIVersions.Has \"custom.example/v1\" | quote }}\n  builtin: {{ .Capabilities.APIVersions.Has \"apps/v1\" | quote }}\n  file: {{ .Files.Get \"config.txt\" | trim | quote }}\n  funcs: {{ printf \"%s/%s/%s/%s/%t/%t\" (substr 1 3 \"abcd\") (replace \"a\" \"b\" \"aa\") (first (list \"first\" \"last\")) (toString 42) (typeIs \"string\" \"x\") (semverCompare \">=1.20.0 <2.0.0\" .Capabilities.KubeVersion.Version) | quote }}\n  lookup: {{ empty (lookup \"v1\" \"Secret\" \"testing\" \"missing\") | quote }}\n");
+	let mut options = chart.options(json!({}));
+	options.api_versions.push("custom.example/v1".into());
+	let actual = Chart::load(chart.path())
+		.unwrap()
+		.render("example", &options)
+		.unwrap();
+	assert_eq!(
+		actual["config_map_parent"]["data"],
+		json!({"api":"true", "builtin":"true", "file":"parent file", "funcs":"bc/bb/first/42/true/true", "lookup":"true"})
+	);
+}
+
+#[test]
+#[ignore = "requires Helm; compares dependencies, schemas, v1/library charts, files, capabilities and functions"]
+fn expanded_features_match_real_helm() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	let values = json!({"renamed":{"value":"override", "nested":{"remove":null}}});
+	assert_eq!(chart.render(values.clone()), chart.helm(&values, &[]));
+	let chart = FeatureChart::new("v1");
+	chart.write("templates/config.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: v1\ndata:\n  kube: {{ .Capabilities.KubeVersion.Version | quote }}\n");
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+}
+
+impl FeatureChart {
+	fn pack(&self, relative: &str, name: &str) -> Vec<u8> {
+		let directory = self.path().join(relative);
+		let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+		let mut builder = tar::Builder::new(encoder);
+		for entry in walkdir::WalkDir::new(&directory).sort_by_file_name() {
+			let entry = entry.unwrap();
+			if entry.file_type().is_file() {
+				let path = entry.path().strip_prefix(&directory).unwrap();
+				let bytes = fs::read(entry.path()).unwrap();
+				let mut header = tar::Header::new_gnu();
+				header.set_size(bytes.len() as u64);
+				header.set_mode(0o644);
+				header.set_cksum();
+				builder
+					.append_data(&mut header, Path::new(name).join(path), &bytes[..])
+					.unwrap();
+			}
+		}
+		builder.into_inner().unwrap().finish().unwrap()
+	}
+}
+
+#[test]
+fn packed_dependencies_and_root_archives_render() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	let expected = chart.render(json!({}));
+	let archive = chart.pack("charts/child", "child");
+	fs::remove_dir_all(chart.path().join("charts/child")).unwrap();
+	fs::write(chart.path().join("charts/child-1.0.0.tgz"), archive).unwrap();
+	assert_eq!(chart.render(json!({})), expected);
+	let archive = tempfile::NamedTempFile::new().unwrap();
+	fs::write(archive.path(), chart.pack("", "parent")).unwrap();
+	assert_eq!(
+		Chart::load(archive.path())
+			.unwrap()
+			.render("example", &chart.options(json!({})))
+			.unwrap(),
+		expected
+	);
+}
+
+#[test]
+fn archive_paths_cannot_escape_the_chart() {
+	let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+	let mut builder = tar::Builder::new(encoder);
+	let mut header = tar::Header::new_gnu();
+	let name = b"parent/../escaped";
+	header.as_mut_bytes()[..name.len()].copy_from_slice(name);
+	header.set_size(1);
+	header.set_mode(0o644);
+	header.set_cksum();
+	builder.append(&header, &b"x"[..]).unwrap();
+	let bytes = builder.into_inner().unwrap().finish().unwrap();
+	assert!(
+		Chart::archive(&bytes)
+			.unwrap_err()
+			.to_string()
+			.contains("invalid chart archive path")
+	);
+}
+
+#[test]
+fn semver_constraints_accept_sprig_versions_and_zero_major_carets() {
+	for (constraint, version, expected) in [
+		(">=1.20.0 <2.0.0", "v1.37.0", true),
+		(">=1.20.0-0", "v1.20.0-beta.1", true),
+		(">=1.20.0", "v1.21.0-beta.1", false),
+		("^0.1.2", "0.1.3", true),
+		("^0.1.2", "0.2.0", false),
+		("^0.0.2", "0.0.3", false),
+		("1.2.x || >=2.0.0", "1.2.3", true),
+		("1.2 - 1.4", "1.3.0", true),
+	] {
+		assert_eq!(
+			super::versions::Version::parse(version)
+				.unwrap()
+				.matches(constraint)
+				.unwrap(),
+			expected,
+			"{constraint}, {version}"
+		);
+	}
+}
+
+#[test]
+#[ignore = "requires Helm; checks method receivers, file globs, library helpers and packed dependencies"]
+fn native_methods_and_archives_match_real_helm() {
+	let chart = FeatureChart::new("v2");
+	chart.write("configs/a.txt", "alpha\n");
+	chart.write("configs/nested/b.txt", "beta\n");
+	chart.write(
+		"templates/config.yaml",
+		r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: methods
+data:
+  config: {{ (.Files.Glob "configs/**").AsConfig | quote }}
+  secrets: {{ (.Files.Glob "configs/*").AsSecrets | quote }}
+  getter: {{ with .Files }}{{ .Get "configs/a.txt" | trim | quote }}{{ end }}
+  alias: {{ $apis := .Capabilities.APIVersions }}{{ $apis.Has "apps/v1" | quote }}
+  literal: {{ ".Files.Get }} {{ .Capabilities.APIVersions.Has" | quote }}
+  negative: {{ -3 | quote }}
+  major: {{ (semver "1.2.3").Major | quote }}
+"#,
+	);
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	chart.write("charts/child/config.txt", "child file\n");
+	chart.write(
+		"templates/config.yaml",
+		r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: parent
+data:
+  child: {{ (index .Subcharts "renamed").Files.Get "config.txt" | trim | quote }}
+"#,
+	);
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+	let archive = chart.pack("charts/child", "child");
+	fs::remove_dir_all(chart.path().join("charts/child")).unwrap();
+	fs::write(chart.path().join("charts/child.tgz"), archive).unwrap();
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+}
+
+#[test]
+#[ignore = "requires Helm and RTK_NATIVE_CHART_CORPUS; smoke-tests an external chart corpus"]
+fn external_chart_corpus_renders_with_native_helm() {
+	let root = PathBuf::from(
+		std::env::var_os("RTK_NATIVE_CHART_CORPUS").expect("RTK_NATIVE_CHART_CORPUS is required"),
+	);
+	let limit: usize = std::env::var("RTK_NATIVE_CHART_LIMIT")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.unwrap_or(30);
+	let mut paths = Vec::new();
+	for entry in walkdir::WalkDir::new(&root).sort_by_file_name() {
+		let entry = entry.unwrap();
+		if entry.file_type().is_file() && entry.file_name() == "Chart.yaml" {
+			let path = entry.path().parent().unwrap();
+			if path
+				.strip_prefix(&root)
+				.unwrap()
+				.components()
+				.filter(|part| part.as_os_str() == "charts")
+				.count() > 1
+			{
+				continue;
+			}
+			paths.push(path.to_owned());
+		}
+	}
+	let mut failures = Vec::new();
+	let mut successful = 0;
+	for path in paths.into_iter().take(limit) {
+		let helm = Command::new("helm")
+			.args(["template", "example"])
+			.arg(&path)
+			.args(["--namespace", "testing", "--include-crds"])
+			.output()
+			.unwrap();
+		if !helm.status.success() {
+			continue;
+		}
+		let options: Options = serde_json::from_value(
+			json!({"calledFrom": path.join("main.jsonnet"), "namespace":"testing"}),
+		)
+		.unwrap();
+		match Chart::load(&path).and_then(|chart| chart.render("example", &options)) {
+			Ok(_) => {
+				successful += 1;
+				eprintln!("native render passed: {}", path.display());
+			}
+			Err(error) => failures.push(format!("{}: {error:#}", path.display())),
+		}
+	}
+	assert!(successful > 0, "no charts rendered successfully");
+	assert!(
+		failures.is_empty(),
+		"{} charts failed:\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
+}
+
+#[test]
+fn sprig_dictionary_and_string_operations() {
+	let chart = FeatureChart::new("v2");
+	chart.write("templates/config.yaml", r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: functions
+data:
+  nested: {{ dig "outer" "inner" "fallback" (dict "outer" (dict "inner" "found")) | quote }}
+  missing: {{ dig "absent" "inner" "fallback" (dict "outer" (dict)) | quote }}
+  merge: {{ merge (dict "nested" (dict "first" "a")) (dict "nested" (dict "first" "b" "second" "c")) | toJson | quote }}
+  overwrite: {{ mergeOverwrite (dict "nested" (dict "first" "a")) (dict "nested" (dict "first" "b" "second" "c")) | toJson | quote }}
+  substring: {{ substr 2 -1 "abcdef" | quote }}
+  prefix: {{ trimPrefix "aa" "aaaa" | quote }}
+  suffix: {{ trimSuffix "aa" "aaaa" | quote }}
+  sorted: {{ list "b" "a" | sortAlpha | join "," | quote }}
+  json: {{ dict "markup" "<>&" | toJson | quote }}
+  raw: {{ dict "markup" "<>&" | toRawJson | quote }}
+"#);
+	let output = chart.render(json!({}));
+	let data = &output["config_map_functions"]["data"];
+	assert_eq!(data["nested"], "found");
+	assert_eq!(data["missing"], "fallback");
+	assert_eq!(data["merge"], r#"{"nested":{"first":"a","second":"c"}}"#);
+	assert_eq!(
+		data["overwrite"],
+		r#"{"nested":{"first":"b","second":"c"}}"#
+	);
+	assert_eq!(data["substring"], "cdef");
+	assert_eq!(data["prefix"], "aa");
+	assert_eq!(data["suffix"], "aa");
+	assert_eq!(data["sorted"], "a,b");
+	assert_eq!(data["json"], r#"{"markup":"\u003c\u003e\u0026"}"#);
+	assert_eq!(data["raw"], r#"{"markup":"<>&"}"#);
+}
+
+#[test]
+#[ignore = "requires Helm"]
+fn sprig_dictionary_operations_match_helm() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"templates/config.yaml",
+		r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: merge
+data:
+  merge: {{ merge (dict "a" (dict "first" 1)) (dict "a" (dict "second" 2)) | toJson | quote }}
+  dig: {{ dig "a" "b" "fallback" (dict "a" (dict "b" "found")) | quote }}
+"#,
+	);
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+}
+
+#[test]
+fn helm_nil_lists_and_raw_literals() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"templates/config.yaml",
+		r#"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: syntax
+data:
+  raw: {{ regexMatch `^v[0-9]+\.[0-9]+$` "v1.2" | quote }}
+  member: {{ has "present" (tuple "present" "other") | quote }}
+  absent: {{ has "absent" .Values.missing | quote }}
+  nil: {{ kindIs "invalid" .Values.missing | quote }}
+  fallback: {{ default "fallback" | quote }}
+  optional: {{ (.Values.missing).field | default "fallback" | quote }}
+"#,
+	);
+	assert_eq!(
+		chart.render(json!({}))["config_map_syntax"]["data"],
+		json!({"raw":"true", "member":"true", "absent":"false", "nil":"true", "fallback":"fallback", "optional":"fallback"})
+	);
 }

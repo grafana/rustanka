@@ -89,12 +89,17 @@ fn native_cache_does_not_hide_chart_or_option_changes() {
 		"changed"
 	);
 	fs::create_dir_all(directory.path().join("charts/empty-dependency")).unwrap();
+	fs::write(
+		directory.path().join("charts/empty-dependency/README.md"),
+		"incomplete chart",
+	)
+	.unwrap();
 	assert!(
 		function
 			.native_render("release", directory.path(), &options, false)
 			.unwrap_err()
 			.to_string()
-			.contains("subcharts")
+			.contains("Chart.yaml is required")
 	);
 }
 

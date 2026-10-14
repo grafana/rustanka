@@ -5,6 +5,174 @@ use sha2::{Digest, Sha256};
 use super::{Scope, from_json, to_json};
 
 pub(super) fn install(template: &mut Template) {
+	template.add_funcs(gtmpl_ng::helm_functions::HELM_FUNCTIONS);
+	super::methods::install(template);
+
+	template.add_func("tuple", |args| Ok(Value::Array(args.to_vec())));
+	for name in ["has", "mustHas"] {
+		template.add_func(name, |args| {
+			let args = Arguments::new(args, 2)?;
+			match &args.0[1] {
+				Value::Array(values) => Ok(values.contains(&args.0[0]).into()),
+				Value::Nil | Value::NoValue => Ok(false.into()),
+				_ => Err(FuncError::Generic("has requires a list".into())),
+			}
+		});
+	}
+	template.add_func("fromJsonArray", |args| {
+		let args = Arguments::new(args, 1)?;
+		let value: serde_json::Value =
+			serde_json::from_str(args.text(0)?).map_err(anyhow::Error::from)?;
+		if !value.is_array() {
+			return Err(FuncError::Generic("fromJsonArray requires an array".into()));
+		}
+		Ok(from_json(&value))
+	});
+	template.add_func("kindOf", |args| {
+		Ok(Arguments::kind(&Arguments::new(args, 1)?.0[0]).into())
+	});
+	template.add_func("kindIs", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok((args.text(0)? == Arguments::kind(&args.0[1])).into())
+	});
+	template.add_func("semverCompare", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(super::versions::Version::parse(args.text(1)?)?
+			.matches(args.text(0)?)?
+			.into())
+	});
+	template.add_func("semver", |args| {
+		let args = Arguments::new(args, 1)?;
+		Ok(from_json(
+			&super::versions::Version::parse(args.text(0)?)?.fields(),
+		))
+	});
+	template.add_func("lookup", |args| {
+		let args = Arguments::new(args, 4)?;
+		for index in 0..4 {
+			args.text(index)?;
+		}
+		Ok(from_json(&serde_json::json!({})))
+	});
+	template.add_func("fromYamlArray", |args| {
+		let args = Arguments::new(args, 1)?;
+		let value: serde_json::Value =
+			serde_saphyr::from_str(args.text(0)?).map_err(anyhow::Error::from)?;
+		if !value.is_array() {
+			return Err(FuncError::Generic("fromYamlArray requires an array".into()));
+		}
+		Ok(from_json(&value))
+	});
+	template.add_func("join", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(args.strings(1).join(args.text(0)?).into())
+	});
+	template.add_func("sortAlpha", |args| {
+		let args = Arguments::new(args, 1)?;
+		let mut strings = args.strings(0);
+		strings.sort();
+		Ok(Value::Array(strings.into_iter().map(Value::from).collect()))
+	});
+	template.add_func("splitList", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(Value::Array(
+			args.split(None)?.into_iter().map(Value::from).collect(),
+		))
+	});
+	template.add_func("split", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(Value::Map(
+			args.split(None)?
+				.into_iter()
+				.enumerate()
+				.map(|(index, value)| (format!("_{index}"), value.into()))
+				.collect(),
+		))
+	});
+	template.add_func("splitn", |args| {
+		let args = Arguments::new(args, 3)?;
+		let split =
+			Arguments(&[args.0[0].clone(), args.0[2].clone()]).split(Some(args.integer(1)?))?;
+		Ok(Value::Map(
+			split
+				.into_iter()
+				.enumerate()
+				.map(|(index, value)| (format!("_{index}"), value.into()))
+				.collect(),
+		))
+	});
+	template.add_func("substr", |args| {
+		let args = Arguments::new(args, 3)?;
+		let text = args.text(2)?;
+		let start = usize::try_from(args.integer(0)?.max(0))
+			.map_err(anyhow::Error::from)?
+			.min(text.len());
+		let end = args.integer(1)?;
+		let end = if end < 0 {
+			text.len()
+		} else {
+			usize::try_from(end)
+				.map_err(anyhow::Error::from)?
+				.min(text.len())
+		};
+		Ok(text
+			.get(start..end)
+			.ok_or_else(|| {
+				anyhow::anyhow!("substr has invalid bounds or splits a UTF-8 character")
+			})?
+			.into())
+	});
+	template.add_func("trimPrefix", |args| {
+		let args = Arguments::new(args, 2)?;
+		Ok(args
+			.text(1)?
+			.strip_prefix(args.text(0)?)
+			.unwrap_or(args.text(1)?)
+			.into())
+	});
+	template.add_func("trimAll", |args| {
+		let args = Arguments::new(args, 2)?;
+		let cutset = args.text(0)?;
+		Ok(args
+			.text(1)?
+			.trim_matches(|character| cutset.contains(character))
+			.into())
+	});
+	template.add_func("toDecimal", |args| {
+		let args = Arguments::new(args, 1)?;
+		Ok(i64::from_str_radix(&args.0[0].to_string(), 8)
+			.unwrap_or_default()
+			.into())
+	});
+	for name in ["toRawJson", "mustToRawJson"] {
+		template.add_func(name, |args| {
+			let args = Arguments::new(args, 1)?;
+			Ok(serde_json::to_string(&to_json(&args.0[0])?)
+				.map_err(anyhow::Error::from)?
+				.into())
+		});
+	}
+	template.add_func("mustToJson", |args| {
+		let args = Arguments::new(args, 1)?;
+		Ok(Arguments::json(&to_json(&args.0[0])?)?.into())
+	});
+	template.add_func("mustFromJson", |args| {
+		let args = Arguments::new(args, 1)?;
+		Ok(from_json(
+			&serde_json::from_str(args.text(0)?).map_err(anyhow::Error::from)?,
+		))
+	});
+	template.add_func("dig", |args| Ok(Arguments(args).dig()?.clone()));
+	for name in ["merge", "mustMerge"] {
+		template.add_func(name, |args| Ok(Arguments(args).merge(false)?));
+	}
+	for name in ["mergeOverwrite", "mustMergeOverwrite"] {
+		template.add_func(name, |args| Ok(Arguments(args).merge(true)?));
+	}
+	template.add_func("genPrivateKey", |args| {
+		let args = Arguments::new(args, 1)?;
+		Ok(super::crypto::Key::generate(args.text(0)?)?.into())
+	});
 	template.add_func("int", |args| {
 		Ok(Arguments::new(args, 1)?.cast_integer(0).into())
 	});
@@ -37,8 +205,13 @@ pub(super) fn install(template: &mut Template) {
 		Ok(Scope::render("__rtk_tpl", args.0[1].clone(), Some(args.text(0)?))?.into())
 	});
 	template.add_func("default", |args| {
-		let args = Arguments::new(args, 2)?;
-		Ok(if Arguments::empty(&args.0[1]) {
+		if args.is_empty() {
+			return Err(FuncError::Generic(
+				"default requires a default value".into(),
+			));
+		}
+		let args = Arguments(args);
+		Ok(if args.0.len() == 1 || Arguments::empty(&args.0[1]) {
 			&args.0[0]
 		} else {
 			&args.0[1]
@@ -130,11 +303,8 @@ pub(super) fn install(template: &mut Template) {
 		Ok(from_json(&value))
 	});
 	template.add_func("toJson", |args| {
-		Ok(
-			serde_json::to_string(&to_json(&Arguments::new(args, 1)?.0[0])?)
-				.map_err(anyhow::Error::from)?
-				.into(),
-		)
+		let args = Arguments::new(args, 1)?;
+		Ok(Arguments::json(&to_json(&args.0[0])?)?.into())
 	});
 	template.add_func("fromJson", |args| {
 		Ok(from_json(
@@ -161,6 +331,20 @@ pub(super) fn install(template: &mut Template) {
 
 struct Arguments<'a>(&'a [Value]);
 impl<'a> Arguments<'a> {
+	fn kind(value: &Value) -> &'static str {
+		match value {
+			Value::Nil | Value::NoValue => "invalid",
+			Value::Bool(_) => "bool",
+			Value::String(_) => "string",
+			Value::Array(_) => "slice",
+			Value::Map(_) | Value::Object(_) => "map",
+			Value::Function(_) => "func",
+			Value::Number(number) if number.as_i64().is_some() => "int64",
+			Value::Number(number) if number.as_u64().is_some() => "uint64",
+			Value::Number(_) => "float64",
+		}
+	}
+
 	fn new(values: &'a [Value], count: usize) -> Result<Self> {
 		ensure!(
 			values.len() == count,
@@ -168,6 +352,110 @@ impl<'a> Arguments<'a> {
 			values.len()
 		);
 		Ok(Self(values))
+	}
+
+	fn dig(&self) -> Result<&Value> {
+		ensure!(
+			self.0.len() >= 3,
+			"dig requires keys, a default and a dictionary"
+		);
+		let default = &self.0[self.0.len() - 2];
+		let mut current = &self.0[self.0.len() - 1];
+		for key in &self.0[..self.0.len() - 2] {
+			let Value::String(key) = key else {
+				bail!("dig keys must be strings");
+			};
+			let (Value::Map(map) | Value::Object(map)) = current else {
+				bail!("dig requires a dictionary");
+			};
+			let Some(value) = map.get(key) else {
+				return Ok(default);
+			};
+			current = value;
+		}
+		Ok(current)
+	}
+	fn merge(&self, overwrite: bool) -> Result<Value> {
+		ensure!(
+			!self.0.is_empty(),
+			"merge requires a destination dictionary"
+		);
+		let mut values = to_json(&self.0[0])?;
+		ensure!(values.is_object(), "merge requires dictionaries");
+		for source in &self.0[1..] {
+			let source = to_json(source)?;
+			ensure!(source.is_object(), "merge requires dictionaries");
+			Self::merge_maps(&mut values, &source, overwrite);
+		}
+		Ok(from_json(&values))
+	}
+	fn merge_maps(
+		destination: &mut serde_json::Value,
+		source: &serde_json::Value,
+		overwrite: bool,
+	) {
+		if let (Some(destination), Some(source)) = (destination.as_object_mut(), source.as_object())
+		{
+			for (key, value) in source {
+				match destination.get_mut(key) {
+					Some(existing) if existing.is_object() && value.is_object() => {
+						Self::merge_maps(existing, value, overwrite);
+					}
+					Some(existing) if overwrite || existing.is_null() => *existing = value.clone(),
+					Some(_) => {}
+					None => {
+						destination.insert(key.clone(), value.clone());
+					}
+				}
+			}
+		}
+	}
+
+	fn strings(&self, index: usize) -> Vec<String> {
+		match &self.0[index] {
+			Value::Array(values) => values
+				.iter()
+				.filter(|value| !matches!(value, Value::Nil | Value::NoValue))
+				.map(ToString::to_string)
+				.collect(),
+			Value::Nil | Value::NoValue => Vec::new(),
+			value => vec![value.to_string()],
+		}
+	}
+	fn split(&self, count: Option<i64>) -> Result<Vec<String>> {
+		let separator = self.text(0)?;
+		let text = self.text(1)?;
+		if count == Some(0) {
+			return Ok(Vec::new());
+		}
+		if separator.is_empty() {
+			let mut values: Vec<_> = text
+				.chars()
+				.map(|character| character.to_string())
+				.collect();
+			if let Some(count) = count.filter(|count| *count > 0)
+				&& usize::try_from(count)? < values.len()
+			{
+				let remainder = values.split_off(usize::try_from(count - 1)?).join("");
+				values.push(remainder);
+			}
+			return Ok(values);
+		}
+		Ok(match count.filter(|count| *count > 0) {
+			Some(count) => text
+				.splitn(usize::try_from(count)?, separator)
+				.map(str::to_owned)
+				.collect(),
+			None => text.split(separator).map(str::to_owned).collect(),
+		})
+	}
+	fn json(value: &serde_json::Value) -> Result<String> {
+		Ok(serde_json::to_string(value)?
+			.replace('&', "\\u0026")
+			.replace('<', "\\u003c")
+			.replace('>', "\\u003e")
+			.replace('\u{2028}', "\\u2028")
+			.replace('\u{2029}', "\\u2029"))
 	}
 
 	fn text(&self, index: usize) -> Result<&str> {

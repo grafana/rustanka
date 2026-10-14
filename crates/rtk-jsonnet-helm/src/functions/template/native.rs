@@ -11,40 +11,125 @@ use serde_json::{Value as Json, json};
 
 use super::{Options, name_documents};
 
+mod crypto;
 mod functions;
 mod ignore;
+mod methods;
+mod versions;
 
+#[derive(Clone)]
 pub(super) struct Chart {
 	metadata: Json,
 	values: Json,
-	templates: Rc<Sources>,
+	templates: Vec<(String, String)>,
+	files: std::collections::BTreeMap<String, Vec<u8>>,
+	schema: Option<Json>,
 	crds: Vec<String>,
+	dependencies: Vec<Self>,
 }
 
 impl Chart {
 	pub(super) fn load(path: &Path) -> Result<Self> {
-		ensure!(path.is_dir(), "only unpacked local charts are supported");
-		let rules = ignore::Rules::load(path)?;
-		ensure!(
-			!path.join("values.schema.json").exists() || rules.ignores("values.schema.json", false),
-			"values.schema.json is not supported"
-		);
-		if path.join("charts").exists() {
-			for entry in rules.walk(path, "charts") {
+		let files = if path.is_dir() {
+			let rules = ignore::Rules::load(path)?;
+			let mut files = std::collections::BTreeMap::new();
+			for entry in rules.walk(path, "") {
+				let entry = entry?;
 				ensure!(
-					entry?.path() == path.join("charts"),
-					"subcharts are not supported"
+					!entry.file_type().is_symlink(),
+					"chart symlinks are not supported: {}",
+					entry.path().display()
 				);
+				if entry.file_type().is_file() {
+					let name = entry
+						.path()
+						.strip_prefix(path)?
+						.to_str()
+						.context("non-UTF-8 chart path")?
+						.replace(std::path::MAIN_SEPARATOR, "/");
+					files.insert(name, fs::read(entry.path())?);
+				}
 			}
+			files
+		} else {
+			Self::archive(&fs::read(path).with_context(|| format!("reading {}", path.display()))?)?
+		};
+		Self::from_files(files)
+	}
+
+	fn archive(bytes: &[u8]) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
+		use std::io::Read as _;
+		let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+		let mut files = std::collections::BTreeMap::new();
+		let mut root = None;
+		let mut total = 0_u64;
+		for entry in archive.entries()? {
+			let mut entry = entry?;
+			let path = entry.path()?.into_owned();
+			ensure!(
+				path.components()
+					.all(|part| matches!(part, std::path::Component::Normal(_))),
+				"invalid chart archive path: {}",
+				path.display()
+			);
+			if entry.header().entry_type().is_dir() {
+				continue;
+			}
+			ensure!(
+				entry.header().entry_type().is_file(),
+				"chart archive contains a non-regular file: {}",
+				path.display()
+			);
+			let path = path.to_str().context("non-UTF-8 chart archive path")?;
+			let (prefix, name) = path
+				.split_once('/')
+				.context("chart archive has no root directory")?;
+			if let Some(root) = &root {
+				ensure!(root == prefix, "chart archive contains multiple roots");
+			} else {
+				root = Some(prefix.to_owned());
+			}
+			let size = entry.size();
+			ensure!(
+				size <= 5 * 1024 * 1024,
+				"chart archive file exceeds 5 MiB: {name}"
+			);
+			total = total
+				.checked_add(size)
+				.context("chart archive size overflow")?;
+			ensure!(total <= 100 * 1024 * 1024, "chart archive exceeds 100 MiB");
+			let mut content = Vec::new();
+			entry.read_to_end(&mut content)?;
+			ensure!(
+				files.insert(name.to_owned(), content).is_none(),
+				"duplicate chart archive file: {name}"
+			);
+		}
+		Ok(files)
+	}
+
+	fn yaml(bytes: &[u8]) -> Result<Json> {
+		let source = std::str::from_utf8(bytes)?.trim_start_matches('\u{feff}');
+		serde_saphyr::from_str_with_options(
+			source,
+			serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
+		)
+		.map_err(Into::into)
+	}
+
+	fn from_files(mut files: std::collections::BTreeMap<String, Vec<u8>>) -> Result<Self> {
+		let mut metadata = Self::yaml(
+			&files
+				.remove("Chart.yaml")
+				.context("Chart.yaml is required")?,
+		)?;
+		ensure!(metadata.is_object(), "Chart.yaml must contain a mapping");
+		if metadata["apiVersion"].is_null() {
+			metadata["apiVersion"] = json!("v1");
 		}
 		ensure!(
-			!rules.ignores("Chart.yaml", false),
-			"Chart.yaml is required"
-		);
-		let metadata = Self::read_yaml(&path.join("Chart.yaml"))?;
-		ensure!(
-			metadata["apiVersion"] == "v2",
-			"only apiVersion v2 charts are supported"
+			matches!(metadata["apiVersion"].as_str(), Some("v1" | "v2")),
+			"Chart.yaml apiVersion must be v1 or v2"
 		);
 		ensure!(
 			metadata["name"]
@@ -57,113 +142,340 @@ impl Chart {
 			"Chart.yaml needs a version"
 		);
 		ensure!(
-			metadata["type"].is_null() || metadata["type"] == "application",
-			"only application charts are supported"
+			metadata["type"].is_null()
+				|| matches!(metadata["type"].as_str(), Some("application" | "library")),
+			"invalid chart type"
 		);
-		ensure!(
-			metadata["dependencies"].is_null() || metadata["dependencies"] == json!([]),
-			"chart dependencies are not supported"
-		);
-		let values = if path.join("values.yaml").exists() && !rules.ignores("values.yaml", false) {
-			Self::read_yaml(&path.join("values.yaml"))?
-		} else {
-			json!({})
-		};
+		if metadata["apiVersion"] == "v1"
+			&& let Some(requirements) = files.remove("requirements.yaml")
+		{
+			metadata["dependencies"] = Self::yaml(&requirements)?["dependencies"].clone();
+		}
+		let values = files
+			.remove("values.yaml")
+			.map(|source| Self::yaml(&source))
+			.transpose()?
+			.filter(|value| !value.is_null())
+			.unwrap_or_else(|| json!({}));
 		ensure!(values.is_object(), "values.yaml must contain a mapping");
-		let templates = Rc::new(Sources(Self::read_directory(path, "templates", &rules)?));
-		let crds = Self::read_directory(path, "crds", &rules)?
-			.into_iter()
-			.filter(|(name, _)| {
-				matches!(
-					Path::new(name)
-						.extension()
-						.and_then(|extension| extension.to_str()),
-					Some("yaml" | "yml" | "json")
-				)
-			})
-			.map(|(_, content)| content)
-			.collect();
+		let schema = files
+			.remove("values.schema.json")
+			.map(|source| serde_json::from_slice(&source))
+			.transpose()?;
+		let mut templates = Vec::new();
+		let mut crds = Vec::new();
+		let mut children =
+			std::collections::BTreeMap::<String, std::collections::BTreeMap<String, Vec<u8>>>::new(
+			);
+		let mut dependencies = Vec::new();
+		let mut ordinary_files = std::collections::BTreeMap::new();
+		for (name, source) in files {
+			if let Some(rest) = name.strip_prefix("charts/") {
+				let child_name = rest.split('/').next().unwrap();
+				if child_name.starts_with(['.', '_']) {
+					continue;
+				}
+				if let Some((child, path)) = rest.split_once('/') {
+					children
+						.entry(child.to_owned())
+						.or_default()
+						.insert(path.to_owned(), source);
+				} else if Path::new(rest)
+					.extension()
+					.is_some_and(|extension| extension == "tgz")
+				{
+					dependencies.push(Self::from_files(Self::archive(&source)?)?);
+				}
+			} else if name.starts_with("templates/") {
+				templates.push((
+					name,
+					std::str::from_utf8(&source)?
+						.trim_start_matches('\u{feff}')
+						.to_owned(),
+				));
+			} else {
+				if name.starts_with("crds/")
+					&& matches!(
+						Path::new(&name)
+							.extension()
+							.and_then(|extension| extension.to_str()),
+						Some("yaml" | "yml" | "json")
+					) {
+					crds.push(
+						std::str::from_utf8(&source)?
+							.trim_start_matches('\u{feff}')
+							.to_owned(),
+					);
+				}
+				ordinary_files.insert(name, source);
+			}
+		}
+		for (_, files) in children {
+			dependencies.push(Self::from_files(files)?);
+		}
 		Ok(Self {
 			metadata,
 			values,
 			templates,
+			files: ordinary_files,
+			schema,
 			crds,
+			dependencies,
 		})
 	}
 
-	fn read_yaml(path: &Path) -> Result<Json> {
-		let source =
-			fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-		serde_saphyr::from_str_with_options(
-			&source,
-			serde_saphyr::options! { legacy_octal_numbers: true },
-		)
-		.with_context(|| format!("parsing {}", path.display()))
+	fn name(&self) -> &str {
+		self.metadata["name"].as_str().unwrap()
+	}
+	fn library(&self) -> bool {
+		self.metadata["type"] == "library"
 	}
 
-	fn read_directory(
-		root: &Path,
-		directory: &str,
-		rules: &ignore::Rules,
-	) -> Result<Vec<(String, String)>> {
-		let path = root.join(directory);
-		if !path.exists() {
-			return Ok(Vec::new());
+	fn resolve_dependencies(&mut self) -> Result<()> {
+		let definitions = self.metadata["dependencies"]
+			.as_array()
+			.cloned()
+			.unwrap_or_default();
+		if !definitions.is_empty() {
+			let mut dependencies: Vec<_> = self
+				.dependencies
+				.iter()
+				.filter(|child| {
+					!definitions
+						.iter()
+						.any(|definition| definition["name"].as_str() == Some(child.name()))
+				})
+				.cloned()
+				.collect();
+			for definition in definitions {
+				let name = definition["name"]
+					.as_str()
+					.context("dependency needs a name")?;
+				let mut child = self
+					.dependencies
+					.iter()
+					.find(|child| child.name() == name)
+					.cloned()
+					.with_context(|| format!("missing chart dependency {name}"))?;
+				if let Some(alias) = definition["alias"]
+					.as_str()
+					.filter(|alias| !alias.is_empty())
+				{
+					ensure!(
+						alias
+							.chars()
+							.all(|character| character.is_ascii_alphanumeric()
+								|| character == '_' || character == '-'),
+						"invalid dependency alias {alias}"
+					);
+					child.metadata["name"] = json!(alias);
+				}
+				dependencies.push(child);
+			}
+			self.dependencies = dependencies;
 		}
-		let mut files = Vec::new();
-		for entry in rules.walk(root, directory) {
-			let entry = entry?;
+		for child in &mut self.dependencies {
+			child.resolve_dependencies()?;
+		}
+		Ok(())
+	}
+
+	fn coalesce(&mut self, overrides: &Json, globals: Option<&Json>) -> Result<()> {
+		let mut overrides = overrides.clone();
+		ensure!(overrides.is_object(), "chart values must contain a mapping");
+		if let Some(globals) = globals.filter(|globals| globals.is_object()) {
+			let mut merged = overrides
+				.get("global")
+				.filter(|value| value.is_object())
+				.cloned()
+				.unwrap_or_else(|| json!({}));
+			merge(&mut merged, globals);
+			overrides["global"] = merged;
+		}
+		let children: std::collections::BTreeSet<_> = self
+			.dependencies
+			.iter()
+			.map(|child| child.name().to_owned())
+			.collect();
+		Self::merge_values(&mut self.values, &overrides, &children, false);
+		let globals = self
+			.values
+			.get("global")
+			.cloned()
+			.unwrap_or_else(|| json!({}));
+		for child in &mut self.dependencies {
+			let overrides = self
+				.values
+				.get(child.name())
+				.cloned()
+				.unwrap_or_else(|| json!({}));
+			child.coalesce(&overrides, Some(&globals))?;
+			self.values[child.name()] = child.values.clone();
+		}
+		let definitions = self.metadata["dependencies"]
+			.as_array()
+			.cloned()
+			.unwrap_or_default();
+		self.dependencies.retain(|child| {
+			let definition = definitions.iter().find(|definition| {
+				definition["alias"]
+					.as_str()
+					.filter(|alias| !alias.is_empty())
+					.or_else(|| definition["name"].as_str())
+					== Some(child.name())
+			});
+			let Some(definition) = definition else {
+				return true;
+			};
+			let mut enabled = true;
+			if let Some(tags) = definition["tags"].as_array() {
+				let states: Vec<_> = tags
+					.iter()
+					.filter_map(|tag| self.values.get("tags")?.get(tag.as_str()?)?.as_bool())
+					.collect();
+				if states.contains(&true) {
+					enabled = true;
+				} else if states.contains(&false) {
+					enabled = false;
+				}
+			}
+			if let Some(condition) = definition["condition"].as_str() {
+				for path in condition.split(',') {
+					if let Some(value) = Self::value_at(&self.values, path).and_then(Json::as_bool)
+					{
+						enabled = value;
+						break;
+					}
+				}
+			}
+			enabled
+		});
+		for definition in definitions {
+			let name = definition["alias"]
+				.as_str()
+				.filter(|alias| !alias.is_empty())
+				.or_else(|| definition["name"].as_str())
+				.unwrap_or_default();
+			let Some(child) = self.dependencies.iter().find(|child| child.name() == name) else {
+				continue;
+			};
+			let mut imports = json!({});
+			for import in definition["import-values"].as_array().into_iter().flatten() {
+				let (source, destination) = if let Some(key) = import.as_str() {
+					(format!("exports.{key}"), String::new())
+				} else {
+					(
+						import["child"].as_str().unwrap_or_default().to_owned(),
+						import["parent"].as_str().unwrap_or_default().to_owned(),
+					)
+				};
+				if let Some(value) =
+					Self::value_at(&child.values, &source).filter(|value| value.is_object())
+				{
+					let mut imported = value.clone();
+					for part in destination.split('.').filter(|part| !part.is_empty()).rev() {
+						imported = json!({part: imported});
+					}
+					merge(&mut imports, &imported);
+				}
+			}
+			merge(&mut imports, &self.values);
+			self.values = imports;
+		}
+		Ok(())
+	}
+
+	fn merge_values(
+		base: &mut Json,
+		overrides: &Json,
+		children: &std::collections::BTreeSet<String>,
+		preserve_null: bool,
+	) {
+		if let (Some(base), Some(overrides)) = (base.as_object_mut(), overrides.as_object()) {
+			for (key, value) in overrides {
+				if value.is_null() && base.contains_key(key) && !preserve_null {
+					base.remove(key);
+				} else {
+					Self::merge_values(
+						base.entry(key.clone()).or_insert(Json::Null),
+						value,
+						&std::collections::BTreeSet::new(),
+						preserve_null || children.contains(key),
+					);
+				}
+			}
+		} else {
+			*base = overrides.clone();
+		}
+	}
+
+	fn value_at<'a>(values: &'a Json, path: &str) -> Option<&'a Json> {
+		path.split('.')
+			.filter(|part| !part.is_empty())
+			.try_fold(values, |value, part| value.get(part))
+	}
+
+	fn validate(&self) -> Result<()> {
+		if let Some(schema) = &self.schema {
+			let draft = match schema["$schema"].as_str() {
+				Some(value) if value.contains("draft-04") => jsonschema::Draft::Draft4,
+				Some(value) if value.contains("draft-06") => jsonschema::Draft::Draft6,
+				_ => jsonschema::Draft::Draft7,
+			};
+			let validator = jsonschema::options()
+				.with_draft(draft)
+				.should_validate_formats(true)
+				.build(schema)
+				.with_context(|| format!("invalid values schema for {}", self.name()))?;
+			let errors: Vec<_> = validator
+				.iter_errors(&self.values)
+				.map(|error| error.to_string())
+				.collect();
 			ensure!(
-				!entry.file_type().is_symlink(),
-				"chart symlinks are not supported: {}",
-				entry.path().display()
+				errors.is_empty(),
+				"values do not meet the schema for {}: {}",
+				self.name(),
+				errors.join("; ")
 			);
-			if entry.file_type().is_file() {
-				let name = entry
-					.path()
-					.strip_prefix(root)?
-					.to_str()
-					.context("non-UTF-8 template path")?
-					.replace(std::path::MAIN_SEPARATOR, "/");
-				files.push((name, fs::read_to_string(entry.path())?));
+		}
+		for child in &self.dependencies {
+			child.validate()?;
+		}
+		Ok(())
+	}
+
+	fn sources(&self, path: &str, sources: &mut Sources) {
+		sources.files.insert(path.to_owned(), self.files.clone());
+		for (name, content) in &self.templates {
+			if !self.library()
+				|| Path::new(name)
+					.file_name()
+					.unwrap()
+					.to_string_lossy()
+					.starts_with('_')
+			{
+				sources
+					.templates
+					.push((format!("{path}/{name}"), content.clone()));
 			}
 		}
-		Ok(files)
+		for child in &self.dependencies {
+			child.sources(&format!("{path}/charts/{}", child.name()), sources);
+		}
 	}
 
-	pub(super) fn render(mut self, release: &str, options: &Options) -> Result<Json> {
-		ensure!(
-			options.api_versions.is_empty(),
-			"apiVersions and .Capabilities are not supported"
-		);
-		let namespace = options
-			.namespace
-			.as_deref()
-			.filter(|namespace| !namespace.is_empty())
-			.context(
-				"an explicit namespace is required (kubeconfig resolution is not supported)",
-			)?;
-		ensure!(
-			!release.is_empty()
-				&& release.len() <= 53
-				&& release.split('.').all(|part| {
-					!part.is_empty()
-						&& part.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-						&& part.ends_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-						&& part
-							.chars()
-							.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-				}),
-			"invalid release name {release:?}"
-		);
-		if let Some(overrides) = &options.values {
-			ensure!(overrides.is_object(), "values must contain a mapping");
-			self.merge_values(overrides);
-		}
-		let chart = self
+	fn context(
+		&self,
+		path: &str,
+		release: &str,
+		namespace: &str,
+		capabilities: &Json,
+		is_root: bool,
+	) -> Json {
+		let mut metadata = self
 			.metadata
 			.as_object()
-			.context("invalid Chart.yaml")?
+			.unwrap()
 			.iter()
 			.map(|(key, value)| {
 				let name = match key.as_str() {
@@ -171,52 +483,132 @@ impl Chart {
 					"appVersion" => "AppVersion".to_owned(),
 					_ => {
 						let mut chars = key.chars();
-						chars.next().map_or_else(String::new, |c| {
-							c.to_uppercase().collect::<String>() + chars.as_str()
+						chars.next().map_or_else(String::new, |character| {
+							character.to_uppercase().collect::<String>() + chars.as_str()
 						})
 					}
 				};
 				(name, value.clone())
 			})
 			.collect::<serde_json::Map<_, _>>();
-		let mut context = json!({
-			"Release": { "Name": release, "Namespace": namespace, "Service": "Helm", "IsInstall": true, "IsUpgrade": false, "Revision": 1 },
-			"Chart": chart,
-			"Values": self.values,
-		});
-		let _scope = Scope::enter(Rc::clone(&self.templates))?;
-		let mut documents = Vec::new();
+		metadata.insert("IsRoot".to_owned(), json!(is_root));
+		let subcharts = self
+			.dependencies
+			.iter()
+			.map(|child| {
+				(
+					child.name().to_owned(),
+					child.context(
+						&format!("{path}/charts/{}", child.name()),
+						release,
+						namespace,
+						capabilities,
+						false,
+					),
+				)
+			})
+			.collect::<serde_json::Map<_, _>>();
+		json!({"Release": {"Name": release, "Namespace": namespace, "Service": "Helm", "IsInstall": true, "IsUpgrade": false, "Revision": 1}, "Chart": metadata, "Values": self.values, "Capabilities": capabilities, "Subcharts": subcharts, "Template": {"Name": "", "BasePath": format!("{path}/templates")}})
+	}
+
+	fn render_into(
+		&self,
+		path: &str,
+		release: &str,
+		options: &Options,
+		sources: &Rc<Sources>,
+		output: &mut Vec<Json>,
+		is_root: bool,
+	) -> Result<()> {
+		for child in &self.dependencies {
+			child.render_into(
+				&format!("{path}/charts/{}", child.name()),
+				release,
+				options,
+				sources,
+				output,
+				false,
+			)?;
+		}
 		if options.include_crds {
 			for crd in &self.crds {
-				Self::documents(crd, false, &mut documents)?;
+				Self::documents(crd, false, output)?;
 			}
 		}
-		for (name, _) in &self.templates.0 {
-			let filename = name.rsplit('/').next().unwrap_or(name);
+		if self.library() {
+			return Ok(());
+		}
+		let mut context = self.context(
+			path,
+			release,
+			options.namespace.as_deref().unwrap(),
+			&sources.capabilities,
+			is_root,
+		);
+		for (name, _) in &self.templates {
+			let filename = name.rsplit('/').next().unwrap();
 			if filename.starts_with('_') || filename == "NOTES.txt" {
 				continue;
 			}
-			context["Template"] = json!({"Name": format!("{}/{}", self.metadata["name"].as_str().unwrap(), name), "BasePath": format!("{}/templates", self.metadata["name"].as_str().unwrap())});
-			let Value::Map(root) = from_json(&context) else {
-				unreachable!()
-			};
-			let rendered = self
-				.templates
-				.render(name, Value::Object(root), None)
-				.with_context(|| format!("rendering {name}"))?;
-			Self::documents(&rendered, options.no_hooks, &mut documents)?;
+			let full_name = format!("{path}/{name}");
+			context["Template"]["Name"] = json!(full_name);
+			let context = sources.context(from_json(&context));
+			let _scope = Scope::enter(Rc::clone(sources))?;
+			let rendered = sources
+				.render(&full_name, context, None)
+				.with_context(|| format!("rendering {full_name}"))?;
+			Self::documents(
+				&rendered.replace("<no value>", ""),
+				options.no_hooks,
+				output,
+			)?;
 		}
+		Ok(())
+	}
+
+	pub(super) fn render(mut self, release: &str, options: &Options) -> Result<Json> {
+		ensure!(
+			options
+				.namespace
+				.as_deref()
+				.is_some_and(|namespace| !namespace.is_empty()),
+			"an explicit namespace is required (kubeconfig resolution is not supported)"
+		);
+		ensure!(
+			!self.library(),
+			"library charts cannot be rendered directly"
+		);
+		super::validate_release_name(release).map_err(anyhow::Error::msg)?;
+		self.resolve_dependencies()?;
+		self.coalesce(options.values.as_ref().unwrap_or(&json!({})), None)?;
+		self.validate()?;
+		let mut sources = Sources::new(&options.api_versions)?;
+		self.sources(self.name(), &mut sources);
+		// Helm parses deeper charts first, so a parent's helpers take precedence.
+		sources.templates.sort_by(|(a, _), (b, _)| {
+			b.matches('/')
+				.count()
+				.cmp(&a.matches('/').count())
+				.then_with(|| b.cmp(a))
+		});
+		let sources = Rc::new(sources);
+		let mut documents = Vec::new();
+		self.render_into(
+			self.name(),
+			release,
+			options,
+			&sources,
+			&mut documents,
+			true,
+		)?;
 		Ok(name_documents(documents, options.name_format.as_deref()))
 	}
 
-	fn merge_values(&mut self, overrides: &Json) {
-		merge(&mut self.values, overrides);
-	}
-
 	fn documents(source: &str, no_hooks: bool, output: &mut Vec<Json>) -> Result<()> {
+		let source = super::normalize_helm_multiline_quotes(source);
 		let documents: Vec<Json> = serde_saphyr::from_multiple_with_options(
-			source,
-			serde_saphyr::options! { legacy_octal_numbers: true },
+			&source,
+			serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
 		)?;
 		for document in documents {
 			if document.is_null() {
@@ -250,24 +642,95 @@ fn merge(base: &mut Json, overrides: &Json) {
 	}
 }
 
-struct Sources(Vec<(String, String)>);
+struct Sources {
+	templates: Vec<(String, String)>,
+	files: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<u8>>>,
+	capabilities: Json,
+}
 
 impl Sources {
+	fn new(extra_versions: &[String]) -> Result<Self> {
+		let mut capabilities: Json =
+			serde_json::from_str(include_str!("native/capabilities.json"))?;
+		let mut api_versions: Vec<_> = capabilities["APIVersions"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|value| value.as_str().unwrap().to_owned())
+			.collect();
+		api_versions.extend_from_slice(extra_versions);
+		capabilities["APIVersions"] = json!(api_versions);
+		let helm = capabilities["HelmVersion"].clone();
+		capabilities["HelmVersion"] = json!({"Version": helm["version"], "GitCommit": helm["git_commit"], "GitTreeState": helm["git_tree_state"], "GoVersion": helm["go_version"], "KubeClientVersion": helm["kube_client_version"]});
+		Ok(Self {
+			templates: Vec::new(),
+			files: std::collections::BTreeMap::new(),
+			capabilities,
+		})
+	}
+
+	fn context(&self, mut context: Value) -> Value {
+		let Value::Map(ref mut root) = context else {
+			return context;
+		};
+		if let Some(Value::Map(subcharts)) = root.get_mut("Subcharts") {
+			for child in subcharts.values_mut() {
+				*child = self.context(child.clone());
+			}
+		}
+		let path = match root.get("Template") {
+			Some(Value::Map(template)) => template.get("BasePath").and_then(|value| {
+				if let Value::String(text) = value {
+					text.strip_suffix("/templates")
+				} else {
+					None
+				}
+			}),
+			_ => None,
+		};
+		let files = path
+			.and_then(|path| self.files.get(path))
+			.map(|files| {
+				files
+					.iter()
+					.map(|(name, bytes)| {
+						(
+							name.clone(),
+							Value::Array(bytes.iter().copied().map(Value::from).collect()),
+						)
+					})
+					.collect()
+			})
+			.unwrap_or_default();
+		root.insert("Files".into(), Value::Map(files));
+		if let Some(Value::Map(capabilities)) = root.get_mut("Capabilities")
+			&& let Some(Value::Map(version)) = capabilities.get_mut("KubeVersion")
+		{
+			version.insert("GitVersion".into(), version["Version"].clone());
+		}
+		let Value::Map(root) = context else {
+			unreachable!();
+		};
+		Value::Object(root)
+	}
+
 	fn render(&self, name: &str, context: Value, dynamic: Option<&str>) -> Result<String> {
 		let mut template = Template::with_name(name);
+		// Helper arguments can include the complete byte-backed Files catalog.
+		template.limits.function_output = Some(64 * 1024 * 1024);
 		functions::install(&mut template);
-		for (name, source) in &self.0 {
-			template.add_template(name, source)?;
+		for (name, source) in &self.templates {
+			template.add_template(name, methods::Actions::rewrite(source))?;
 		}
 		if let Some(source) = dynamic {
-			template.parse(source)?;
+			template.parse(methods::Actions::rewrite(source))?;
 		}
 		Ok(template.render(&Context::from(context))?)
 	}
 }
 
 thread_local! {
-	// gtmpl callbacks are function pointers, so nested include/tpl calls need a scoped chart context.
+	// include/tpl callbacks need the same parsed chart sources across nested calls.
 	static SCOPES: RefCell<Vec<Rc<Sources>>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -280,7 +743,6 @@ impl Scope {
 			Ok(Self)
 		})
 	}
-
 	fn render(name: &str, context: Value, dynamic: Option<&str>) -> Result<String> {
 		let sources = SCOPES
 			.with_borrow(|scopes| scopes.last().cloned())

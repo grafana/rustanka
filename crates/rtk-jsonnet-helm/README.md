@@ -21,13 +21,16 @@ No automatic fallback occurs on errors.
 
 ## Supported experiment
 
-- Unpacked, local `apiVersion: v2` application charts.
+- Local directories and gzip chart archives, with v1/v2 application and library dependencies.
+- Dependency aliases, globals, conditions, tags and imported values.
+- Values schema validation (JSON Schema drafts 4, 6 and 7).
 - Default values with recursive object overrides, array replacement and null deletion.
-- `.Release`, `.Chart`, `.Values` and `.Template` context.
+- `.Release`, `.Chart`, `.Values`, `.Template`, `.Subcharts`, `.Files` and `.Capabilities` context.
+- File access, globbing, config/secret rendering and explicit API version additions.
 - Named templates, `include`, `tpl`, conditionals, variables, pipelines and array iteration.
-- `default`, `required`, `fail`, `empty`, `quote`, `upper`, `lower`, `trim`,
-  `trimSuffix`, `trunc`, `indent`, `nindent`, `toYaml`, `fromYaml`, `toJson`,
-  `fromJson`, `dict`, `list`, `sha256sum`, `int`, `until` and `add`, plus gtmpl's built-ins.
+- Sprig functions from gtmpl's Helm feature, with Helm-compatible adapters for
+  dictionaries, strings, JSON/YAML conversion, semantic versions and private keys.
+- Offline `lookup` returns an empty dictionary, as `helm template` does.
 - CRD inclusion, hook exclusion and Tanka manifest naming.
 - Helm-compatible `.helmignore` rules and default exclusion of dotfiles in `templates/`.
 
@@ -41,13 +44,13 @@ major version.
 This is a prototype, not a drop-in replacement for Helm. The test corpus is
 small, and successful rendering does not establish parity for other charts.
 
-Archives, subcharts, dependencies, library charts, schema
-validation and explicit `apiVersions` are rejected. `.Capabilities`, `.Files`,
-`lookup`, and unregistered Sprig functions are unavailable. Chart metadata is
+Default capabilities are pinned to the checked-in Helm capability snapshot.
+Live cluster lookups and unregistered functions are unavailable. Dictionary mutation
+through aliases does not reproduce Go template reference semantics. Chart metadata is
 exposed with its top-level Go-style field names; nested metadata is not fully
 modeled.
 
-Go formatting, missing values, JSON escaping,
+Go formatting, missing values,
 YAML formatting and conversion error behavior are not fully compatible. In
 particular, `fromYaml` accepts mappings only and conversion failures are errors.
 `until` is limited to one million elements.
