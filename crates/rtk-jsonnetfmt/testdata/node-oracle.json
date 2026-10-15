@@ -179141,7 +179141,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "justBelowMillion",
+          "id": "activeSeriesLimit",
           "superSugar": "false"
         },
         "slots": [
@@ -179151,6 +179151,123 @@
               {
                 "kind": "LineEnd",
                 "blanks": 1,
+                "indent": 4
+              },
+              {
+                "kind": "Paragraph",
+                "blanks": 0,
+                "indent": 4,
+                "comment": [
+                  "// Direct manifest scalars use Go formatting independently of embedded YAML."
+                ]
+              }
+            ]
+          },
+          {
+            "name": "Fodder2"
+          },
+          {
+            "name": "OpFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Method",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr1",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr2",
+        "kind": "Binary",
+        "attrs": {
+          "op": "/"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "OpFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr2.Left",
+        "kind": "Binary",
+        "attrs": {
+          "op": "*"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "OpFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr2.Left.Left",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "40000000"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr2.Left.Right",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "2"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr2.Right",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "3"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[6].Expr3",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[7]",
+        "kind": "ObjectField",
+        "attrs": {
+          "fieldKind": "ObjectFieldID",
+          "hide": "Inherit",
+          "id": "justBelowMillion",
+          "superSugar": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder1",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 2,
                 "indent": 4
               },
               {
@@ -179183,61 +179300,6 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[6].Method",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[6].Expr1",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[6].Expr2",
-        "kind": "LiteralNumber",
-        "attrs": {
-          "originalString": "999999"
-        },
-        "slots": [
-          {
-            "name": "Fodder"
-          }
-        ]
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[6].Expr3",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[7]",
-        "kind": "ObjectField",
-        "attrs": {
-          "fieldKind": "ObjectFieldID",
-          "hide": "Inherit",
-          "id": "million",
-          "superSugar": "false"
-        },
-        "slots": [
-          {
-            "name": "Fodder1",
-            "fodder": [
-              {
-                "kind": "LineEnd",
-                "blanks": 0,
-                "indent": 4
-              }
-            ]
-          },
-          {
-            "name": "Fodder2"
-          },
-          {
-            "name": "OpFodder"
-          },
-          {
-            "name": "CommaFodder"
-          }
-        ]
-      },
-      {
         "path": "$.Fields[3].Expr2.Fields[7].Method",
         "kind": "\u003cnil\u003e"
       },
@@ -179249,7 +179311,7 @@
         "path": "$.Fields[3].Expr2.Fields[7].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "1000000"
+          "originalString": "999999"
         },
         "slots": [
           {
@@ -179267,7 +179329,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "justAboveMillion",
+          "id": "million",
           "superSugar": "false"
         },
         "slots": [
@@ -179304,7 +179366,7 @@
         "path": "$.Fields[3].Expr2.Fields[8].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "1000001"
+          "originalString": "1000000"
         },
         "slots": [
           {
@@ -179322,7 +179384,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "tenMillion",
+          "id": "justAboveMillion",
           "superSugar": "false"
         },
         "slots": [
@@ -179359,7 +179421,7 @@
         "path": "$.Fields[3].Expr2.Fields[9].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "1e7"
+          "originalString": "1000001"
         },
         "slots": [
           {
@@ -179377,7 +179439,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "smallBoundary",
+          "id": "tenMillion",
           "superSugar": "false"
         },
         "slots": [
@@ -179414,7 +179476,7 @@
         "path": "$.Fields[3].Expr2.Fields[10].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "0.0001"
+          "originalString": "1e7"
         },
         "slots": [
           {
@@ -179432,7 +179494,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "belowSmallBoundary",
+          "id": "smallBoundary",
           "superSugar": "false"
         },
         "slots": [
@@ -179469,7 +179531,7 @@
         "path": "$.Fields[3].Expr2.Fields[11].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "0.00001"
+          "originalString": "0.0001"
         },
         "slots": [
           {
@@ -179483,6 +179545,61 @@
       },
       {
         "path": "$.Fields[3].Expr2.Fields[12]",
+        "kind": "ObjectField",
+        "attrs": {
+          "fieldKind": "ObjectFieldID",
+          "hide": "Inherit",
+          "id": "belowSmallBoundary",
+          "superSugar": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder1",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 4
+              }
+            ]
+          },
+          {
+            "name": "Fodder2"
+          },
+          {
+            "name": "OpFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[12].Method",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[12].Expr1",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[12].Expr2",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "0.00001"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[12].Expr3",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[13]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179521,15 +179638,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[12].Method",
+        "path": "$.Fields[3].Expr2.Fields[13].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[12].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[13].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[12].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[13].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1e100"
@@ -179541,11 +179658,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[12].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[13].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[13]",
+        "path": "$.Fields[3].Expr2.Fields[14]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179576,15 +179693,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[13].Method",
+        "path": "$.Fields[3].Expr2.Fields[14].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[13].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[14].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[13].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[14].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1e-100"
@@ -179596,11 +179713,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[13].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[14].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[14]",
+        "path": "$.Fields[3].Expr2.Fields[15]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179647,15 +179764,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[14].Method",
+        "path": "$.Fields[3].Expr2.Fields[15].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[14].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[15].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[14].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[15].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "9007199254740992"
@@ -179667,11 +179784,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[14].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[15].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[15]",
+        "path": "$.Fields[3].Expr2.Fields[16]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179702,15 +179819,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[15].Method",
+        "path": "$.Fields[3].Expr2.Fields[16].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[15].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[16].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[15].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[16].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "9007199254740993"
@@ -179722,11 +179839,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[15].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[16].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[16]",
+        "path": "$.Fields[3].Expr2.Fields[17]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179773,15 +179890,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[16].Method",
+        "path": "$.Fields[3].Expr2.Fields[17].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[16].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[17].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[16].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[17].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "9223372036854775807"
@@ -179793,11 +179910,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[16].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[17].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[17]",
+        "path": "$.Fields[3].Expr2.Fields[18]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179828,15 +179945,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[17].Method",
+        "path": "$.Fields[3].Expr2.Fields[18].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[17].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[18].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[17].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[18].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "9223372036854775808"
@@ -179848,11 +179965,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[17].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[18].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[18]",
+        "path": "$.Fields[3].Expr2.Fields[19]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179891,15 +180008,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[18].Method",
+        "path": "$.Fields[3].Expr2.Fields[19].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[18].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[19].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[18].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[19].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1.2345678901234567"
@@ -179911,11 +180028,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[18].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[19].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19]",
+        "path": "$.Fields[3].Expr2.Fields[20]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -179946,15 +180063,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19].Method",
+        "path": "$.Fields[3].Expr2.Fields[20].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[20].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[20].Expr2",
         "kind": "Unary",
         "attrs": {
           "op": "-"
@@ -179966,7 +180083,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19].Expr2.Expr",
+        "path": "$.Fields[3].Expr2.Fields[20].Expr2.Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.5"
@@ -179978,11 +180095,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[19].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[20].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[20]",
+        "path": "$.Fields[3].Expr2.Fields[21]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -180029,73 +180146,6 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[20].Method",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[20].Expr1",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[20].Expr2",
-        "kind": "Unary",
-        "attrs": {
-          "op": "-"
-        },
-        "slots": [
-          {
-            "name": "Fodder"
-          }
-        ]
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[20].Expr2.Expr",
-        "kind": "LiteralNumber",
-        "attrs": {
-          "originalString": "0.0"
-        },
-        "slots": [
-          {
-            "name": "Fodder"
-          }
-        ]
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[20].Expr3",
-        "kind": "\u003cnil\u003e"
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[21]",
-        "kind": "ObjectField",
-        "attrs": {
-          "fieldKind": "ObjectFieldID",
-          "hide": "Inherit",
-          "id": "negativeZeroComputed",
-          "superSugar": "false"
-        },
-        "slots": [
-          {
-            "name": "Fodder1",
-            "fodder": [
-              {
-                "kind": "LineEnd",
-                "blanks": 0,
-                "indent": 4
-              }
-            ]
-          },
-          {
-            "name": "Fodder2"
-          },
-          {
-            "name": "OpFodder"
-          },
-          {
-            "name": "CommaFodder"
-          }
-        ]
-      },
-      {
         "path": "$.Fields[3].Expr2.Fields[21].Method",
         "kind": "\u003cnil\u003e"
       },
@@ -180105,33 +180155,6 @@
       },
       {
         "path": "$.Fields[3].Expr2.Fields[21].Expr2",
-        "kind": "Binary",
-        "attrs": {
-          "op": "*"
-        },
-        "slots": [
-          {
-            "name": "Fodder"
-          },
-          {
-            "name": "OpFodder"
-          }
-        ]
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[21].Expr2.Left",
-        "kind": "LiteralNumber",
-        "attrs": {
-          "originalString": "0.0"
-        },
-        "slots": [
-          {
-            "name": "Fodder"
-          }
-        ]
-      },
-      {
-        "path": "$.Fields[3].Expr2.Fields[21].Expr2.Right",
         "kind": "Unary",
         "attrs": {
           "op": "-"
@@ -180143,10 +180166,10 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[21].Expr2.Right.Expr",
+        "path": "$.Fields[3].Expr2.Fields[21].Expr2.Expr",
         "kind": "LiteralNumber",
         "attrs": {
-          "originalString": "1"
+          "originalString": "0.0"
         },
         "slots": [
           {
@@ -180164,7 +180187,7 @@
         "attrs": {
           "fieldKind": "ObjectFieldID",
           "hide": "Inherit",
-          "id": "positiveZero",
+          "id": "negativeZeroComputed",
           "superSugar": "false"
         },
         "slots": [
@@ -180199,9 +180222,48 @@
       },
       {
         "path": "$.Fields[3].Expr2.Fields[22].Expr2",
+        "kind": "Binary",
+        "attrs": {
+          "op": "*"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "OpFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[22].Expr2.Left",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.0"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[22].Expr2.Right",
+        "kind": "Unary",
+        "attrs": {
+          "op": "-"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[22].Expr2.Right.Expr",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "1"
         },
         "slots": [
           {
@@ -180215,6 +180277,61 @@
       },
       {
         "path": "$.Fields[3].Expr2.Fields[23]",
+        "kind": "ObjectField",
+        "attrs": {
+          "fieldKind": "ObjectFieldID",
+          "hide": "Inherit",
+          "id": "positiveZero",
+          "superSugar": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder1",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 4
+              }
+            ]
+          },
+          {
+            "name": "Fodder2"
+          },
+          {
+            "name": "OpFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[23].Method",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[23].Expr1",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[23].Expr2",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "0.0"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[23].Expr3",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[3].Expr2.Fields[24]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -180261,15 +180378,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Method",
+        "path": "$.Fields[3].Expr2.Fields[24].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2",
         "kind": "Object",
         "attrs": {
           "trailingComma": "true"
@@ -180291,7 +180408,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[0]",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[0]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -180322,15 +180439,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[0].Method",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[0].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[0].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[0].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[0].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[0].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "2.5"
@@ -180342,11 +180459,11 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[0].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[0].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[1]",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[1]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -180377,15 +180494,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[1].Method",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[1].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[1].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[1].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[1].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[1].Expr2",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1e21"
@@ -180397,15 +180514,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr2.Fields[1].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Fields[1].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[23].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[24].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24]",
+        "path": "$.Fields[3].Expr2.Fields[25]",
         "kind": "ObjectField",
         "attrs": {
           "fieldKind": "ObjectFieldID",
@@ -180436,15 +180553,15 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Method",
+        "path": "$.Fields[3].Expr2.Fields[25].Method",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr1",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr1",
         "kind": "\u003cnil\u003e"
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2",
         "kind": "Array",
         "attrs": {
           "trailingComma": "false"
@@ -180459,7 +180576,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[0]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[0]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180468,7 +180585,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[0].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[0].Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1"
@@ -180480,7 +180597,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[1]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[1]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180489,7 +180606,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[1].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[1].Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1.5"
@@ -180501,7 +180618,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[2]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[2]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180510,7 +180627,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[2].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[2].Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "1000000"
@@ -180522,7 +180639,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[3]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[3]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180531,7 +180648,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[3].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[3].Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.0001"
@@ -180543,7 +180660,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[4]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[4]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180552,7 +180669,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[4].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[4].Expr",
         "kind": "Binary",
         "attrs": {
           "op": "+"
@@ -180567,7 +180684,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[4].Expr.Left",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[4].Expr.Left",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.1"
@@ -180579,7 +180696,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[4].Expr.Right",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[4].Expr.Right",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.2"
@@ -180591,7 +180708,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[5]",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[5]",
         "kind": "CommaSeparatedExpr",
         "slots": [
           {
@@ -180600,7 +180717,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[5].Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[5].Expr",
         "kind": "Unary",
         "attrs": {
           "op": "-"
@@ -180612,7 +180729,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr2.Elements[5].Expr.Expr",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr2.Elements[5].Expr.Expr",
         "kind": "LiteralNumber",
         "attrs": {
           "originalString": "0.0"
@@ -180624,7 +180741,7 @@
         ]
       },
       {
-        "path": "$.Fields[3].Expr2.Fields[24].Expr3",
+        "path": "$.Fields[3].Expr2.Fields[25].Expr3",
         "kind": "\u003cnil\u003e"
       },
       {
