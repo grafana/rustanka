@@ -82,7 +82,7 @@ pub(super) fn install(template: &mut Template) {
 	super::regex::install(template);
 	super::urls::install(template);
 
-	template.add_func("tuple", |args| Ok(Value::Array(args.to_vec())));
+	template.add_shared_func("tuple", |args| Ok(Value::Array(args.to_vec())));
 	for name in ["has", "mustHas"] {
 		template.add_shared_func(name, |args| {
 			let args = Arguments::new(args, 2)?;
@@ -325,7 +325,9 @@ pub(super) fn install(template: &mut Template) {
 	});
 	template.add_shared_func("required", |args| {
 		let args = Arguments::new(args, 2)?;
-		if Arguments::empty(&args.0[1]) {
+		if matches!(&args.0[1], Value::Nil | Value::NoValue)
+			|| matches!(&args.0[1], Value::String(text) if text.is_empty())
+		{
 			return Err(FuncError::Generic(args.text(0)?.into()));
 		}
 		Ok(args.0[1].clone())
@@ -411,6 +413,15 @@ pub(super) fn install(template: &mut Template) {
 		}
 		Ok(from_json(&value))
 	});
+	for name in ["toPrettyJson", "mustToPrettyJson"] {
+		template.add_func(name, |args| {
+			let args = Arguments::new(args, 1)?;
+			Ok(Arguments::escape_json(
+				serde_json::to_string_pretty(&to_json(&args.0[0])?).map_err(anyhow::Error::from)?,
+			)
+			.into())
+		});
+	}
 	template.add_func("toJson", |args| {
 		let args = Arguments::new(args, 1)?;
 		Ok(Arguments::json(&to_json(&args.0[0])?)?.into())
@@ -426,7 +437,10 @@ pub(super) fn install(template: &mut Template) {
 		let mut map = std::collections::HashMap::new();
 		for index in (0..args.0.len()).step_by(2) {
 			map.insert(
-				args.text(index)?.to_owned(),
+				match &args.0[index] {
+					Value::Nil | Value::NoValue => "<nil>".to_owned(),
+					value => value.to_string(),
+				},
 				args.0.get(index + 1).cloned().unwrap_or_else(|| "".into()),
 			);
 		}
@@ -567,13 +581,17 @@ impl<'a> Arguments<'a> {
 			None => text.split(separator).map(str::to_owned).collect(),
 		})
 	}
+
 	fn json(value: &serde_json::Value) -> Result<String> {
-		Ok(serde_json::to_string(value)?
+		Ok(Self::escape_json(serde_json::to_string(value)?))
+	}
+	fn escape_json(value: String) -> String {
+		value
 			.replace('&', "\\u0026")
 			.replace('<', "\\u003c")
 			.replace('>', "\\u003e")
 			.replace('\u{2028}', "\\u2028")
-			.replace('\u{2029}', "\\u2029"))
+			.replace('\u{2029}', "\\u2029")
 	}
 
 	fn text(&self, index: usize) -> Result<&str> {

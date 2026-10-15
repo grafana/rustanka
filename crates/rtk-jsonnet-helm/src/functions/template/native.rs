@@ -302,6 +302,16 @@ impl Chart {
 			.map(|child| child.name().to_owned())
 			.collect();
 		Self::merge_values(&mut self.values, &overrides, &children, false);
+		let child_overrides: std::collections::BTreeMap<_, _> = self
+			.dependencies
+			.iter()
+			.map(|child| {
+				(
+					child.name().to_owned(),
+					self.values.get(child.name()).cloned(),
+				)
+			})
+			.collect();
 		let globals = self
 			.values
 			.get("global")
@@ -354,6 +364,37 @@ impl Chart {
 			}
 			enabled
 		});
+
+		for (name, values) in child_overrides {
+			if self.dependencies.iter().all(|child| child.name() != name) {
+				if let Some(values) = values {
+					self.values[&name] = values;
+				} else {
+					self.values.as_object_mut().unwrap().remove(&name);
+				}
+			}
+		}
+		if self.metadata.get("dependencies").is_some() {
+			let active: Vec<_> = definitions
+				.iter()
+				.filter_map(|definition| {
+					let name = definition["alias"]
+						.as_str()
+						.filter(|alias| !alias.is_empty())
+						.or_else(|| definition["name"].as_str())?;
+					self.dependencies
+						.iter()
+						.any(|child| child.name() == name)
+						.then(|| {
+							let mut definition = definition.clone();
+							definition["name"] = json!(name);
+							definition["enabled"] = json!(true);
+							definition
+						})
+				})
+				.collect();
+			self.metadata["dependencies"] = json!(active);
+		}
 		for definition in definitions {
 			let name = definition["alias"]
 				.as_str()

@@ -27,6 +27,25 @@ impl Pattern {
 		ensure!(!arguments.is_empty(), "regex requires a pattern");
 		let mut arguments = arguments.to_vec();
 		arguments[0] = Self::normalize(&arguments[0].to_string()).into();
+		if name.ends_with("ReplaceAll") || name.ends_with("ReplaceAllLiteral") {
+			ensure!(
+				arguments.len() == 3,
+				"regex replacement requires three arguments"
+			);
+			let pattern = regex::Regex::new(&arguments[0].to_string())?;
+			let text = arguments[1].to_string();
+			let replacement = arguments[2].to_string();
+			return Ok(if name.ends_with("Literal") {
+				pattern
+					.replace_all(&text, regex::NoExpand(&replacement))
+					.into_owned()
+			} else {
+				pattern
+					.replace_all(&text, replacement.as_str())
+					.into_owned()
+			}
+			.into());
+		}
 		let (_, function) = gtmpl_ng::helm_functions::HELM_FUNCTIONS
 			.iter()
 			.find(|(candidate, _)| *candidate == name)

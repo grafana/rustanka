@@ -968,6 +968,13 @@ metadata:
   name: regressions
 data:
   alias: {{ .Values.added | quote }}
+  keys: {{ dict 5 "five" false "no" | toJson | quote }}
+  requiredZero: {{ required "missing" 0 | quote }}
+  requiredFalse: {{ required "missing" false | quote }}
+  pretty: {{ dict "html" "<>&" | mustToPrettyJson | quote }}
+  release: {{ regexReplaceAll "(-?[^a-z\\d\\-])+-?" "redis" "-" | quote }}
+  replacement: {{ regexReplaceAll "a(x*)b" "-ab-axxb-" "${1}W" | quote }}
+  literal: {{ regexReplaceAllLiteral "a(x*)b" "-ab-axxb-" "${1}W" | quote }}
   empty: {{ get (dict) "missing" | upper | quote }}
   yaml: {{ "key: first\nkey: last\n" | fromYaml | toJson | quote }}
   array: {{ "" | fromYamlArray | toJson | quote }}
@@ -979,4 +986,24 @@ data:
 	for values in [json!({}), json!({"seed":true})] {
 		assert_eq!(chart.render(values.clone()), chart.helm(&values, &[]));
 	}
+}
+
+#[test]
+#[ignore = "requires Helm"]
+fn disabled_dependencies_keep_only_parent_supplied_values() {
+	let chart = FeatureChart::new("v2");
+	chart.dependency();
+	chart.write(
+		"templates/config.yaml",
+		r"apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: disabled
+data:
+  values: {{ .Values.renamed | toJson | quote }}
+  dependencies: {{ .Chart.Dependencies | toJson | quote }}
+",
+	);
+	let values = json!({"renamed":{"enabled":false}});
+	assert_eq!(chart.render(values.clone()), chart.helm(&values, &[]));
 }
