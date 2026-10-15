@@ -78,3 +78,14 @@ reason = "`AddPlusObject` is not implemented (Phase 2e), so no `+` is inserted"
 # nine. Its progress shows up in `testdata/corpus-baseline.toml` (118 -> 120)
 # and, for the two passes the corpus cannot see at all, in
 # `tests/pass_parity.rs`.
+#
+# Phase 2c removed none either, and could not: not one of the nine inputs
+# contains a string literal or a comment. Its progress is in
+# `corpus-baseline.toml` (120 -> 123) and in `tests/pass_parity.rs`.
+#
+# One fixture outside this list does flip, though it is only graded when
+# `GO_JSONNET_FOR_TESTS` is set: `go_jsonnet/empty_comment` is `#` above an
+# empty object, and go-jsonnet's own `empty_comment.fmt.golden` says the answer
+# is `//`. That golden is the single authoritative `tk fmt` answer
+# `EnforceCommentStyle` has outside the snippets — the 138-file corpus gives it
+# none at all.
