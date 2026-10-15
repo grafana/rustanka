@@ -70,16 +70,14 @@ fn validates_schema_and_dependency_metadata() {
 }
 
 #[test]
-fn rejects_unresolved_namespace() {
+fn resolves_an_implicit_namespace_without_helm() {
 	let mut options = options();
 	options.namespace = None;
 	assert!(
 		Chart::load(&fixture().join("chart"))
 			.unwrap()
 			.render("example", &options)
-			.unwrap_err()
-			.to_string()
-			.contains("explicit namespace")
+			.is_ok()
 	);
 }
 
@@ -783,13 +781,13 @@ fn external_chart_corpus_renders_with_native_helm() {
 			Err(error) => failures.push(format!("{}: {error:#}", path.display())),
 		}
 	}
-	assert!(successful > 0, "no charts rendered successfully");
 	assert!(
 		failures.is_empty(),
 		"{} charts failed:\n{}",
 		failures.len(),
 		failures.join("\n")
 	);
+	assert!(successful > 0, "no charts rendered successfully");
 }
 
 #[test]
@@ -903,4 +901,82 @@ metadata:
 		json!({"cert":"true", "key":"true", "empty":"{}", "first":"{\"one\":1}"})
 	);
 	assert!(output.get("config_map_second").is_some());
+}
+
+#[test]
+fn dictionary_aliases_and_helpers_keep_reference_identity() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"templates/_helpers.tpl",
+		r#"{{define "mutate"}}{{ $_ := set . "value" "helper" }}{{end}}"#,
+	);
+	chart.write(
+		"templates/config.yaml",
+		r#"{{ $dict := dict "nested" (dict "before" true) }}
+{{ $alias := $dict.nested }}{{ $_ := set $alias "after" true }}
+{{ $_ := include "mutate" $alias }}{{ $_ := unset $alias "before" }}
+{{ $copy := deepCopy $dict }}{{ $_ := set $copy.nested "value" "copy" }}
+{{ $merged := dict "nested" (dict "retained" true) }}
+{{ $_ := merge $dict $merged }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: references
+data:
+  original: {{ $dict | toJson | quote }}
+  alias: {{ $alias | toJson | quote }}
+  copy: {{ $copy | toJson | quote }}
+"#,
+	);
+	let data = chart.render(json!({}))["config_map_references"]["data"].clone();
+	assert_eq!(
+		data,
+		json!({"original":r#"{"nested":{"after":true,"retained":true,"value":"helper"}}"#, "alias":r#"{"after":true,"retained":true,"value":"helper"}"#, "copy":r#"{"nested":{"after":true,"value":"copy"}}"#})
+	);
+}
+
+#[test]
+#[ignore = "requires Helm"]
+fn profile_templates_mutate_values_before_manifests_match_helm() {
+	let chart = FeatureChart::new("v2");
+	chart.write("templates/zzz_profile.yaml", r#"{{ $defaults := dict "image" "registry/operator:latest" }}{{ $_ := set . "Values" (mergeOverwrite $defaults .Values) }}"#);
+	chart.write(
+		"templates/config.yaml",
+		r#"{{ $_ := set . "path" "/api/" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: profile
+data:
+  image: {{ .Values.image | quote }}
+  path: {{ .path | quote }}
+"#,
+	);
+	assert_eq!(chart.render(json!({})), chart.helm(&json!({}), &[]));
+}
+
+#[test]
+#[ignore = "requires Helm"]
+fn production_helper_regressions_match_helm() {
+	let chart = FeatureChart::new("v2");
+	chart.write(
+		"templates/config.yaml",
+		r#"{{ $_ := set .Values.AsMap "added" "present" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: regressions
+data:
+  alias: {{ .Values.added | quote }}
+  empty: {{ get (dict) "missing" | upper | quote }}
+  yaml: {{ "key: first\nkey: last\n" | fromYaml | toJson | quote }}
+  array: {{ "" | fromYamlArray | toJson | quote }}
+  random: {{ randInt 4 5 | quote }}
+  url: {{ urlParse "https://user:password@example.com:8443/a%20path?x=1#section" | toJson | quote }}
+  regex: {{ regexMatch `\$(?:__(?:env|file|vault))?{[^}]+}` "$__env{PASSWORD}" | quote }}
+"#,
+	);
+	for values in [json!({}), json!({"seed":true})] {
+		assert_eq!(chart.render(values.clone()), chart.helm(&values, &[]));
+	}
 }

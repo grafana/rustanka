@@ -8,7 +8,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gtmpl-ng = { version = "1.0.0", features = ["helm-functions"] }
+gtmpl-ng = { git = "https://github.com/julienduchesne/gtmpl-rust", rev = "8b58dcc71f448c0612869b7000b92b1923fad972", features = ["helm-functions", "shared-values"] }
 flate2 = "1.1"
 globset = "0.4.18"
 base64 = "0.22.1"
@@ -25,6 +25,8 @@ jsonschema = { version = "0.58.6", default-features = false }
 rtk-masterminds.workspace = true
 semver.workspace = true
 regex.workspace = true
+url.workspace = true
+percent-encoding = "2"
 rtk-yaml.workspace = true
 ciborium.workspace = true
 hex.workspace = true

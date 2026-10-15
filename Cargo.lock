@@ -2769,8 +2769,7 @@ dependencies = [
 [[package]]
 name = "gtmpl-ng"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe530486407b50f5829aec90ec27f8b3c5da181b328e3aa562b058caf5fad051"
+source = "git+https://github.com/julienduchesne/gtmpl-rust?rev=8b58dcc71f448c0612869b7000b92b1923fad972#8b58dcc71f448c0612869b7000b92b1923fad972"
 dependencies = [
  "anyhow",
  "bcrypt",
@@ -2807,8 +2806,7 @@ dependencies = [
 [[package]]
 name = "gtmpl_value_ng"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3773dfc79ca272cdd43704bb1d3c89f507441a338bcc1037bc84aa1bcaa6cbd3"
+source = "git+https://github.com/julienduchesne/gtmpl-rust?rev=8b58dcc71f448c0612869b7000b92b1923fad972#8b58dcc71f448c0612869b7000b92b1923fad972"
 dependencies = [
  "anyhow",
  "thiserror 1.0.69",
@@ -5758,6 +5756,7 @@ dependencies = [
  "jsonschema",
  "p256",
  "pem",
+ "percent-encoding",
  "rand_core 0.6.4",
  "regex",
  "rsa",
@@ -5774,6 +5773,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tracing",
+ "url",
  "walkdir",
  "x509-parser",
  "yasna",

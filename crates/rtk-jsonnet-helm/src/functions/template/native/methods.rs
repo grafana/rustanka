@@ -4,6 +4,19 @@ use anyhow::{Result, ensure};
 use gtmpl_ng::{FuncError, Template, Value};
 
 pub(super) fn install(template: &mut Template) {
+	template.add_shared_func("__rtkAsMap", |args| {
+		let args = Arguments::new(args, 1)?;
+		let empty = match &args.0[0] {
+			Value::SharedMap(values) => values.with(std::collections::HashMap::is_empty),
+			Value::Map(values) => values.is_empty(),
+			_ => return Err(FuncError::Generic("AsMap requires values".into())),
+		};
+		Ok(if empty {
+			Value::Map(std::collections::HashMap::new())
+		} else {
+			args.0[0].clone()
+		})
+	});
 	template.add_func("__rtkLiteral", |args| {
 		use base64::Engine as _;
 		let args = Arguments::new(args, 1)?;
@@ -22,7 +35,7 @@ pub(super) fn install(template: &mut Template) {
 			.split('.')
 			.filter(|field| !field.is_empty())
 		{
-			value = match value {
+			value = match value.into_snapshot() {
 				Value::Map(fields) | Value::Object(fields) => {
 					fields.get(field).cloned().unwrap_or(Value::NoValue)
 				}
@@ -116,6 +129,9 @@ impl<'a> Arguments<'a> {
 			.map(Option::unwrap_or_default)
 	}
 	fn bytes(value: &Value) -> Result<Vec<u8>> {
+		if let Value::String(text) = value {
+			return Ok(text.as_bytes().to_vec());
+		}
 		let Value::Array(bytes) = value else {
 			anyhow::bail!("invalid chart file bytes");
 		};
@@ -353,7 +369,7 @@ impl Action {
 				index += 1;
 				continue;
 			};
-			let no_arguments = matches!(method, "AsConfig" | "AsSecrets");
+			let no_arguments = matches!(method, "AsConfig" | "AsSecrets" | "AsMap");
 			let function = match method {
 				"Has" => "__rtkHas",
 				"Get" => "__rtkGet",
@@ -362,6 +378,7 @@ impl Action {
 				"Glob" => "__rtkGlob",
 				"AsConfig" => "__rtkAsConfig",
 				"AsSecrets" => "__rtkAsSecrets",
+				"AsMap" => "__rtkAsMap",
 				_ => {
 					if token.joined && index > 0 && self.tokens[index - 1] == ")" {
 						let field = token.text.clone();

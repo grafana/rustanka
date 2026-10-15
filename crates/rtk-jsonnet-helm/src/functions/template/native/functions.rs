@@ -7,11 +7,84 @@ use super::{Scope, from_json, to_json};
 pub(super) fn install(template: &mut Template) {
 	template.add_funcs(gtmpl_ng::helm_functions::HELM_FUNCTIONS);
 	super::methods::install(template);
+	template.add_shared_func("get", |args| {
+		let args = Arguments::new(args, 2)?;
+		let key = args.text(1)?;
+		let value = match &args.0[0] {
+			Value::SharedMap(values) => values.get(key),
+			Value::Map(values) => values.get(key).cloned(),
+			_ => return Err(FuncError::Generic("get requires a dictionary".into())),
+		};
+		Ok(value.unwrap_or_else(|| "".into()))
+	});
+	template.add_func("randInt", |args| {
+		use rand_core::RngCore as _;
+		let args = Arguments::new(args, 2)?;
+		let minimum = args.integer(0)?;
+		let maximum = args.integer(1)?;
+		if maximum <= minimum {
+			return Err(FuncError::Generic(
+				"randInt maximum must exceed minimum".into(),
+			));
+		}
+		let width = u64::try_from(i128::from(maximum) - i128::from(minimum))
+			.map_err(anyhow::Error::from)?;
+		let threshold = width.wrapping_neg() % width;
+		loop {
+			let random = rand_core::OsRng.next_u64();
+			if random >= threshold {
+				return Ok(
+					i64::try_from(i128::from(minimum) + i128::from(random % width))
+						.map_err(anyhow::Error::from)?
+						.into(),
+				);
+			}
+		}
+	});
+	for &(name, function) in gtmpl_ng::helm_functions::HELM_FUNCTIONS {
+		if matches!(
+			name,
+			"append"
+				| "mustAppend"
+				| "prepend" | "mustPrepend"
+				| "first" | "mustFirst"
+				| "last" | "mustLast"
+				| "coalesce" | "all"
+				| "any" | "ternary"
+		) {
+			template.add_shared_func(name, function);
+		}
+	}
+	template.add_shared_func("set", |args| {
+		let args = Arguments::new(args, 3)?;
+		let Value::SharedMap(values) = &args.0[0] else {
+			return Err(FuncError::Generic("set requires a dictionary".into()));
+		};
+		values.insert(args.text(1)?.to_owned(), args.0[2].clone());
+		Ok(args.0[0].clone())
+	});
+	template.add_shared_func("unset", |args| {
+		let args = Arguments::new(args, 2)?;
+		let Value::SharedMap(values) = &args.0[0] else {
+			return Err(FuncError::Generic("unset requires a dictionary".into()));
+		};
+		values.remove(args.text(1)?);
+		Ok(args.0[0].clone())
+	});
+	for name in ["deepCopy", "mustDeepCopy"] {
+		template.add_shared_func(name, |args| {
+			let args = Arguments::new(args, 1)?;
+			Ok(from_json(&to_json(&args.0[0])?))
+		});
+	}
+
 	super::clock::install(template);
+	super::regex::install(template);
+	super::urls::install(template);
 
 	template.add_func("tuple", |args| Ok(Value::Array(args.to_vec())));
 	for name in ["has", "mustHas"] {
-		template.add_func(name, |args| {
+		template.add_shared_func(name, |args| {
 			let args = Arguments::new(args, 2)?;
 			match &args.0[1] {
 				Value::Array(values) => Ok(values.contains(&args.0[0]).into()),
@@ -57,8 +130,14 @@ pub(super) fn install(template: &mut Template) {
 	});
 	template.add_func("fromYamlArray", |args| {
 		let args = Arguments::new(args, 1)?;
-		let value: serde_json::Value =
-			serde_saphyr::from_str(args.text(0)?).map_err(anyhow::Error::from)?;
+		let value: serde_json::Value = serde_saphyr::from_str_with_options(
+			args.text(0)?,
+			serde_saphyr::options! {duplicate_keys: serde_saphyr::DuplicateKeyPolicy::LastWins},
+		)
+		.map_err(anyhow::Error::from)?;
+		if value.is_null() {
+			return Ok(Value::Array(Vec::new()));
+		}
 		if !value.is_array() {
 			return Err(FuncError::Generic("fromYamlArray requires an array".into()));
 		}
@@ -163,12 +242,12 @@ pub(super) fn install(template: &mut Template) {
 			&serde_json::from_str(args.text(0)?).map_err(anyhow::Error::from)?,
 		))
 	});
-	template.add_func("dig", |args| Ok(Arguments(args).dig()?.clone()));
+	template.add_shared_func("dig", |args| Ok(Arguments(args).dig()?));
 	for name in ["merge", "mustMerge"] {
-		template.add_func(name, |args| Ok(Arguments(args).merge(false)?));
+		template.add_shared_func(name, |args| Ok(Arguments(args).merge(false)?));
 	}
 	for name in ["mergeOverwrite", "mustMergeOverwrite"] {
-		template.add_func(name, |args| Ok(Arguments(args).merge(true)?));
+		template.add_shared_func(name, |args| Ok(Arguments(args).merge(true)?));
 	}
 	template.add_func("buildCustomCert", |args| {
 		let args = Arguments::new(args, 2)?;
@@ -222,15 +301,15 @@ pub(super) fn install(template: &mut Template) {
 			.fold(0_i64, |sum, i| sum.wrapping_add(args.cast_integer(i)))
 			.into())
 	});
-	template.add_func("include", |args| {
+	template.add_shared_func("include", |args| {
 		let args = Arguments::new(args, 2)?;
 		Ok(Scope::render(args.text(0)?, args.0[1].clone(), None)?.into())
 	});
-	template.add_func("tpl", |args| {
+	template.add_shared_func("tpl", |args| {
 		let args = Arguments::new(args, 2)?;
 		Ok(Scope::render("__rtk_tpl", args.0[1].clone(), Some(args.text(0)?))?.into())
 	});
-	template.add_func("default", |args| {
+	template.add_shared_func("default", |args| {
 		if args.is_empty() {
 			return Err(FuncError::Generic(
 				"default requires a default value".into(),
@@ -244,7 +323,7 @@ pub(super) fn install(template: &mut Template) {
 		}
 		.clone())
 	});
-	template.add_func("required", |args| {
+	template.add_shared_func("required", |args| {
 		let args = Arguments::new(args, 2)?;
 		if Arguments::empty(&args.0[1]) {
 			return Err(FuncError::Generic(args.text(0)?.into()));
@@ -320,7 +399,7 @@ pub(super) fn install(template: &mut Template) {
 		let args = Arguments::new(args, 1)?;
 		let values: Vec<serde_json::Value> = serde_saphyr::from_multiple_with_options(
 			args.text(0)?,
-			serde_saphyr::options! { legacy_octal_numbers: true },
+			serde_saphyr::options! { legacy_octal_numbers: true, duplicate_keys: serde_saphyr::DuplicateKeyPolicy::LastWins },
 		)
 		.map_err(anyhow::Error::from)?;
 		let value = values.into_iter().next().unwrap_or(serde_json::Value::Null);
@@ -342,7 +421,7 @@ pub(super) fn install(template: &mut Template) {
 				.map_err(anyhow::Error::from)?,
 		))
 	});
-	template.add_func("dict", |args| {
+	template.add_shared_func("dict", |args| {
 		let args = Arguments(args);
 		let mut map = std::collections::HashMap::new();
 		for index in (0..args.0.len()).step_by(2) {
@@ -353,7 +432,7 @@ pub(super) fn install(template: &mut Template) {
 		}
 		Ok(Value::Map(map))
 	});
-	template.add_func("list", |args| Ok(Value::Array(args.to_vec())));
+	template.add_shared_func("list", |args| Ok(Value::Array(args.to_vec())));
 	template.add_func("sha256sum", |args| {
 		Ok(hex::encode(Sha256::digest(Arguments::new(args, 1)?.text(0)?.as_bytes())).into())
 	});
@@ -367,7 +446,7 @@ impl<'a> Arguments<'a> {
 			Value::Bool(_) => "bool",
 			Value::String(_) => "string",
 			Value::Array(_) => "slice",
-			Value::Map(_) | Value::Object(_) => "map",
+			Value::Map(_) | Value::Object(_) | Value::SharedMap(_) => "map",
 			Value::Function(_) => "func",
 			Value::Number(number) if number.as_i64().is_some() => "int64",
 			Value::Number(number) if number.as_u64().is_some() => "uint64",
@@ -384,24 +463,24 @@ impl<'a> Arguments<'a> {
 		Ok(Self(values))
 	}
 
-	fn dig(&self) -> Result<&Value> {
+	fn dig(&self) -> Result<Value> {
 		ensure!(
 			self.0.len() >= 3,
-			"dig requires keys, a default and a dictionary"
+			"dig needs keys, a default and a dictionary"
 		);
-		let default = &self.0[self.0.len() - 2];
-		let mut current = &self.0[self.0.len() - 1];
+		let fallback = &self.0[self.0.len() - 2];
+		let mut current = self.0.last().unwrap().clone();
 		for key in &self.0[..self.0.len() - 2] {
 			let Value::String(key) = key else {
 				bail!("dig keys must be strings");
 			};
-			let (Value::Map(map) | Value::Object(map)) = current else {
-				bail!("dig requires a dictionary");
+			let Value::Map(values) = current.into_snapshot() else {
+				bail!("dig requires dictionaries");
 			};
-			let Some(value) = map.get(key) else {
-				return Ok(default);
+			let Some(value) = values.get(key) else {
+				return Ok(fallback.clone());
 			};
-			current = value;
+			current = value.clone();
 		}
 		Ok(current)
 	}
@@ -410,35 +489,44 @@ impl<'a> Arguments<'a> {
 			!self.0.is_empty(),
 			"merge requires a destination dictionary"
 		);
-		let mut values = to_json(&self.0[0])?;
-		ensure!(values.is_object(), "merge requires dictionaries");
+		let destination = &self.0[0];
+		ensure!(
+			matches!(destination, Value::SharedMap(_)),
+			"merge requires dictionaries"
+		);
 		for source in &self.0[1..] {
-			let source = to_json(source)?;
-			ensure!(source.is_object(), "merge requires dictionaries");
-			Self::merge_maps(&mut values, &source, overwrite);
+			Self::merge_values(destination, source, overwrite)?;
 		}
-		Ok(from_json(&values))
+		Ok(destination.clone())
 	}
-	fn merge_maps(
-		destination: &mut serde_json::Value,
-		source: &serde_json::Value,
-		overwrite: bool,
-	) {
-		if let (Some(destination), Some(source)) = (destination.as_object_mut(), source.as_object())
+	fn merge_values(destination: &Value, source: &Value, overwrite: bool) -> Result<()> {
+		let Value::SharedMap(destination) = destination else {
+			bail!("merge requires dictionaries");
+		};
+		if let Value::SharedMap(source) = source
+			&& destination.ptr_eq(source)
 		{
-			for (key, value) in source {
-				match destination.get_mut(key) {
-					Some(existing) if existing.is_object() && value.is_object() => {
-						Self::merge_maps(existing, value, overwrite);
-					}
-					Some(existing) if overwrite || existing.is_null() => *existing = value.clone(),
-					Some(_) => {}
-					None => {
-						destination.insert(key.clone(), value.clone());
-					}
+			return Ok(());
+		}
+		let Value::Map(source) = source.snapshot() else {
+			bail!("merge requires dictionaries");
+		};
+		for (key, value) in source {
+			match destination.get(&key) {
+				Some(existing)
+					if matches!(existing, Value::SharedMap(_))
+						&& matches!(value, Value::SharedMap(_)) =>
+				{
+					Self::merge_values(&existing, &value, overwrite)?;
 				}
+				Some(existing) if overwrite || Self::empty(&existing) => {
+					destination.insert(key, value);
+				}
+				Some(_) => {}
+				None => destination.insert(key, value),
 			}
 		}
+		Ok(())
 	}
 
 	fn strings(&self, index: usize) -> Vec<String> {
@@ -538,6 +626,7 @@ impl<'a> Arguments<'a> {
 			Value::String(value) => value.is_empty(),
 			Value::Array(value) => value.is_empty(),
 			Value::Map(value) | Value::Object(value) => value.is_empty(),
+			Value::SharedMap(value) => value.with(std::collections::HashMap::is_empty),
 			Value::Number(value) => {
 				value.as_i64() == Some(0)
 					|| value.as_u64() == Some(0)

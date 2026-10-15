@@ -153,6 +153,8 @@ impl Function {
 		options: &Options,
 		cache_disabled: bool,
 	) -> anyhow::Result<serde_json::Value> {
+		let resolved = options.native_resolved();
+		let options = resolved.as_ref();
 		let render = || native::Chart::load(chart_path)?.render(name, options);
 		if cache_disabled {
 			render()
@@ -381,7 +383,7 @@ impl Function {
 	}
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Options {
 	#[serde(default)]

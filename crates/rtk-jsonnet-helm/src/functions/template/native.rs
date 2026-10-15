@@ -16,6 +16,9 @@ mod crypto;
 mod functions;
 mod ignore;
 mod methods;
+mod namespace;
+mod regex;
+mod urls;
 mod versions;
 
 #[derive(Clone)]
@@ -113,7 +116,7 @@ impl Chart {
 		let source = std::str::from_utf8(bytes)?.trim_start_matches('\u{feff}');
 		serde_saphyr::from_str_with_options(
 			source,
-			serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
+			serde_saphyr::options! { legacy_octal_numbers: true, budget: None, duplicate_keys: serde_saphyr::DuplicateKeyPolicy::LastWins },
 		)
 		.map_err(Into::into)
 	}
@@ -521,7 +524,7 @@ impl Chart {
 		output: &mut Vec<Json>,
 		is_root: bool,
 	) -> Result<()> {
-		for child in &self.dependencies {
+		for child in self.dependencies.iter().rev() {
 			child.render_into(
 				&format!("{path}/charts/{}", child.name()),
 				release,
@@ -539,24 +542,30 @@ impl Chart {
 		if self.library() {
 			return Ok(());
 		}
-		let mut context = self.context(
+		let context = self.context(
 			path,
 			release,
 			options.namespace.as_deref().unwrap(),
 			&sources.capabilities,
 			is_root,
 		);
-		for (name, _) in &self.templates {
+		let context = sources.context(from_json(&context));
+		for (name, _) in self.templates.iter().rev() {
 			let filename = name.rsplit('/').next().unwrap();
 			if filename.starts_with('_') || filename == "NOTES.txt" {
 				continue;
 			}
 			let full_name = format!("{path}/{name}");
-			context["Template"]["Name"] = json!(full_name);
-			let context = sources.context(from_json(&context));
+			let Value::SharedMap(root) = &context else {
+				unreachable!()
+			};
+			let Some(Value::SharedMap(template)) = root.get("Template") else {
+				unreachable!()
+			};
+			template.insert("Name".into(), full_name.clone().into());
 			let _scope = Scope::enter(Rc::clone(sources))?;
 			let rendered = sources
-				.render(&full_name, context, None)
+				.render(&full_name, context.clone(), None)
 				.with_context(|| format!("rendering {full_name}"))?;
 			Self::documents(
 				&rendered.replace("<no value>", ""),
@@ -568,13 +577,8 @@ impl Chart {
 	}
 
 	pub(super) fn render(mut self, release: &str, options: &Options) -> Result<Json> {
-		ensure!(
-			options
-				.namespace
-				.as_deref()
-				.is_some_and(|namespace| !namespace.is_empty()),
-			"an explicit namespace is required (kubeconfig resolution is not supported)"
-		);
+		let resolved = options.native_resolved();
+		let options = resolved.as_ref();
 		ensure!(
 			!self.library(),
 			"library charts cannot be rendered directly"
@@ -592,6 +596,7 @@ impl Chart {
 				.cmp(&a.matches('/').count())
 				.then_with(|| b.cmp(a))
 		});
+		sources.parse()?;
 		let sources = Rc::new(sources);
 		let mut documents = Vec::new();
 		self.render_into(
@@ -606,8 +611,8 @@ impl Chart {
 	}
 
 	fn documents(source: &str, no_hooks: bool, output: &mut Vec<Json>) -> Result<()> {
-		static SEPARATORS: std::sync::LazyLock<regex::Regex> =
-			std::sync::LazyLock::new(|| regex::Regex::new(r"(?:^|\s*\n)---\s*").unwrap());
+		static SEPARATORS: std::sync::LazyLock<::regex::Regex> =
+			std::sync::LazyLock::new(|| ::regex::Regex::new(r"(?:^|\s*\n)---\s*").unwrap());
 		let mut documents = Vec::new();
 		// Helm splits rendered templates before passing each manifest to YAML.
 		for source in SEPARATORS
@@ -617,7 +622,7 @@ impl Chart {
 			let source = super::normalize_helm_multiline_quotes(source);
 			documents.push(serde_saphyr::from_str_with_options::<Json>(
 				&source,
-				serde_saphyr::options! { legacy_octal_numbers: true, budget: None },
+				serde_saphyr::options! { legacy_octal_numbers: true, budget: None, duplicate_keys: serde_saphyr::DuplicateKeyPolicy::LastWins },
 			)?);
 		}
 
@@ -657,6 +662,7 @@ struct Sources {
 	templates: Vec<(String, String)>,
 	files: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<u8>>>,
 	capabilities: Json,
+	parsed: Option<Template>,
 }
 
 impl Sources {
@@ -677,6 +683,7 @@ impl Sources {
 			templates: Vec::new(),
 			files: std::collections::BTreeMap::new(),
 			capabilities,
+			parsed: None,
 		})
 	}
 
@@ -707,7 +714,12 @@ impl Sources {
 					.map(|(name, bytes)| {
 						(
 							name.clone(),
-							Value::Array(bytes.iter().copied().map(Value::from).collect()),
+							match std::str::from_utf8(bytes) {
+								Ok(text) => Value::from(text),
+								Err(_) => {
+									Value::Array(bytes.iter().copied().map(Value::from).collect())
+								}
+							},
 						)
 					})
 					.collect()
@@ -722,21 +734,34 @@ impl Sources {
 		let Value::Map(root) = context else {
 			unreachable!();
 		};
-		Value::Map(root)
+		Value::Map(root).into_shared()
 	}
 
-	fn render(&self, name: &str, context: Value, dynamic: Option<&str>) -> Result<String> {
-		let mut template = Template::with_name(name);
+	fn parse(&mut self) -> Result<()> {
+		let mut template = Template::default();
 		// Helper arguments can include the complete byte-backed Files catalog.
 		template.limits.function_output = Some(64 * 1024 * 1024);
 		functions::install(&mut template);
 		for (name, source) in &self.templates {
 			template.add_template(name, methods::Actions::rewrite(source))?;
 		}
+		self.parsed = Some(template);
+		Ok(())
+	}
+	fn render(&self, name: &str, context: Value, dynamic: Option<&str>) -> Result<String> {
+		let template = self
+			.parsed
+			.as_ref()
+			.context("chart templates have not been parsed")?;
+		let context = Context::from(context);
 		if let Some(source) = dynamic {
-			template.parse(methods::Actions::rewrite(source))?;
+			let mut overlay = template.clone();
+			name.clone_into(&mut overlay.name);
+			overlay.parse(methods::Actions::rewrite(source))?;
+			Ok(overlay.render(&context)?)
+		} else {
+			Ok(template.render_named(name, &context)?)
 		}
-		Ok(template.render(&Context::from(context))?)
 	}
 }
 
@@ -791,21 +816,35 @@ fn from_json(value: &Json) -> Value {
 }
 
 fn to_json(value: &Value) -> Result<Json> {
+	to_json_at_depth(value, 0)
+}
+
+fn to_json_at_depth(value: &Value, depth: usize) -> Result<Json> {
+	ensure!(
+		depth < 100,
+		"cannot serialize a cyclic or deeply nested dictionary"
+	);
 	Ok(match value {
 		Value::Nil | Value::NoValue => Json::Null,
 		Value::Bool(value) => json!(value),
 		Value::String(value) => json!(value),
 		Value::Number(value) => serde_json::from_str(&value.to_string())?,
-		Value::Array(values) => Json::Array(values.iter().map(to_json).collect::<Result<_>>()?),
+		Value::Array(values) => Json::Array(
+			values
+				.iter()
+				.map(|value| to_json_at_depth(value, depth + 1))
+				.collect::<Result<_>>()?,
+		),
 		Value::Map(values) | Value::Object(values) => {
 			let sorted: std::collections::BTreeMap<_, _> = values.iter().collect();
 			Json::Object(
 				sorted
 					.into_iter()
-					.map(|(key, value)| Ok((key.clone(), to_json(value)?)))
+					.map(|(key, value)| Ok((key.clone(), to_json_at_depth(value, depth + 1)?)))
 					.collect::<Result<_>>()?,
 			)
 		}
+		Value::SharedMap(values) => to_json_at_depth(&Value::Map(values.snapshot()), depth + 1)?,
 		Value::Function(_) => bail!("cannot serialize a template function"),
 	})
 }

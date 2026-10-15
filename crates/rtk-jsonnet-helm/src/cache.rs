@@ -58,7 +58,9 @@ impl Key {
 		chart_path: &Path,
 		options: &Options,
 	) -> io::Result<Key> {
-		// Native rendering has no Helm executable, resolved namespace or disk entries.
+		// Native rendering resolves namespaces without a Helm executable or disk entries.
+		let resolved = options.native_resolved();
+		let options = resolved.as_ref();
 		let mut builder = KeyBuilder::new(b"rtk native helm render key v1");
 		builder.string(name);
 		options.hash_cache_key(&mut builder);

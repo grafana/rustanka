@@ -9,8 +9,8 @@ RTK_HELM_RENDERER=rust cargo run -p rtk -- export /tmp/rtk-native-output path/to
 The normal backend remains Helm. Unset `RTK_HELM_RENDERER`, or set it to `helm`,
 to use it. Other values are errors.
 
-The Rust backend uses the released [`gtmpl-ng`](https://github.com/firstdorsal/gtmpl-rust)
-for Go template syntax, serde-saphyr for YAML
+The Rust backend uses [`gtmpl-ng`](https://github.com/firstdorsal/gtmpl-rust)
+with a pinned patch for shared dictionaries and parsed-template reuse, serde-saphyr for YAML
 reading, and rtk-yaml for `toYaml`. There is no Go code or Helm subprocess in
 this backend. Identical renders share the engine's in-memory cache, including
 across worker threads, under a key distinct from Helm's. Keys cover chart contents
@@ -34,8 +34,8 @@ No automatic fallback occurs on errors.
 - CRD inclusion, hook exclusion and Tanka manifest naming.
 - Helm-compatible `.helmignore` rules and default exclusion of dotfiles in `templates/`.
 
-Every call must provide a non-empty `namespace`. The prototype does not resolve
-namespaces through kubeconfig. A project's `expectVersions.helm` is rejected
+An omitted namespace follows `HELM_NAMESPACE`, kubeconfig and the `default`
+namespace without invoking Helm. A project's `expectVersions.helm` is rejected
 without invoking Helm: this renderer does not claim compatibility with a Helm
 major version.
 
@@ -46,10 +46,9 @@ small, and successful rendering does not establish parity for other charts.
 
 Default capabilities match Helm 3.19.2 (Kubernetes 1.34), the full-export CI runner,
 and are pinned in the checked-in snapshot.
-Live cluster lookups and unregistered functions are unavailable. Dictionary mutation
-through aliases does not reproduce Go template reference semantics. Chart metadata is
-exposed with its top-level Go-style field names; nested metadata is not fully
-modeled.
+Live cluster lookups and unregistered functions are unavailable. Go reflection
+on file buffers and nested metadata remains incomplete. Chart metadata exposes
+its top-level Go-style field names.
 
 Go formatting, missing values,
 YAML formatting and conversion error behavior are not fully compatible. In
@@ -57,8 +56,8 @@ particular, `fromYaml` accepts mappings only and conversion failures are errors.
 `until` is limited to one million elements. Clock helpers support duration
 validation; Go `time.Time` formatting remains unsupported.
 Manifest ordering does not reproduce Helm's kind/hook ordering; avoid resources
-that produce duplicate Tanka manifest keys. `include` and `tpl` reparse the chart
-and have a 64-call nesting limit. No performance improvement is claimed.
+that produce duplicate Tanka manifest keys. `include` reuses parsed templates; `tpl` parses an isolated overlay. Both have
+a 64-call nesting limit. No performance improvement is claimed.
 
 ## Validation
 
