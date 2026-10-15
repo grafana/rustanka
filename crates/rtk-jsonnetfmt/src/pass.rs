@@ -35,9 +35,10 @@ use crate::{
 /// only what it changes and calls the matching [`base`] function to carry on
 /// downwards.
 pub trait AstPass {
-	/// Per-pass traversal context, corresponding to go-jsonnet's `pass.Context`.
-	/// Stateless passes use `()`; context-sensitive passes can carry parent
-	/// information to their children.
+	/// Per-pass traversal context. Most passes use `()`; `AddPlusObject`
+	/// carries [`Parent`](crate::passes::add_plus_object::Parent) to decide
+	/// whether an explicit `+` needs parentheses. Its five specialized hooks
+	/// assign context per child slot, which the base traversal cannot do.
 	type Ctx;
 
 	/// `BaseContext`: the context the root is visited with.
@@ -203,8 +204,12 @@ pub trait AstPass {
 
 	/// Visit a node of any kind.
 	///
-	/// This is the only hook that can **replace** the node, which `FixParens`,
-	/// `RemovePlusObject` and `AddPlusObject` all do.
+	/// This is the only hook that gets the whole [`Node`], so it is the only
+	/// one that can **replace** it — which all three of Phase 2e's passes do.
+	/// It is also why [`FixParens`](crate::passes::FixParens) overrides this
+	/// rather than [`AstPass::parens`], although upstream overrides `Parens`:
+	/// it needs the node's own fodder, and this module's second departure keeps
+	/// that on [`Node`] instead of in the variant.
 	fn visit(&mut self, node: &mut Node, ctx: &Self::Ctx) {
 		base::visit(self, node, ctx);
 	}
