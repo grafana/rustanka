@@ -1,0 +1,2 @@
+# Collapse generated parity answers in GitHub; keep the generator visible.
+/crates/rtk-gobwas-glob/testdata/gobwas-glob-v*.json linguist-generated=true
