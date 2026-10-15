@@ -503,17 +503,25 @@ impl<'a> Arguments<'a> {
 			!self.0.is_empty(),
 			"merge requires a destination dictionary"
 		);
-		let destination = &self.0[0];
+		let destination = match &self.0[0] {
+			Value::Nil | Value::NoValue => {
+				Value::Map(std::collections::HashMap::new()).into_shared()
+			}
+			value => value.clone(),
+		};
 		ensure!(
 			matches!(destination, Value::SharedMap(_)),
 			"merge requires dictionaries"
 		);
 		for source in &self.0[1..] {
-			Self::merge_values(destination, source, overwrite)?;
+			Self::merge_values(&destination, source, overwrite)?;
 		}
-		Ok(destination.clone())
+		Ok(destination)
 	}
 	fn merge_values(destination: &Value, source: &Value, overwrite: bool) -> Result<()> {
+		if matches!(source, Value::Nil | Value::NoValue) {
+			return Ok(());
+		}
 		let Value::SharedMap(destination) = destination else {
 			bail!("merge requires dictionaries");
 		};

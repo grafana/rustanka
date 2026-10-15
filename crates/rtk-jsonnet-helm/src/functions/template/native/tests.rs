@@ -969,6 +969,8 @@ metadata:
 data:
   alias: {{ .Values.added | quote }}
   keys: {{ dict 5 "five" false "no" | toJson | quote }}
+  nilSource: {{ mustMergeOverwrite (dict "runAsUser" 1000) nil | toJson | quote }}
+  nilDestination: {{ mustMergeOverwrite nil (dict "runAsUser" 1000) | toJson | quote }}
   requiredZero: {{ required "missing" 0 | quote }}
   requiredFalse: {{ required "missing" false | quote }}
   pretty: {{ dict "html" "<>&" | mustToPrettyJson | quote }}
