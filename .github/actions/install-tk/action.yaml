@@ -1,0 +1,104 @@
+name: Install tk
+description: >
+  Installs Tanka's tk and asserts which version arrived.
+
+  It exists because the step it replaces computed a TK_VERSION and then
+  downloaded releases/latest anyway, never using the variable, and printed
+  `tk --version` without asserting anything about it. So the goldens and the
+  CLI cross-check were retargeted at whatever tanka released most recently,
+  silently, with no rtk change.
+
+inputs:
+  version:
+    description: >
+      `pinned` (the default) reads rtk_masterminds::TANKA_COMPATIBLE_VERSION
+      out of the source, so the pin has exactly one home and cannot drift from
+      the version rtk answers for. `latest` resolves the newest release, which
+      only the non-blocking scheduled workflow wants. Anything else is taken as
+      a tag.
+    required: false
+    default: pinned
+
+outputs:
+  version:
+    description: The tag that was installed, e.g. v0.38.0.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      # Through `env` rather than interpolated into `run`. `${{ }}` is expanded
+      # by the runner *before* bash sees the script, so an input spliced into
+      # `run` arrives as code: a tag containing a quote and a `;` would execute.
+      # As an environment variable it reaches bash as data and cannot be
+      # anything but a string, whatever it holds. This is what zizmor's
+      # template-injection audit asks for, and it costs nothing here.
+      env:
+        REQUESTED_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$REQUESTED_VERSION" in
+          pinned)
+            # One home for the pin: the constant rtk itself answers for.
+            # `git describe --tags` builds it into tk, so a release reports the
+            # tag verbatim and the two are directly comparable.
+            source=crates/rtk-masterminds/src/lib.rs
+            version=$(sed -n \
+              's/^pub const TANKA_COMPATIBLE_VERSION: &str = "\(v[0-9][^"]*\)";$/\1/p' \
+              "$source")
+            # An empty read must fail rather than fall back to latest: that is
+            # exactly the bug this action replaces. A reformat that wraps the
+            # constant, or a move to another file, lands here loudly.
+            if [ -z "$version" ]; then
+              echo "::error::could not read TANKA_COMPATIBLE_VERSION from $source"
+              exit 1
+            fi
+            echo "pinned to $version, read from $source"
+            ;;
+          latest)
+            version=$(curl -fsSL https://api.github.com/repos/grafana/tanka/releases/latest \
+              | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+            if [ -z "$version" ]; then
+              echo "::error::could not resolve the latest tanka release"
+              exit 1
+            fi
+            echo "latest tanka release is $version"
+            ;;
+          *)
+            version="$REQUESTED_VERSION"
+            echo "using the requested tag $version"
+            ;;
+        esac
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - shell: bash
+      # Same reasoning as the step above. zizmor did not flag this one — a step
+      # output is a narrower source than an action input — but leaving one
+      # interpolation in a file whose other two were just removed invites the
+      # pattern back.
+      env:
+        RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
+      run: |
+        set -euo pipefail
+        version="$RESOLVED_VERSION"
+        curl -fSL -o /usr/local/bin/tk \
+          "https://github.com/grafana/tanka/releases/download/${version}/tk-linux-amd64"
+        chmod +x /usr/local/bin/tk
+        # tk prints its version through Go's `log` package, which writes to
+        # **stderr** — so `$(tk --version)` captures the empty string and the
+        # assertion below fails on a perfectly good install. Merge the streams.
+        # `|| true` because the exit code is not the thing being asserted, and
+        # `set -e` would otherwise abort before the message could be printed.
+        reported=$(tk --version 2>&1) || true
+        echo "tk --version: ${reported}"
+        # Matched on the number rather than the whole tag, so a leading `v` on
+        # one side and not the other cannot fail a correct install. A dev build
+        # reports something else entirely and fails here — which matters,
+        # because a dev build of tk skips the expectVersions.tanka check
+        # altogether and would answer golden fixtures differently.
+        if ! printf '%s' "${reported}" | grep -qF "${version#v}"; then
+          echo "::error::expected tk ${version}, but tk --version said: ${reported}"
+          exit 1
+        fi

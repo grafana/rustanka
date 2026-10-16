@@ -1,0 +1,138 @@
+name: fmt acceptance
+
+# Phase 5's acceptance gate for `rtk fmt`, over real Grafana Jsonnet.
+#
+# Non-blocking by construction, like tk-latest.yaml: nothing calls this workflow
+# and it has no `pull_request` trigger. That is not because the gate is
+# unimportant — it is the thing the README's ✅ for `fmt` rests on — but because
+# its corpus is several hundred megabytes of external clones tracking moving
+# branches. As a pull-request gate it would go red for a GitHub outage or an
+# upstream commit, and a gate that is red for reasons unrelated to the change
+# under review is a gate people learn to ignore.
+#
+# What *is* a pull-request gate is everything the formatter is graded by inside
+# the repository: 857 corpus files, the node and pass oracles, 15 fixtures, the
+# CLI parity tests and the tk cross-check. This adds breadth those cannot have,
+# and it ratchets on counts recorded in fmt-acceptance.toml, so drift here is a
+# red check and a filed issue rather than a silent change of subject.
+on:
+  schedule:
+    # Wednesdays, 05:23 UTC. Deliberately not Monday: tk-latest.yaml runs then,
+    # and two jobs filing formatter issues on the same morning read as one
+    # problem.
+    - cron: '23 5 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: fmt against tk over real Jsonnet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To file the divergence report.
+      issues: write
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+
+      # Pinned to `rtk_masterminds::TANKA_COMPATIBLE_VERSION`, the same as
+      # test.yaml. An unpinned tk here would retarget the gate rather than
+      # measure against it.
+      - id: tk
+        uses: ./.github/actions/install-tk
+
+      - name: Clone the acceptance corpus
+        run: make fmt-acceptance-corpus
+
+      - name: Run the gate
+        id: gate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          make fmt-acceptance 2>&1 | tee acceptance.log
+          # The exit code is the assertion; this is the guard against a future
+          # refactor that exits 0 without having measured anything. The harness
+          # prints its counts on success as well as failure precisely so that
+          # this line can exist.
+          grep -q 'fmt acceptance: green.' acceptance.log
+          grep -q '^  parity ' acceptance.log
+
+      - name: Report divergence
+        if: steps.gate.outcome == 'failure'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          TK_VERSION: ${{ steps.tk.outputs.version }}
+        with:
+          script: |
+            const fs = require('fs');
+            // One issue, updated, rather than a new one every week.
+            const marker = '<!-- FMT_ACCEPTANCE_DIVERGENCE -->';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            let log = '';
+            try {
+              log = fs.readFileSync('acceptance.log', 'utf8').split('\n').slice(-120).join('\n');
+            } catch (error) {
+              log = `(no log: ${error.message})`;
+            }
+            const body = [
+              `\`rtk fmt\` diverges from \`tk ${process.env.TK_VERSION}\` over the real-Jsonnet`,
+              `acceptance corpus, or one of the recorded counts in \`fmt-acceptance.toml\` moved.`,
+              '',
+              `The corpus tracks moving branches, so the ordinary cause is upstream Jsonnet that`,
+              `reaches something the in-repo corpus does not. Two of the counts are worth reading`,
+              `first, because they are the ones that block the README's ✅ for \`fmt\`:`,
+              '',
+              `* **\`refusing_to_reparse\`** — a file whose formatted output the parser refuses.`,
+              `  \`tk fmt\` writes in place, so this destroys a file. Two upstream mechanisms are`,
+              `  known and documented in \`CLAUDE.md\`; a third would be new.`,
+              `* **\`matching\`** — byte parity per file. Anything below \`files\` is a formatter`,
+              `  difference and is the more serious of the two.`,
+              '',
+              '```',
+              log,
+              '```',
+              '',
+              `[Full log](${run})`,
+              '',
+              `_Last seen: ${new Date().toISOString()}_`,
+              marker,
+            ].join('\n');
+
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = open.find(issue => (issue.body || '').includes(marker));
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.info(`Updated issue #${existing.number}`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'rtk fmt diverges over the real-Jsonnet acceptance corpus',
+                body,
+              });
+              core.info(`Opened issue #${created.number}`);
+            }
+
+      # Red in the Actions tab as well as filed, because an issue that is
+      # already open makes the next run look clean.
+      - name: Fail on divergence
+        if: steps.gate.outcome == 'failure'
+        run: |
+          echo "::error::rtk fmt diverges over the acceptance corpus; see the issue"
+          exit 1
