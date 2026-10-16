@@ -79,7 +79,7 @@ import (
 //
 // **The three strip passes are deliberately absent.** All three are skipped
 // under `DefaultOptions`, which is the only configuration `tk fmt` uses, and
-// `docs/rtk-fmt-plan.md` schedules none of them. They are also what made this
+// the fmt port plan schedules none of them. They are also what made this
 // oracle unreviewable: each rewrites *every* tree it touches, so
 // `StripAllButComments` and `StripEverything` alone accounted for roughly 270
 // of the 356 changed cells over the corpus and most of a 23 MB file — a diff

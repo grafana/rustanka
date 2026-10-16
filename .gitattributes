@@ -8,3 +8,5 @@
 /crates/rtk-jsonnetfmt/testdata/pass-snippet-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/corpus/*.golden linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/go-jsonnet-corpus.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/parse-error-snippet-oracle.json linguist-generated=true
