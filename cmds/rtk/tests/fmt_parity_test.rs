@@ -94,9 +94,11 @@ fn clip(text: &str) -> String {
 
 /// Run `binary` in `directory`, optionally feeding it stdin.
 ///
-/// The environment is scrubbed of the three things that would otherwise let a
-/// developer's shell write to the stderr being asserted: `RUST_LOG` and the two
-/// OpenTelemetry endpoints `telemetry::init` looks for. Nothing being asserted
+/// The subprocess environment disables backtraces and controls logging and the
+/// two OpenTelemetry endpoints `telemetry::init` looks for. CI enables
+/// `RUST_BACKTRACE`, and `RUST_LIB_BACKTRACE` can independently enable anyhow's
+/// backtraces; neither belongs in the ordinary CLI output compared here.
+/// Nothing being asserted
 /// is a tracing event — the summary lines are `eprintln!`s — so the log level
 /// cannot hide a real expectation.
 fn run_binary(binary: &str, directory: &Path, arguments: &[&str], stdin: Option<&str>) -> Run {
@@ -105,6 +107,8 @@ fn run_binary(binary: &str, directory: &Path, arguments: &[&str], stdin: Option<
 		.current_dir(directory)
 		.args(arguments)
 		.env("RUST_LOG", "error")
+		.env("RUST_BACKTRACE", "0")
+		.env("RUST_LIB_BACKTRACE", "0")
 		.env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
 		.env_remove("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 		.stdout(Stdio::piped())
