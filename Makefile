@@ -139,23 +139,33 @@ update-glob-truth-table:
 GO_JSONNET_CHECKOUT := target/go-jsonnet
 # What every recipe below resolves to: an explicit checkout wins, and failing
 # that the one this file clones.
-GO_JSONNET_PATH = $${GO_JSONNET_FOR_TESTS:-$(CURDIR)/$(GO_JSONNET_CHECKOUT)}
+GO_JSONNET_PATH = $${GO_JSONNET_FOR_TESTS:-$(abspath $(GO_JSONNET_CHECKOUT))}
 
-# A real directory target rather than a phony one, so it is cloned once and
-# then left alone.
+# Rust's build cache can restore an incomplete directory under target/. Check
+# the contents on every invocation rather than trusting the directory's existence.
+.PHONY: $(GO_JSONNET_CHECKOUT)
 $(GO_JSONNET_CHECKOUT):
-	@if [ -n "$${GO_JSONNET_FOR_TESTS:-}" ]; then \
+	@set -e; \
+	if [ -n "$${GO_JSONNET_FOR_TESTS:-}" ]; then \
 		echo "GO_JSONNET_FOR_TESTS is set to $$GO_JSONNET_FOR_TESTS; not cloning"; \
+	elif [ -f "$@/go.mod" ] && [ -d "$@/testdata" ] && \
+		[ -d "$@/formatter/testdata" ]; then \
+		:; \
 	else \
 		echo "cloning go-jsonnet $(GO_JSONNET_VERSION) into $@..."; \
 		mkdir -p $(dir $@); \
+		staged=$$(mktemp -d "$@.XXXXXX"); \
+		trap 'rm -rf "$$staged"' EXIT; \
 		git clone --quiet --depth 1 --branch $(GO_JSONNET_VERSION) \
-			https://github.com/google/go-jsonnet $@; \
+			https://github.com/google/go-jsonnet "$$staged"; \
+		rm -rf "$@"; \
+		mv "$$staged" "$@"; \
 	fi
 
 go-jsonnet-checkout: $(GO_JSONNET_CHECKOUT)
 	@checkout="$(GO_JSONNET_PATH)"; \
-	test -d "$$checkout/formatter/testdata" || { \
+	{ test -f "$$checkout/go.mod" && test -d "$$checkout/testdata" && \
+		test -d "$$checkout/formatter/testdata"; } || { \
 		echo "$$checkout does not look like a go-jsonnet checkout"; exit 1; \
 	}; \
 	echo "go-jsonnet checkout ready at $$checkout"
