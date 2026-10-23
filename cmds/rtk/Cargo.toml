@@ -47,10 +47,12 @@ rtk-spec.workspace = true
 # Telemetry
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
-tracing-opentelemetry = "0.32"
-opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "reqwest-rustls"] }
+tracing-opentelemetry = "0.33"
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "reqwest-blocking-client"] }
+# Keep OTLP on the same ring-backed TLS provider as profiling and Kubernetes.
+reqwest = { workspace = true, features = ["rustls-no-provider"] }
 thiserror.workspace = true
 dirs = "6.0.0"
 http = "1.4.0"

@@ -134,7 +134,7 @@ where
 	// Build OTLP exporter - select transport based on `OTEL_EXPORTER_OTLP_PROTOCOL`
 	let exporter = match std::env::var(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL)
 		.as_deref()
-		.unwrap_or(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL_DEFAULT)
+		.unwrap_or(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL_HTTP_PROTOBUF)
 	{
 		"grpc" => opentelemetry_otlp::SpanExporter::builder()
 			.with_tonic()
