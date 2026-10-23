@@ -121,6 +121,9 @@ where
 {
 	use opentelemetry_sdk::Resource;
 
+	// OTLP builds its HTTP client before profiling can install a TLS provider.
+	let _ = rustls::crypto::ring::default_provider().install_default();
+
 	let mut resource_builder = Resource::builder();
 
 	// Resource::builder() reads `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` automatically.
@@ -134,7 +137,7 @@ where
 	// Build OTLP exporter - select transport based on `OTEL_EXPORTER_OTLP_PROTOCOL`
 	let exporter = match std::env::var(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL)
 		.as_deref()
-		.unwrap_or(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL_DEFAULT)
+		.unwrap_or(opentelemetry_otlp::OTEL_EXPORTER_OTLP_PROTOCOL_HTTP_PROTOBUF)
 	{
 		"grpc" => opentelemetry_otlp::SpanExporter::builder()
 			.with_tonic()
