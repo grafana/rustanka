@@ -25,7 +25,7 @@ use crate::{
 	k8s::{
 		apply::ApplyEngine,
 		client::ClusterConnection,
-		diff::{DiffStatus, PruneDetectionOptions, ResourceDiff},
+		diff::{list_ignored_resources, DiffStatus, PruneDetectionOptions, ResourceDiff},
 		output::DiffOutput,
 	},
 };
@@ -67,6 +67,10 @@ pub struct PruneArgs {
 	#[arg(long)]
 	pub namespace: Option<String>,
 
+	/// List resources protected by tanka.dev/prune-ignore without deleting anything
+	#[arg(long)]
+	pub list_ignored: bool,
+
 	/// Regex filter on '<kind>/<name>'. See https://tanka.dev/output-filtering
 	#[arg(short = 't', long)]
 	pub target: Vec<String>,
@@ -102,6 +106,8 @@ pub struct PruneOpts {
 	pub name: Option<String>,
 	/// Limit pruning to a single namespace.
 	pub namespace: Option<String>,
+	/// List protected resources without evaluating manifests or deleting anything.
+	pub list_ignored: bool,
 }
 
 /// Prune orphaned resources from the cluster.
@@ -116,6 +122,34 @@ pub async fn prune_environment<W: Write>(
 	mut writer: W,
 ) -> Result<Vec<ResourceDiff>> {
 	let engine = engine(jsonnet);
+	if opts.list_ignored {
+		let discovered = engine
+			.peek_single(path, opts.name.as_deref())
+			.map_err(super::common::environment_error)?
+			.ok_or_else(|| anyhow::anyhow!("no Tanka environment found at {}", path.display()))?;
+		let targets = Targets::compile(&opts.target)?;
+		let connection =
+			get_or_create_connection(connection, Some(&discovered.environment.spec)).await?;
+		let ignored = list_ignored_resources(
+			connection.client(),
+			&discovered.environment_label(),
+			opts.namespace.as_deref(),
+			&targets,
+		)
+		.await?;
+		if ignored.is_empty() {
+			eprintln!("No resources found with the tanka.dev/prune-ignore annotation.");
+		} else {
+			for (kind, name, namespace) in ignored {
+				writeln!(
+					writer,
+					"{kind}/{name} (namespace: {})",
+					namespace.as_deref().unwrap_or("")
+				)?;
+			}
+		}
+		return Ok(Vec::new());
+	}
 	let evaluated = evaluate_manifests(&engine, path, opts.name.as_deref(), &opts.target)?;
 	let spec = evaluated.spec.as_ref();
 
@@ -280,6 +314,7 @@ async fn run_async<W: Write>(args: PruneArgs, writer: W) -> Result<()> {
 		target: args.target,
 		name: args.name,
 		namespace: args.namespace,
+		list_ignored: args.list_ignored,
 	};
 
 	prune_environment(&args.path, None, jsonnet, opts, writer).await?;
@@ -302,5 +337,11 @@ mod tests {
 	fn parses_namespace_flag() {
 		let cli = TestCli::parse_from(["rtk-prune", ".", "--namespace", "monitoring"]);
 		assert_eq!(cli.args.namespace.as_deref(), Some("monitoring"));
+	}
+
+	#[test]
+	fn parses_list_ignored_flag() {
+		let cli = TestCli::parse_from(["rtk-prune", ".", "--list-ignored"]);
+		assert!(cli.args.list_ignored);
 	}
 }

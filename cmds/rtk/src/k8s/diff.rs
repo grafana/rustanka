@@ -340,6 +340,59 @@ struct ManifestInfo {
 /// Maximum concurrent API operations for parallel diffing.
 const MAX_CONCURRENT_DIFF_OPS: usize = 8;
 
+/// List live resources explicitly protected from pruning for this environment.
+pub async fn list_ignored_resources(
+	client: &Client,
+	env_label: &str,
+	namespace: Option<&str>,
+	targets: &Targets,
+) -> Result<Vec<(String, String, Option<String>)>, DiffError> {
+	let namespace = namespace.filter(|namespace| !namespace.is_empty());
+	let cache = ApiResourceCache::build(client, HashSet::new(), true)
+		.await
+		.map_err(|source| DiffError::BuildingApiCache(Box::new(source)))?;
+	let mut ignored = Vec::new();
+	let kind_hints = targets.kind_hints();
+	for (gvk, discovered) in cache.iter() {
+		if !discovered
+			.capabilities
+			.supports_operation(kube::discovery::verbs::LIST)
+			|| (namespace.is_some() && discovered.scope != ResourceScope::Namespaced)
+			|| kind_hints
+				.as_ref()
+				.is_some_and(|hints| !hints.contains(&gvk.kind.to_lowercase()))
+		{
+			continue;
+		}
+		let api: Api<DynamicObject> = match namespace {
+			Some(namespace) => {
+				Api::namespaced_with(client.clone(), namespace, &discovered.api_resource)
+			}
+			None => Api::all_with(client.clone(), &discovered.api_resource),
+		};
+		let selector = format!("tanka.dev/environment={env_label}");
+		let resources = api
+			.list(&ListParams::default().labels(&selector))
+			.await
+			.map_err(|source| DiffError::PruneList {
+				kind: gvk.kind.clone(),
+				source: Box::new(source),
+			})?;
+		for resource in resources {
+			let Some(name) = resource.metadata.name.clone() else {
+				continue;
+			};
+			if DiffEngine::is_prune_ignored(&resource)
+				&& targets.keeps_kind_name(&format!("{}/{name}", gvk.kind))
+			{
+				ignored.push((gvk.kind.clone(), name, resource.metadata.namespace));
+			}
+		}
+	}
+	ignored.sort();
+	Ok(ignored)
+}
+
 /// Result type for tasks in the shared worker pool.
 enum DiffTaskResult {
 	/// Result from diffing a manifest.
@@ -854,6 +907,10 @@ impl DiffEngine {
 				continue;
 			}
 
+			if Self::is_prune_ignored(&resource) {
+				continue;
+			}
+
 			if !Self::is_directly_created(&resource) {
 				tracing::debug!(
 					kind = %gvk.kind,
@@ -928,6 +985,18 @@ impl DiffEngine {
 		const VALID_MANAGERS: &[&str] =
 			&["tanka", "kubectl-client-side-apply", "kustomize-controller"];
 
+		if resource
+			.metadata
+			.owner_references
+			.as_ref()
+			.is_some_and(|references| {
+				references
+					.iter()
+					.any(|reference| reference.controller == Some(true))
+			}) {
+			return false;
+		}
+
 		// Check for last-applied-configuration annotation (client-side apply)
 		if resource
 			.metadata
@@ -949,6 +1018,18 @@ impl DiffEngine {
 						.as_ref()
 						.is_some_and(|m| VALID_MANAGERS.contains(&m.as_str()))
 				})
+			})
+	}
+
+	fn is_prune_ignored(resource: &DynamicObject) -> bool {
+		resource
+			.metadata
+			.annotations
+			.as_ref()
+			.is_some_and(|annotations| {
+				annotations
+					.get("tanka.dev/prune-ignore")
+					.is_some_and(|value| value == "true")
 			})
 	}
 

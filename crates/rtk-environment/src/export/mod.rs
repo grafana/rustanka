@@ -47,6 +47,13 @@ pub use crate::export::manifest::{InvalidMergeStrategy, MergeStrategy};
 pub use crate::export::template::DEFAULT_FORMAT;
 pub use process::Targets;
 
+impl Discovered {
+	/// Tanka's stable label for this discovered environment.
+	pub fn environment_label(&self) -> String {
+		process::Processing::environment_label(&self.environment.metadata)
+	}
+}
+
 /// A Kubernetes label selector used to filter discovered environments.
 pub struct LabelSelector(Selector);
 
