@@ -1,0 +1,10 @@
+vulnerabilities:
+  - id: CVE-2026-45792
+    paths:
+      - Cargo.lock
+    purls:
+      - pkg:cargo/rtk@0.1.0
+    statement: >-
+      This workspace's rtk is Rustanka, a Tanka implementation. The advisory
+      affects the unrelated Rust Token Killer crate and its .rtk/filters.toml
+      output filtering, which Rustanka does not implement.
