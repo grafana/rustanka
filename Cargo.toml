@@ -132,7 +132,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 reqwest = { version = "0.13", default-features = false, features = [
   "blocking",
 ] }
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.0", default-features = false, features = ["deflate"] }
 directories = "6.0.0"
 gix = { version = "0.83.0", features = ["blocking-network-client"] }
 camino = { version = "1.2.2", features = ["serde1"] }
