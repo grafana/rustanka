@@ -20,14 +20,40 @@
 //!
 //! # State
 //!
-//! [`format`] parses, runs every step of `FormatNode`, and unparses. **Phase
-//! 2 of `docs/rtk-fmt-plan.md` is complete**: the lexer, the AST, the parser,
-//! the unparser, the [`pass`] traversal, all twelve passes and all three of
-//! `FormatNode`'s non-pass steps. `testdata/corpus-baseline.toml` counts the
-//! files — all 138 of them — and `quarantine.toml` is empty.
+//! [`format`] parses, runs every step of `FormatNode`, and unparses.
+//! **The port is complete**: the lexer, the AST,
+//! the parser, the unparser, the [`pass`] traversal, all twelve passes, all
+//! three of `FormatNode`'s non-pass steps, the CLI that drives them, and
+//! acceptance against the real `tk` over 3,016 files of real Grafana Jsonnet —
+//! 1,452 of them vendored — at byte parity, with nothing rewritten that `tk fmt`
+//! had already formatted. `quarantine.toml` is empty.
 //!
-//! What is left is Phase 3, the CLI: `cmds/rtk/src/commands/fmt.rs` still
-//! `bail!`s, so this crate is a library nothing calls in anger yet.
+//! `testdata/corpus-baseline.toml` counts the files, and Phase 4 made that
+//! count two counts. The breadth corpus is now **857 files in two sets**: the
+//! 138 in-repo files every phase up to 3 reported as "138 of 138", and 719 more
+//! from go-jsonnet's own root `testdata/` — Jsonnet written by people testing a
+//! parser rather than a formatter, which is the breadth the in-repo set most
+//! lacked, most of it having been `tk fmt`-clean before any pass existed. The
+//! two sets are stored differently because the second set's *inputs* are not in
+//! this repository; that file explains why, and why the in-repo set did not
+//! simply grow.
+//!
+//! `cmds/rtk/src/commands/fmt.rs` is the caller, and it calls
+//! [`format_default`] and [`find_files_all`] and nothing else. Two things it
+//! owns are worth knowing from in here: it runs the formatting on a thread with
+//! a 1 GiB stack, because this crate recurses to the nesting depth of its input
+//! in several places and has no depth limit anywhere — deliberately, since a
+//! limit would refuse a file `tk fmt` formats — and it does **not** iterate to
+//! convergence, because matching `tk fmt` on one run is the contract and
+//! twelve inputs do not settle in one. `tests/idempotence.rs` lists them.
+//!
+//! Three more, found by Phase 4's corpus set, are worse than unsettled: their
+//! first-run output does not parse, so a convergence loop would not have saved
+//! them either. `PrettyFieldNames` promotes a computed field inside an object
+//! comprehension, which a comprehension may not have, and a `|||` block of
+//! nothing but newlines loses the indent that held it together. Both are
+//! upstream's, both are confirmed against the real `tk` on both runs, and
+//! `tests/corpus.rs`'s `OUTPUT_DOES_NOT_REPARSE` pins them.
 //!
 //! One thing here is not a formatter at all. [`go_sort`] is a port of
 //! `sort.Slice`, needed because [`sort_imports`] sorts by a key two imports
@@ -77,15 +103,39 @@ pub enum CommentStyle {
 	Leave,
 }
 
-/// go-jsonnet's `formatter.Options`.
+/// go-jsonnet's `formatter.Options`, less the three strip flags.
 ///
 /// `tk` exposes none of these, so `Options::default` — go-jsonnet's
 /// `DefaultOptions()` — is the only configuration that has to be correct. The
 /// rest are carried because the passes are shared and because upstream's own
 /// `TestFormatNoImplicitPlus` runs with `use_implicit_plus` off — which is the
 /// only way to reach [`passes::AddPlusObject`].
+///
+/// # Why `StripEverything`, `StripComments` and `StripAllButComments` are not here
+///
+/// They were, as three `pub` bools that nothing read. Phase 3 is the first
+/// time `Options` is handed to a caller, which is the moment a flag that
+/// promises to strip comments and silently keeps them stops being harmless, so
+/// they were removed rather than left to be found. Four things decided it:
+///
+/// - Nothing implements them. `format` has no step 9, and an absent field is
+///   the only honest way to say so.
+/// - `DefaultOptions()` skips all three, `tk` exposes no way to ask for them,
+///   and no phase of the fmt port plan schedules them.
+/// - The pass oracle deliberately does **not** dump them: two of the three
+///   rewrite every tree they touch, which was about 270 of 356 changed cells
+///   and most of a 23 MB file. So the passes would land ungraded, which is the
+///   one thing this port does not do.
+/// - Nothing in `tk` parity needs them, and parity is the whole contract.
+///
+/// The route back, should a caller ever want them: they are **one
+/// `if / else if / else if` chain** at step 9 of `FormatNode`
+/// (`internal/formatter/jsonnetfmt.go:178-184`) — mutually exclusive and
+/// first-wins, *not* three independent `if`s — and adding their names to
+/// `passNames` in `testdata/generate/_staged/passdump.go` is what makes the
+/// oracle grade them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// A faithful port of a Go struct of eight bools; grouping them would hide the
+// A faithful port of a Go struct of plain bools; grouping them would hide the
 // correspondence.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Options {
@@ -105,16 +155,10 @@ pub struct Options {
 	pub sort_imports: bool,
 	/// Remove the `+` where it is not required.
 	pub use_implicit_plus: bool,
-	pub strip_everything: bool,
-	pub strip_comments: bool,
-	pub strip_all_but_comments: bool,
 }
 
 impl Default for Options {
 	/// go-jsonnet's `DefaultOptions()`, which is what `tanka.Format` passes.
-	///
-	/// The three `strip_*` fields are absent from `DefaultOptions()` and so
-	/// take Go's zero value.
 	fn default() -> Self {
 		Self {
 			indent: 2,
@@ -126,9 +170,6 @@ impl Default for Options {
 			pad_arrays: false,
 			pad_objects: true,
 			sort_imports: true,
-			strip_everything: false,
-			strip_comments: false,
-			strip_all_but_comments: false,
 		}
 	}
 }
@@ -212,7 +253,7 @@ impl Error {
 /// | 6 | [`FixParens`](passes::FixParens) | **runs** |
 /// | 7 | [`RemovePlusObject`](passes::RemovePlusObject) or [`AddPlusObject`](passes::AddPlusObject) | **runs** |
 /// | 8 | [`NoRedundantSliceColon`](passes::NoRedundantSliceColon) | **runs** |
-/// | 9 | the three strip passes | skipped under `Options::default` |
+/// | 9 | the three strip passes | **not ported** — see [`Options`] |
 /// | 10 | [`PrettyFieldNames`](passes::PrettyFieldNames) | **runs** |
 /// | 11 | [`EnforceStringStyle`](passes::EnforceStringStyle) | **runs** |
 /// | 12 | [`EnforceCommentStyle`](passes::EnforceCommentStyle) | **runs** |
@@ -356,9 +397,6 @@ mod tests {
 		assert!(!options.pad_arrays);
 		assert!(options.pad_objects);
 		assert!(options.sort_imports);
-		assert!(!options.strip_everything);
-		assert!(!options.strip_comments);
-		assert!(!options.strip_all_but_comments);
 	}
 
 	#[test]

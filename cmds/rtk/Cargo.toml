@@ -44,6 +44,11 @@ rtk-environments.workspace = true
 rtk-jsonnet.workspace = true
 rtk-spec.workspace = true
 
+# Tanka-compatible Jsonnet file discovery, shared by `fmt` and `lint`, and the
+# glob library it matches `--exclude` with
+rtk-jsonnetfmt.workspace = true
+rtk-gobwas-glob.workspace = true
+
 # Telemetry
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

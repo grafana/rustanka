@@ -7,7 +7,7 @@
 //!
 //! # What has landed
 //!
-//! Phase 2b of `docs/rtk-fmt-plan.md`: [`FixTrailingCommas`],
+//! Phase 2b of the fmt port plan: [`FixTrailingCommas`],
 //! [`NoRedundantSliceColon`] and [`PrettyFieldNames`]. Phase 2c:
 //! [`EnforceStringStyle`] and [`EnforceCommentStyle`]. Phase 2d:
 //! [`EnforceMaxBlankLines`] and [`FixNewlines`], plus the two four-line
@@ -18,8 +18,9 @@
 //! directly rather than through the `pass.ASTPass` machinery, so it is not an
 //! implementation of [`crate::pass::AstPass`] and does not belong in this
 //! module. Phase 2e: [`FixParens`], [`RemovePlusObject`] and
-//! [`AddPlusObject`]. That leaves `SortImports` (Phase 2f) and the three strip
-//! passes, which no phase schedules because `Options::default` skips them.
+//! [`AddPlusObject`]. Phase 2f: `SortImports`, which is not a visitor and so
+//! is not here either. The three strip passes are **not ported at all**, and
+//! [`crate::Options`] carries the decision and the route back.
 //!
 //! # Phase 2e's three are the ones that change meaning
 //!
