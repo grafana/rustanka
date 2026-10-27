@@ -21,7 +21,8 @@
 # would be a divergence from `tk fmt` — that is, a bug.
 
 # ---------------------------------------------------------------------------
-# This file is EMPTY, and Phase 2e is what emptied it.
+# This file is EMPTY. Phase 2e emptied it, and Phase 2f — which completed the
+# pipeline and took the breadth corpus to 138 of 138 — added nothing to it.
 # ---------------------------------------------------------------------------
 #
 # The history, because the ratchet is only meaningful if what came off it is
@@ -42,6 +43,15 @@
 #     fixed point of everything those phases added. Their progress is in
 #     `testdata/corpus-baseline.toml` (118 -> 120 -> 124 -> 134) and, for the
 #     passes the corpus cannot see at all, in `tests/pass_parity.rs`.
+#   * Phase 2f added none, and there was one candidate. `sort.Slice` is not a
+#     stable sort, so which of two imports sharing a path comes first is
+#     decided by pdqsort's pivot choices — and the pass oracle measured that
+#     it inverts ties from thirteen elements upwards, which neither
+#     `sort_by` nor `sort_unstable_by` reproduces. A stable sort plus an entry
+#     here was the cheap answer and was rejected: a group of thirteen imports
+#     is ordinary, aliasing one path twice is an ordinary Jsonnet habit, and
+#     the two together are a file `rtk fmt` would rewrite and `tk fmt` would
+#     not. `crates/rtk-jsonnetfmt/src/go_sort.rs` ports the sort instead.
 #   * Phase 2e removed the remaining nine, by landing `FixParens` and
 #     `AddPlusObject`. Note those nine run with `use_implicit_plus: false`,
 #     which is not what `tk fmt` passes: that branch is `AddPlusObject`, and
