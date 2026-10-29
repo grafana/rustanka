@@ -28,6 +28,24 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 - **🎯 Confidence**: Stop guessing and use `rtk diff` to see what exactly will happen.
 - **🔭 Helm**: Vendor in, modify, and export [Helm charts reproducibly](https://tanka.dev/helm#helm-support).
 
+## Jsonnet tests
+
+Run assertion files and jsonnetunit suites with one command:
+
+```sh
+rtk test -r .
+rtk test -r . -p 4 -J vendor -J lib
+rtk test path/to/example_test.jsonnet
+```
+
+Directory searches select `*_test.jsonnet` and `*_test.libsonnet`, skipping
+hidden directories, `vendor`, and `target`. Explicit file paths can have any name.
+Tests inside a Tanka project use its usual import paths; `-J` paths take precedence.
+`-p` / `--parallel` sets the evaluation worker count (defaults to available CPUs).
+Each file is fully evaluated; evaluation errors and `allTestsPassed: false` fail
+the run. Other results pass, including plain assertion files. All selected files run, and any failure exits 1.
+An empty selection exits 0.
+
 ## Performance vs Tanka
 
 ### CPU profiles

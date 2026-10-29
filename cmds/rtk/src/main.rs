@@ -52,6 +52,9 @@ enum Commands {
 	/// Export environments found in path(s)
 	Export(commands::export::ExportArgs),
 
+	/// Run Jsonnet test suites
+	Test(commands::test::TestArgs),
+
 	/// Format Jsonnet code
 	Fmt(commands::fmt::FmtArgs),
 
@@ -108,6 +111,7 @@ fn run(cli: Cli) -> Result<i32> {
 		Commands::Env(args) => commands::env::run(args, stdout).map(|_| 0),
 		Commands::Status(args) => commands::status::run(args, stdout).map(|_| 0),
 		Commands::Export(args) => commands::export::run(args, stdout).map(|_| 0),
+		Commands::Test(args) => commands::test::run(args, stdout),
 		Commands::Fmt(args) => commands::fmt::run(args, stdout).map(|_| 0),
 		Commands::Lint(args) => commands::lint::run(args, stdout).map(|_| 0),
 		Commands::Eval(args) => commands::eval::run(
