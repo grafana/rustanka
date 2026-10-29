@@ -398,7 +398,12 @@ enum DiffTaskResult {
 	/// Result from diffing a manifest.
 	Diff(Result<ResourceDiff, DiffError>),
 	/// Result from scanning a resource type for deleted resources.
-	Prune(Result<Vec<ResourceDiff>, DiffError>),
+	Prune(Result<Vec<PruneCandidate>, DiffError>),
+}
+
+struct PruneCandidate {
+	diff: ResourceDiff,
+	uid: Option<String>,
 }
 
 impl DiffEngine {
@@ -675,6 +680,14 @@ impl DiffEngine {
 		let manifests: Vec<Arc<serde_json::Value>> =
 			manifests.iter().cloned().map(Arc::new).collect();
 
+		// API versions are representations of the same live object; only its UID
+		// identifies it across every endpoint through which discovery can serve it.
+		let mut seen_uids = if do_prune {
+			self.live_manifest_uids(&manifests).await?
+		} else {
+			HashSet::new()
+		};
+
 		// Spawn diff tasks
 		let use_native = self.strategy == DiffStrategy::Validate;
 		Self::spawn_diff_tasks(&mut join_set, &engine, &semaphore, &manifests, use_native);
@@ -695,13 +708,37 @@ impl DiffEngine {
 
 		// Collect all results
 		let mut diffs = Vec::with_capacity(manifests.len());
+		let mut candidates = Vec::new();
 		while let Some(result) = join_set.join_next().await {
 			match result.map_err(DiffError::TaskPanicked)? {
 				DiffTaskResult::Diff(Ok(diff)) => diffs.push(diff),
 				DiffTaskResult::Diff(Err(e)) => return Err(e),
-				DiffTaskResult::Prune(Ok(deleted)) => diffs.extend(deleted),
+				DiffTaskResult::Prune(Ok(deleted)) => candidates.extend(deleted),
 				DiffTaskResult::Prune(Err(e)) => return Err(e),
 			}
+		}
+
+		candidates.sort_by(|a, b| {
+			(
+				&a.diff.gvk.group,
+				&a.diff.gvk.version,
+				&a.diff.gvk.kind,
+				&a.diff.namespace,
+				&a.diff.name,
+			)
+				.cmp(&(
+					&b.diff.gvk.group,
+					&b.diff.gvk.version,
+					&b.diff.gvk.kind,
+					&b.diff.namespace,
+					&b.diff.name,
+				))
+		});
+		for candidate in candidates {
+			if candidate.uid.is_some_and(|uid| !seen_uids.insert(uid)) {
+				continue;
+			}
+			diffs.push(candidate.diff);
 		}
 
 		diffs.sort_by(|a, b| {
@@ -743,6 +780,40 @@ impl DiffEngine {
 				DiffTaskResult::Diff(result)
 			});
 		}
+	}
+
+	async fn live_manifest_uids(
+		&self,
+		manifests: &[Arc<serde_json::Value>],
+	) -> Result<HashSet<String>, DiffError> {
+		let mut tasks = JoinSet::new();
+		let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DIFF_OPS));
+		for manifest in manifests {
+			let info = self.extract_manifest_info(manifest)?;
+			let api = self.dynamic_api(&info.discovered.api_resource, info.namespace.as_deref());
+			let semaphore = semaphore.clone();
+			tasks.spawn(async move {
+				let _permit = semaphore
+					.acquire()
+					.await
+					.map_err(|_| DiffError::SemaphoreClosed)?;
+				api.get_opt(&info.name)
+					.await
+					.map(|resource| resource.and_then(|resource| resource.metadata.uid))
+					.map_err(|error| DiffError::FetchResource {
+						kind: info.gvk.kind,
+						name: info.name,
+						source: Box::new(error),
+					})
+			});
+		}
+		let mut uids = HashSet::new();
+		while let Some(result) = tasks.join_next().await {
+			if let Some(uid) = result.map_err(DiffError::TaskPanicked)?? {
+				uids.insert(uid);
+			}
+		}
+		Ok(uids)
 	}
 
 	/// Build a set of (apiVersion, kind, namespace, name) from manifests for prune detection.
@@ -863,7 +934,7 @@ impl DiffEngine {
 		env_label: &str,
 		namespace_filter: Option<&str>,
 		targets: Option<&Targets>,
-	) -> Result<Vec<ResourceDiff>, DiffError> {
+	) -> Result<Vec<PruneCandidate>, DiffError> {
 		let label_selector = format!("tanka.dev/environment={}", env_label);
 		let list_params = ListParams::default().labels(&label_selector);
 
@@ -931,13 +1002,16 @@ impl DiffEngine {
 				.flatten()
 				.unwrap_or_default();
 
-			deleted.push(ResourceDiff {
-				gvk: gvk.clone(),
-				namespace,
-				name,
-				status: DiffStatus::Deleted,
-				current_yaml,
-				desired_yaml: String::new(),
+			deleted.push(PruneCandidate {
+				uid: resource.metadata.uid.clone(),
+				diff: ResourceDiff {
+					gvk: gvk.clone(),
+					namespace,
+					name,
+					status: DiffStatus::Deleted,
+					current_yaml,
+					desired_yaml: String::new(),
+				},
 			});
 		}
 

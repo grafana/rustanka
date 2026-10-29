@@ -4,7 +4,7 @@
 //! connections, unlike the tower mock which only works with in-process clients.
 
 use std::{
-	collections::HashMap,
+	collections::{BTreeMap, HashMap},
 	sync::{Arc, RwLock},
 };
 
@@ -281,37 +281,37 @@ async fn mount_discovery(
 		}]
 	});
 
-	let aggregated_groups: Vec<_> = discovery
-		.group_resources
+	let mut versions_by_group: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+	let mut group_versions: Vec<_> = discovery.group_resources.keys().collect();
+	group_versions.sort();
+	for gv in group_versions {
+		let (group, version) = gv.split_once('/').unwrap_or(("", gv));
+		versions_by_group
+			.entry(group)
+			.or_default()
+			.push((gv, version));
+	}
+	let aggregated_groups: Vec<_> = versions_by_group
 		.iter()
-		.map(|(gv, rs)| {
-			let (group, version) = gv.split_once('/').unwrap_or(("", gv));
-			let resources: Vec<_> = rs
+		.map(|(group, versions)| {
+			let versions: Vec<_> = versions
 				.iter()
-				.map(|r| {
-					serde_json::json!({
-						"resource": r.name,
-						"responseKind": {
-							"group": group,
-							"version": version,
-							"kind": r.kind
-						},
-						"scope": if r.namespaced { "Namespaced" } else { "Cluster" },
-						"verbs": r.verbs,
-					})
+				.map(|(gv, version)| {
+					let resources: Vec<_> = discovery.group_resources[*gv]
+						.iter()
+						.map(|resource| {
+							serde_json::json!({
+								"resource": resource.name,
+								"responseKind": {"group": group, "version": version, "kind": resource.kind},
+								"scope": if resource.namespaced { "Namespaced" } else { "Cluster" },
+								"verbs": resource.verbs,
+							})
+						})
+						.collect();
+					serde_json::json!({"version": version, "resources": resources, "freshness": "Current"})
 				})
 				.collect();
-
-			serde_json::json!({
-				"metadata": {
-					"name": group
-				},
-				"versions": [{
-					"version": version,
-					"resources": resources,
-					"freshness": "Current"
-				}]
-			})
+			serde_json::json!({"metadata": {"name": group}, "versions": versions})
 		})
 		.collect();
 
@@ -327,18 +327,17 @@ async fn mount_discovery(
 	});
 
 	// API groups
-	let groups: Vec<_> = discovery
-		.group_resources
-		.keys()
-		.map(|gv| {
-			let (group, version) = gv.split_once('/').unwrap_or(("", gv));
-			serde_json::json!({
-				"name": group,
-				"versions": [{"groupVersion": gv, "version": version}],
-				"preferredVersion": {"groupVersion": gv, "version": version}
-			})
+	let groups: Vec<_> = versions_by_group
+		.iter()
+		.map(|(group, versions)| {
+			let versions: Vec<_> = versions
+				.iter()
+				.map(|(gv, version)| serde_json::json!({"groupVersion": gv, "version": version}))
+				.collect();
+			serde_json::json!({"name": group, "preferredVersion": versions[0], "versions": versions})
 		})
 		.collect();
+
 	let legacy_apis_body = serde_json::json!({
 		"kind": "APIGroupList",
 		"apiVersion": "v1",
