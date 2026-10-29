@@ -166,4 +166,16 @@ mod tests {
 			serde_json::json!("picked")
 		);
 	}
+	#[test]
+	fn native_yaml_large_integers_match_jsonnet_numbers() {
+		let (_directory, entrypoint) = entrypoint(
+			r#"{
+			parsed: std.native('parseYaml')('maximum: 9223372036854775000\nminimum: -9223372036854775000')[0],
+			expected: { maximum: 9223372036854775000, minimum: -9223372036854775000 },
+		}"#,
+		);
+		let value = eval(&entrypoint, None)
+			.expect("large YAML integers should round like Jsonnet literals");
+		assert_eq!(value["parsed"], value["expected"]);
+	}
 }
