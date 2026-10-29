@@ -193,7 +193,7 @@ impl Candidates {
 }
 
 impl Iterator for Candidates {
-	/// Walking cannot fail; only working out where a relative path starts can.
+	/// Filesystem failures are reported rather than mistaken for an empty tree.
 	type Item = Result<Candidate, std::io::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -204,7 +204,7 @@ impl Iterator for Candidates {
 			if let Some(directory) = &mut self.directory {
 				let entry = match directory.next() {
 					Some(Ok(entry)) => entry,
-					Some(Err(_)) => continue,
+					Some(Err(error)) => return Some(Err(error.into())),
 					None => {
 						self.directory = None;
 						continue;
@@ -244,7 +244,11 @@ impl Iterator for Candidates {
 			// Walking is the exception. `FindFiles` hands a named file straight
 			// back and the walk then keeps only what is called `main.jsonnet`,
 			// so naming anything else recursively finds nothing at all.
-			if absolute.is_file() {
+			let metadata = match fs::metadata(&absolute) {
+				Ok(metadata) => metadata,
+				Err(error) => return Some(Err(error)),
+			};
+			if metadata.is_file() {
 				let named_default = absolute
 					.file_name()
 					.is_some_and(|name| name == JPath::DEFAULT_ENTRYPOINT);
@@ -1170,6 +1174,31 @@ mod tests {
 		assert_eq!(
 			discovered[0].environment.metadata.name.as_deref(),
 			Some(".")
+		);
+	}
+	#[test]
+	fn missing_paths_are_discovery_errors() {
+		let directory = TempDir::new().unwrap();
+		for search in [Search::Tree, Search::Environment] {
+			let missing = directory.path().join("missing");
+			let mut candidates = Candidates::new(vec![missing], search);
+			let error = candidates
+				.next()
+				.unwrap()
+				.err()
+				.expect("missing path must fail");
+			assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+			assert!(candidates.next().is_none());
+		}
+	}
+
+	#[test]
+	fn an_existing_empty_directory_is_not_an_error() {
+		let directory = TempDir::new().unwrap();
+		assert!(
+			Candidates::new(vec![directory.path().to_owned()], Search::Tree)
+				.next()
+				.is_none()
 		);
 	}
 }
