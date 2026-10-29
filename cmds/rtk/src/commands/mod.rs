@@ -11,6 +11,7 @@ pub mod lint;
 pub mod prune;
 pub mod show;
 pub mod status;
+pub mod test;
 pub mod tool;
 pub mod validate;
 
