@@ -25,14 +25,6 @@ pub struct TestArgs {
 	#[arg(short = 'p', long, alias = "jobs")]
 	pub parallel: Option<NonZeroUsize>,
 
-	/// Zero-based batch index
-	#[arg(long, default_value_t = 0)]
-	pub batch_idx: usize,
-
-	/// Partition sorted test paths into this many batches
-	#[arg(long, default_value = "1")]
-	pub batch_count: NonZeroUsize,
-
 	/// Additional Jsonnet import search paths, in precedence order
 	#[arg(short = 'J', long = "jpath")]
 	pub jpaths: Vec<PathBuf>,
@@ -43,10 +35,6 @@ pub struct TestArgs {
 
 impl TestArgs {
 	fn discover(&self) -> Result<Vec<PathBuf>> {
-		ensure!(
-			self.batch_idx < self.batch_count.get(),
-			"--batch-idx must be less than --batch-count"
-		);
 		let mut files = Vec::new();
 		for path in &self.paths {
 			if path.is_file() {
@@ -71,13 +59,7 @@ impl TestArgs {
 		}
 		files.sort();
 		files.dedup();
-		Ok(files
-			.into_iter()
-			.enumerate()
-			.filter_map(|(index, path)| {
-				(index % self.batch_count.get() == self.batch_idx).then_some(path)
-			})
-			.collect())
+		Ok(files)
 	}
 }
 
@@ -191,7 +173,7 @@ mod tests {
 	}
 
 	#[test]
-	fn discovery_is_sorted_deduplicated_and_batches_partition_it() {
+	fn discovery_is_sorted_and_deduplicated() {
 		let dir = tempfile::tempdir().unwrap();
 		for name in [
 			"a_test.jsonnet",
@@ -211,29 +193,14 @@ mod tests {
 		let files = all.discover().unwrap();
 		assert_eq!(files.len(), 3);
 		assert_eq!(args(dir.path(), &[]).discover().unwrap().len(), 2);
-		let mut batches = Vec::new();
-		for batch in 0..4 {
-			batches.extend(
-				args(
-					dir.path(),
-					&[
-						"-r",
-						"--batch-count",
-						"4",
-						"--batch-idx",
-						&batch.to_string(),
-					],
-				)
-				.discover()
-				.unwrap(),
-			);
-		}
-		batches.sort();
-		assert_eq!(batches, files);
-		assert!(
-			args(dir.path(), &["--batch-count", "2", "--batch-idx", "2"])
-				.discover()
-				.is_err()
+		assert_eq!(
+			files,
+			[
+				"a_test.jsonnet",
+				"b_test.libsonnet",
+				"nested/c_test.jsonnet"
+			]
+			.map(|name| dir.path().join(name).canonicalize().unwrap())
 		);
 	}
 
@@ -297,7 +264,7 @@ mod tests {
 	}
 
 	#[test]
-	fn empty_batches_succeed_but_missing_paths_fail() {
+	fn empty_selections_succeed_but_missing_paths_fail() {
 		let dir = tempfile::tempdir().unwrap();
 		assert_eq!(run(args(dir.path(), &[]), Vec::new()).unwrap(), 0);
 		assert!(run(args(&dir.path().join("missing"), &[]), Vec::new()).is_err());

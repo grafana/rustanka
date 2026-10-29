@@ -34,7 +34,7 @@ Run assertion files and jsonnetunit suites with one command:
 
 ```sh
 rtk test -r .
-rtk test -r . -p 4 -J vendor -J lib --batch-idx 0 --batch-count 8
+rtk test -r . -p 4 -J vendor -J lib
 rtk test path/to/example_test.jsonnet
 ```
 
@@ -42,10 +42,8 @@ Directory searches select `*_test.jsonnet` and `*_test.libsonnet`, skipping
 hidden directories, `vendor`, and `target`. Explicit file paths can have any name.
 Tests inside a Tanka project use its usual import paths; `-J` paths take precedence.
 `-p` / `--parallel` sets the evaluation worker count (defaults to available CPUs).
-Batches use zero-based indices over sorted, deduplicated absolute paths; use the
-same paths and checkout layout for every batch. Each file is fully evaluated;
-evaluation errors and `allTestsPassed: false` fail the run. Other results pass,
-including plain assertion files. All selected files run, and any failure exits 1.
+Each file is fully evaluated; evaluation errors and `allTestsPassed: false` fail
+the run. Other results pass, including plain assertion files. All selected files run, and any failure exits 1.
 An empty selection exits 0.
 
 ## Performance vs Tanka
