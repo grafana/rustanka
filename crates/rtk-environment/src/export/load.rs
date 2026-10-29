@@ -212,7 +212,36 @@ impl Engine {
 
 	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
 	pub fn load_single(&self, path: &Path, name: Option<&str>) -> Result<LoadedEnvironment, Error> {
-		let jpath = JPath::resolve(path)?;
+		let (discovered, jpath) = self.select_single(path, name)?;
+		match discovered {
+			Some(environment) => self.load(&environment),
+			None => self.load_bare(jpath),
+		}
+	}
+
+	/// Discover one environment without evaluating its manifests.
+	pub fn peek_single(
+		&self,
+		path: &Path,
+		name: Option<&str>,
+	) -> Result<Option<Discovered>, Error> {
+		self.select_single(path, name)
+			.map(|(environment, _)| environment)
+	}
+
+	fn select_single(
+		&self,
+		path: &Path,
+		name: Option<&str>,
+	) -> Result<(Option<Discovered>, JPath), Error> {
+		let fallback_name = (!path.exists()).then(|| path.to_string_lossy().into_owned());
+		let name = name.or(fallback_name.as_deref());
+		let resolved_path = if fallback_name.is_some() {
+			Path::new(".")
+		} else {
+			path
+		};
+		let jpath = JPath::resolve(resolved_path)?;
 		// Discovery is pointed at the resolved entrypoint rather than at the
 		// path as given, which may have named a directory, or a file above the
 		// environment that holds it.
@@ -251,7 +280,7 @@ impl Engine {
 		}
 
 		match discovered.as_slice() {
-			[environment] => return self.load(environment),
+			[environment] => return Ok((Some(environment.clone()), jpath)),
 			[] if name.is_some() => {
 				return Err(Error::NoEnvironmentNamed {
 					name: name.expect("matched arm").to_owned(),
@@ -280,7 +309,7 @@ impl Engine {
 			}
 		}
 
-		self.load_bare(jpath)
+		Ok((None, jpath))
 	}
 
 	fn load_bare(&self, jpath: JPath) -> Result<LoadedEnvironment, Error> {

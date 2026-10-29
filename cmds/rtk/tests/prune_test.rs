@@ -250,4 +250,148 @@ mod tests {
 			.collect();
 		assert_eq!(prune_list_paths, vec!["/api/v1/configmaps"]);
 	}
+
+	#[tokio::test]
+	async fn prune_skips_explicitly_ignored_and_controller_owned_resources() {
+		let test_dir = fixture_dir("resource_deleted");
+		let env_dir = test_dir.join("environment");
+		let mut cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		let orphan = cluster_state
+			.iter()
+			.find(|resource| resource["metadata"]["name"] == "delete-this")
+			.unwrap()
+			.clone();
+		let mut ignored = orphan.clone();
+		ignored["metadata"]["annotations"]["tanka.dev/prune-ignore"] = "true".into();
+		let mut owned = orphan.clone();
+		owned["metadata"]["name"] = "owned".into();
+		owned["metadata"]["ownerReferences"] = serde_json::json!([{"apiVersion":"v1","kind":"ConfigMap","name":"parent","uid":"parent-uid","controller":true}]);
+		let mut false_owner = orphan;
+		false_owner["metadata"]["name"] = "false-owner".into();
+		false_owner["metadata"]["ownerReferences"] = serde_json::json!([{"apiVersion":"v1","kind":"ConfigMap","name":"parent","uid":"parent-uid","controller":false}]);
+		cluster_state.retain(|resource| resource["metadata"]["name"] != "delete-this");
+		cluster_state.extend([ignored, owned, false_owner]);
+		let (_server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			false,
+		)
+		.await;
+		let mut opts = default_prune_opts();
+		opts.dry_run = Some("client".to_string());
+		let diffs = run_prune(&env_dir, connection, opts)
+			.await
+			.expect("prune should succeed");
+		assert_eq!(
+			diffs
+				.iter()
+				.map(|diff| diff.name.as_str())
+				.collect::<Vec<_>>(),
+			vec!["false-owner"]
+		);
+	}
+
+	#[tokio::test]
+	async fn list_ignored_includes_desired_resources_without_deleting() {
+		let test_dir = fixture_dir("resource_deleted");
+		let env_dir = test_dir.join("environment");
+		let mut cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		for resource in &mut cluster_state {
+			resource["metadata"]["annotations"]["tanka.dev/prune-ignore"] = "true".into();
+		}
+		let (server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			false,
+		)
+		.await;
+		let mut opts = default_prune_opts();
+		opts.list_ignored = true;
+		let mut output = Vec::new();
+		let diffs = prune_environment(
+			&env_dir,
+			Some(connection.clone()),
+			rtk_jsonnet::Options::default(),
+			opts,
+			&mut output,
+		)
+		.await
+		.expect("listing should succeed");
+		assert!(diffs.is_empty());
+		let output = String::from_utf8(output).unwrap();
+		assert!(output.contains("ConfigMap/delete-this (namespace: default)"));
+		assert!(output.contains("ConfigMap/keep-this (namespace: default)"));
+		let mut filtered_opts = default_prune_opts();
+		filtered_opts.list_ignored = true;
+		filtered_opts.namespace = Some("default".to_string());
+		filtered_opts.target = vec!["ConfigMap/keep-this".to_string()];
+		let mut filtered_output = Vec::new();
+		prune_environment(
+			&env_dir,
+			Some(connection),
+			rtk_jsonnet::Options::default(),
+			filtered_opts,
+			&mut filtered_output,
+		)
+		.await
+		.expect("filtered listing should succeed");
+		assert_eq!(
+			String::from_utf8(filtered_output).unwrap(),
+			"ConfigMap/keep-this (namespace: default)\n"
+		);
+		assert!(server
+			.http_exchanges()
+			.iter()
+			.all(|exchange| exchange.method != "DELETE"));
+	}
+
+	#[tokio::test]
+	async fn list_ignored_does_not_evaluate_static_manifests() {
+		let project = tempfile::Builder::new()
+			.prefix("rustanka-prune-")
+			.tempdir()
+			.unwrap();
+		std::fs::write(project.path().join("jsonnetfile.json"), "{}").unwrap();
+		std::fs::write(
+			project.path().join("main.jsonnet"),
+			"error 'manifests must not be evaluated'",
+		)
+		.unwrap();
+		std::fs::write(project.path().join("spec.json"), r#"{"apiVersion":"tanka.dev/v1alpha1","kind":"Environment","metadata":{"name":"static-prune"},"spec":{"namespace":"default"}}"#).unwrap();
+		let engine = rtk_environments::Engine::new(rtk_jsonnet::Engine::new(
+			rtk_jsonnet::Options::default(),
+		));
+		let label = engine
+			.peek_single(project.path(), None)
+			.unwrap()
+			.unwrap()
+			.environment_label();
+		let test_dir = fixture_dir("resource_deleted");
+		let mut cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
+		cluster_state.retain(|resource| resource["metadata"]["name"] == "delete-this");
+		cluster_state[0]["metadata"]["labels"]["tanka.dev/environment"] = label.into();
+		cluster_state[0]["metadata"]["annotations"]["tanka.dev/prune-ignore"] = "true".into();
+		let (_server, connection) = test_utils::setup_connection_from_cluster_state(
+			cluster_state,
+			DiscoveryMode::Aggregated,
+			false,
+		)
+		.await;
+		let mut opts = default_prune_opts();
+		opts.list_ignored = true;
+		let mut output = Vec::new();
+		prune_environment(
+			project.path(),
+			Some(connection),
+			rtk_jsonnet::Options::default(),
+			opts,
+			&mut output,
+		)
+		.await
+		.expect("listing should not evaluate manifests");
+		assert_eq!(
+			String::from_utf8(output).unwrap(),
+			"ConfigMap/delete-this (namespace: default)\n"
+		);
+	}
 }
