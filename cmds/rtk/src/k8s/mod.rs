@@ -8,6 +8,7 @@ pub mod client;
 pub mod diff;
 pub mod discovery;
 pub mod openapi;
+pub(crate) mod order;
 pub mod output;
 pub mod redacted_object;
 
