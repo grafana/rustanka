@@ -201,6 +201,7 @@ fn environment_candidates_in(root: &Path, current: &OsStr) -> Vec<CompletionCand
 		return Vec::new();
 	};
 	let mut candidates = WalkDir::new(root)
+		.follow_links(true)
 		.into_iter()
 		.filter_entry(visible_entry)
 		.filter_map(std::result::Result::ok)
@@ -293,5 +294,36 @@ mod tests {
 		let candidates = environment_candidates_in(directory.path(), OsStr::new("environments/p"));
 		assert_eq!(candidates.len(), 1);
 		assert_eq!(candidates[0].get_value(), OsStr::new("environments/prod"));
+	}
+	#[cfg(unix)]
+	#[test]
+	fn completes_symlinked_environments_without_following_cycles() {
+		use std::os::unix::fs::symlink;
+
+		let directory = tempfile::tempdir().unwrap();
+		let root = directory.path().join("project");
+		let shared = directory.path().join("shared");
+		fs::create_dir_all(root.join("environments")).unwrap();
+		fs::create_dir_all(shared.join("nested")).unwrap();
+		fs::create_dir_all(shared.join(".hidden")).unwrap();
+		fs::write(shared.join("main.jsonnet"), "{}").unwrap();
+		fs::write(shared.join("nested/main.jsonnet"), "{}").unwrap();
+		fs::write(shared.join(".hidden/main.jsonnet"), "{}").unwrap();
+		symlink("../../shared", root.join("environments/public")).unwrap();
+		symlink(".", shared.join("cycle")).unwrap();
+		symlink("missing", root.join("environments/broken")).unwrap();
+
+		let candidates = environment_candidates_in(&root, OsStr::new("environments/p"));
+		let paths: Vec<_> = candidates
+			.iter()
+			.map(|candidate| candidate.get_value())
+			.collect();
+		assert_eq!(
+			paths,
+			[
+				OsStr::new("environments/public"),
+				OsStr::new("environments/public/nested")
+			]
+		);
 	}
 }
