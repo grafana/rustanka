@@ -204,6 +204,15 @@ impl Iterator for Candidates {
 			if let Some(directory) = &mut self.directory {
 				let entry = match directory.next() {
 					Some(Ok(entry)) => entry,
+					// Tanka never follows these links, so they must not hide valid environments.
+					Some(Err(error))
+						if error.loop_ancestor().is_some()
+							|| error.io_error().is_some_and(|error| {
+								error.kind() == std::io::ErrorKind::NotFound
+							}) && error.path().is_some_and(|path| path.is_symlink()) =>
+					{
+						continue;
+					}
 					Some(Err(error)) => return Some(Err(error.into())),
 					None => {
 						self.directory = None;
@@ -1200,5 +1209,44 @@ mod tests {
 				.next()
 				.is_none()
 		);
+	}
+	#[cfg(unix)]
+	#[test]
+	fn internal_broken_links_and_cycles_do_not_hide_environments() {
+		use std::os::unix::fs::symlink;
+
+		let directory = TempDir::new().unwrap();
+		let root = directory.path();
+		inline(root, false);
+		fs::create_dir_all(root.join("env/venv/bin")).unwrap();
+		symlink("missing-python", root.join("env/venv/bin/python")).unwrap();
+		symlink("missing-directory", root.join("broken-directory")).unwrap();
+		symlink(".", root.join("cycle")).unwrap();
+		symlink("env", root.join("linked-env")).unwrap();
+
+		let found = test_engine().discover_all(vec![root.to_owned()]).unwrap();
+		assert_eq!(found.len(), 2);
+		let paths: std::collections::HashSet<_> =
+			found.iter().map(|found| found.path.as_path()).collect();
+		assert!(paths.contains(root.join("env").as_path()));
+		assert!(paths.contains(root.join("linked-env").as_path()));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn an_explicit_broken_link_is_a_missing_path_error() {
+		use std::os::unix::fs::symlink;
+
+		let directory = TempDir::new().unwrap();
+		let broken = directory.path().join("broken");
+		symlink("missing", &broken).unwrap();
+		for search in [Search::Tree, Search::Environment] {
+			let error = Candidates::new(vec![broken.clone()], search)
+				.next()
+				.unwrap()
+				.err()
+				.unwrap();
+			assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+		}
 	}
 }
