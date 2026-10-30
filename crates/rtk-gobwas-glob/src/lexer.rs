@@ -158,9 +158,8 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// Go's `peek()`. The rune error branch is unreachable: a `&str` is always
-	/// valid UTF-8, so `could not read rune` cannot be produced here.
-	fn peek(&self) -> (Option<char>, usize) {
+	/// Go rejects RuneError even when it was encoded as valid UTF-8.
+	fn peek(&mut self) -> (Option<char>, usize) {
 		if self.pos == self.data.len() {
 			return (None, 0);
 		}
@@ -168,6 +167,10 @@ impl<'a> Lexer<'a> {
 			.chars()
 			.next()
 			.expect("pos is a char boundary before the end of the string");
+		if c == char::REPLACEMENT_CHARACTER {
+			self.errorf("could not read rune");
+			return (None, 0);
+		}
 		(Some(c), c.len_utf8())
 	}
 
@@ -195,9 +198,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	fn errorf(&mut self, message: impl Into<String>) {
-		if self.err.is_none() {
-			self.err = Some(message.into());
-		}
+		self.err = Some(message.into());
 	}
 
 	fn in_terms(&self) -> bool {

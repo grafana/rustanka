@@ -8,6 +8,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,9 +23,11 @@ type Case struct {
 	// tk does.
 	Separators string `json:"separators,omitempty"`
 	// Error is glob.Compile's message, verbatim, when it rejected the pattern.
-	Error   string   `json:"error,omitempty"`
-	Matches []string `json:"matches,omitempty"`
-	Rejects []string `json:"rejects,omitempty"`
+	Error      string   `json:"error,omitempty"`
+	Matches    []string `json:"matches,omitempty"`
+	Rejects    []string `json:"rejects,omitempty"`
+	MatchesHex []string `json:"matches_hex,omitempty"`
+	RejectsHex []string `json:"rejects_hex,omitempty"`
 }
 
 func main() {
@@ -57,6 +60,14 @@ func main() {
 		// match "" however zero-width its parts are.
 		"[a]", "[!a]", "{?,a}", "{[!a],b}", "{**,a}", "{,}", "****", "**?",
 		"?**", "**[!a]", "[!a]**",
+		// Unicode exposes Row's byte slicing and BTree's byte/rune offsets.
+		"?.jsonnet", "[é]a", "[é界]a", "[!a]a", "[é-界]a", "?é", "é?",
+		"é", "界", "🙂", "é*", "*é", "*é*", "é*界", "*?a", "?a*",
+		"*?.jsonnet", "lib/?.jsonnet", "lib/*?.jsonnet", "??.jsonnet",
+		"{é,界}a", "{?a,?b}", "{é*,界*}", "{é,é}", "*{é,界}a*",
+		"{*,é}", "{é,*}", "{?,é}a", "[!é]*", "??", "???", "??*",
+		// Invalid filename bytes must not be replaced before literal matching.
+		"�", "*�*", "*�.jsonnet", "[�]", "[a-�]", "file-?.jsonnet", "file-*.jsonnet",
 		// Malformed.
 		"[", "[a", "[a-", "[a-]", "[]", "[!]", "[z-a]", "{", "{a", "{a,",
 		"[a-bc]", "[ab-]", "]", "}", ",",
@@ -74,6 +85,9 @@ func main() {
 		"lib/foo/bar.libsonnet", "node_modules/x/y.js",
 		"/abs/vendor/k.libsonnet", "./vendor/k.libsonnet", "a/.hidden/b.jsonnet",
 		"jsonnet", "libsonnet", "a.jsonnet", "a.libsonnet",
+		"é", "界", "🙂", "éa", "界a", "🙂a", "aé", "éé", "é界", "é/界",
+		"é.jsonnet", "界.jsonnet", "🙂.jsonnet", "aé.jsonnet", "lib/é.jsonnet",
+		"lib/aé.jsonnet", "éab", "éaa", "aéa", "éba", "�", "file-�.jsonnet",
 	}
 
 	// Every pattern is asked with no separators (what tk does) and with "/"
@@ -95,6 +109,13 @@ func main() {
 					entry.Matches = append(entry.Matches, s)
 				} else {
 					entry.Rejects = append(entry.Rejects, s)
+				}
+			}
+			for _, s := range []string{"\xff", "\xff\xfe", "file-\xff.jsonnet", "file-\xc3.jsonnet", "file-\xc3\xa9.jsonnet"} {
+				if g.Match(s) {
+					entry.MatchesHex = append(entry.MatchesHex, hex.EncodeToString([]byte(s)))
+				} else {
+					entry.RejectsHex = append(entry.RejectsHex, hex.EncodeToString([]byte(s)))
 				}
 			}
 			out = append(out, entry)

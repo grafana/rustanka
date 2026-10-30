@@ -3,8 +3,8 @@
 //! The table is the oracle, not the library's documentation: the two disagree
 //! about separators, and it is the table that decides which files `rtk fmt`
 //! touches. `testdata/generate/` holds the generator; regenerate with
-//! `make update-glob-truth-table` (needs Go) whenever the pinned version of the
-//! library moves.
+//! `go run . > ../gobwas-glob-v0.2.3.json` from that directory whenever
+//! the pinned version of the library moves.
 
 use std::{fs, path::PathBuf};
 
@@ -25,6 +25,10 @@ struct Case {
 	matches: Vec<String>,
 	#[serde(default)]
 	rejects: Vec<String>,
+	#[serde(default)]
+	matches_hex: Vec<String>,
+	#[serde(default)]
+	rejects_hex: Vec<String>,
 }
 
 fn table_path() -> PathBuf {
@@ -34,14 +38,7 @@ fn table_path() -> PathBuf {
 #[test]
 fn matches_the_generated_truth_table() {
 	let path = table_path();
-	let Ok(raw) = fs::read_to_string(&path) else {
-		eprintln!(
-			"no gobwas/glob truth table at {}; generate it with `make update-glob-truth-table` \
-			 (needs Go). Skipping.",
-			path.display()
-		);
-		return;
-	};
+	let raw = fs::read_to_string(&path).expect("checked-in gobwas/glob truth table is readable");
 
 	let cases: Vec<Case> = serde_json::from_str(&raw).expect("truth table is valid JSON");
 	assert!(!cases.is_empty(), "truth table is empty");
@@ -84,6 +81,20 @@ fn matches_the_generated_truth_table() {
 				continue;
 			}
 		};
+
+		for (subjects, expected) in [(&case.matches_hex, true), (&case.rejects_hex, false)] {
+			for subject in subjects {
+				let bytes: Vec<u8> = (0..subject.len())
+					.step_by(2)
+					.map(|i| {
+						u8::from_str_radix(&subject[i..i + 2], 16).expect("hex filename bytes")
+					})
+					.collect();
+				if glob.is_match_bytes(&bytes) != expected {
+					failures.push(format!("{label}: bytes {subject} should match: {expected}"));
+				}
+			}
+		}
 
 		for subject in &case.matches {
 			if !glob.is_match(subject) {

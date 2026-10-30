@@ -5,7 +5,10 @@
 //! Each test names the behaviour of Tanka's `FindFiles` it pins; the six are
 //! enumerated in `src/files.rs`.
 
-use std::{fs, path::Path};
+use std::{
+	fs,
+	path::{Path, PathBuf},
+};
 
 use rtk_gobwas_glob::{Glob, TANKA_DEFAULT_EXCLUDES, compile_all};
 use rtk_jsonnetfmt::{find_files, find_files_all};
@@ -74,14 +77,15 @@ fn as_str(path: &Path) -> &str {
 }
 
 /// Strip the temporary root so expectations read as relative paths.
-fn relative(root: &Path, found: &[String]) -> Vec<String> {
+fn relative(root: &Path, found: &[PathBuf]) -> Vec<String> {
 	let prefix = format!("{}/", as_str(root));
 	found
 		.iter()
 		.map(|path| {
-			path.strip_prefix(&prefix)
-				.unwrap_or_else(|| panic!("{path} is not under {prefix}"))
-				.to_owned()
+			path.strip_prefix(root)
+				.unwrap_or_else(|_| panic!("{} is not under {prefix}", path.display()))
+				.to_string_lossy()
+				.replace(std::path::MAIN_SEPARATOR, "/")
 		})
 		.collect()
 }
@@ -97,7 +101,7 @@ fn a_named_regular_file_bypasses_the_excludes() {
 
 	assert_eq!(
 		found,
-		vec![as_str(&target).to_owned()],
+		vec![target],
 		"a vendored file named outright is formatted despite the default vendor exclude"
 	);
 }
@@ -111,7 +115,7 @@ fn a_named_regular_file_bypasses_the_extension_check() {
 
 	let found = find_files(as_str(&target), &defaults()).expect("discovery succeeds");
 
-	assert_eq!(found, vec![as_str(&target).to_owned()]);
+	assert_eq!(found, vec![target]);
 }
 
 /// Behaviour 1, and the path is returned with the spelling it was given.
@@ -124,7 +128,7 @@ fn a_named_regular_file_is_returned_verbatim() {
 
 	assert_eq!(
 		found,
-		vec![target],
+		vec![PathBuf::from(target)],
 		"the file case returns the argument, uncleaned — only walked paths are cleaned"
 	);
 }
@@ -157,7 +161,7 @@ fn walked_paths_are_cleaned() {
 
 	assert_eq!(
 		found,
-		vec![format!("{}/lib/util.libsonnet", as_str(tree.path()))],
+		vec![tree.path().join("lib/util.libsonnet")],
 		"a `/./` in the argument does not survive into the walked paths"
 	);
 }
@@ -243,9 +247,9 @@ fn arguments_are_concatenated_without_dedup_or_sorting() {
 	assert_eq!(
 		found,
 		vec![
-			vendor_file.clone(),
-			format!("{}/lib/util.libsonnet", as_str(tree.path())),
-			vendor_file,
+			PathBuf::from(&vendor_file),
+			tree.path().join("lib/util.libsonnet"),
+			PathBuf::from(vendor_file),
 		],
 		"results are per-argument, in argument order, with duplicates kept"
 	);
@@ -299,5 +303,73 @@ fn a_named_symlink_to_a_file_is_returned() {
 
 	let found = find_files(as_str(&target), &defaults()).expect("discovery succeeds");
 
-	assert_eq!(found, vec![as_str(&target).to_owned()]);
+	assert_eq!(found, vec![target]);
+}
+
+#[test]
+fn parent_components_do_not_bypass_excludes() {
+	let tree = fixture_tree();
+	let target = tree.path().join("environments/default/../..");
+	let exclude = Glob::new(&rtk_gobwas_glob::quote_meta(as_str(
+		&tree.path().join("main.jsonnet"),
+	)))
+	.unwrap();
+	let found = find_files(&target, &[exclude]).unwrap();
+	assert!(!found.contains(&tree.path().join("main.jsonnet")));
+	assert!(found.contains(&tree.path().join("lib/util.libsonnet")));
+	assert!(found.iter().all(|path| {
+		!path
+			.as_os_str()
+			.as_encoded_bytes()
+			.windows(2)
+			.any(|w| w == b"//")
+	}));
+}
+
+#[test]
+fn a_named_file_preserves_native_spelling() {
+	let tree = fixture_tree();
+	let target = tree.path().join("lib/.././main.jsonnet");
+	let found = find_files(&target, &defaults()).unwrap();
+	assert_eq!(found[0].as_os_str(), target.as_os_str());
+}
+
+// macOS filesystems reject invalid UTF-8 names; Linux permits them.
+#[cfg(target_os = "linux")]
+#[test]
+fn non_utf8_paths_survive_discovery_and_can_be_opened() {
+	use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+	let tree = fixture_tree();
+	let directory = tree
+		.path()
+		.join(OsString::from_vec(b"native-\xff".to_vec()));
+	fs::create_dir(&directory).unwrap();
+	let target = directory.join(OsString::from_vec(b"file-\xfe.jsonnet".to_vec()));
+	fs::write(&target, "{}\n").unwrap();
+	assert_eq!(
+		find_files(&target, &defaults()).unwrap(),
+		vec![target.clone()]
+	);
+	assert_eq!(find_files(&directory, &[]).unwrap(), vec![target.clone()]);
+	assert_eq!(
+		fs::read_to_string(&find_files(&directory, &[]).unwrap()[0]).unwrap(),
+		"{}\n"
+	);
+	assert!(
+		find_files(&directory, &excludes(&["**/file-*.jsonnet"]))
+			.unwrap()
+			.is_empty()
+	);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_directory_symlink_is_not_cleaned_or_followed() {
+	let tree = fixture_tree();
+	std::os::unix::fs::symlink(tree.path().join("lib"), tree.path().join("linkdir.jsonnet"))
+		.unwrap();
+	let target = tree.path().join("lib/.././linkdir.jsonnet");
+	let found = find_files(&target, &[]).unwrap();
+	assert_eq!(found.len(), 1);
+	assert_eq!(found[0].as_os_str(), target.as_os_str());
 }
