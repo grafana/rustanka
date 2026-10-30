@@ -133,3 +133,60 @@ async fn applies_in_tanka_dependency_order() {
 		}
 	}
 }
+
+#[tokio::test]
+async fn pending_crds_are_added_without_a_namespace_pending_message() {
+	use rtk::k8s::diff::{DiffEngine, DiffStatus};
+	for scope in ["Namespaced", "Cluster"] {
+		for strategy in [
+			DiffStrategy::Native,
+			DiffStrategy::Server,
+			DiffStrategy::Subset,
+			DiffStrategy::Validate,
+		] {
+			let crd = json!({"apiVersion":"apiextensions.k8s.io/v1", "kind":"CustomResourceDefinition", "metadata":{"name":"widgets.test.example.com"}, "spec":{"group":"test.example.com", "scope":scope, "names":{"kind":"Widget", "plural":"widgets"}, "versions":[{"name":"v1", "served":true, "storage":true}]}});
+			let widget = json!({"apiVersion":"test.example.com/v1", "kind":"Widget", "metadata":{"name":"example", "namespace":"default"}});
+			let discovery = k8s_mock::MockDiscovery::default().with_group(
+				"apiextensions.k8s.io/v1",
+				vec![k8s_mock::MockApiResource::cluster_scoped(
+					"customresourcedefinitions",
+					"CustomResourceDefinition",
+				)],
+			);
+			let server = k8s_mock::HttpMockK8sServer::builder()
+				.discovery(discovery)
+				.resources(vec![
+					json!({"apiVersion":"v1", "kind":"Namespace", "metadata":{"name":"default"}}),
+				])
+				.build()
+				.start()
+				.await;
+			let mut spec = rtk_spec::canonical::EnvironmentSpec::default();
+			spec.context_names = vec!["mock-context".into()];
+			let connection =
+				ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
+					.await
+					.unwrap();
+			let manifests = vec![crd, widget];
+			let engine = DiffEngine::new(connection, strategy, "default".into(), &manifests, false)
+				.await
+				.unwrap();
+			let diffs = engine
+				.diff_all(&manifests, false, None, false)
+				.await
+				.unwrap();
+			let diff = diffs.iter().find(|diff| diff.gvk.kind == "Widget").unwrap();
+			assert_eq!(diff.status, DiffStatus::Added, "{scope}, {strategy:?}");
+			assert!(diff.current_yaml.is_empty());
+			assert!(diff.desired_yaml.contains("kind: Widget"));
+			let mut output = Vec::new();
+			let mut writer =
+				rtk::k8s::output::DiffOutput::new(&mut output, ColorMode::Never, strategy).unwrap();
+			writer.write_diff(diff).unwrap();
+			writer.write_summary(std::slice::from_ref(diff)).unwrap();
+			let output = String::from_utf8(output).unwrap();
+			assert!(!output.contains("namespace not yet created"), "{output}");
+			assert!(!output.contains("namespace pending"), "{output}");
+		}
+	}
+}

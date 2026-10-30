@@ -483,6 +483,23 @@ impl DiffEngine {
 		})
 	}
 
+	async fn pending_addition_status(
+		&self,
+		gvk: &GroupVersionKind,
+		namespace: Option<&str>,
+	) -> Result<Option<DiffStatus>, DiffError> {
+		// Pending CRDs cannot be queried or dry-run validated until their API exists.
+		if self.api_cache.is_pending_crd(gvk) {
+			return Ok(Some(DiffStatus::Added));
+		}
+		if let Some(namespace) = namespace {
+			if !self.namespace_exists(namespace).await? {
+				return Ok(Some(DiffStatus::SoonAdded));
+			}
+		}
+		Ok(None)
+	}
+
 	/// Diff a single manifest against cluster state.
 	#[instrument(skip(self, manifest), fields(
 		kind = manifest.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown"),
@@ -500,17 +517,15 @@ impl DiffEngine {
 		} = self.extract_manifest_info(manifest)?;
 		let normalized_manifest = normalize_manifest_namespace(manifest, namespace.as_deref());
 
-		// Pending CRDs cannot be queried or dry-run validated until their API exists.
-		if self.api_cache.is_pending_crd(&gvk)
-			|| match namespace.as_deref() {
-				Some(namespace) => !self.namespace_exists(namespace).await?,
-				None => false,
-			} {
+		if let Some(status) = self
+			.pending_addition_status(&gvk, namespace.as_deref())
+			.await?
+		{
 			return Ok(ResourceDiff {
 				gvk: gvk.clone(),
 				namespace,
 				name,
-				status: DiffStatus::SoonAdded,
+				status,
 				current_yaml: String::new(),
 				desired_yaml: self.manifest_to_redacted_yaml(&normalized_manifest, &gvk)?,
 			});
@@ -594,17 +609,15 @@ impl DiffEngine {
 			discovered,
 		} = self.extract_manifest_info(manifest)?;
 
-		// Pending CRDs cannot be queried or dry-run validated until their API exists.
-		if self.api_cache.is_pending_crd(&gvk)
-			|| match namespace.as_deref() {
-				Some(namespace) => !self.namespace_exists(namespace).await?,
-				None => false,
-			} {
+		if let Some(status) = self
+			.pending_addition_status(&gvk, namespace.as_deref())
+			.await?
+		{
 			return Ok(ResourceDiff {
 				gvk: gvk.clone(),
 				namespace,
 				name,
-				status: DiffStatus::SoonAdded,
+				status,
 				current_yaml: String::new(),
 				desired_yaml: self.manifest_to_redacted_yaml(manifest, &gvk)?,
 			});
