@@ -3,7 +3,11 @@
 //! This module implements the core diffing logic that compares local
 //! manifests against cluster state using various strategies.
 
-use std::{collections::HashSet, fmt, sync::Arc};
+use std::{
+	collections::{HashMap, HashSet},
+	fmt,
+	sync::Arc,
+};
 
 use clap::ValueEnum;
 use k8s::strategicpatch::CombinedSchemaLookup;
@@ -322,11 +326,28 @@ impl ResourceDiff {
 /// Engine for computing diffs against a Kubernetes cluster.
 #[derive(Clone)]
 pub struct DiffEngine {
+	live_resources: Option<Arc<LiveResources>>,
 	client: Client,
 	api_cache: ApiResourceCache,
 	openapi_cache: Arc<OpenApiSchemaCache>,
 	strategy: DiffStrategy,
 	default_namespace: String,
+}
+
+type ResourceKey = (GroupVersionKind, Option<String>, String);
+
+#[derive(Default)]
+struct LiveResources {
+	objects: HashMap<ResourceKey, Option<DynamicObject>>,
+}
+
+impl LiveResources {
+	fn uids(&self) -> HashSet<String> {
+		self.objects
+			.values()
+			.filter_map(|object| object.as_ref()?.metadata.uid.clone())
+			.collect()
+	}
 }
 
 /// Information extracted from a manifest for diff operations.
@@ -398,7 +419,12 @@ enum DiffTaskResult {
 	/// Result from diffing a manifest.
 	Diff(Result<ResourceDiff, DiffError>),
 	/// Result from scanning a resource type for deleted resources.
-	Prune(Result<Vec<ResourceDiff>, DiffError>),
+	Prune(Result<Vec<PruneCandidate>, DiffError>),
+}
+
+struct PruneCandidate {
+	diff: ResourceDiff,
+	uid: Option<String>,
 }
 
 impl DiffEngine {
@@ -432,6 +458,7 @@ impl DiffEngine {
 		));
 
 		Ok(Self {
+			live_resources: None,
 			client: connection.client().clone(),
 			api_cache,
 			openapi_cache,
@@ -668,12 +695,25 @@ impl DiffEngine {
 		}
 
 		// Shared worker pool for all operations
-		let engine = Arc::new(self.clone());
+		let mut engine = self.clone();
 		let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DIFF_OPS));
 		let mut join_set: JoinSet<DiffTaskResult> = JoinSet::new();
 
 		let manifests: Vec<Arc<serde_json::Value>> =
 			manifests.iter().cloned().map(Arc::new).collect();
+
+		// API versions are representations of the same live object; only its UID
+		// identifies it across every endpoint through which discovery can serve it.
+		let mut seen_uids = if do_prune {
+			let live = self.fetch_live_manifests(&manifests).await?;
+			let uids = live.uids();
+			engine.live_resources = Some(Arc::new(live));
+			uids
+		} else {
+			HashSet::new()
+		};
+
+		let engine = Arc::new(engine);
 
 		// Spawn diff tasks
 		let use_native = self.strategy == DiffStrategy::Validate;
@@ -695,13 +735,37 @@ impl DiffEngine {
 
 		// Collect all results
 		let mut diffs = Vec::with_capacity(manifests.len());
+		let mut candidates = Vec::new();
 		while let Some(result) = join_set.join_next().await {
 			match result.map_err(DiffError::TaskPanicked)? {
 				DiffTaskResult::Diff(Ok(diff)) => diffs.push(diff),
 				DiffTaskResult::Diff(Err(e)) => return Err(e),
-				DiffTaskResult::Prune(Ok(deleted)) => diffs.extend(deleted),
+				DiffTaskResult::Prune(Ok(deleted)) => candidates.extend(deleted),
 				DiffTaskResult::Prune(Err(e)) => return Err(e),
 			}
+		}
+
+		candidates.sort_by(|a, b| {
+			(
+				&a.diff.gvk.group,
+				&a.diff.gvk.version,
+				&a.diff.gvk.kind,
+				&a.diff.namespace,
+				&a.diff.name,
+			)
+				.cmp(&(
+					&b.diff.gvk.group,
+					&b.diff.gvk.version,
+					&b.diff.gvk.kind,
+					&b.diff.namespace,
+					&b.diff.name,
+				))
+		});
+		for candidate in candidates {
+			if candidate.uid.is_some_and(|uid| !seen_uids.insert(uid)) {
+				continue;
+			}
+			diffs.push(candidate.diff);
 		}
 
 		diffs.sort_by(|a, b| {
@@ -743,6 +807,44 @@ impl DiffEngine {
 				DiffTaskResult::Diff(result)
 			});
 		}
+	}
+
+	async fn fetch_live_manifests(
+		&self,
+		manifests: &[Arc<serde_json::Value>],
+	) -> Result<LiveResources, DiffError> {
+		let mut tasks = JoinSet::new();
+		let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DIFF_OPS));
+		for manifest in manifests {
+			let info = self.extract_manifest_info(manifest)?;
+			let api = self.dynamic_api(&info.discovered.api_resource, info.namespace.as_deref());
+			let semaphore = semaphore.clone();
+			tasks.spawn(async move {
+				let _permit = semaphore
+					.acquire()
+					.await
+					.map_err(|_| DiffError::SemaphoreClosed)?;
+				api.get_opt(&info.name)
+					.await
+					.map(|resource| {
+						(
+							(info.gvk.clone(), info.namespace, info.name.clone()),
+							resource,
+						)
+					})
+					.map_err(|error| DiffError::FetchResource {
+						kind: info.gvk.kind,
+						name: info.name,
+						source: Box::new(error),
+					})
+			});
+		}
+		let mut live = LiveResources::default();
+		while let Some(result) = tasks.join_next().await {
+			let (key, object) = result.map_err(DiffError::TaskPanicked)??;
+			live.objects.insert(key, object);
+		}
+		Ok(live)
 	}
 
 	/// Build a set of (apiVersion, kind, namespace, name) from manifests for prune detection.
@@ -863,7 +965,7 @@ impl DiffEngine {
 		env_label: &str,
 		namespace_filter: Option<&str>,
 		targets: Option<&Targets>,
-	) -> Result<Vec<ResourceDiff>, DiffError> {
+	) -> Result<Vec<PruneCandidate>, DiffError> {
 		let label_selector = format!("tanka.dev/environment={}", env_label);
 		let list_params = ListParams::default().labels(&label_selector);
 
@@ -931,13 +1033,16 @@ impl DiffEngine {
 				.flatten()
 				.unwrap_or_default();
 
-			deleted.push(ResourceDiff {
-				gvk: gvk.clone(),
-				namespace,
-				name,
-				status: DiffStatus::Deleted,
-				current_yaml,
-				desired_yaml: String::new(),
+			deleted.push(PruneCandidate {
+				uid: resource.metadata.uid.clone(),
+				diff: ResourceDiff {
+					gvk: gvk.clone(),
+					namespace,
+					name,
+					status: DiffStatus::Deleted,
+					current_yaml,
+					desired_yaml: String::new(),
+				},
 			});
 		}
 
@@ -1059,14 +1164,10 @@ impl DiffEngine {
 		let api = self.dynamic_api(&discovered.api_resource, namespace.as_deref());
 
 		// Try to get current state
-		let current = match api
-			.get_opt(name)
-			.await
-			.map_err(|e| DiffError::FetchResource {
-				kind: gvk.kind.clone(),
-				name: name.to_string(),
-				source: Box::new(e),
-			})? {
+		let current = match self
+			.current_resource(gvk, name, namespace.as_deref(), discovered)
+			.await?
+		{
 			Some(obj) => obj,
 			None => {
 				// Resource doesn't exist - do dry-run create to get server-mutated version
@@ -1219,14 +1320,10 @@ impl DiffEngine {
 		let api = self.dynamic_api(&discovered.api_resource, namespace.as_deref());
 
 		// Try to get current state
-		let current = match api
-			.get_opt(name)
-			.await
-			.map_err(|e| DiffError::FetchResource {
-				kind: gvk.kind.clone(),
-				name: name.to_string(),
-				source: Box::new(e),
-			})? {
+		let current = match self
+			.current_resource(gvk, name, namespace.as_deref(), discovered)
+			.await?
+		{
 			Some(obj) => obj,
 			None => {
 				// Resource doesn't exist - do dry-run create to get server-mutated version
@@ -1300,17 +1397,11 @@ impl DiffEngine {
 		manifest: &serde_json::Value,
 		discovered: &DiscoveredResource,
 	) -> Result<ResourceDiff, DiffError> {
-		let api = self.dynamic_api(&discovered.api_resource, namespace.as_deref());
-
 		// Get current state
-		let current = match api
-			.get_opt(name)
-			.await
-			.map_err(|e| DiffError::FetchResource {
-				kind: gvk.kind.clone(),
-				name: name.to_string(),
-				source: Box::new(e),
-			})? {
+		let current = match self
+			.current_resource(gvk, name, namespace.as_deref(), discovered)
+			.await?
+		{
 			Some(obj) => obj,
 			None => {
 				let desired_yaml = self.manifest_to_redacted_yaml(manifest, gvk)?;
@@ -1414,6 +1505,29 @@ impl DiffEngine {
 			current_yaml,
 			desired_yaml,
 		})
+	}
+
+	async fn current_resource(
+		&self,
+		gvk: &GroupVersionKind,
+		name: &str,
+		namespace: Option<&str>,
+		discovered: &DiscoveredResource,
+	) -> Result<Option<DynamicObject>, DiffError> {
+		if let Some(live) = &self.live_resources {
+			let key = (gvk.clone(), namespace.map(str::to_owned), name.to_owned());
+			if let Some(object) = live.objects.get(&key) {
+				return Ok(object.clone());
+			}
+		}
+		self.dynamic_api(&discovered.api_resource, namespace)
+			.get_opt(name)
+			.await
+			.map_err(|error| DiffError::FetchResource {
+				kind: gvk.kind.clone(),
+				name: name.to_owned(),
+				source: Box::new(error),
+			})
 	}
 
 	/// Create a dynamic API for the given resource.
