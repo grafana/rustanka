@@ -1603,18 +1603,13 @@ fn filter_to_manifest_fields(
 			serde_json::Value::Object(filtered)
 		}
 		(serde_json::Value::Array(curr_arr), serde_json::Value::Array(man_arr)) => {
-			// For arrays, process only indices that exist in the manifest.
-			// For each manifest index, take the corresponding current element if it exists.
-			let filtered: Vec<_> = man_arr
+			// Preserve the live length so missing and extra elements remain differences.
+			let filtered: Vec<_> = curr_arr
 				.iter()
 				.enumerate()
-				.map(|(i, man_elem)| {
-					if let Some(curr_elem) = curr_arr.get(i) {
-						filter_to_manifest_fields(curr_elem, man_elem)
-					} else {
-						// Manifest has more elements than current - use manifest value
-						man_elem.clone()
-					}
+				.map(|(i, curr_elem)| match man_arr.get(i) {
+					Some(man_elem) => filter_to_manifest_fields(curr_elem, man_elem),
+					None => curr_elem.clone(),
 				})
 				.collect();
 			serde_json::Value::Array(filtered)
