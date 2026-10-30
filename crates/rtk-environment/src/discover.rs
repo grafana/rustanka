@@ -193,7 +193,7 @@ impl Candidates {
 }
 
 impl Iterator for Candidates {
-	/// Walking cannot fail; only working out where a relative path starts can.
+	/// Filesystem failures are reported rather than mistaken for an empty tree.
 	type Item = Result<Candidate, std::io::Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -204,7 +204,16 @@ impl Iterator for Candidates {
 			if let Some(directory) = &mut self.directory {
 				let entry = match directory.next() {
 					Some(Ok(entry)) => entry,
-					Some(Err(_)) => continue,
+					// Tanka never follows these links, so they must not hide valid environments.
+					Some(Err(error))
+						if error.loop_ancestor().is_some()
+							|| error.io_error().is_some_and(|error| {
+								error.kind() == std::io::ErrorKind::NotFound
+							}) && error.path().is_some_and(|path| path.is_symlink()) =>
+					{
+						continue;
+					}
+					Some(Err(error)) => return Some(Err(error.into())),
 					None => {
 						self.directory = None;
 						continue;
@@ -244,7 +253,11 @@ impl Iterator for Candidates {
 			// Walking is the exception. `FindFiles` hands a named file straight
 			// back and the walk then keeps only what is called `main.jsonnet`,
 			// so naming anything else recursively finds nothing at all.
-			if absolute.is_file() {
+			let metadata = match fs::metadata(&absolute) {
+				Ok(metadata) => metadata,
+				Err(error) => return Some(Err(error)),
+			};
+			if metadata.is_file() {
 				let named_default = absolute
 					.file_name()
 					.is_some_and(|name| name == JPath::DEFAULT_ENTRYPOINT);
@@ -1171,5 +1184,69 @@ mod tests {
 			discovered[0].environment.metadata.name.as_deref(),
 			Some(".")
 		);
+	}
+	#[test]
+	fn missing_paths_are_discovery_errors() {
+		let directory = TempDir::new().unwrap();
+		for search in [Search::Tree, Search::Environment] {
+			let missing = directory.path().join("missing");
+			let mut candidates = Candidates::new(vec![missing], search);
+			let error = candidates
+				.next()
+				.unwrap()
+				.err()
+				.expect("missing path must fail");
+			assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+			assert!(candidates.next().is_none());
+		}
+	}
+
+	#[test]
+	fn an_existing_empty_directory_is_not_an_error() {
+		let directory = TempDir::new().unwrap();
+		assert!(
+			Candidates::new(vec![directory.path().to_owned()], Search::Tree)
+				.next()
+				.is_none()
+		);
+	}
+	#[cfg(unix)]
+	#[test]
+	fn internal_broken_links_and_cycles_do_not_hide_environments() {
+		use std::os::unix::fs::symlink;
+
+		let directory = TempDir::new().unwrap();
+		let root = directory.path();
+		inline(root, false);
+		fs::create_dir_all(root.join("env/venv/bin")).unwrap();
+		symlink("missing-python", root.join("env/venv/bin/python")).unwrap();
+		symlink("missing-directory", root.join("broken-directory")).unwrap();
+		symlink(".", root.join("cycle")).unwrap();
+		symlink("env", root.join("linked-env")).unwrap();
+
+		let found = test_engine().discover_all(vec![root.to_owned()]).unwrap();
+		assert_eq!(found.len(), 2);
+		let paths: std::collections::HashSet<_> =
+			found.iter().map(|found| found.path.as_path()).collect();
+		assert!(paths.contains(root.join("env").as_path()));
+		assert!(paths.contains(root.join("linked-env").as_path()));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn an_explicit_broken_link_is_a_missing_path_error() {
+		use std::os::unix::fs::symlink;
+
+		let directory = TempDir::new().unwrap();
+		let broken = directory.path().join("broken");
+		symlink("missing", &broken).unwrap();
+		for search in [Search::Tree, Search::Environment] {
+			let error = Candidates::new(vec![broken.clone()], search)
+				.next()
+				.unwrap()
+				.err()
+				.unwrap();
+			assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+		}
 	}
 }
