@@ -117,3 +117,52 @@ async fn prune_preserves_live_uids_and_deduplicates_versions_like_tanka() {
 		}
 	}
 }
+
+#[tokio::test]
+async fn prune_prefetch_is_reused_and_does_not_survive_the_diff_batch() {
+	for strategy in [
+		DiffStrategy::Native,
+		DiffStrategy::Server,
+		DiffStrategy::Subset,
+		DiffStrategy::Validate,
+	] {
+		for exists in [false, true] {
+			let desired = json!({"apiVersion":"v1", "kind":"ConfigMap", "metadata":{"name":"prefetch", "namespace":"default"}, "data":{"key":"value"}});
+			let mut live = desired.clone();
+			live["metadata"]["uid"] = json!("prefetch-uid");
+			let server = HttpMockK8sServer::builder()
+				.resources(if exists { vec![live] } else { vec![] })
+				.build()
+				.start()
+				.await;
+			let mut spec = rtk_spec::canonical::EnvironmentSpec::default();
+			spec.context_names = vec!["mock-context".into()];
+			let connection =
+				ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
+					.await
+					.unwrap();
+			let manifests = vec![desired];
+			let engine = DiffEngine::new(connection, strategy, "default".into(), &manifests, true)
+				.await
+				.unwrap();
+			for _ in 0..2 {
+				let before = server.http_exchanges().len();
+				let diffs = engine
+					.diff_all(&manifests, true, Some("prefetch-label"), true)
+					.await
+					.unwrap();
+				assert_eq!(diffs[0].has_changes(), !exists, "{strategy:?}");
+				let gets = server
+					.http_exchanges()
+					.into_iter()
+					.skip(before)
+					.filter(|exchange| {
+						exchange.method == "GET"
+							&& exchange.path == "/api/v1/namespaces/default/configmaps/prefetch"
+					})
+					.count();
+				assert_eq!(gets, 1, "{strategy:?}, exists={exists}");
+			}
+		}
+	}
+}
