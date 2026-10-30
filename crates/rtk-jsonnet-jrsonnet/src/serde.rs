@@ -585,11 +585,11 @@ impl ser::Serializer for ValueSerializer {
 		Ok(Value(Val::num(number)))
 	}
 
-	/// Unlike jrsonnet's own `Val::from_serde`, which stringifies 64-bit
-	/// integers, these stay numbers: erroring outside the safe integer range
-	/// keeps numbers round-trippable through the [`Deserializer`] above.
+	/// Tanka converts native results through JSON into float64, so large
+	/// integers must round just like Jsonnet numeric literals.
+	#[expect(clippy::cast_precision_loss, reason = "Jsonnet numbers use float64")]
 	fn serialize_i64(self, number: i64) -> Result<Value, Error> {
-		Ok(Value(Val::try_num(number)?))
+		Ok(Value(Val::try_num(number as f64)?))
 	}
 
 	fn serialize_u8(self, number: u8) -> Result<Value, Error> {
@@ -604,8 +604,9 @@ impl ser::Serializer for ValueSerializer {
 		Ok(Value(Val::num(number)))
 	}
 
+	#[expect(clippy::cast_precision_loss, reason = "Jsonnet numbers use float64")]
 	fn serialize_u64(self, number: u64) -> Result<Value, Error> {
-		Ok(Value(Val::try_num(number)?))
+		Ok(Value(Val::try_num(number as f64)?))
 	}
 
 	fn serialize_f32(self, number: f32) -> Result<Value, Error> {
@@ -1401,9 +1402,18 @@ mod tests {
 		assert_eq!(value.as_num(), Some(42.0));
 		let value = to_val(&42u64).unwrap();
 		assert_eq!(value.as_num(), Some(42.0));
-		// beyond the safe integer range is an error instead of silent precision loss
-		assert!(to_val(&u64::MAX).is_err());
-		assert!(to_val(&i64::MIN).is_err());
+		assert_eq!(
+			to_val(&u64::MAX).unwrap().as_num(),
+			Some(18446744073709551616.0)
+		);
+		assert_eq!(
+			to_val(&i64::MIN).unwrap().as_num(),
+			Some(-9223372036854775808.0)
+		);
+		assert_eq!(
+			to_val(&9223372036854775000i64).unwrap().as_num(),
+			Some(9223372036854775000.0)
+		);
 	}
 
 	#[test]
