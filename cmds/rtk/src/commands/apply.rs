@@ -345,6 +345,8 @@ pub async fn apply_environment<W: Write>(
 			.then_with(|| left.name.cmp(&right.name))
 	});
 
+	let declared_resources = crate::k8s::discovery::ApiResourceCache::from_crds(&manifests);
+
 	for diff in &changes_to_apply {
 		// Find the corresponding manifest
 		let manifest = manifests.iter().find(|m| {
@@ -357,7 +359,12 @@ pub async fn apply_environment<W: Write>(
 		});
 
 		if let Some(manifest) = manifest {
-			match apply_engine.apply_manifest(manifest).await {
+			let result = if declared_resources.lookup(&diff.gvk).is_some() {
+				apply_engine.apply_when_discovered(manifest).await
+			} else {
+				apply_engine.apply_manifest(manifest).await
+			};
+			match result {
 				Ok(_) => {
 					eprintln!(
 						"  {} {}/{} applied",

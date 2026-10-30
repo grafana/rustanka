@@ -76,6 +76,7 @@ pub struct DiscoveredResource {
 /// then provides O(1) lookups for resources by apiVersion and kind.
 #[derive(Clone)]
 pub struct ApiResourceCache {
+	pending_crds: HashSet<GroupVersionKind>,
 	resources: HashMap<GroupVersionKind, DiscoveredResource>,
 }
 
@@ -187,7 +188,10 @@ impl ApiResourceCache {
 			}
 		}
 
-		Self { resources }
+		Self {
+			resources,
+			pending_crds: HashSet::new(),
+		}
 	}
 
 	/// Build cache lazily by discovering only the specified resource keys.
@@ -266,7 +270,72 @@ impl ApiResourceCache {
 			});
 		}
 
-		Ok(Self { resources })
+		Ok(Self {
+			resources,
+			pending_crds: HashSet::new(),
+		})
+	}
+
+	pub(crate) fn from_crds(manifests: &[serde_json::Value]) -> Self {
+		use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
+		let mut resources = HashMap::new();
+		for manifest in manifests {
+			if manifest.get("apiVersion").and_then(|value| value.as_str())
+				!= Some("apiextensions.k8s.io/v1")
+				|| manifest.get("kind").and_then(|value| value.as_str())
+					!= Some("CustomResourceDefinition")
+			{
+				continue;
+			}
+			let Ok(crd) = serde_json::from_value::<CustomResourceDefinition>(manifest.clone())
+			else {
+				continue;
+			};
+			let (scope, capability_scope) = match crd.spec.scope.as_str() {
+				"Namespaced" => (ResourceScope::Namespaced, Scope::Namespaced),
+				"Cluster" => (ResourceScope::ClusterWide, Scope::Cluster),
+				_ => continue,
+			};
+			for version in crd.spec.versions.iter().filter(|version| version.served) {
+				let gvk =
+					GroupVersionKind::gvk(&crd.spec.group, &version.name, &crd.spec.names.kind);
+				resources.insert(
+					gvk.clone(),
+					DiscoveredResource {
+						api_resource: ApiResource::from_gvk_with_plural(
+							&gvk,
+							&crd.spec.names.plural,
+						),
+						scope,
+						capabilities: ApiCapabilities {
+							scope: capability_scope.clone(),
+							operations: Vec::new(),
+							subresources: Vec::new(),
+						},
+					},
+				);
+			}
+		}
+		Self {
+			resources,
+			pending_crds: HashSet::new(),
+		}
+	}
+
+	pub(crate) fn with_crds(mut self, manifests: &[serde_json::Value]) -> Self {
+		for (gvk, resource) in Self::from_crds(manifests).resources {
+			if let std::collections::hash_map::Entry::Vacant(entry) =
+				self.resources.entry(gvk.clone())
+			{
+				entry.insert(resource);
+				self.pending_crds.insert(gvk);
+			}
+		}
+		self
+	}
+
+	pub(crate) fn is_pending_crd(&self, gvk: &GroupVersionKind) -> bool {
+		self.pending_crds.contains(gvk)
 	}
 
 	/// Look up a resource by its GroupVersionKind.
@@ -283,6 +352,36 @@ impl ApiResourceCache {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn pending_crds_use_served_versions_and_declared_scope() {
+		for (scope, expected_scope) in [
+			("Namespaced", ResourceScope::Namespaced),
+			("Cluster", ResourceScope::ClusterWide),
+		] {
+			let crd = serde_json::json!({
+				"apiVersion":"apiextensions.k8s.io/v1", "kind":"CustomResourceDefinition",
+				"metadata":{"name":"mice.test.example.com"},
+				"spec":{"group":"test.example.com", "scope":scope,
+					"names":{"kind":"Mouse", "plural":"mice"},
+					"versions":[{"name":"v1", "served":true, "storage":true}, {"name":"v0", "served":false, "storage":false}]}
+			});
+			let cache = ApiResourceCache::from_crds(&[]).with_crds(&[crd]);
+			let served = GroupVersionKind::gvk("test.example.com", "v1", "Mouse");
+			let resource = cache.lookup(&served).unwrap();
+			assert_eq!(resource.api_resource.plural, "mice");
+			assert_eq!(resource.scope, expected_scope);
+			assert!(cache.is_pending_crd(&served));
+			assert!(cache
+				.lookup(&GroupVersionKind::gvk("test.example.com", "v0", "Mouse"))
+				.is_none());
+			assert!(!cache.is_pending_crd(&GroupVersionKind::gvk(
+				"test.example.com",
+				"v1",
+				"Unknown"
+			)));
+		}
+	}
 
 	#[test]
 	fn test_gvk_from_manifest() {

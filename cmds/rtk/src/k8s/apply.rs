@@ -16,6 +16,8 @@ use super::discovery::{gvk_from_manifest, ApiResourceCache, DiscoveredResource, 
 /// Errors that can occur during apply operations.
 #[derive(Debug, Error)]
 pub enum ApplyError {
+	#[error("timed out waiting for the API for {kind}/{name} after installing its CRD")]
+	DiscoveryTimeout { kind: String, name: String },
 	#[error("manifest missing apiVersion or kind")]
 	MissingApiVersionOrKind,
 
@@ -48,6 +50,17 @@ pub enum ApplyError {
 	ManifestConversion(#[source] serde_json::Error),
 }
 
+impl ApplyError {
+	fn is_missing_discovery(&self) -> bool {
+		match self {
+			Self::UnknownResourceType { .. } => true,
+			Self::BuildingApiCache(error) => matches!(error.as_ref(),
+				DiscoveryError::ResourceDiscovery { source: kube::Error::Api(response), .. } if response.code == 404),
+			_ => false,
+		}
+	}
+}
+
 /// Engine for applying resources to a Kubernetes cluster.
 pub struct ApplyEngine {
 	client: Client,
@@ -66,6 +79,37 @@ impl ApplyEngine {
 			default_namespace,
 			server_side,
 			force,
+		}
+	}
+
+	pub(crate) async fn apply_when_discovered(
+		&self,
+		manifest: &serde_json::Value,
+	) -> Result<(), ApplyError> {
+		use std::time::{Duration, Instant};
+		let deadline = Instant::now() + Duration::from_secs(30);
+		// CRD persistence and API discovery become visible at different times.
+		loop {
+			match self.apply_manifest(manifest).await {
+				Err(error) if error.is_missing_discovery() => {
+					if Instant::now() >= deadline {
+						return Err(ApplyError::DiscoveryTimeout {
+							kind: manifest
+								.get("kind")
+								.and_then(|value| value.as_str())
+								.unwrap_or_default()
+								.to_owned(),
+							name: manifest
+								.pointer("/metadata/name")
+								.and_then(|value| value.as_str())
+								.unwrap_or_default()
+								.to_owned(),
+						});
+					}
+					tokio::time::sleep(Duration::from_millis(200)).await;
+				}
+				result => return result,
+			}
 		}
 	}
 

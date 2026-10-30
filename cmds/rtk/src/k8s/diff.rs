@@ -424,7 +424,8 @@ impl DiffEngine {
 
 		let api_cache = ApiResourceCache::build(connection.client(), required_keys, with_prune)
 			.await
-			.map_err(|e| DiffError::BuildingApiCache(Box::new(e)))?;
+			.map_err(|e| DiffError::BuildingApiCache(Box::new(e)))?
+			.with_crds(manifests);
 
 		let openapi_cache = Arc::new(OpenApiSchemaCache::new(
 			connection.client().clone(),
@@ -499,18 +500,20 @@ impl DiffEngine {
 		} = self.extract_manifest_info(manifest)?;
 		let normalized_manifest = normalize_manifest_namespace(manifest, namespace.as_deref());
 
-		// Check if namespace exists (for namespaced resources)
-		if let Some(ref ns) = namespace {
-			if !self.namespace_exists(ns).await? {
-				return Ok(ResourceDiff {
-					gvk: gvk.clone(),
-					namespace,
-					name,
-					status: DiffStatus::SoonAdded,
-					current_yaml: String::new(),
-					desired_yaml: self.manifest_to_redacted_yaml(&normalized_manifest, &gvk)?,
-				});
-			}
+		// Pending CRDs cannot be queried or dry-run validated until their API exists.
+		if self.api_cache.is_pending_crd(&gvk)
+			|| match namespace.as_deref() {
+				Some(namespace) => !self.namespace_exists(namespace).await?,
+				None => false,
+			} {
+			return Ok(ResourceDiff {
+				gvk: gvk.clone(),
+				namespace,
+				name,
+				status: DiffStatus::SoonAdded,
+				current_yaml: String::new(),
+				desired_yaml: self.manifest_to_redacted_yaml(&normalized_manifest, &gvk)?,
+			});
 		}
 
 		// Execute the appropriate diff strategy
@@ -546,6 +549,10 @@ impl DiffEngine {
 			namespace,
 			discovered,
 		} = self.extract_manifest_info(manifest)?;
+
+		if self.api_cache.is_pending_crd(&gvk) {
+			return Ok(());
+		}
 
 		let api = self.dynamic_api(&discovered.api_resource, namespace.as_deref());
 
@@ -587,18 +594,20 @@ impl DiffEngine {
 			discovered,
 		} = self.extract_manifest_info(manifest)?;
 
-		// Check if namespace exists (for namespaced resources)
-		if let Some(ref ns) = namespace {
-			if !self.namespace_exists(ns).await? {
-				return Ok(ResourceDiff {
-					gvk: gvk.clone(),
-					namespace,
-					name,
-					status: DiffStatus::SoonAdded,
-					current_yaml: String::new(),
-					desired_yaml: self.manifest_to_redacted_yaml(manifest, &gvk)?,
-				});
-			}
+		// Pending CRDs cannot be queried or dry-run validated until their API exists.
+		if self.api_cache.is_pending_crd(&gvk)
+			|| match namespace.as_deref() {
+				Some(namespace) => !self.namespace_exists(namespace).await?,
+				None => false,
+			} {
+			return Ok(ResourceDiff {
+				gvk: gvk.clone(),
+				namespace,
+				name,
+				status: DiffStatus::SoonAdded,
+				current_yaml: String::new(),
+				desired_yaml: self.manifest_to_redacted_yaml(manifest, &gvk)?,
+			});
 		}
 
 		// Always use native strategy

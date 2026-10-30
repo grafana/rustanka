@@ -9,6 +9,7 @@ use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn applies_in_tanka_dependency_order() {
+	let _ = rustls::crypto::ring::default_provider().install_default();
 	let namespace =
 		json!({"apiVersion":"v1", "kind":"Namespace", "metadata":{"name":"ordering-repro"}});
 	let config = json!({"apiVersion":"v1", "kind":"ConfigMap", "metadata":{"name":"config", "namespace":"ordering-repro"}, "data":{"key":"value"}});
@@ -52,63 +53,83 @@ async fn applies_in_tanka_dependency_order() {
 		k8s_mock::DiscoveryMode::Legacy,
 	] {
 		for strategy in [ApplyStrategy::Server, ApplyStrategy::Client] {
-			let (discovery, schemas) = k8s_mock::extract_crd_metadata(&[crd.clone()]);
-			let discovery = discovery.with_group(
-				"apiextensions.k8s.io/v1",
-				vec![k8s_mock::MockApiResource::cluster_scoped(
-					"customresourcedefinitions",
-					"CustomResourceDefinition",
-				)],
-			);
-			let server = k8s_mock::HttpMockK8sServer::builder()
-				.discovery_mode(discovery_mode)
-				.discovery(discovery)
-				.openapi_schemas(schemas)
-				.build()
-				.start()
-				.await;
-			let mut spec = rtk_spec::canonical::EnvironmentSpec::default();
-			spec.context_names = vec!["mock-context".into()];
-			let connection =
-				ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
+			for diff_strategy in [
+				DiffStrategy::Native,
+				DiffStrategy::Server,
+				DiffStrategy::Subset,
+				DiffStrategy::Validate,
+			] {
+				let (discovery, schemas) = k8s_mock::extract_crd_metadata(&[crd.clone()]);
+				let discovery = discovery.with_group(
+					"apiextensions.k8s.io/v1",
+					vec![k8s_mock::MockApiResource::cluster_scoped(
+						"customresourcedefinitions",
+						"CustomResourceDefinition",
+					)],
+				);
+				let server = k8s_mock::HttpMockK8sServer::builder()
+					.discovery_mode(discovery_mode)
+					.discovery(discovery)
+					.openapi_schemas(schemas)
+					.build()
+					.start()
+					.await;
+				server
+					.defer_group_until_crd("test.example.com", "widgets.test.example.com")
+					.await;
+				let rejected = reqwest::Client::new()
+					.post(format!(
+						"{}/apis/test.example.com/v1/namespaces/ordering-repro/widgets",
+						server.uri()
+					))
+					.body(widget.to_string())
+					.send()
 					.await
 					.unwrap();
-			apply_environment(
-				project.path(),
-				Some(connection),
-				rtk_jsonnet::Options::default(),
-				ApplyOpts {
-					diff_strategy: Some(DiffStrategy::Subset),
-					apply_strategy: Some(strategy),
-					auto_approve: AutoApprove::Always,
-					color: ColorMode::Never,
-					..Default::default()
-				},
-				&mut Vec::new(),
-			)
-			.await
-			.unwrap();
-			let kinds: Vec<String> = server
-				.http_exchanges()
-				.into_iter()
-				.filter(|exchange| {
-					["POST", "PATCH"].contains(&exchange.method.as_str())
-						&& (200..300).contains(&exchange.response_status)
-						&& !exchange
-							.query
-							.as_deref()
-							.unwrap_or_default()
-							.contains("dryRun")
-				})
-				.map(|exchange| {
-					serde_json::from_str::<serde_json::Value>(&exchange.request_body).unwrap()
-						["kind"]
-						.as_str()
-						.unwrap()
-						.to_owned()
-				})
-				.collect();
-			assert_eq!(kinds, expected, "{strategy:?}");
+				assert_eq!(rejected.status().as_u16(), 404);
+				let mut spec = rtk_spec::canonical::EnvironmentSpec::default();
+				spec.context_names = vec!["mock-context".into()];
+				let connection =
+					ClusterConnection::from_spec_with_kubeconfig(&spec, server.kubeconfig())
+						.await
+						.unwrap();
+				apply_environment(
+					project.path(),
+					Some(connection),
+					rtk_jsonnet::Options::default(),
+					ApplyOpts {
+						diff_strategy: Some(diff_strategy),
+						apply_strategy: Some(strategy),
+						auto_approve: AutoApprove::Always,
+						color: ColorMode::Never,
+						..Default::default()
+					},
+					&mut Vec::new(),
+				)
+				.await
+				.unwrap();
+				let kinds: Vec<String> = server
+					.http_exchanges()
+					.into_iter()
+					.filter(|exchange| {
+						["POST", "PATCH"].contains(&exchange.method.as_str())
+							&& (200..300).contains(&exchange.response_status)
+							&& !exchange
+								.query
+								.as_deref()
+								.unwrap_or_default()
+								.contains("dryRun")
+					})
+					.map(|exchange| {
+						serde_json::from_str::<serde_json::Value>(&exchange.request_body).unwrap()
+							["kind"]
+							.as_str()
+							.unwrap()
+							.to_owned()
+					})
+					.collect();
+				assert_eq!(kinds, expected, "{strategy:?}");
+			}
 		}
 	}
 }
