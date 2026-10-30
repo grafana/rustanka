@@ -32,7 +32,10 @@
 //! `filepath.WalkDir` does not follow symlinks, including one named as the
 //! argument, so neither does this.
 
-use std::{fs, io, path::Path};
+use std::{
+	fs, io,
+	path::{Component, Path, PathBuf},
+};
 
 use rtk_gobwas_glob::Glob;
 use walkdir::WalkDir;
@@ -43,11 +46,11 @@ use walkdir::WalkDir;
 /// `finding Jsonnet files`; the wrapping belongs to the command, not here.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-	#[error("{path}: {source}")]
-	Stat { path: String, source: io::Error },
-	#[error("walking {path}: {source}")]
+	#[error("{}: {source}", path.display())]
+	Stat { path: PathBuf, source: io::Error },
+	#[error("walking {}: {source}", path.display())]
 	Walk {
-		path: String,
+		path: PathBuf,
 		source: walkdir::Error,
 	},
 }
@@ -57,10 +60,10 @@ const JSONNET_EXTENSIONS: [&str; 2] = [".jsonnet", ".libsonnet"];
 
 /// Find the Jsonnet files under `target`, which may itself be a file.
 ///
-/// `target` is taken as a string rather than a `Path` on purpose: the exact
-/// spelling is what a named regular file is returned as, and what the excludes
-/// are matched against.
-pub fn find_files(target: &str, excludes: &[Glob]) -> Result<Vec<String>, Error> {
+/// A named regular file retains its original spelling. Filesystem paths stay
+/// native throughout discovery, including names that are not valid UTF-8.
+pub fn find_files(target: impl AsRef<Path>, excludes: &[Glob]) -> Result<Vec<PathBuf>, Error> {
+	let target = target.as_ref();
 	let metadata = fs::metadata(target).map_err(|source| Error::Stat {
 		path: target.to_owned(),
 		source,
@@ -83,7 +86,7 @@ pub fn find_files(target: &str, excludes: &[Glob]) -> Result<Vec<String>, Error>
 	let target_is_symlink =
 		fs::symlink_metadata(target).is_ok_and(|metadata| metadata.file_type().is_symlink());
 	if target_is_symlink {
-		consider(clean(&to_slash(Path::new(target))), excludes, &mut files);
+		consider(target.to_owned(), excludes, &mut files);
 		return Ok(files);
 	}
 
@@ -101,19 +104,24 @@ pub fn find_files(target: &str, excludes: &[Glob]) -> Result<Vec<String>, Error>
 
 		// Behaviour 3: the path the excludes see, cleaned and slash-normalised
 		// the way `filepath.Join` plus `filepath.ToSlash` leave it.
-		consider(clean(&to_slash(entry.path())), excludes, &mut files);
+		consider(clean(entry.path()), excludes, &mut files);
 	}
 
 	Ok(files)
 }
 
 /// The tail of the walk callback: the excludes, then the extension.
-fn consider(path: String, excludes: &[Glob], files: &mut Vec<String>) {
-	if excludes.iter().any(|glob| glob.is_match(&path)) {
+fn consider(path: PathBuf, excludes: &[Glob], files: &mut Vec<PathBuf>) {
+	let match_path = to_slash(&path);
+	if excludes.iter().any(|glob| glob.is_match_bytes(&match_path)) {
 		return;
 	}
 	// Behaviours 4 and 5.
-	if JSONNET_EXTENSIONS.contains(&extension(&path)) {
+	let ext = extension(&path);
+	if JSONNET_EXTENSIONS
+		.iter()
+		.any(|candidate| ext == candidate.as_bytes())
+	{
 		files.push(path);
 	}
 }
@@ -122,10 +130,10 @@ fn consider(path: String, excludes: &[Glob], files: &mut Vec<String>) {
 ///
 /// Behaviour 6: results are concatenated in argument order, neither sorted nor
 /// deduplicated.
-pub fn find_files_all<I, S>(targets: I, excludes: &[Glob]) -> Result<Vec<String>, Error>
+pub fn find_files_all<I, S>(targets: I, excludes: &[Glob]) -> Result<Vec<PathBuf>, Error>
 where
 	I: IntoIterator<Item = S>,
-	S: AsRef<str>,
+	S: AsRef<Path>,
 {
 	let mut all = Vec::new();
 	for target in targets {
@@ -134,99 +142,55 @@ where
 	Ok(all)
 }
 
-/// Go's `filepath.ToSlash`.
-fn to_slash(path: &Path) -> String {
-	let path = path.to_string_lossy();
-	if std::path::MAIN_SEPARATOR == '/' {
-		path.into_owned()
-	} else {
-		path.replace(std::path::MAIN_SEPARATOR, "/")
-	}
-}
-
-/// Go's `filepath.Ext`, which scans back from the end and stops at a separator.
-///
-/// The difference from `Path::extension` is the leading dot and, more to the
-/// point, a name that is *only* an extension: `filepath.Ext(".jsonnet")` is
-/// `".jsonnet"`, while `Path::new(".jsonnet").extension()` is `None`.
-fn extension(path: &str) -> &str {
-	let bytes = path.as_bytes();
-	let mut i = bytes.len();
-	while i > 0 {
-		i -= 1;
-		match bytes[i] {
-			b'/' => break,
-			b'.' => return &path[i..],
-			_ => {}
+/// Slash-normalise only the matching view; never reconstruct a filesystem
+/// path from a Unicode conversion. On Unix these are the original filename
+/// bytes, which Go strings also preserve.
+fn to_slash(path: &Path) -> Vec<u8> {
+	let mut bytes = path.as_os_str().as_encoded_bytes().to_vec();
+	if std::path::MAIN_SEPARATOR != '/' {
+		for byte in &mut bytes {
+			if *byte == b'\\' {
+				*byte = b'/';
+			}
 		}
 	}
-	""
+	bytes
 }
 
-/// Go's `path.Clean`, on a slash-separated path.
-///
-/// Ported because `filepath.Join` cleans and `Path::join` does not, and the
-/// difference is visible to the excludes — see behaviour 3.
-fn clean(path: &str) -> String {
-	if path.is_empty() {
-		return ".".to_string();
-	}
-
-	let bytes = path.as_bytes();
-	let rooted = bytes[0] == b'/';
-	let n = bytes.len();
-	let mut out: Vec<u8> = Vec::with_capacity(n);
-
-	// Go seeds its `lazybuf` with the leading separator and refuses to back up
-	// over it: `dotdot` is the floor a `..` cannot pop past.
-	let (mut r, mut dotdot) = if rooted {
-		out.push(b'/');
-		(1, 1)
-	} else {
-		(0, 0)
+/// Go's `filepath.Ext` includes a leading dot, even in a name like `.jsonnet`.
+fn extension(path: impl AsRef<Path>) -> Vec<u8> {
+	let Some(name) = path.as_ref().file_name() else {
+		return Vec::new();
 	};
+	let bytes = name.as_encoded_bytes();
+	bytes
+		.iter()
+		.rposition(|byte| *byte == b'.')
+		.map_or_else(Vec::new, |dot| bytes[dot..].to_vec())
+}
 
-	while r < n {
-		if bytes[r] == b'/' {
-			// Empty path element.
-			r += 1;
-		} else if bytes[r] == b'.' && (r + 1 == n || bytes[r + 1] == b'/') {
-			// `.` element.
-			r += 1;
-		} else if bytes[r] == b'.' && bytes[r + 1] == b'.' && (r + 2 == n || bytes[r + 2] == b'/') {
-			// `..` element: remove the last one written.
-			r += 2;
-			if out.len() > dotdot {
-				out.truncate(out.len() - 1);
-				while out.len() > dotdot && *out.last().expect("len > dotdot >= 0") != b'/' {
-					out.truncate(out.len() - 1);
+/// Lexically clean the path as `filepath.Join` does, without resolving
+/// symlinks or converting native components to text. `PathBuf::pop` removes
+/// the component and its separator together, including repeated `..` steps.
+fn clean(path: impl AsRef<Path>) -> PathBuf {
+	let mut result = PathBuf::new();
+	for component in path.as_ref().components() {
+		match component {
+			Component::CurDir => {}
+			Component::ParentDir => {
+				if matches!(result.components().next_back(), Some(Component::Normal(_))) {
+					result.pop();
+				} else if !result.has_root() {
+					result.push(component.as_os_str());
 				}
-			} else if !rooted {
-				// Cannot back up past the start of a relative path, so keep
-				// the `..` and refuse to back up past it later.
-				if !out.is_empty() {
-					out.push(b'/');
-				}
-				out.push(b'.');
-				out.push(b'.');
-				dotdot = out.len();
 			}
-		} else {
-			// A real path element; add a separator if needed, then copy it.
-			if (rooted && out.len() != 1) || (!rooted && !out.is_empty()) {
-				out.push(b'/');
-			}
-			while r < n && bytes[r] != b'/' {
-				out.push(bytes[r]);
-				r += 1;
-			}
+			_ => result.push(component.as_os_str()),
 		}
 	}
-
-	if out.is_empty() {
-		return ".".to_string();
+	if result.as_os_str().is_empty() {
+		result.push(".");
 	}
-	String::from_utf8(out).expect("only whole bytes of a UTF-8 string were copied")
+	result
 }
 
 #[cfg(test)]
@@ -235,46 +199,98 @@ mod tests {
 
 	#[test]
 	fn extension_matches_filepath_ext() {
-		assert_eq!(extension("main.jsonnet"), ".jsonnet");
-		assert_eq!(extension("a/b/main.libsonnet"), ".libsonnet");
-		assert_eq!(extension("a.b.jsonnet"), ".jsonnet");
-		assert_eq!(extension("README.md"), ".md");
-		assert_eq!(extension("Makefile"), "");
+		assert_eq!(extension("main.jsonnet"), b".jsonnet");
+		assert_eq!(extension("a/b/main.libsonnet"), b".libsonnet");
+		assert_eq!(extension("a.b.jsonnet"), b".jsonnet");
+		assert_eq!(extension("README.md"), b".md");
+		assert_eq!(extension("Makefile"), b"");
 		// The case `Path::extension` gets wrong.
-		assert_eq!(extension(".jsonnet"), ".jsonnet");
-		assert_eq!(extension("a/.libsonnet"), ".libsonnet");
+		assert_eq!(extension(".jsonnet"), b".jsonnet");
+		assert_eq!(extension("a/.libsonnet"), b".libsonnet");
 		// A dot in a directory name is not an extension of the file.
-		assert_eq!(extension("a.b/Makefile"), "");
-		assert_eq!(extension(""), "");
+		assert_eq!(extension("a.b/Makefile"), b"");
+		assert_eq!(extension(""), b"");
 	}
 
 	#[test]
 	fn extension_is_case_sensitive() {
-		assert!(!JSONNET_EXTENSIONS.contains(&extension("main.JSONNET")));
-		assert!(JSONNET_EXTENSIONS.contains(&extension("main.jsonnet")));
+		assert!(
+			!JSONNET_EXTENSIONS
+				.iter()
+				.any(|ext| extension("main.JSONNET") == ext.as_bytes())
+		);
+		assert!(
+			JSONNET_EXTENSIONS
+				.iter()
+				.any(|ext| extension("main.jsonnet") == ext.as_bytes())
+		);
 	}
 
 	#[test]
 	fn clean_matches_path_clean() {
-		assert_eq!(clean(""), ".");
-		assert_eq!(clean("."), ".");
-		assert_eq!(clean("./foo/bar"), "foo/bar");
-		assert_eq!(clean("foo/bar"), "foo/bar");
-		assert_eq!(clean("foo//bar"), "foo/bar");
-		assert_eq!(clean("foo/./bar"), "foo/bar");
-		assert_eq!(clean("foo/../bar"), "bar");
-		assert_eq!(clean("../foo/bar"), "../foo/bar");
-		assert_eq!(clean("../../foo"), "../../foo");
-		assert_eq!(clean("/foo/bar"), "/foo/bar");
-		assert_eq!(clean("/../foo"), "/foo");
-		assert_eq!(clean("/foo/.."), "/");
-		assert_eq!(clean("foo/.."), ".");
-		assert_eq!(clean("foo/"), "foo");
-		assert_eq!(clean("/"), "/");
+		assert_eq!(clean(""), Path::new("."));
+		assert_eq!(clean("."), Path::new("."));
+		assert_eq!(clean("./foo/bar"), Path::new("foo/bar"));
+		assert_eq!(clean("foo/bar"), Path::new("foo/bar"));
+		assert_eq!(clean("foo//bar"), Path::new("foo/bar"));
+		assert_eq!(clean("foo/./bar"), Path::new("foo/bar"));
+		assert_eq!(clean("foo/../bar"), Path::new("bar"));
+		assert_eq!(clean("../foo/bar"), Path::new("../foo/bar"));
+		assert_eq!(clean("../../foo"), Path::new("../../foo"));
+		assert_eq!(clean("/foo/bar"), Path::new("/foo/bar"));
+		assert_eq!(clean("/../foo"), Path::new("/foo"));
+		assert_eq!(clean("/foo/.."), Path::new("/"));
+		assert_eq!(clean("foo/.."), Path::new("."));
+		assert_eq!(clean("foo/"), Path::new("foo"));
+		assert_eq!(clean("/"), Path::new("/"));
 	}
 
 	#[test]
 	fn clean_keeps_multibyte_elements_whole() {
-		assert_eq!(clean("./ünïcødé/main.jsonnet"), "ünïcødé/main.jsonnet");
+		assert_eq!(
+			clean("./ünïcødé/main.jsonnet"),
+			Path::new("ünïcødé/main.jsonnet")
+		);
+	}
+	#[test]
+	fn clean_removes_separators_with_parent_components() {
+		for (input, expected) in [
+			("foo/bar/../baz", "foo/baz"),
+			("foo/bar/../../baz", "baz"),
+			("foo/bar/..", "foo"),
+			("/foo/bar/../../..", "/"),
+			("../foo/../../bar", "../../bar"),
+		] {
+			assert_eq!(clean(input), Path::new(expected));
+		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn native_bytes_survive_cleaning_and_extension_checks() {
+		use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+		let path = Path::new(OsStr::from_bytes(
+			b"./native-\xff/child/../file-\xfe.jsonnet",
+		));
+		let cleaned = clean(path);
+		assert_eq!(
+			cleaned.as_os_str().as_bytes(),
+			b"native-\xff/file-\xfe.jsonnet"
+		);
+		assert_eq!(extension(&cleaned), b".jsonnet");
+		assert_eq!(to_slash(&cleaned), b"native-\xff/file-\xfe.jsonnet");
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn clean_preserves_windows_volumes() {
+		assert_eq!(
+			clean(r"C:\foo\bar\..\main.jsonnet"),
+			Path::new(r"C:\foo\main.jsonnet")
+		);
+		assert_eq!(
+			clean(r"\\server\share\foo\..\main.jsonnet"),
+			Path::new(r"\\server\share\main.jsonnet")
+		);
 	}
 }

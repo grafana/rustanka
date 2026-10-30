@@ -10,8 +10,7 @@ use crate::lexer::{Lexer, Token, TokenType};
 /// `gobwas/glob`'s `ast.Kind`, with `ast.List` / `ast.Range` / `ast.Text`
 /// folded into the variants that carry them.
 ///
-/// `KindNothing` is absent: only `gobwas`' alternation minimiser produces it,
-/// and that is an optimisation this port does not need (see `program`).
+/// `KindNothing` is produced only during compilation, not parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
 	Pattern,
@@ -39,6 +38,16 @@ pub struct Tree {
 }
 
 impl Tree {
+	pub(crate) fn equivalent(&self, a: usize, b: usize) -> bool {
+		let (a, b) = (&self.nodes[a], &self.nodes[b]);
+		a.kind == b.kind
+			&& a.children.len() == b.children.len()
+			&& a.children
+				.iter()
+				.zip(&b.children)
+				.all(|(a, b)| self.equivalent(*a, *b))
+	}
+
 	fn new() -> Self {
 		Self {
 			nodes: vec![Node {

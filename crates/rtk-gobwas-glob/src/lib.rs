@@ -79,6 +79,13 @@ impl Glob {
 
 	/// Whether the whole of `subject` matches.
 	pub fn is_match(&self, subject: &str) -> bool {
+		self.is_match_bytes(subject.as_bytes())
+	}
+
+	/// Match native Unix filename bytes without replacing invalid UTF-8.
+	/// Like Go, rune matchers decode each invalid byte as U+FFFD, while text
+	/// matchers compare the original bytes.
+	pub fn is_match_bytes(&self, subject: &[u8]) -> bool {
 		self.program.is_match(subject)
 	}
 }
