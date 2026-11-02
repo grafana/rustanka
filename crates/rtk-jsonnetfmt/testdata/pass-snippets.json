@@ -1268,5 +1268,540 @@
     "name": "indentation/deeply_mixed",
     "source": "local f(x) = {\n  ['k' + x]: [\n  x,\n    {\n y: x,\n  },\n  ],\n};\nf(\n1,\n)",
     "why": "One snippet through most of the branches at once, as an integration case rather than a unit one."
+  },
+  {
+    "name": "fix_parens/single",
+    "source": "(1)",
+    "why": "One pair of parens is not redundant. The no-op is graded too."
+  },
+  {
+    "name": "fix_parens/double",
+    "source": "((1))",
+    "why": "The pass exists for this: the inner Parens is spliced out and the outer keeps its place."
+  },
+  {
+    "name": "fix_parens/triple",
+    "source": "(((1)))",
+    "why": "The `if` is not a loop, so exactly one level goes: P1.Inner becomes P3 and the walk moves on to P3, which has a literal inside it. So `jsonnetfmt` is not a fixed point here either -- formatting the answer again removes another pair."
+  },
+  {
+    "name": "fix_parens/quad",
+    "source": "((((1))))",
+    "why": "Four levels halve to two: P1 absorbs P2, then the walk reaches P3 and it absorbs P4."
+  },
+  {
+    "name": "fix_parens/double_inner_open_comment",
+    "source": "( /* a */ (1))",
+    "why": "The comment between the two `(` is the *inner* Parens' own fodder, and FodderMoveFront puts it in front of the outer's -- so it ends up outside the surviving paren."
+  },
+  {
+    "name": "fix_parens/double_outer_and_inner_open_comment",
+    "source": "/* x */ ( /* a */ (1))",
+    "why": "Both slots are occupied, so the move concatenates and the two comments come out in the other order."
+  },
+  {
+    "name": "fix_parens/double_close_comments",
+    "source": "((1 /* a */) /* b */)",
+    "why": "The close-fodder move, with both slots occupied."
+  },
+  {
+    "name": "fix_parens/double_inner_close_only",
+    "source": "((1) /* b */)",
+    "why": "The inner close fodder is empty, so the outer's is left as it was. A move from an empty slot is the common case."
+  },
+  {
+    "name": "fix_parens/double_multiline",
+    "source": "(\n  (1)\n)",
+    "why": "A line end before the inner `(` and before the outer `)`, so both moves carry a LineEnd."
+  },
+  {
+    "name": "fix_parens/double_newline_between_opens",
+    "source": "(\n  (1))",
+    "why": "Only the open-fodder move carries anything."
+  },
+  {
+    "name": "fix_parens/double_line_comment_between_opens",
+    "source": "( // a\n(1))",
+    "why": "A paragraph moved into empty fodder, which is where FodderAppend's synthetic LineEnd rule can fire."
+  },
+  {
+    "name": "fix_parens/double_comment_both_sides_of_seam",
+    "source": "// x\n( // a\n(1))",
+    "why": "Concat with a paragraph on each side of the seam: the invariant is enforced at exactly one element."
+  },
+  {
+    "name": "fix_parens/double_blank_lines_between_opens",
+    "source": "(\n\n  (1)\n)",
+    "why": "Blanks are a count on the moved element, not separate elements."
+  },
+  {
+    "name": "fix_parens/inner_not_parens",
+    "source": "((1) + 2)",
+    "why": "The outer's inner is a Binary whose left happens to be a Parens, which is not the shape this pass matches. A no-op."
+  },
+  {
+    "name": "fix_parens/parens_in_binary_left",
+    "source": "((1)) + 2",
+    "why": "The redundant pair is not the root, so the collapse has to happen wherever the walk finds it."
+  },
+  {
+    "name": "fix_parens/parens_in_binary_right",
+    "source": "2 + ((1))",
+    "why": "The same, on the other side."
+  },
+  {
+    "name": "fix_parens/in_object_field",
+    "source": "{ a: ((1)) }",
+    "why": "Reached through the object-field hook rather than from the root."
+  },
+  {
+    "name": "fix_parens/in_array",
+    "source": "[((1)), ((2))]",
+    "why": "Two collapses in one file."
+  },
+  {
+    "name": "fix_parens/apply_target",
+    "source": "((f))(1)",
+    "why": "The Parens is an Apply's target, so the enclosing node is left-recursive."
+  },
+  {
+    "name": "fix_parens/index_target",
+    "source": "((a)).b",
+    "why": "openFodder on a Parens is its own fodder -- Parens is not left-recursive -- even where its parent is."
+  },
+  {
+    "name": "fix_parens/double_around_object",
+    "source": "(({ a: 1 }))",
+    "why": "The inner expression is an Object, which is what the plus-object passes at step 7 will be looking at."
+  },
+  {
+    "name": "fix_parens/nested_deeper_inside",
+    "source": "((1 + (2)))",
+    "why": "The outer pair collapses and the unrelated `(2)` deeper in is untouched."
+  },
+  {
+    "name": "fix_parens/three_opens_with_comments",
+    "source": "( /* a */ ( /* b */ (1)))",
+    "why": "The collapse takes the middle Parens' comment outward and leaves the innermost one where it is."
+  },
+  {
+    "name": "fix_parens/double_in_local_bind",
+    "source": "local x = ((1)); x",
+    "why": "Through the local hook."
+  },
+  {
+    "name": "fix_parens/double_in_function_default",
+    "source": "function(x=((1))) x",
+    "why": "Through the parameters hook, which only descends into a default that exists."
+  },
+  {
+    "name": "remove_plus_object/var_plus_object",
+    "source": "a + { b: 1 }",
+    "why": "The pass's whole purpose: a Var on the left and an Object on the right becomes an ApplyBrace, so the `+` is not written."
+  },
+  {
+    "name": "remove_plus_object/index_plus_object",
+    "source": "a.b + { c: 1 }",
+    "why": "An Index on the left is the other accepted shape."
+  },
+  {
+    "name": "remove_plus_object/bracket_index_plus_object",
+    "source": "a['b'] + { c: 1 }",
+    "why": "The bracket form of Index, which is the same Go type."
+  },
+  {
+    "name": "remove_plus_object/dotted_chain_plus_object",
+    "source": "a.b.c + { d: 1 }",
+    "why": "An Index whose target is an Index."
+  },
+  {
+    "name": "remove_plus_object/index_of_apply_plus_object",
+    "source": "f().a + { b: 1 }",
+    "why": "The test is on the *outermost* node of the left side, so an Index over an Apply is accepted although an Apply is not."
+  },
+  {
+    "name": "remove_plus_object/object_plus_object",
+    "source": "{ a: 1 } + { b: 2 }",
+    "why": "NOT rewritten. Upstream restricts the left side to a Var or an Index -- 'Could relax this to allow more ASTs on the LHS but this seems OK for now' -- so this is the negative case that says the restriction is real."
+  },
+  {
+    "name": "remove_plus_object/apply_plus_object",
+    "source": "f() + { a: 1 }",
+    "why": "NOT rewritten: an Apply on the left is not accepted."
+  },
+  {
+    "name": "remove_plus_object/parens_plus_object",
+    "source": "(a) + { b: 1 }",
+    "why": "NOT rewritten: Parens is not Var, whatever it wraps."
+  },
+  {
+    "name": "remove_plus_object/slice_plus_object",
+    "source": "a[1:2] + { b: 1 }",
+    "why": "NOT rewritten: ast.Slice is a different type from ast.Index, and only Index is accepted."
+  },
+  {
+    "name": "remove_plus_object/super_index_plus_object",
+    "source": "{ x: super.a + { b: 1 } }",
+    "why": "NOT rewritten: ast.SuperIndex is its own type too."
+  },
+  {
+    "name": "remove_plus_object/self_plus_object",
+    "source": "{ x: self + { b: 1 } }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/dollar_plus_object",
+    "source": "{ x: $ + { b: 1 } }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/var_plus_array",
+    "source": "a + [1]",
+    "why": "NOT rewritten: the right side has to be an Object."
+  },
+  {
+    "name": "remove_plus_object/var_plus_object_comp",
+    "source": "a + { [k]: 1 for k in x }",
+    "why": "NOT rewritten: ast.ObjectComp is a different type from ast.Object, so a comprehension keeps its `+`."
+  },
+  {
+    "name": "remove_plus_object/var_plus_parenthesised_object",
+    "source": "a + ({ b: 1 })",
+    "why": "NOT rewritten: the right side is a Parens."
+  },
+  {
+    "name": "remove_plus_object/var_minus_object",
+    "source": "a - { b: 1 }",
+    "why": "NOT rewritten: the operator has to be `+`."
+  },
+  {
+    "name": "remove_plus_object/var_mult_object",
+    "source": "a * { b: 1 }",
+    "why": "NOT rewritten."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_interstitial",
+    "source": "a /* c */ + { b: 1 }",
+    "why": "The comment is the Binary's OpFodder, and the `+` it sat in front of is about to disappear -- so it moves to the front of the object's own fodder."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_line_end",
+    "source": "a\n+ { b: 1 }",
+    "why": "The line end before the `+` becomes the line end before the `{`. This is the shape the docsonnet corpus file has."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_and_object_fodder",
+    "source": "a\n+\n{ b: 1 }",
+    "why": "Both slots hold a LineEnd, so the move goes through FodderAppend's merge rule rather than a plain concatenation."
+  },
+  {
+    "name": "remove_plus_object/op_fodder_comment_both",
+    "source": "a // x\n+ // y\n{ b: 1 }",
+    "why": "A comment on each side of the seam."
+  },
+  {
+    "name": "remove_plus_object/object_fodder_only",
+    "source": "a + /* c */ { b: 1 }",
+    "why": "The comment is after the `+`, so it is the object's fodder already and the (empty) move changes nothing."
+  },
+  {
+    "name": "remove_plus_object/chain_left_converts",
+    "source": "a + { b: 1 } + { c: 2 }",
+    "why": "Left-associative, so the outer Binary's left is a Binary and is refused while the inner one converts. The answer is `a { b: 1 } + { c: 2 }`, which is exactly what the docsonnet golden shows."
+  },
+  {
+    "name": "remove_plus_object/chain_right_is_not_object",
+    "source": "a + { b: 1 } + c",
+    "why": "The outer is refused twice over; the inner still converts."
+  },
+  {
+    "name": "remove_plus_object/already_apply_brace",
+    "source": "a { b: 1 }",
+    "why": "Already an ApplyBrace, so there is nothing to do. The pass never looks at one."
+  },
+  {
+    "name": "remove_plus_object/in_object_field",
+    "source": "{ x: a + { b: 1 } }",
+    "why": "Through the object-field hook."
+  },
+  {
+    "name": "remove_plus_object/in_array",
+    "source": "[a + { b: 1 }]",
+    "why": "Through the array hook."
+  },
+  {
+    "name": "remove_plus_object/in_local_bind",
+    "source": "local x = a + { b: 1 }; x",
+    "why": "Through the local hook."
+  },
+  {
+    "name": "remove_plus_object/nested_rhs_also_converts",
+    "source": "a + { b: c + { d: 1 } }",
+    "why": "The walk continues into the replacement's children, so both convert."
+  },
+  {
+    "name": "remove_plus_object/empty_object",
+    "source": "a + {}",
+    "why": "An empty Object is still an Object."
+  },
+  {
+    "name": "remove_plus_object/object_with_local",
+    "source": "a + { local x = 1, y: x }",
+    "why": "An object whose first field is a local, so the replacement has to keep the field list intact."
+  },
+  {
+    "name": "remove_plus_object/hidden_field_object",
+    "source": "a + { b:: 1 }",
+    "why": "A hidden field, to pin that only the node kinds are looked at."
+  },
+  {
+    "name": "add_plus_object/top_level",
+    "source": "{ a: 1 } { b: 2 }",
+    "why": "The root has a nil parent, so no parens: BaseContext returns an empty passCtx."
+  },
+  {
+    "name": "add_plus_object/three",
+    "source": "{ a: 1 } { b: 2 } { c: 3 }",
+    "why": "Two ApplyBraces. The outer becomes a Binary with no parens; the inner is then that Binary's *left*, and `+` is left-associative, so it needs none either."
+  },
+  {
+    "name": "add_plus_object/var_brace",
+    "source": "a { b: 2 }",
+    "why": "The commonest real shape, and the one RemovePlusObject produces."
+  },
+  {
+    "name": "add_plus_object/apply_target",
+    "source": "{ a: 1 } { b: 2 }(42)",
+    "why": "Apply binds tighter than `+`, so the target position needs parens."
+  },
+  {
+    "name": "add_plus_object/apply_positional_arg",
+    "source": "f({ a: 1 } { b: 2 })",
+    "why": "An argument is delimited by the parens that are already there, so none are added."
+  },
+  {
+    "name": "add_plus_object/apply_named_arg",
+    "source": "f(x={ a: 1 } { b: 2 })",
+    "why": "The same, reached through the named-argument slot."
+  },
+  {
+    "name": "add_plus_object/apply_tailstrict",
+    "source": "f({ a: 1 } { b: 2 }) tailstrict",
+    "why": "The tailstrict fodder slot is only visited when the keyword is there, so this exercises the branch."
+  },
+  {
+    "name": "add_plus_object/index_target_dot",
+    "source": "{ a: 1 } { b: 2 }.a",
+    "why": "Upstream's own regression case: without the parens the formatted expression is a runtime error rather than a differently-spelled program."
+  },
+  {
+    "name": "add_plus_object/index_target_bracket",
+    "source": "{ a: 1 } { b: 2 }['a']",
+    "why": "The bracket form of the same."
+  },
+  {
+    "name": "add_plus_object/index_expression",
+    "source": "a[{ b: 1 } { c: 2 }]",
+    "why": "The index expression is delimited by its brackets, so no parens."
+  },
+  {
+    "name": "add_plus_object/index_target_chained",
+    "source": "{ a: 1 } { b: 2 }.a.b",
+    "why": "The ApplyBrace is the target of the *inner* Index, which is where the parens go."
+  },
+  {
+    "name": "add_plus_object/slice_target",
+    "source": "{ a: 1 } { b: 2 }[1:2]",
+    "why": "ast.Slice is not in upstream's switch, so it takes the default branch and NO parens are added -- although Slice binds as tightly as Index. Recorded because it is what the reference implementation does."
+  },
+  {
+    "name": "add_plus_object/binary_left_plus",
+    "source": "{ a: 1 } { b: 2 } + { c: 3 }",
+    "why": "On the left of a `+`: 6 < 6 is false, so no parens -- left-associativity makes the flattened form parse the same."
+  },
+  {
+    "name": "add_plus_object/binary_right_plus",
+    "source": "{ a: 1 } + { b: 2 } { c: 3 }",
+    "why": "On the right of a `+`: 6 <= 6 is true, so parens. The asymmetry is the associativity."
+  },
+  {
+    "name": "add_plus_object/binary_left_minus",
+    "source": "{ a: 1 } { b: 2 } - { c: 3 }",
+    "why": "`-` has the same precedence as `+`, so the left side needs nothing."
+  },
+  {
+    "name": "add_plus_object/binary_right_minus",
+    "source": "{ a: 1 } - { b: 2 } { c: 3 }",
+    "why": "And the right side does."
+  },
+  {
+    "name": "add_plus_object/binary_left_mult",
+    "source": "{ a: 1 } { b: 2 } * { c: 3 }",
+    "why": "`*` binds tighter (5 < 6), so the left side needs parens as well."
+  },
+  {
+    "name": "add_plus_object/binary_right_mult",
+    "source": "{ a: 1 } * { b: 2 } { c: 3 }",
+    "why": "And so does the right."
+  },
+  {
+    "name": "add_plus_object/binary_left_or",
+    "source": "{ a: 1 } { b: 2 } || { c: 3 }",
+    "why": "`||` binds looser (14), so neither side needs parens."
+  },
+  {
+    "name": "add_plus_object/binary_right_or",
+    "source": "{ a: 1 } || { b: 2 } { c: 3 }",
+    "why": "The looser operator on the right: 14 <= 6 is false."
+  },
+  {
+    "name": "add_plus_object/binary_left_in",
+    "source": "{ a: 1 } { b: 2 } in { c: 3 }",
+    "why": "`in` as an ordinary binary operator, precedence 8."
+  },
+  {
+    "name": "add_plus_object/binary_right_in",
+    "source": "{ a: 1 } in { b: 2 } { c: 3 }",
+    "why": "The right of an `in`: still no parens, because `+` binds tighter than `in` and the parse is unchanged."
+  },
+  {
+    "name": "add_plus_object/unary_plus",
+    "source": "+42 { b: 2 }",
+    "why": "Upstream's own case. The parse is `+(implicit-plus 42 {b:2})`, and explicit `+` binds looser than unary `+`, so parens are needed to keep it. The expression does not evaluate; it still has to format."
+  },
+  {
+    "name": "add_plus_object/unary_minus",
+    "source": "-a { b: 2 }",
+    "why": "The same for unary `-`."
+  },
+  {
+    "name": "add_plus_object/unary_not",
+    "source": "!a { b: 2 }",
+    "why": "And for `!`: the branch is a constant comparison, 4 < 6, so every Unary parent needs parens."
+  },
+  {
+    "name": "add_plus_object/unary_bitwise_not",
+    "source": "~a { b: 2 }",
+    "why": "And for `~`."
+  },
+  {
+    "name": "add_plus_object/in_super",
+    "source": "{ x: { a: 1 } { b: 2 } in super }",
+    "why": "InSuper's own branch, which compares precedence(in) <= precedence(+) -- 8 <= 6 -- and so is always false. No parens, and that is correct: `+` binds tighter than `in`."
+  },
+  {
+    "name": "add_plus_object/in_object_field",
+    "source": "{ x: { a: 1 } { b: 2 } }",
+    "why": "An Object parent takes the default branch."
+  },
+  {
+    "name": "add_plus_object/in_array",
+    "source": "[{ a: 1 } { b: 2 }]",
+    "why": "So does an Array."
+  },
+  {
+    "name": "add_plus_object/in_local_bind",
+    "source": "local x = { a: 1 } { b: 2 }; x",
+    "why": "So does a Local."
+  },
+  {
+    "name": "add_plus_object/local_body",
+    "source": "local x = 1; { a: 1 } { b: 2 }",
+    "why": "The body slot of the same Local."
+  },
+  {
+    "name": "add_plus_object/conditional_branches",
+    "source": "if c then { a: 1 } { b: 2 } else { c: 1 } { d: 2 }",
+    "why": "Both branches, and a Conditional parent needs no parens."
+  },
+  {
+    "name": "add_plus_object/conditional_cond",
+    "source": "if { a: 1 } { b: 2 } then 1 else 2",
+    "why": "The condition slot."
+  },
+  {
+    "name": "add_plus_object/error_expr",
+    "source": "error { a: 1 } { b: 2 }",
+    "why": "An Error parent."
+  },
+  {
+    "name": "add_plus_object/assert_cond",
+    "source": "assert { a: 1 } { b: 2 }; 1",
+    "why": "An Assert's condition."
+  },
+  {
+    "name": "add_plus_object/assert_message",
+    "source": "assert c : { a: 1 } { b: 2 }; 1",
+    "why": "An Assert's message, which is only visited when it is there."
+  },
+  {
+    "name": "add_plus_object/function_body",
+    "source": "function(x) { a: 1 } { b: 2 }",
+    "why": "A Function parent."
+  },
+  {
+    "name": "add_plus_object/function_default",
+    "source": "function(x={ a: 1 } { b: 2 }) x",
+    "why": "A parameter default, reached through the parameters hook."
+  },
+  {
+    "name": "add_plus_object/for_spec_expr",
+    "source": "[x for x in { a: 1 } { b: 2 }]",
+    "why": "The `in` expression of a comprehension, reached through for_spec."
+  },
+  {
+    "name": "add_plus_object/if_spec_expr",
+    "source": "[x for x in y if { a: 1 } { b: 2 }]",
+    "why": "A comprehension's condition, reached through the same hook."
+  },
+  {
+    "name": "add_plus_object/object_comp_field",
+    "source": "{ [k]: { a: 1 } { b: 2 } for k in y }",
+    "why": "An ObjectComp parent."
+  },
+  {
+    "name": "add_plus_object/field_name_expr",
+    "source": "{ [{ a: 1 } { b: 2 }]: 1 }",
+    "why": "A computed field name, which is the FieldExpr branch of object_field."
+  },
+  {
+    "name": "add_plus_object/already_parenthesised",
+    "source": "({ a: 1 } { b: 2 }) { c: 3 }",
+    "why": "The inner ApplyBrace's parent is a Parens, which takes the default branch -- so the parens already in the source are the ones that stay."
+  },
+  {
+    "name": "add_plus_object/parens_inner",
+    "source": "({ a: 1 } { b: 2 })",
+    "why": "A Parens parent on its own."
+  },
+  {
+    "name": "add_plus_object/nested_under_inserted_parens",
+    "source": "{ a: 1 } { b: 2 } { c: 3 }.x",
+    "why": "The outer ApplyBrace is an Index target and gets parens; the *replacement* node is handed down as the parent, so the inner ApplyBrace sees the new Parens rather than the Binary, and then the Binary, and needs nothing."
+  },
+  {
+    "name": "add_plus_object/apply_of_index_target",
+    "source": "{ f(x):: x } { a: 1 }.f(99)",
+    "why": "Upstream's `implicit-plus-apply`: the ApplyBrace is the target of an Index which is itself the target of an Apply."
+  },
+  {
+    "name": "add_plus_object/index_then_apply_brace",
+    "source": "a.b { c: 1 }",
+    "why": "An ApplyBrace whose left is an Index, which is the shape RemovePlusObject produces from `a.b + { c: 1 }`."
+  },
+  {
+    "name": "add_plus_object/object_fodder_before_brace",
+    "source": "a\n{ b: 1 }",
+    "why": "The right-hand object carries a LineEnd in its own fodder, which the replacement must leave alone."
+  },
+  {
+    "name": "add_plus_object/super_index_target",
+    "source": "{ x: super.a { b: 1 } }",
+    "why": "A SuperIndex on the left of an implicit plus."
+  },
+  {
+    "name": "add_plus_object/deep_chain_in_field",
+    "source": "{ x: a { b: 1 } { c: 2 }.d }",
+    "why": "Two ApplyBraces under an Index under an object field."
   }
 ]
