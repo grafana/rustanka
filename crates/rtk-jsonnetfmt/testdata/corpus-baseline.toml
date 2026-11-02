@@ -106,7 +106,48 @@
 # `tk fmt`-clean file has already been rewritten to `//`. It is graded only by
 # the snippets, which is what Phase 2c added 57 more of them for.
 #
-# A drop below 124 means a pass or the round trip broke a file that used to
-# pass, and the test prints which. Expect this to reach 138 when the passes are
-# finished.
-matching = 124
+# Phase 2d took it to 134, which was predicted as 134 — the first prediction in
+# this phase sequence to land exactly, and it landed because it was derived from
+# `pass-oracle.json` per file and per pass rather than from reading diffs. Ten
+# files, and the split between 2d's two halves is the thing to record:
+#
+#   * the three small steps (removeInitialNewlines, EnforceMaxBlankLines,
+#     FixNewlines, removeExtraTrailingNewlines) moved the count by **zero**
+#   * FixIndentation moved it by **ten**
+#
+# Nine of the ten are the files the oracle attributes to FixIndentation alone:
+# crates/jrsonnet-formatter/src/tests/{args,asserts,complex_nested}.jsonnet,
+# tests/golden/{builtin_strings,builtin_strings_string,issue126,issue225}.jsonnet,
+# tests/suite/comp_if_with_multiple_captures.jsonnet and
+# tests/suite/std_param_names.jsonnet. The last two of those are the pair Phase
+# 2c recorded as masked: EnforceStringStyle genuinely changed them and they
+# stayed red because they are tab-indented, which is exactly what this step
+# fixes.
+#
+# The tenth is test_fixtures/golden_envs/yaml_line_wrapping_env/main.jsonnet,
+# and it is the one worth dwelling on. It is the **only** corpus file the oracle
+# attributes to FixNewlines — and landing FixNewlines did not flip it. It took
+# FixIndentation as well, because FixNewlines only inserts bare
+# `LineEnd(0, 0)`s and something then has to indent them. So a file can need
+# two passes while the oracle names one, and the count staying at 124 through
+# the first half of this phase was correct rather than a bug.
+#
+# The general form, which is the same warning this file has carried since 2b
+# pointed the other way: **the oracle says which passes change a file's AST, and
+# that is not the same as saying which passes a file needs.** Read it as a lower
+# bound on the work, never as a sufficient set.
+#
+# The four that remain are all 2e and 2f, and the oracle names them exactly:
+#
+#   * RemovePlusObject (2e) — tests/golden/deep_mixin_chain.jsonnet,
+#     tests/golden/string_object_extend.jsonnet, and
+#     test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/
+#     jsonnet-libs/docsonnet/doc-util/render.libsonnet
+#   * SortImports (2f) — tests/realworld/entry-graalvm.jsonnet
+#
+# So nothing 2d-shaped is left in this corpus, and 138 is reachable with three
+# passes rather than four.
+#
+# A drop below 134 means a pass or the round trip broke a file that used to
+# pass, and the test prints which.
+matching = 134

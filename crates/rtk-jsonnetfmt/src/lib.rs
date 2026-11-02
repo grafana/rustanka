@@ -21,14 +21,17 @@
 //! # State
 //!
 //! [`format`] parses, runs the passes that have landed, and unparses. Phases
-//! 0, 1, 2a, 2b and 2c of `docs/rtk-fmt-plan.md` are done: the lexer, the AST,
-//! the parser, the unparser, the [`pass`] traversal and five of the twelve
-//! passes. The other seven are no-ops, so a file that needs one of them comes
-//! back unformatted; `quarantine.toml` names the fixtures that leaves failing
-//! and `testdata/corpus-baseline.toml` counts the files.
+//! 0, 1, 2a, 2b, 2c and 2d of `docs/rtk-fmt-plan.md` are done: the lexer, the
+//! AST, the parser, the unparser, the [`pass`] traversal, nine of the twelve
+//! passes and all three of `FormatNode`'s non-pass steps. The three that
+//! remain are `SortImports` (2f) and `FixParens` with `RemovePlusObject`
+//! (2e); a file that needs one of them comes back unformatted.
+//! `quarantine.toml` names the fixtures that leaves failing and
+//! `testdata/corpus-baseline.toml` counts the files.
 
 pub mod ast;
 pub mod files;
+pub mod fix_indentation;
 pub mod fodder;
 pub mod lexer;
 pub mod location;
@@ -197,9 +200,9 @@ impl Error {
 /// | # | pass | state |
 /// | --- | --- | --- |
 /// | 1 | `SortImports` (a free function, not a visitor) | Phase 2f |
-/// | 2 | `removeInitialNewlines` | Phase 2d |
-/// | 3 | `EnforceMaxBlankLines` | Phase 2d |
-/// | 4 | `FixNewlines` | Phase 2d |
+/// | 2 | [`removeInitialNewlines`](ast::Node::remove_initial_newlines) | **runs** |
+/// | 3 | [`EnforceMaxBlankLines`](passes::EnforceMaxBlankLines) | **runs** |
+/// | 4 | [`FixNewlines`](passes::FixNewlines) | **runs** |
 /// | 5 | [`FixTrailingCommas`](passes::FixTrailingCommas) | **runs** |
 /// | 6 | `FixParens` | Phase 2e |
 /// | 7 | `RemovePlusObject` / `AddPlusObject` | Phase 2e |
@@ -208,16 +211,43 @@ impl Error {
 /// | 10 | [`PrettyFieldNames`](passes::PrettyFieldNames) | **runs** |
 /// | 11 | [`EnforceStringStyle`](passes::EnforceStringStyle) | **runs** |
 /// | 12 | [`EnforceCommentStyle`](passes::EnforceCommentStyle) | **runs** |
-/// | 13 | `FixIndentation` | Phase 2d |
-/// | 14 | `removeExtraTrailingNewlines` | Phase 2d |
+/// | 13 | [`FixIndentation`](fix_indentation::FixIndentation) | **runs** |
+/// | 14 | [`removeExtraTrailingNewlines`](fodder::Fodder::remove_extra_trailing_newlines) | **runs** |
 ///
 /// A file that needs one of the missing passes comes back unformatted. What
 /// is already real is the refusal: a file that does not parse fails here with
 /// go-jsonnet's message, which is what `tk fmt` prints before aborting the
 /// whole run.
+///
+/// Three of the fourteen steps are not passes. Steps 2 and 14 are unexported
+/// four-line functions in `jsonnetfmt.go`, which is why the staged pass
+/// dumper cannot reach either — see
+/// [`ast::Node::remove_initial_newlines`] for what that means for how they
+/// are graded. Their **position** is the load-bearing part: step 2 runs
+/// before `EnforceMaxBlankLines` at step 3, so a blank run at the top of a
+/// file is deleted rather than clamped to two; step 14 runs after
+/// `FixIndentation` at step 13, so it zeroes the blanks of whatever element
+/// indentation left at the end of the file.
+///
+/// Step 13 is not a pass either, for a different reason: `FormatNode`
+/// constructs a [`fix_indentation::FixIndentation`] and calls `VisitFile` on
+/// it directly rather than through upstream's `visitFile` helper, so it has
+/// its own walk and is not an implementation of [`pass::AstPass`] at all. It
+/// therefore reaches the four fodder slots [`pass::base`] skips, which is why
+/// a comment in `x in super` survives `EnforceCommentStyle` and is still
+/// re-indented.
 pub fn format(filename: &str, input: &str, options: &Options) -> Result<String, Error> {
 	let (mut node, mut final_fodder) = parser::snippet_to_raw_ast(filename, input)?;
 
+	node.remove_initial_newlines();
+	if options.max_blank_lines > 0 {
+		pass::visit_file(
+			&mut passes::EnforceMaxBlankLines::new(options.max_blank_lines),
+			&mut node,
+			&mut final_fodder,
+		);
+	}
+	pass::visit_file(&mut passes::FixNewlines, &mut node, &mut final_fodder);
 	pass::visit_file(&mut passes::FixTrailingCommas, &mut node, &mut final_fodder);
 	pass::visit_file(
 		&mut passes::NoRedundantSliceColon,
@@ -245,6 +275,13 @@ pub fn format(filename: &str, input: &str, options: &Options) -> Result<String, 
 			&mut final_fodder,
 		);
 	}
+
+	// Not a pass: `FormatNode` constructs this one and calls `VisitFile` on it
+	// directly, bypassing the `pass.ASTPass` machinery.
+	if options.indent > 0 {
+		fix_indentation::FixIndentation::new(options).visit_file(&mut node, &mut final_fodder);
+	}
+	final_fodder.remove_extra_trailing_newlines();
 
 	let mut unparser = unparse::Unparser::new(options.clone());
 	unparser.unparse(&node, false);
