@@ -1,0 +1,5871 @@
+[
+  {
+    "source": "trailing_comma/array_one_line",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_multiline_missing",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_multiline_present",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comment_before_comma",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comma_on_its_own_line",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comment_only_before_close",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_line_comment_before_close",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "// c"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "// c"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_empty",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_empty_multiline",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_nested",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[1]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[1].Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[1].Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[1].Expr.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "2"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_one_line",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_multiline_missing",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_last_field_is_a_local",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectLocal",
+              "hide": "Visible",
+              "id": "b",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "2"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_last_field_is_an_assert",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectAssert",
+              "hide": "Visible",
+              "id": "\u003cnil\u003e",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1].Expr2",
+            "kind": "LiteralBoolean",
+            "attrs": {
+              "value": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_empty",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comp_comma",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ArrayComp",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "TrailingCommaFodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Body",
+            "kind": "Var",
+            "attrs": {
+              "id": "x"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec",
+            "kind": "ForSpec",
+            "attrs": {
+              "varName": "x"
+            },
+            "slots": [
+              {
+                "name": "ForFodder"
+              },
+              {
+                "name": "VarFodder"
+              },
+              {
+                "name": "InFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comp_comma_multiline",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ArrayComp",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "TrailingCommaFodder"
+              },
+              {
+                "name": "CloseFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Body",
+            "kind": "Var",
+            "attrs": {
+              "id": "x"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Spec",
+            "kind": "ForSpec",
+            "attrs": {
+              "varName": "x"
+            },
+            "slots": [
+              {
+                "name": "ForFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 2
+                  }
+                ]
+              },
+              {
+                "name": "VarFodder"
+              },
+              {
+                "name": "InFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comp_comment_before_comma",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ArrayComp",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "TrailingCommaFodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Body",
+            "kind": "Var",
+            "attrs": {
+              "id": "x"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec",
+            "kind": "ForSpec",
+            "attrs": {
+              "varName": "x"
+            },
+            "slots": [
+              {
+                "name": "ForFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "VarFodder"
+              },
+              {
+                "name": "InFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/array_comp_no_comma",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_comp_comma",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ObjectComp",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "TrailingCommaFodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldExpr",
+              "hide": "Inherit",
+              "id": "\u003cnil\u003e",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "Var",
+            "attrs": {
+              "id": "k"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "Var",
+            "attrs": {
+              "id": "k"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Spec",
+            "kind": "ForSpec",
+            "attrs": {
+              "varName": "k"
+            },
+            "slots": [
+              {
+                "name": "ForFodder"
+              },
+              {
+                "name": "VarFodder"
+              },
+              {
+                "name": "InFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0].Expr",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/object_comp_with_local",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ObjectComp",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "TrailingCommaFodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectLocal",
+              "hide": "Visible",
+              "id": "v",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldExpr",
+              "hide": "Inherit",
+              "id": "\u003cnil\u003e",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[1].Expr1",
+            "kind": "Var",
+            "attrs": {
+              "id": "k"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Expr2",
+            "kind": "Var",
+            "attrs": {
+              "id": "v"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[1].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Spec",
+            "kind": "ForSpec",
+            "attrs": {
+              "varName": "k"
+            },
+            "slots": [
+              {
+                "name": "ForFodder"
+              },
+              {
+                "name": "VarFodder"
+              },
+              {
+                "name": "InFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Spec.Expr.Elements[0].Expr",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/apply_arguments_are_untouched",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "trailing_comma/function_params_are_untouched",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/double_colon",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/empty_step",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/comment_before_step_colon",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Slice",
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "EndColonFodder"
+              },
+              {
+                "name": "StepColonFodder"
+              },
+              {
+                "name": "RightBracketFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.BeginIndex",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.EndIndex",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "2"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Step",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/newline_before_step_colon",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Slice",
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "EndColonFodder"
+              },
+              {
+                "name": "StepColonFodder"
+              },
+              {
+                "name": "RightBracketFodder",
+                "fodder": [
+                  {
+                    "kind": "LineEnd",
+                    "blanks": 0,
+                    "indent": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.BeginIndex",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.EndIndex",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "2"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Step",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/comment_with_a_real_step",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/plain",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/all_three",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_single_quoted",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_double_quoted",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "\u003cnil\u003e"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_verbatim",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_not_an_identifier",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_empty_string",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_keyword",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_keyword_cased",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "False"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_leading_digit",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_escape_sequence",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "\u003cnil\u003e"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_block_string",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_number",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_comment_before_bracket",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_comment_before_string",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_comment_both_sides",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* b */"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/super_index_is_untouched",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_computed_string",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "foo",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_computed_not_an_identifier",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldStr",
+              "hide": "Inherit",
+              "id": "\u003cnil\u003e",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "a b"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_computed_expression",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_computed_comments_everywhere",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "foo",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* a */"
+                    ]
+                  },
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* b */"
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  },
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* d */"
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_computed_method",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "foo",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "Method",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "ParenLeftFodder",
+                "fodder": [
+                  {
+                    "kind": "Interstitial",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "/* c */"
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "ParenRightFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method.Parameters[0]",
+            "kind": "Parameter",
+            "attrs": {
+              "name": "x"
+            },
+            "slots": [
+              {
+                "name": "NameFodder"
+              },
+              {
+                "name": "EqFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method.Parameters[0].DefaultArg",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "Var",
+            "attrs": {
+              "id": "x"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_quoted",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "foo",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_quoted_keyword",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_hidden",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Hidden",
+              "id": "foo",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_super_sugar",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "foo",
+              "superSugar": "true"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/field_local_and_assert",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/nested",
+    "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceMaxBlankLines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixNewlines",
+        "unchanged": true
+      },
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "b",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Expr2",
+            "kind": "Index",
+            "attrs": {
+              "id": "d"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Expr2.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "c"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Expr2.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr2.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "FixIndentation",
+        "unchanged": true
+      }
+    ]
+  }
+]
