@@ -1803,5 +1803,385 @@
     "name": "add_plus_object/deep_chain_in_field",
     "source": "{ x: a { b: 1 } { c: 2 }.d }",
     "why": "Two ApplyBraces under an Index under an object field."
+  },
+  {
+    "name": "sort_imports/single_import",
+    "source": "local a = import 'a';\n1",
+    "why": "One import, nothing to reorder. The whole chain is still rebuilt, so this grades buildGroupAST reproducing exactly what it was handed."
+  },
+  {
+    "name": "sort_imports/two_sorted",
+    "source": "local a = import 'a';\nlocal b = import 'b';\n1",
+    "why": "Already in order. sortGroup must leave it and the rebuild must be invisible -- the no-op that says the fodder bookkeeping is balanced."
+  },
+  {
+    "name": "sort_imports/two_unsorted",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The smallest real swap: two single-bind Locals exchange their binds while each keeps the fodder of the position it lands in."
+  },
+  {
+    "name": "sort_imports/three_rotated",
+    "source": "local c = import 'c';\nlocal a = import 'a';\nlocal b = import 'b';\n1",
+    "why": "Three, so a rotation rather than a swap is graded."
+  },
+  {
+    "name": "sort_imports/three_reversed",
+    "source": "local c = import 'c';\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Fully reversed, which is the shape tests/realworld/entry-graalvm.jsonnet is a large version of."
+  },
+  {
+    "name": "sort_imports/one_import_no_newline",
+    "source": "local a = import 'a';1",
+    "why": "The body is on the same line as the `;`, so the body's open fodder is empty and FodderEnsureCleanNewline has to invent a LineEnd. One import and no reordering, and the file still changes."
+  },
+  {
+    "name": "sort_imports/all_on_one_line",
+    "source": "local b = import 'b';local a = import 'a';1",
+    "why": "No fodder between the locals at all, so groupEndsAfter loops over an empty fodder and returns false: one group. Both seams gain an invented newline."
+  },
+  {
+    "name": "sort_imports/key_is_the_escaped_value",
+    "source": "local a = import '\\u0061';\nlocal u = import '_x';\n1",
+    "why": "The key is the six characters `\\u0061`, not `a`. Backslash is 0x5C and `_` is 0x5F, so the escaped spelling already sorts first and the cell is a no-op -- and THAT is the assertion: a port that unescaped the key first would sort `a` (0x61) after `_x` and swap these two. See key_is_the_escaped_value_swaps for the same fact graded positively."
+  },
+  {
+    "name": "sort_imports/case_is_bytewise",
+    "source": "local i00 = import 'b';\nlocal i01 = import 'B';\nlocal i02 = import 'a';\nlocal i03 = import 'A';\n1",
+    "why": "Go compares with `<` on strings, which is bytewise, and Rust's str Ord is too. Uppercase sorts before lowercase; nothing here is case-insensitive or locale-aware."
+  },
+  {
+    "name": "sort_imports/punctuation_sorts_before_letters",
+    "source": "local i00 = import 'b';\nlocal i01 = import './a';\nlocal i02 = import '../c';\nlocal i03 = import 'a';\n1",
+    "why": "`.` is 0x2E and `/` is 0x2F, so relative paths sort ahead of bare names. Real Jsonnet trees are full of these."
+  },
+  {
+    "name": "sort_imports/quote_kind_does_not_reach_the_key",
+    "source": "local b = import \"b\";\nlocal a = import 'a';\n1",
+    "why": "One path is double-quoted and one single. The key is the value, not the spelling, so the quote kind changes neither the order nor -- at this step -- the literal."
+  },
+  {
+    "name": "sort_imports/verbatim_path",
+    "source": "local b = import @'b';\nlocal a = import 'a';\n1",
+    "why": "A verbatim string import. The parser has already collapsed its doubled quotes, so File.Value is the plain text and sorts as such."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_two",
+    "source": "local second = import 'x';\nlocal first = import 'x';\n1",
+    "why": "Two distinct variables importing the same path. duplicatedVariables keys on the variable, not the path, so this group *is* sorted -- with two equal keys."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_eleven",
+    "source": "local i00 = import 'k';\nlocal i01 = import 'j';\nlocal i02 = import 'dup';\nlocal i03 = import 'h';\nlocal i04 = import 'g';\nlocal i05 = import 'f';\nlocal i06 = import 'e';\nlocal i07 = import 'd';\nlocal i08 = import 'dup';\nlocal i09 = import 'b';\nlocal i10 = import 'a';\n1",
+    "why": "Eleven elements with two equal keys, below Go's insertionSort threshold and so stable by construction."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_twelve",
+    "source": "local i00 = import 'k';\nlocal i01 = import 'j';\nlocal i02 = import 'dup';\nlocal i03 = import 'h';\nlocal i04 = import 'g';\nlocal i05 = import 'f';\nlocal i06 = import 'e';\nlocal i07 = import 'd';\nlocal i08 = import 'c';\nlocal i09 = import 'dup';\nlocal i10 = import 'b';\nlocal i11 = import 'a';\n1",
+    "why": "Twelve elements with two equal keys. Go's `maxInsertion` is 12 tested with `<=`, so twelve is the LAST size that is insertion-sorted, not the first that is not -- which is worth pinning, because reading the constant as a strict bound puts the boundary one out."
+  },
+  {
+    "name": "sort_imports/duplicate_paths_thirteen",
+    "source": "local i00 = import 'm';\nlocal i01 = import 'k';\nlocal i02 = import 'j';\nlocal i03 = import 'dup';\nlocal i04 = import 'h';\nlocal i05 = import 'g';\nlocal i06 = import 'f';\nlocal i07 = import 'e';\nlocal i08 = import 'd';\nlocal i09 = import 'c';\nlocal i10 = import 'dup';\nlocal i11 = import 'b';\nlocal i12 = import 'a';\n1",
+    "why": "Thirteen: the first size at which pdqsort proper runs and ties have no defined answer. Whatever the oracle says here is what decides whether rtk can sort stably."
+  },
+  {
+    "name": "sort_imports/twelve_distinct_reversed",
+    "source": "local i00 = import 'l';\nlocal i01 = import 'k';\nlocal i02 = import 'j';\nlocal i03 = import 'i';\nlocal i04 = import 'h';\nlocal i05 = import 'g';\nlocal i06 = import 'f';\nlocal i07 = import 'e';\nlocal i08 = import 'd';\nlocal i09 = import 'c';\nlocal i10 = import 'b';\nlocal i11 = import 'a';\n1",
+    "why": "Twelve distinct keys, fully reversed. With no ties the answer is the same for any correct sort, so this grades the size-twelve path without depending on stability."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_shadowed",
+    "source": "local b = import 'b';\nlocal b = import 'a';\n1",
+    "why": "The same variable bound twice in one group, which is legal shadowing. duplicatedVariables is true, so the group keeps source order although its keys are out of order. The negative that says the check is real."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_with_a_third",
+    "source": "local x = import 'c';\nlocal y = import 'a';\nlocal x = import 'b';\n1",
+    "why": "Three imports, two of them bound to the same variable. One duplicate disables sorting for every element of the group, not just for the pair."
+  },
+  {
+    "name": "sort_imports/duplicate_variables_in_the_second_group_only",
+    "source": "local c = import 'c';\nlocal a = import 'a';\n\nlocal d = import 'd';\nlocal d = import 'b';\n1",
+    "why": "Two groups, only the second of which has a duplicated variable. The first must still sort: duplicatedVariables is asked per group, and the group is what topLevelImport accumulated."
+  },
+  {
+    "name": "sort_imports/root_is_not_a_local",
+    "source": "{ b: import 'b', a: import 'a' }",
+    "why": "goodLocalOrNull on the root returns nil, so nothing happens. Imports elsewhere in the file are never touched."
+  },
+  {
+    "name": "sort_imports/root_is_a_function",
+    "source": "function(x) local b = import 'b'; local a = import 'a'; x",
+    "why": "Top-level imports are more top-level than top-level functions, says the doc comment. The root is a Function, so the chain beneath it is left exactly as written."
+  },
+  {
+    "name": "sort_imports/root_local_is_not_an_import",
+    "source": "local x = 1;\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The first local binds a number, so the scan stops before it starts and the imports below it are never reached."
+  },
+  {
+    "name": "sort_imports/root_local_has_a_function_bind",
+    "source": "local f(x) = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Fun != nil, so isGoodLocal is false however import-shaped the body is."
+  },
+  {
+    "name": "sort_imports/root_local_is_importstr",
+    "source": "local a = importstr 'z';\nlocal b = import 'a';\n1",
+    "why": "isGoodLocal asserts *ast.Import specifically, so ImportStr fails it. ImportStr and ImportBin are never sorted."
+  },
+  {
+    "name": "sort_imports/root_local_is_importbin",
+    "source": "local a = importbin 'z';\nlocal b = import 'a';\n1",
+    "why": "The ImportBin half of the same rule."
+  },
+  {
+    "name": "sort_imports/mixed_binds_in_one_local",
+    "source": "local b = import 'b', n = 1;\nlocal a = import 'a';\n1",
+    "why": "One bind of the local is not an import, which disqualifies the whole local and so the whole file."
+  },
+  {
+    "name": "sort_imports/group_stops_at_a_non_import_local",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal x = 1;\nx",
+    "why": "The first two are a group and do sort; the third local is not good, so goodLocalOrNull returns nil, the group ends and the non-good local becomes the body whose open fodder is rewritten."
+  },
+  {
+    "name": "sort_imports/group_stops_at_a_function_local",
+    "source": "local b = import 'b';\nlocal f(x) = x;\n1",
+    "why": "One import, then a local that fails isGoodLocal. groupEndsAfter returns true on the nil, and the body is the function local."
+  },
+  {
+    "name": "sort_imports/importstr_ends_the_group",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal s = importstr 'z';\ns",
+    "why": "An ImportStr local terminates the sortable chain rather than joining it, so the two real imports sort and it stays put."
+  },
+  {
+    "name": "sort_imports/blank_line_splits_the_group",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "One blank line means Blanks > 0 on the LineEnd, which ends the group immediately. Each half sorts within itself and nothing crosses."
+  },
+  {
+    "name": "sort_imports/three_groups",
+    "source": "local f = import 'f';\nlocal e = import 'e';\n\nlocal d = import 'd';\nlocal c = import 'c';\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Three groups, so the recursion through topLevelImport is graded more than once and each group's open fodder has to come from the previous group's tail."
+  },
+  {
+    "name": "sort_imports/two_blank_lines_split_the_group",
+    "source": "local b = import 'b';\n\n\nlocal a = import 'a';\n1",
+    "why": "Blanks = 2. splitFodder zeroes the blanks on the first half and builds a fresh LineEnd carrying them at the front of the second, which then becomes the next group's open fodder."
+  },
+  {
+    "name": "sort_imports/comment_line_splits_the_group",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n// the second group\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A comment on its own line is a Paragraph preceded by a LineEnd, so the LineEnd sets newlineReached and the Paragraph ends the group. No blank line is needed."
+  },
+  {
+    "name": "sort_imports/trailing_line_comment_continues_the_group",
+    "source": "local b = import 'b';  // about b\nlocal a = import 'a';\n1",
+    "why": "A `//` comment that is not on a fresh line is a LineEnd *carrying* a comment, and a single LineEnd with no blanks continues the group. So this sorts -- and the comment travels with the import it trails."
+  },
+  {
+    "name": "sort_imports/trailing_comments_travel_with_their_imports",
+    "source": "local c = import 'c';  // about c\nlocal a = import 'a';  // about a\nlocal b = import 'b';  // about b\n1",
+    "why": "Each import's adjacent fodder is what follows it, and buildGroupAST puts imports[i-1].adjacentFodder in front of import i -- so every trailing comment moves with the line it was written on."
+  },
+  {
+    "name": "sort_imports/interstitial_then_newline_continues_the_group",
+    "source": "local b = import 'b'; /* c */\nlocal a = import 'a';\n1",
+    "why": "An interstitial does not set newlineReached, so the LineEnd after it is still the first non-interstitial and the group continues."
+  },
+  {
+    "name": "sort_imports/interstitial_only_continues_the_group",
+    "source": "local b = import 'b'; /* c */ local a = import 'a';\n1",
+    "why": "Fodder of nothing but an interstitial: splitFodder never flips into its second half, and FodderEnsureCleanNewline then has to add the newline that puts the next local on its own line."
+  },
+  {
+    "name": "sort_imports/two_interstitials_continue_the_group",
+    "source": "local b = import 'b'; /* c */ /* d */ local a = import 'a';\n1",
+    "why": "Two interstitials in a row, so the first half of the split has to keep both in order before the invented newline."
+  },
+  {
+    "name": "sort_imports/comment_after_a_blank_line_ends_the_group",
+    "source": "local b = import 'b';\n\n// header of the next group\nlocal a = import 'a';\n1",
+    "why": "The LineEnd has Blanks = 1, which ends the group on the first element, and the Paragraph after it is appended to a second half that already has a clean ending."
+  },
+  {
+    "name": "sort_imports/multiline_c_comment_between_groups",
+    "source": "local b = import 'b';\n/* one\n   two */\nlocal a = import 'a';\n1",
+    "why": "A multi-line C comment is a Paragraph appended with addFodderSafe, so FodderAppend may have put a synthetic LineEnd in front of it. That is the fodder splitFodder then has to divide."
+  },
+  {
+    "name": "sort_imports/two_comment_lines_between_groups",
+    "source": "local b = import 'b';\n// one\n// two\nlocal a = import 'a';\n1",
+    "why": "Two Paragraphs, so the second half of the split takes more than one element through FodderAppend."
+  },
+  {
+    "name": "sort_imports/file_header_comment",
+    "source": "// what this file is\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The group's open fodder is the root local's own fodder, which here holds the file's header comment. It must stay in front of whichever import sorts first."
+  },
+  {
+    "name": "sort_imports/file_header_comment_and_blank_line",
+    "source": "// what this file is\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "The same, with the blank line that makes the header a paragraph of its own rather than a comment on the first import."
+  },
+  {
+    "name": "sort_imports/one_local_two_binds",
+    "source": "local b = import 'b', a = import 'a';\n1",
+    "why": "One local with two binds becomes two nested single-bind locals. The comma goes and a `;` plus a newline appear, all from the rebuild."
+  },
+  {
+    "name": "sort_imports/one_local_two_binds_sorted",
+    "source": "local a = import 'a', b = import 'b';\n1",
+    "why": "Already in order, and still split into two locals -- so the split is unconditional rather than a consequence of reordering."
+  },
+  {
+    "name": "sort_imports/one_local_three_binds_multiline",
+    "source": "local b = import 'b',\n      a = import 'a',\n      c = import 'c';\n1",
+    "why": "Each bind's VarFodder is a LineEnd indented to line up under `local`. The rotation moves each one to the *previous* bind, and FixIndentation at step 13 is what later puts the columns right."
+  },
+  {
+    "name": "sort_imports/bind_comment_before_the_variable",
+    "source": "local b = import 'b',\n      // about a\n      a = import 'a';\n1",
+    "why": "A comment inside the bind list. splitFodder leaves the LineEnd with the previous bind and carries the Paragraph over, so the comment stays attached to `a` -- and ends up between `local` and `a` once a sorts first."
+  },
+  {
+    "name": "sort_imports/bind_interstitial_after_the_comma",
+    "source": "local b = import 'b', /* c */ a = import 'a';\n1",
+    "why": "VarFodder of nothing but an interstitial, which never flips the split and so lands entirely on the preceding bind, before its invented newline."
+  },
+  {
+    "name": "sort_imports/two_locals_each_with_two_binds",
+    "source": "local d = import 'd', c = import 'c';\nlocal b = import 'b', a = import 'a';\n1",
+    "why": "Four imports reaching one group through two locals, so the group is the concatenation extractImportElems appends rather than one local's binds."
+  },
+  {
+    "name": "sort_imports/multi_bind_local_across_a_group_boundary",
+    "source": "local d = import 'd', c = import 'c';\n\nlocal b = import 'b', a = import 'a';\n1",
+    "why": "The same, with a blank line between them: two groups of two, and the blank line has to survive being moved from a bind's VarFodder to a rebuilt local's own fodder."
+  },
+  {
+    "name": "sort_imports/body_is_left_recursive",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n1 + 2",
+    "why": "The body's open fodder lives on the leftmost leaf of the Binary, not on the Binary, so the assignment has to go through openFodder."
+  },
+  {
+    "name": "sort_imports/body_is_an_index_chain",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nb.x.y",
+    "why": "A deeper left-recursive spine: openFodder reaches the Var at the bottom of two Indexes."
+  },
+  {
+    "name": "sort_imports/body_after_blank_lines",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n\n\n{}",
+    "why": "Blank lines between the last import and the body, which splitFodder moves into the second half and FodderConcat then merges back onto the group's tail."
+  },
+  {
+    "name": "sort_imports/body_preceded_by_a_comment",
+    "source": "local b = import 'b';\nlocal a = import 'a';\n// what follows\n{}",
+    "why": "The last import's adjacent fodder keeps the LineEnd and the comment goes to the second half, so the comment stays with the body."
+  },
+  {
+    "name": "sort_imports/trailing_comment_on_the_last_import",
+    "source": "local b = import 'b';\nlocal a = import 'a';  // about a\n1",
+    "why": "The last import in source order carries a trailing comment, and it is the first in sorted order -- so the comment moves up a line while the import it trails moves up with it."
+  },
+  {
+    "name": "sort_imports/import_with_a_comment_before_its_path",
+    "source": "local b = import /* c */ 'b';\nlocal a = import 'a';\n1",
+    "why": "Fodder inside the import expression, which SortImports never touches: the bind is carried whole and the comment travels with it."
+  },
+  {
+    "name": "sort_imports/key_is_the_escaped_value_swaps",
+    "source": "local u = import '_x';\nlocal a = import '\\u0061';\n1",
+    "why": "The mirror of key_is_the_escaped_value, with the escaped path written second so the answer is a swap rather than a no-op. Sorting by the unescaped value would leave this alone; sorting by the stored value moves the escaped one first, because backslash is 0x5C and `_` is 0x5F."
+  },
+  {
+    "name": "sort_imports/two_blank_lines_split_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\n\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Blanks = 2 between two groups that both need sorting, so the blanks move splitFodder performs is graded by a changed tree rather than by a no-op."
+  },
+  {
+    "name": "sort_imports/comment_after_a_blank_line_splits_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n\n// the second group\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A blank line and then a comment. The LineEnd's blanks end the group on the first element and the Paragraph is appended to a second half that already has a clean ending -- so no synthetic LineEnd is inserted."
+  },
+  {
+    "name": "sort_imports/two_comment_lines_split_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n// one\n// two\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "Two Paragraphs with no blank line, so the second half of the split starts empty and FodderAppend *does* insert a synthetic LineEnd in front of the first Paragraph. The contrast with the case above is the point."
+  },
+  {
+    "name": "sort_imports/multiline_c_comment_splits_two_groups_of_two",
+    "source": "local d = import 'd';\nlocal c = import 'c';\n/* one\n   two */\nlocal b = import 'b';\nlocal a = import 'a';\n1",
+    "why": "A multi-line C comment between two groups that both sort."
+  },
+  {
+    "name": "sort_imports/group_ends_at_a_function_local_after_two",
+    "source": "local b = import 'b';\nlocal a = import 'a';\nlocal f(x) = x;\nf(1)",
+    "why": "Two imports that sort, then a local that fails isGoodLocal and becomes the body whose open fodder is overwritten. The first batch's version had one import and so changed nothing."
+  },
+  {
+    "name": "sort_imports/ties_eleven_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\n1",
+    "why": "Eleven imports of one path. Below the insertion-sort threshold, so this one is stable by construction and is the control for the rest."
+  },
+  {
+    "name": "sort_imports/ties_twelve_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\n1",
+    "why": "Twelve, which is still insertionSort: Go's threshold is `maxInsertion = 12` tested with `<=`, so twelve is the last stable size and not the first unstable one."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\n1",
+    "why": "Thirteen of one path: the first size at which pdqsort proper runs, and an all-equal input is what its partitionEqual path exists for. If sort.Slice reorders ties at all, this is where it shows."
+  },
+  {
+    "name": "sort_imports/ties_sixteen_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\n1",
+    "why": "Sixteen, so the recursion partitions into subranges that are themselves insertion-sorted."
+  },
+  {
+    "name": "sort_imports/ties_fifty_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\nlocal i16 = import 'same';\nlocal i17 = import 'same';\nlocal i18 = import 'same';\nlocal i19 = import 'same';\nlocal i20 = import 'same';\nlocal i21 = import 'same';\nlocal i22 = import 'same';\nlocal i23 = import 'same';\nlocal i24 = import 'same';\nlocal i25 = import 'same';\nlocal i26 = import 'same';\nlocal i27 = import 'same';\nlocal i28 = import 'same';\nlocal i29 = import 'same';\nlocal i30 = import 'same';\nlocal i31 = import 'same';\nlocal i32 = import 'same';\nlocal i33 = import 'same';\nlocal i34 = import 'same';\nlocal i35 = import 'same';\nlocal i36 = import 'same';\nlocal i37 = import 'same';\nlocal i38 = import 'same';\nlocal i39 = import 'same';\nlocal i40 = import 'same';\nlocal i41 = import 'same';\nlocal i42 = import 'same';\nlocal i43 = import 'same';\nlocal i44 = import 'same';\nlocal i45 = import 'same';\nlocal i46 = import 'same';\nlocal i47 = import 'same';\nlocal i48 = import 'same';\nlocal i49 = import 'same';\n1",
+    "why": "Fifty is `shortestNinther`, where choosePivot stops taking a plain median of three and takes a median of medians instead. A different pivot is a different permutation of the ties."
+  },
+  {
+    "name": "sort_imports/ties_fifty_one_all_equal",
+    "source": "local i00 = import 'same';\nlocal i01 = import 'same';\nlocal i02 = import 'same';\nlocal i03 = import 'same';\nlocal i04 = import 'same';\nlocal i05 = import 'same';\nlocal i06 = import 'same';\nlocal i07 = import 'same';\nlocal i08 = import 'same';\nlocal i09 = import 'same';\nlocal i10 = import 'same';\nlocal i11 = import 'same';\nlocal i12 = import 'same';\nlocal i13 = import 'same';\nlocal i14 = import 'same';\nlocal i15 = import 'same';\nlocal i16 = import 'same';\nlocal i17 = import 'same';\nlocal i18 = import 'same';\nlocal i19 = import 'same';\nlocal i20 = import 'same';\nlocal i21 = import 'same';\nlocal i22 = import 'same';\nlocal i23 = import 'same';\nlocal i24 = import 'same';\nlocal i25 = import 'same';\nlocal i26 = import 'same';\nlocal i27 = import 'same';\nlocal i28 = import 'same';\nlocal i29 = import 'same';\nlocal i30 = import 'same';\nlocal i31 = import 'same';\nlocal i32 = import 'same';\nlocal i33 = import 'same';\nlocal i34 = import 'same';\nlocal i35 = import 'same';\nlocal i36 = import 'same';\nlocal i37 = import 'same';\nlocal i38 = import 'same';\nlocal i39 = import 'same';\nlocal i40 = import 'same';\nlocal i41 = import 'same';\nlocal i42 = import 'same';\nlocal i43 = import 'same';\nlocal i44 = import 'same';\nlocal i45 = import 'same';\nlocal i46 = import 'same';\nlocal i47 = import 'same';\nlocal i48 = import 'same';\nlocal i49 = import 'same';\nlocal i50 = import 'same';\n1",
+    "why": "One past the ninther threshold, in case fifty sits exactly on a boundary that happens to be stable."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'f';\nlocal i02 = import 'b';\nlocal i03 = import 'e';\nlocal i04 = import 'c';\nlocal i05 = import 'd';\nlocal i06 = import 'd';\nlocal i07 = import 'c';\nlocal i08 = import 'e';\nlocal i09 = import 'b';\nlocal i10 = import 'f';\nlocal i11 = import 'a';\nlocal i12 = import 'z';\n1",
+    "why": "Thirteen elements, six keys appearing twice and one alone, arranged so each pair straddles the middle. A partition that swaps across the midpoint inverts them."
+  },
+  {
+    "name": "sort_imports/ties_fourteen_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'g';\nlocal i02 = import 'b';\nlocal i03 = import 'f';\nlocal i04 = import 'c';\nlocal i05 = import 'e';\nlocal i06 = import 'd';\nlocal i07 = import 'd';\nlocal i08 = import 'e';\nlocal i09 = import 'c';\nlocal i10 = import 'f';\nlocal i11 = import 'b';\nlocal i12 = import 'g';\nlocal i13 = import 'a';\n1",
+    "why": "Fourteen elements, seven keys each twice, no unique key at all."
+  },
+  {
+    "name": "sort_imports/ties_twenty_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'j';\nlocal i02 = import 'b';\nlocal i03 = import 'i';\nlocal i04 = import 'c';\nlocal i05 = import 'h';\nlocal i06 = import 'd';\nlocal i07 = import 'g';\nlocal i08 = import 'e';\nlocal i09 = import 'f';\nlocal i10 = import 'f';\nlocal i11 = import 'e';\nlocal i12 = import 'g';\nlocal i13 = import 'd';\nlocal i14 = import 'h';\nlocal i15 = import 'c';\nlocal i16 = import 'i';\nlocal i17 = import 'b';\nlocal i18 = import 'j';\nlocal i19 = import 'a';\n1",
+    "why": "Twenty elements, ten keys each twice."
+  },
+  {
+    "name": "sort_imports/ties_fifty_pairs",
+    "source": "local i00 = import 'a';\nlocal i01 = import 'y';\nlocal i02 = import 'b';\nlocal i03 = import 'x';\nlocal i04 = import 'c';\nlocal i05 = import 'w';\nlocal i06 = import 'd';\nlocal i07 = import 'v';\nlocal i08 = import 'e';\nlocal i09 = import 'u';\nlocal i10 = import 'f';\nlocal i11 = import 't';\nlocal i12 = import 'g';\nlocal i13 = import 's';\nlocal i14 = import 'h';\nlocal i15 = import 'r';\nlocal i16 = import 'i';\nlocal i17 = import 'q';\nlocal i18 = import 'j';\nlocal i19 = import 'p';\nlocal i20 = import 'k';\nlocal i21 = import 'o';\nlocal i22 = import 'l';\nlocal i23 = import 'n';\nlocal i24 = import 'm';\nlocal i25 = import 'm';\nlocal i26 = import 'n';\nlocal i27 = import 'l';\nlocal i28 = import 'o';\nlocal i29 = import 'k';\nlocal i30 = import 'p';\nlocal i31 = import 'j';\nlocal i32 = import 'q';\nlocal i33 = import 'i';\nlocal i34 = import 'r';\nlocal i35 = import 'h';\nlocal i36 = import 's';\nlocal i37 = import 'g';\nlocal i38 = import 't';\nlocal i39 = import 'f';\nlocal i40 = import 'u';\nlocal i41 = import 'e';\nlocal i42 = import 'v';\nlocal i43 = import 'd';\nlocal i44 = import 'w';\nlocal i45 = import 'c';\nlocal i46 = import 'x';\nlocal i47 = import 'b';\nlocal i48 = import 'y';\nlocal i49 = import 'a';\n1",
+    "why": "Fifty elements, twenty-five keys each twice, across the ninther threshold."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_at_the_ends",
+    "source": "local i00 = import 'dup';\nlocal i01 = import 'b';\nlocal i02 = import 'c';\nlocal i03 = import 'd';\nlocal i04 = import 'e';\nlocal i05 = import 'f';\nlocal i06 = import 'g';\nlocal i07 = import 'h';\nlocal i08 = import 'i';\nlocal i09 = import 'j';\nlocal i10 = import 'k';\nlocal i11 = import 'l';\nlocal i12 = import 'dup';\n1",
+    "why": "The tie is the first and last element, which is the arrangement a median-of-three pivot is least likely to keep in order."
+  },
+  {
+    "name": "sort_imports/ties_thirteen_adjacent",
+    "source": "local i00 = import 'm';\nlocal i01 = import 'l';\nlocal i02 = import 'dup';\nlocal i03 = import 'dup';\nlocal i04 = import 'k';\nlocal i05 = import 'j';\nlocal i06 = import 'h';\nlocal i07 = import 'g';\nlocal i08 = import 'f';\nlocal i09 = import 'e';\nlocal i10 = import 'd';\nlocal i11 = import 'b';\nlocal i12 = import 'a';\n1",
+    "why": "The two equal keys are already adjacent and already in order, so any inversion is a swap of neighbours rather than a long-range move."
+  },
+  {
+    "name": "sort_imports/ties_seventeen_three_of_a_kind",
+    "source": "local i00 = import 't';\nlocal i01 = import 'dup';\nlocal i02 = import 's';\nlocal i03 = import 'r';\nlocal i04 = import 'dup';\nlocal i05 = import 'q';\nlocal i06 = import 'p';\nlocal i07 = import 'n';\nlocal i08 = import 'm';\nlocal i09 = import 'dup';\nlocal i10 = import 'l';\nlocal i11 = import 'k';\nlocal i12 = import 'j';\nlocal i13 = import 'h';\nlocal i14 = import 'g';\nlocal i15 = import 'f';\nlocal i16 = import 'e';\n1",
+    "why": "Three elements share a key rather than two, so a stable answer has to keep a run of three in source order."
   }
 ]

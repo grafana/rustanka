@@ -168,8 +168,33 @@
 # `no_implicit_plus/` fixtures. If this count ever moves when AddPlusObject
 # changes, step 7 has been wired as two steps instead of one `if`.
 #
-# The one that remains is SortImports (2f) on tests/realworld/entry-graalvm.jsonnet.
+# Phase 2f took it to 138, which is all of them, and **Phase 2 is the thing
+# that exits here** rather than just the step: quarantine.toml is empty, this
+# corpus is exhaustive, and tests/corpus.rs's idempotence allow-list is still
+# empty beside it.
 #
-# A drop below 137 means a pass or the round trip broke a file that used to
+# The one file is tests/realworld/entry-graalvm.jsonnet, exactly as the oracle
+# named it, and it is worth recording what it took. Two of its fourteen
+# top-of-file imports are out of order; SortImports rebuilds the whole chain of
+# Locals from the end backwards and the rest of the file is already clean, so
+# this is the rare case where the oracle's one cell and the file's one flip are
+# the same thing. The prediction was 138 and the measurement was 138, the third
+# exact one in a row.
+#
+# **This corpus grades SortImports about as badly as it has graded anything.**
+# One file of 138, and that file is a plain reversal with no comments between
+# the imports, no multi-bind local, no second group and no tie. Everything that
+# was actually hard here — the fodder split, the VarFodder rotation, the group
+# boundaries, the tie order — is graded by the 76 `sort_imports/` snippets and
+# by nothing in this directory. Phase 2f added them before a line of the pass,
+# per the standing rule, taking testdata/pass-snippets.json from 361 to 437.
+#
+# Note also what 138 does *not* mean. Nothing in this corpus reaches
+# crates/rtk-jsonnetfmt/src/go_sort.rs beyond its insertion-sort path, because
+# no file here has two imports of the same path in a group of thirteen or more.
+# That port is graded by testdata/go-sort-truth-table.json, 410 cases of which
+# 235 have tied keys, and by the `sort_imports/ties_*` snippets.
+#
+# A drop below 138 means a pass or the round trip broke a file that used to
 # pass, and the test prints which.
-matching = 137
+matching = 138
