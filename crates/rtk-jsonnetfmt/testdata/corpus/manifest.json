@@ -1,0 +1,560 @@
+{
+  "goJsonnetVersion": "v0.22.0",
+  "entries": [
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/args.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__args.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/asserts.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__asserts.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/basic_array.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__basic_array.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/basic_object.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__basic_object.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/comments.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__comments.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/complex_comments.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__complex_comments.jsonnet.golden",
+      "error": true
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/complex_nested.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__complex_nested.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/comprehensions.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__comprehensions.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/conditionals.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__conditionals.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/functions.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__functions.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/imports.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__imports.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/local_vars.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__local_vars.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/operators.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__operators.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/self_super.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__self_super.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/std_functions.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__std_functions.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/string_styles.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__string_styles.jsonnet.golden"
+    },
+    {
+      "source": "crates/jrsonnet-formatter/src/tests/visibilities.jsonnet",
+      "golden": "crates__jrsonnet-formatter__src__tests__visibilities.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/cluster_scoped_recursive_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__cluster_scoped_recursive_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/cluster_scoped_recursive_env/test_data.jsonnet",
+      "golden": "test_fixtures__golden_envs__cluster_scoped_recursive_env__test_data.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/cluster_scoped_recursive_env/test_full.jsonnet",
+      "golden": "test_fixtures__golden_envs__cluster_scoped_recursive_env__test_full.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/cluster_scoped_recursive_env/test_helm.jsonnet",
+      "golden": "test_fixtures__golden_envs__cluster_scoped_recursive_env__test_helm.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/conditional_config_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__conditional_config_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/conditional_eval_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__conditional_eval_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/eager_error_eval_env/base.libsonnet",
+      "golden": "test_fixtures__golden_envs__eager_error_eval_env__base.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/eager_error_eval_env/dev_overrides.libsonnet",
+      "golden": "test_fixtures__golden_envs__eager_error_eval_env__dev_overrides.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/eager_error_eval_env/logs_explore.libsonnet",
+      "golden": "test_fixtures__golden_envs__eager_error_eval_env__logs_explore.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/eager_error_eval_env/loki_overrides.libsonnet",
+      "golden": "test_fixtures__golden_envs__eager_error_eval_env__loki_overrides.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/eager_error_eval_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__eager_error_eval_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/empty_fields_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__empty_fields_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/error_override_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__error_override_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/ext_vars_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__ext_vars_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/float_rounding_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__float_rounding_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/helm_api_versions_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__helm_api_versions_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/helm_list_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__helm_list_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/helm_merge_key_crd_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__helm_merge_key_crd_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/helm_no_hooks_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__helm_no_hooks_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/helm_template_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__helm_template_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/inline_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__inline_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/inline_env_export_impl_mixed/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__inline_env_export_impl_mixed__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/json_extension_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__json_extension_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/_example.jsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util___example.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/environment.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util__environment.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/helm.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util__helm.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/k8s.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util__k8s.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/kustomize.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util__kustomize.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/grafana/jsonnet-libs/tanka-util/main.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__grafana__jsonnet-libs__tanka-util__main.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__jsonnet-libs__docsonnet__doc-util__main.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/kustomize_job_hash_env/vendor/github.com/jsonnet-libs/docsonnet/doc-util/render.libsonnet",
+      "golden": "test_fixtures__golden_envs__kustomize_job_hash_env__vendor__github.com__jsonnet-libs__docsonnet__doc-util__render.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/multi_cluster_inline_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__multi_cluster_inline_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/multiline_strings_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__multiline_strings_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/name_exact_match_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__name_exact_match_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/namespace_defaulting_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__namespace_defaulting_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/native_in_labels_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__native_in_labels_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/nested_block_scalar_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__nested_block_scalar_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/nested_environment_manifest_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__nested_environment_manifest_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/nested_project_root_env/environments/demo/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__nested_project_root_env__environments__demo__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/nested_project_root_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__nested_project_root_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/number_formatting_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__number_formatting_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/object_ordering_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__object_ordering_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/selector_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__selector_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/spec_compatibility_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__spec_compatibility_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/static_exporter_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__static_exporter_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/target_filter_case_insensitive_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__target_filter_case_insensitive_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/target_filter_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__target_filter_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/tla_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__tla_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_line_wrapping_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_line_wrapping_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_merge_key_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_merge_key_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_multiple_merge_keys_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_multiple_merge_keys_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_octal_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_octal_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_output_env/ds-querier-cluster-deployment.libsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_output_env__ds-querier-cluster-deployment.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_output_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_output_env__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_output_env_jrsonnet/ds-querier-cluster-deployment.libsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_output_env_jrsonnet__ds-querier-cluster-deployment.libsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yaml_output_env_jrsonnet/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yaml_output_env_jrsonnet__main.jsonnet.golden"
+    },
+    {
+      "source": "test_fixtures/golden_envs/yml_extension_env/main.jsonnet",
+      "golden": "test_fixtures__golden_envs__yml_extension_env__main.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/array_comp.jsonnet",
+      "golden": "tests__golden__array_comp.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_json.jsonnet",
+      "golden": "tests__golden__builtin_json.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_json_minified.jsonnet",
+      "golden": "tests__golden__builtin_json_minified.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_mergePatch.jsonnet",
+      "golden": "tests__golden__builtin_mergePatch.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_parseJson.jsonnet",
+      "golden": "tests__golden__builtin_parseJson.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_strings.jsonnet",
+      "golden": "tests__golden__builtin_strings.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/builtin_strings_string.jsonnet",
+      "golden": "tests__golden__builtin_strings_string.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/deep_mixin_chain.jsonnet",
+      "golden": "tests__golden__deep_mixin_chain.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue126.jsonnet",
+      "golden": "tests__golden__issue126.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue153.jsonnet",
+      "golden": "tests__golden__issue153.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue172.jsonnet",
+      "golden": "tests__golden__issue172.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue187.jsonnet",
+      "golden": "tests__golden__issue187.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue187.rev.jsonnet",
+      "golden": "tests__golden__issue187.rev.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue188.jsonnet",
+      "golden": "tests__golden__issue188.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue195.jsonnet",
+      "golden": "tests__golden__issue195.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue224.jsonnet",
+      "golden": "tests__golden__issue224.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue225.jsonnet",
+      "golden": "tests__golden__issue225.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue30_recursive_slice_concat.jsonnet",
+      "golden": "tests__golden__issue30_recursive_slice_concat.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/issue40.jsonnet",
+      "golden": "tests__golden__issue40.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/missing_binding.jsonnet",
+      "golden": "tests__golden__missing_binding.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/null_coalesce_chain.jsonnet",
+      "golden": "tests__golden__null_coalesce_chain.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/object_comp.jsonnet",
+      "golden": "tests__golden__object_comp.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/string_object_extend.jsonnet",
+      "golden": "tests__golden__string_object_extend.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/super_assertion_recursion.jsonnet",
+      "golden": "tests__golden__super_assertion_recursion.jsonnet.golden"
+    },
+    {
+      "source": "tests/golden/test_assertThrow.jsonnet",
+      "golden": "tests__golden__test_assertThrow.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/bin.jsonnet",
+      "golden": "tests__realworld__bin.jsonnet.golden",
+      "error": true
+    },
+    {
+      "source": "tests/realworld/entry-gitlab-runbooks.jsonnet",
+      "golden": "tests__realworld__entry-gitlab-runbooks.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/entry-graalvm.jsonnet",
+      "golden": "tests__realworld__entry-graalvm.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/entry-kube-prometheus.jsonnet",
+      "golden": "tests__realworld__entry-kube-prometheus.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/entry-loki.jsonnet",
+      "golden": "tests__realworld__entry-loki.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/entry-mimir.jsonnet",
+      "golden": "tests__realworld__entry-mimir.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/entry-tempo.jsonnet",
+      "golden": "tests__realworld__entry-tempo.jsonnet.golden"
+    },
+    {
+      "source": "tests/realworld/k.libsonnet",
+      "golden": "tests__realworld__k.libsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_ascii.jsonnet",
+      "golden": "tests__suite__builtin_ascii.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_base64.jsonnet",
+      "golden": "tests__suite__builtin_base64.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_chars.jsonnet",
+      "golden": "tests__suite__builtin_chars.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_constant.jsonnet",
+      "golden": "tests__suite__builtin_constant.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_count.jsonnet",
+      "golden": "tests__suite__builtin_count.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_join.jsonnet",
+      "golden": "tests__suite__builtin_join.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/builtin_member.jsonnet",
+      "golden": "tests__suite__builtin_member.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/comp_eager_array_body_capture.jsonnet",
+      "golden": "tests__suite__comp_eager_array_body_capture.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/comp_if_with_multiple_captures.jsonnet",
+      "golden": "tests__suite__comp_if_with_multiple_captures.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/function_args.jsonnet",
+      "golden": "tests__suite__function_args.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/function_context.jsonnet",
+      "golden": "tests__suite__function_context.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/function_lazy_args.jsonnet",
+      "golden": "tests__suite__function_lazy_args.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/local.jsonnet",
+      "golden": "tests__suite__local.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/math.jsonnet",
+      "golden": "tests__suite__math.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_assert_after_member_local.jsonnet",
+      "golden": "tests__suite__object_assert_after_member_local.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_assertion.jsonnet",
+      "golden": "tests__suite__object_assertion.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_comp_self.jsonnet",
+      "golden": "tests__suite__object_comp_self.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_context.jsonnet",
+      "golden": "tests__suite__object_context.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_fields.jsonnet",
+      "golden": "tests__suite__object_fields.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_inheritance.jsonnet",
+      "golden": "tests__suite__object_inheritance.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_locals.jsonnet",
+      "golden": "tests__suite__object_locals.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/object_super_standalone.jsonnet",
+      "golden": "tests__suite__object_super_standalone.jsonnet.golden",
+      "error": true
+    },
+    {
+      "source": "tests/suite/remove_key_oop.jsonnet",
+      "golden": "tests__suite__remove_key_oop.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/rounding.jsonnet",
+      "golden": "tests__suite__rounding.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/sjsonnet_issue_1029.jsonnet",
+      "golden": "tests__suite__sjsonnet_issue_1029.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/sjsonnet_issue_1030.jsonnet",
+      "golden": "tests__suite__sjsonnet_issue_1030.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/sjsonnet_issue_127.jsonnet",
+      "golden": "tests__suite__sjsonnet_issue_127.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/std_param_names.jsonnet",
+      "golden": "tests__suite__std_param_names.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/string_concat.jsonnet",
+      "golden": "tests__suite__string_concat.jsonnet.golden"
+    },
+    {
+      "source": "tests/suite/super_field_access.jsonnet",
+      "golden": "tests__suite__super_field_access.jsonnet.golden"
+    }
+  ]
+}
