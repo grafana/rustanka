@@ -75,6 +75,8 @@ pub struct HttpMockK8sServer {
 
 /// A running HTTP mock server instance.
 pub struct RunningHttpMockK8sServer {
+	resources: SharedResources,
+	discovery: MockDiscovery,
 	server: MockServer,
 	exchanges: SharedExchanges,
 }
@@ -118,7 +120,12 @@ impl HttpMockK8sServer {
 		mount_resources(&server, &shared_resources, &exchanges, self.fail_writes).await;
 		mount_openapi(&server, &self.openapi_schemas, &exchanges).await;
 
-		RunningHttpMockK8sServer { server, exchanges }
+		RunningHttpMockK8sServer {
+			server,
+			exchanges,
+			resources: shared_resources,
+			discovery,
+		}
 	}
 }
 
@@ -168,6 +175,45 @@ fn api_path_for_manifest(
 }
 
 impl RunningHttpMockK8sServer {
+	/// Hide a custom API and reject its requests until its CRD has been persisted.
+	pub async fn defer_group_until_crd(&self, group: &str, crd_name: &str) {
+		let groups: Vec<_> = self
+			.discovery
+			.group_resources
+			.keys()
+			.filter_map(|gv| {
+				let (name, version) = gv.split_once('/')?;
+				(name != group).then(|| {
+					serde_json::json!({
+						"name": name,
+						"versions": [{"groupVersion": gv, "version": version}],
+						"preferredVersion": {"groupVersion": gv, "version": version}
+					})
+				})
+			})
+			.collect();
+		let hidden = serde_json::json!({"kind":"APIGroupList", "apiVersion":"v1", "groups":groups});
+		let crd_key = (
+			"/apis/apiextensions.k8s.io/v1/customresourcedefinitions".to_owned(),
+			crd_name.to_owned(),
+		);
+		let resources = Arc::clone(&self.resources);
+		let key = crd_key.clone();
+		Mock::given(method("GET"))
+			.and(path("/apis"))
+			.and(move |_: &Request| !resources.read().unwrap().contains_key(&key))
+			.respond_with(ResponseTemplate::new(200).set_body_json(hidden))
+			.with_priority(1)
+			.mount(&self.server)
+			.await;
+		let resources = Arc::clone(&self.resources);
+		let prefix = format!("/apis/{group}/");
+		Mock::given(move |req: &Request| req.url.path().starts_with(&prefix) && !resources.read().unwrap().contains_key(&crd_key))
+			.respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+				"apiVersion":"v1", "kind":"Status", "status":"Failure", "reason":"NotFound", "message":"custom API is not established", "code":404
+			}))).with_priority(1).mount(&self.server).await;
+	}
+
 	/// Get the server's URI (e.g., "http://127.0.0.1:12345").
 	pub fn uri(&self) -> String {
 		self.server.uri()

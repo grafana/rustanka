@@ -330,10 +330,22 @@ pub async fn apply_environment<W: Write>(
 
 	// Apply changes
 	eprintln!("\nApplying changes...");
-	let changes_to_apply: Vec<_> = diffs
+	let mut changes_to_apply: Vec<_> = diffs
 		.iter()
 		.filter(|d| d.has_changes() && d.status != DiffStatus::Deleted)
 		.collect();
+
+	// Diff display order is independent of the dependencies needed for installation.
+	changes_to_apply.sort_by(|left, right| {
+		use crate::k8s::order::kind_position;
+		kind_position(&left.gvk.kind)
+			.cmp(&kind_position(&right.gvk.kind))
+			.then_with(|| left.gvk.kind.cmp(&right.gvk.kind))
+			.then_with(|| left.namespace.cmp(&right.namespace))
+			.then_with(|| left.name.cmp(&right.name))
+	});
+
+	let declared_resources = crate::k8s::discovery::ApiResourceCache::from_crds(&manifests);
 
 	for diff in &changes_to_apply {
 		// Find the corresponding manifest
@@ -347,7 +359,12 @@ pub async fn apply_environment<W: Write>(
 		});
 
 		if let Some(manifest) = manifest {
-			match apply_engine.apply_manifest(manifest).await {
+			let result = if declared_resources.lookup(&diff.gvk).is_some() {
+				apply_engine.apply_when_discovered(manifest).await
+			} else {
+				apply_engine.apply_manifest(manifest).await
+			};
+			match result {
 				Ok(_) => {
 					eprintln!(
 						"  {} {}/{} applied",
