@@ -125,10 +125,24 @@ impl AstPass for PrettyFieldNames {
 
 #[cfg(test)]
 mod tests {
-	use crate::{Options, format, format_default};
+	use crate::{CommentStyle, Options, StringStyle, format, format_default};
 
 	fn pretty(input: &str) -> String {
 		format_default("t.jsonnet", input).expect("the snippet parses")
+	}
+
+	/// The pipeline with the representation passes off.
+	///
+	/// Needed for the one case where `EnforceStringStyle` changes the answer
+	/// this pass gave — see
+	/// [`an_escape_is_read_as_written_and_so_is_not_an_identifier`].
+	fn pretty_only(input: &str) -> String {
+		let options = Options {
+			string_style: StringStyle::Leave,
+			comment_style: CommentStyle::Leave,
+			..Options::default()
+		};
+		format("t.jsonnet", input, &options).expect("the snippet parses")
 	}
 
 	#[test]
@@ -152,9 +166,33 @@ mod tests {
 
 	#[test]
 	fn an_escape_is_read_as_written_and_so_is_not_an_identifier() {
-		// A fully escaped string keeps its escapes in `value`, so this is
-		// asked about the text `foo`. Upstream does the same.
-		assert_eq!(pretty("a['fo\\u006f']"), "a['fo\\u006f']\n");
+		// A fully escaped string keeps its escapes in `value`, so this pass is
+		// asked about the text `foo`, which has a backslash in it and is
+		// not an identifier. Upstream does the same.
+		//
+		// `string_style` is off because `EnforceStringStyle` runs *after* this
+		// pass and resolves the escape — see the test below, which is what
+		// `tk fmt` actually prints.
+		assert_eq!(pretty_only("a['fo\\u006f']"), "a['fo\\u006f']\n");
+	}
+
+	#[test]
+	fn the_escape_this_pass_refused_is_resolved_by_the_next_one() {
+		// A pipeline-order consequence, and it caught a wrong expectation this
+		// test file had carried since Phase 2b.
+		//
+		// `FormatNode` runs `PrettyFieldNames` at step 10 and
+		// `EnforceStringStyle` at step 11. So this pass sees `foo`, finds
+		// a backslash, and keeps the brackets; the next pass then unescapes to
+		// `foo` and writes it back plainly. The brackets survive an escape
+		// that is no longer there.
+		assert_eq!(pretty("a['fo\\u006f']"), "a['foo']\n");
+
+		// Which makes `tk fmt` non-idempotent on this input: formatting the
+		// answer again promotes it, because by then the value really is an
+		// identifier. `docs/rtk-fmt-plan.md` records this against Phase 2's
+		// exit criterion, which had assumed a one-pass fixed point.
+		assert_eq!(pretty("a['foo']"), "a.foo\n");
 	}
 
 	#[test]
