@@ -160,6 +160,26 @@ fn test_init_creates_chartfile() {
 }
 
 #[test]
+fn test_chartfile_accepts_missing_null_and_empty_lists() {
+	for yaml in [
+		"version: 1\n",
+		"version: 1\nrepositories:\nrequires:\n",
+		"version: 1\nrepositories: null\nrequires: null\n",
+		"version: 1\nrepositories: []\nrequires: []\n",
+	] {
+		let chartfile: Chartfile = serde_saphyr::from_str(yaml).unwrap();
+		assert!(chartfile.repositories.is_empty());
+		assert!(chartfile.requires.is_empty());
+	}
+	for yaml in [
+		"version: 1\nrepositories: wrong\nrequires: []\n",
+		"version: 1\nrepositories: []\nrequires: wrong\n",
+	] {
+		assert!(serde_saphyr::from_str::<Chartfile>(yaml).is_err());
+	}
+}
+
+#[test]
 fn test_init_fails_if_exists() {
 	let dir = tempfile::tempdir().unwrap();
 	let path = dir.path().join(cf::FILENAME);
