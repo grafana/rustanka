@@ -2426,9 +2426,9 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
-version = "1.2.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65ec0d45986cd51c847c75c5b69a00852c4fc84d0e5e79f041173f73437d0cdf"
+checksum = "05f05586d4d4df3d47123207826c40b252728b438a1a07bad3c01ee6bea401df"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -3358,9 +3358,10 @@ dependencies = [
  "md5",
  "num-bigint",
  "regex",
+ "rtk-yaml",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
@@ -3859,7 +3860,7 @@ dependencies = [
  "nix 0.29.0",
  "rtk-yaml",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "tokio",
  "tracing",
@@ -4873,7 +4874,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustls",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "tabwriter",
  "tempfile",
@@ -4977,7 +4978,7 @@ dependencies = [
  "rtk-jsonnet-core",
  "rustc-hash 2.1.1",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -5008,7 +5009,7 @@ version = "0.5.0-pre99"
 dependencies = [
  "rtk-jsonnet-core",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "tempfile",
 ]
@@ -5021,7 +5022,7 @@ dependencies = [
  "rtk-jsonnet-core",
  "rtk-yaml",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "sha2 0.11.0",
 ]
@@ -5069,7 +5070,7 @@ dependencies = [
  "schemars",
  "semver",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
@@ -5083,6 +5084,7 @@ dependencies = [
  "nohash-hasher",
  "ryu",
  "serde",
+ "serde-saphyr 2.1.1",
  "serde_json",
 ]
 
@@ -5344,13 +5346,13 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "1.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3afb591f9cdb6223c88ba39269aff895620c7f0716dc42b705b5733d5c7c0823"
+checksum = "d43fb82d550b07e6f929a58d7d0935182602f48ddead875f5ee313c41c8f07fe"
 dependencies = [
  "annotate-snippets",
  "encoding_rs_io",
- "granit-parser 1.2.0",
+ "granit-parser 2.1.0",
  "num-traits",
  "serde_core",
  "smallvec",
@@ -5892,7 +5894,7 @@ dependencies = [
  "rtk-diff",
  "rtk-yaml",
  "serde",
- "serde-saphyr 1.2.0",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "tempfile",
  "tokio",

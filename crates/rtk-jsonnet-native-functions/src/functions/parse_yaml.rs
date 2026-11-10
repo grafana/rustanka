@@ -11,7 +11,7 @@ fn parse(yaml: &str) -> Result<Vec<serde_json::Value>, String> {
 		legacy_octal_numbers: true,
 		budget: None,
 	};
-	serde_saphyr::from_multiple_with_options(yaml, options)
+	rtk_yaml::parse_documents(yaml, options)
 		.map_err(|error| format!("failed to parse yaml: {error}"))
 }
 
@@ -51,5 +51,17 @@ mod tests {
 	#[test]
 	fn empty_input_has_no_documents() {
 		assert!(parse("").unwrap().is_empty());
+	}
+
+	#[test]
+	fn quoted_continuations_can_align_with_the_mapping_key() {
+		let yaml = "properties:\n  description: 'first line\n  second line'\n  title: \"third line\n  fourth line\"\n";
+		assert_eq!(
+			parse(yaml).unwrap(),
+			vec![json!({ "properties": {
+				"description": "first line second line",
+				"title": "third line fourth line",
+			} })]
+		);
 	}
 }

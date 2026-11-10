@@ -1,15 +1,17 @@
 //! Tanka-compatible YAML writing with go-yaml v2/v3 formatting.
 //!
-//! YAML reading belongs to serde-saphyr. This crate owns output compatibility.
+//! YAML reading uses serde-saphyr with Go-compatible quoted continuations.
 
 #![forbid(unsafe_code)]
 
+mod parse;
 mod ser;
 pub mod ser_error;
 mod ser_quoting;
 mod serializer_options;
 mod sort;
 
+pub use parse::parse_documents;
 pub use ser::*;
 pub use serializer_options::{ChompIndicator, SerializerOptions};
 pub use sort::compare_string_keys;
