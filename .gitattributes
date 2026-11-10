@@ -7,3 +7,4 @@
 /crates/rtk-jsonnetfmt/testdata/pass-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/pass-snippet-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/corpus/*.golden linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json linguist-generated=true
