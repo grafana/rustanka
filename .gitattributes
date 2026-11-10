@@ -2,3 +2,5 @@
 /crates/rtk-gobwas-glob/testdata/gobwas-glob-v*.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/lexer-oracle.json linguist-generated=true
 /crates/rtk-jsonnetfmt/testdata/lexer-snippet-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/node-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/node-snippet-oracle.json linguist-generated=true
