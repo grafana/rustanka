@@ -148,3 +148,78 @@ fn corpus_matches_go_jsonnet_at_the_recorded_rate() {
 		manifest.go_jsonnet_version
 	);
 }
+
+/// Formatting go-jsonnet's own answer has to return that answer unchanged.
+///
+/// `docs/rtk-fmt-plan.md` asks for this per step, and Phase 2d is the step to
+/// ask it of: `FixIndentation` and `FixNewlines` are the two passes that could
+/// plausibly fail to settle, and the plan's original reasoning still holds —
+/// a port that needs a second run to converge has a bug in one of them, and
+/// adding a convergence loop would paper over it.
+///
+/// The inputs are the **goldens**, not the sources, which is what makes this a
+/// clean test of the property: a golden is by construction a fixed point of
+/// go-jsonnet's own `Format`, so any movement here is rtk's.
+///
+/// # This is not an unconditional property
+///
+/// Phase 2c found that `jsonnetfmt` is not a fixed point in general —
+/// `a['fo` `o` `']` formats to `a['foo']` and then to `a.foo`, because
+/// `PrettyFieldNames` at step 10 sees the escape that `EnforceStringStyle`
+/// removes at step 11. That is upstream's, and it is what `tk fmt` prints. So
+/// a failure here is a bug **until** it is traced to a specific cross-pass
+/// interaction in `FormatNode`'s order, at which point it is recorded in
+/// `CLAUDE.md` and excluded by name. No corpus golden reaches the 2c case
+/// today, so the list below is empty and the assertion is exact.
+#[test]
+fn formatting_a_golden_again_changes_nothing() {
+	/// Goldens excluded because they hit a documented upstream
+	/// non-convergence. Empty, and it may only grow with a `CLAUDE.md` entry.
+	const KNOWN_NON_CONVERGENT: &[&str] = &[];
+
+	let corpus = crate_dir().join("testdata/corpus");
+	let manifest_path = corpus.join("manifest.json");
+
+	let Ok(raw) = fs::read_to_string(&manifest_path) else {
+		eprintln!(
+			"no formatter corpus at {}; generate it with `make update-fmt-corpus` (needs Go). \
+			 Skipping.",
+			manifest_path.display()
+		);
+		return;
+	};
+
+	let manifest: Manifest = serde_json::from_str(&raw).expect("the manifest is valid JSON");
+
+	let mut moved: Vec<String> = Vec::new();
+	let mut checked = 0;
+
+	for entry in &manifest.entries {
+		// A golden holding a parse error is not Jsonnet; formatting it would
+		// grade the error text, which `fixtures.rs` already does.
+		if entry.error || KNOWN_NON_CONVERGENT.contains(&entry.source.as_str()) {
+			continue;
+		}
+
+		let golden = fs::read_to_string(corpus.join(&entry.golden))
+			.unwrap_or_else(|err| panic!("reading golden for {}: {err}", entry.source));
+
+		let again = coalesce_error(format(&entry.source, &golden, &Options::default()));
+		checked += 1;
+		if again != golden {
+			moved.push(entry.source.clone());
+		}
+	}
+
+	assert!(
+		moved.is_empty(),
+		"{} golden(s) changed when formatted a second time. Each is a bug in a pass — most \
+		 likely FixIndentation or FixNewlines — until it is traced to a specific cross-pass \
+		 interaction in FormatNode's order. Do **not** add a convergence loop; see the \
+		 correction in docs/rtk-fmt-plan.md, Phase 2.\n  {}",
+		moved.len(),
+		moved.join("\n  ")
+	);
+
+	eprintln!("fmt idempotence: {checked} goldens are fixed points");
+}
