@@ -10,7 +10,7 @@ pub fn builtin_parse_json(str: IStr) -> Result<Val> {
 pub fn builtin_parse_yaml(str: IStr) -> Result<Val> {
 	let needs_synthetic_null = str.trim_end().ends_with("\n---");
 
-	let mut out = serde_saphyr::from_multiple_with_options::<Val>(
+	let mut out = rtk_yaml::parse_documents::<Val>(
 		&str,
 		serde_saphyr::options! {
 			// Golang/C++ compat

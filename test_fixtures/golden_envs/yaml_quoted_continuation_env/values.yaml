@@ -1,0 +1,7 @@
+properties:
+  apiVersion:
+    description: 'APIVersion defines the versioned schema
+    of an object. Servers should convert recognized schemas.'
+  kind:
+    description: "Kind describes the REST resource
+    this object represents."

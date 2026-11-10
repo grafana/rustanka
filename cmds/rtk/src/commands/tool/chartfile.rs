@@ -16,14 +16,25 @@ pub struct Chartfile {
 	pub version: u32,
 
 	/// Repositories to source from
+	#[serde(default, deserialize_with = "deserialize_nullable_list")]
 	pub repositories: Repos,
 
 	/// Requires lists Charts expected to be present in the charts folder
+	#[serde(default, deserialize_with = "deserialize_nullable_list")]
 	pub requires: Requirements,
 
 	/// Folder to use for storing Charts. Defaults to 'charts'
 	#[serde(skip_serializing_if = "String::is_empty", default)]
 	pub directory: String,
+}
+
+fn deserialize_nullable_list<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+	T: Deserialize<'de>,
+{
+	// Go treats null slices as empty, including the chartfile our writer emits.
+	Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Helm repository config file (repositories.yaml) used in place of chartfile repositories when supplied.

@@ -1,0 +1,11 @@
+apiVersion: v1
+data:
+  double: Kind describes the REST resource this object represents.
+  native: APIVersion defines the versioned schema of an object. Servers should convert
+    recognized schemas.
+  single: APIVersion defines the versioned schema of an object. Servers should convert
+    recognized schemas.
+kind: ConfigMap
+metadata:
+  name: quoted-continuation
+  namespace: default
