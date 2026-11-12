@@ -66,6 +66,7 @@ impl LocationRange {
 
 	/// `ast.LocationRangeBetween`: from the start of `self` to the end of
 	/// `other`.
+	#[must_use]
 	pub fn between(&self, other: &Self) -> Self {
 		Self {
 			diagnostic_filename: self.diagnostic_filename.clone(),

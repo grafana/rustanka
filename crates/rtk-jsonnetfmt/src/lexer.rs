@@ -10,9 +10,10 @@
 //! compare tokens and fodder against go-jsonnet.
 
 use crate::{
-	Error,
+	Error, Text,
 	fodder::{Fodder, FodderElement, FodderKind},
 	location::{Location, LocationRange},
+	text::{decode_rune, runes},
 	token::{
 		Token, TokenKind, is_horizontal_whitespace, is_identifier, is_identifier_first, is_symbol,
 		is_whitespace, token_kind_from_id,
@@ -35,7 +36,7 @@ struct Lexer<'a> {
 	/// `""` when the formatter lexes, and only ever reaches a `LocationRange`'s
 	/// unused `FileName`, so it is not carried.
 	diagnostic_filename: &'a str,
-	input: &'a str,
+	input: &'a [u8],
 
 	tokens: Vec<Token>,
 
@@ -53,7 +54,7 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-	fn new(diagnostic_filename: &'a str, input: &'a str) -> Self {
+	fn new(diagnostic_filename: &'a str, input: &'a [u8]) -> Self {
 		Self {
 			diagnostic_filename,
 			input,
@@ -72,8 +73,8 @@ impl<'a> Lexer<'a> {
 
 	/// Go's `next`. Returns `None` for Go's `lexEOF`.
 	fn next(&mut self) -> Option<char> {
-		let c = self.peek()?;
-		self.pos.byte_no += c.len_utf8();
+		let (c, width) = decode_rune(&self.input[self.pos.byte_no..])?;
+		self.pos.byte_no += width;
 		if c == '\n' {
 			self.pos.line_start = self.pos.byte_no;
 			self.pos.line_no += 1;
@@ -91,13 +92,13 @@ impl<'a> Lexer<'a> {
 	}
 
 	fn peek(&self) -> Option<char> {
-		self.input[self.pos.byte_no..].chars().next()
+		decode_rune(&self.input[self.pos.byte_no..]).map(|(rune, _)| rune)
 	}
 
 	/// Whether the remaining input starts with `prefix`; Go's
 	/// `strings.HasPrefix(l.input[l.pos.byteNo:], …)`.
 	fn rest_starts_with(&self, prefix: &str) -> bool {
-		self.input[self.pos.byte_no..].starts_with(prefix)
+		self.input[self.pos.byte_no..].starts_with(prefix.as_bytes())
 	}
 
 	fn location(&self) -> Location {
@@ -117,7 +118,7 @@ impl<'a> Lexer<'a> {
 	fn emit_full_token(
 		&mut self,
 		kind: TokenKind,
-		data: String,
+		data: impl Into<Text>,
 		string_block_indent: String,
 		string_block_term_indent: String,
 	) {
@@ -129,7 +130,7 @@ impl<'a> Lexer<'a> {
 		self.tokens.push(Token {
 			kind,
 			fodder: std::mem::take(&mut self.fodder),
-			data,
+			data: data.into(),
 			string_block_indent,
 			string_block_term_indent,
 			location,
@@ -147,7 +148,7 @@ impl<'a> Lexer<'a> {
 	/// Safe here because of the order the lexer builds fodder in: `lexWhitespace`
 	/// consumes a whole run at once, so it never produces two adjacent line
 	/// ends, and a comment always sits between them.
-	fn add_fodder(&mut self, kind: FodderKind, blanks: usize, indent: usize, comment: Vec<String>) {
+	fn add_fodder(&mut self, kind: FodderKind, blanks: usize, indent: usize, comment: Vec<Text>) {
 		self.fodder
 			.push_raw(FodderElement::new(kind, blanks, indent, comment));
 	}
@@ -158,7 +159,7 @@ impl<'a> Lexer<'a> {
 		kind: FodderKind,
 		blanks: usize,
 		indent: usize,
-		comment: Vec<String>,
+		comment: Vec<Text>,
 	) {
 		self.fodder
 			.append(FodderElement::new(kind, blanks, indent, comment));
@@ -183,15 +184,13 @@ impl<'a> Lexer<'a> {
 		while let Some(c) = self.peek().filter(|c| is_whitespace(*c)) {
 			self.next();
 			match c {
-				// Ignored outright, which is half of why a CRLF file does not
-				// round-trip.
-				'\r' => {}
 				'\n' => {
 					indent = 0;
 					new_lines += 1;
 				}
 				' ' => indent += 1,
 				'\t' => indent += 8,
+				// CR is ignored, so CRLF does not round-trip.
 				_ => {}
 			}
 		}
@@ -224,7 +223,10 @@ impl<'a> Lexer<'a> {
 		while self.peek().is_some_and(is_identifier) {
 			self.next();
 		}
-		let kind = token_kind_from_id(&self.input[self.token_start..self.pos.byte_no]);
+		let kind = token_kind_from_id(
+			std::str::from_utf8(&self.input[self.token_start..self.pos.byte_no])
+				.expect("identifiers are ASCII"),
+		);
 		self.emit_token(kind);
 	}
 
@@ -379,7 +381,7 @@ impl<'a> Lexer<'a> {
 				FodderKind::LineEnd
 			};
 			let text = format!("{}{comment}", first.expect("matched above"));
-			self.add_fodder(kind, blanks, indent, vec![text]);
+			self.add_fodder(kind, blanks, indent, vec![text.into()]);
 			return Ok(());
 		}
 
@@ -413,14 +415,14 @@ impl<'a> Lexer<'a> {
 		// reassigns it — so the decision to keep winding is made on that one
 		// character however far back it goes. `+++` therefore lexes as `+`.
 		// This relies on every operator symbol being ASCII.
-		let last = self.input.as_bytes()[self.pos.byte_no - 1];
+		let last = self.input[self.pos.byte_no - 1];
 		if matches!(last, b'+' | b'-' | b'~' | b'!' | b'$') {
 			while self.pos.byte_no > self.token_start + 1 {
 				self.pos.byte_no -= 1;
 			}
 		}
 
-		if &self.input[self.token_start..self.pos.byte_no] == "$" {
+		if &self.input[self.token_start..self.pos.byte_no] == b"$" {
 			self.emit_token(TokenKind::Dollar);
 		} else {
 			self.emit_token(TokenKind::Operator);
@@ -452,7 +454,7 @@ impl<'a> Lexer<'a> {
 		let comment = self.input[self.token_start..self.pos.byte_no].to_owned();
 		let (new_lines_after, indent_after) = self.lex_whitespace();
 
-		if comment.contains('\n') {
+		if comment.contains(&b'\n') {
 			let mut lines = line_split(&comment, margin);
 			assert!(
 				lines[0].starts_with('/'),
@@ -486,10 +488,10 @@ impl<'a> Lexer<'a> {
 				FodderKind::Paragraph,
 				new_lines_after - 1,
 				indent_after,
-				lines,
+				lines.into_iter().map(Text::from).collect(),
 			);
 		} else {
-			self.add_fodder(FodderKind::Interstitial, 0, 0, vec![comment]);
+			self.add_fodder(FodderKind::Interstitial, 0, 0, vec![comment.into()]);
 			if new_lines_after > 0 {
 				self.add_fodder(
 					FodderKind::LineEnd,
@@ -540,7 +542,10 @@ impl<'a> Lexer<'a> {
 				comment_start,
 			));
 		}
-		let block_indent = self.input[self.pos.byte_no..self.pos.byte_no + white_space].to_owned();
+		let block_indent = String::from_utf8(
+			self.input[self.pos.byte_no..self.pos.byte_no + white_space].to_owned(),
+		)
+		.expect("indent is ASCII");
 
 		loop {
 			self.accept_n(white_space);
@@ -559,7 +564,8 @@ impl<'a> Lexer<'a> {
 				data.push('\n');
 			}
 
-			white_space = check_whitespace(&block_indent, &self.input[self.pos.byte_no..]);
+			white_space =
+				check_whitespace(block_indent.as_bytes(), &self.input[self.pos.byte_no..]);
 			if white_space == 0 {
 				// End of the block: whatever indents the closing `|||`.
 				let mut term_indent = String::new();
@@ -659,6 +665,13 @@ impl<'a> Lexer<'a> {
 /// `diagnostic_filename` is what error messages are prefixed with, and is the
 /// name `Format` was called with.
 pub fn lex(diagnostic_filename: &str, input: &str) -> Result<Vec<Token>, Error> {
+	lex_bytes(diagnostic_filename, input.as_bytes())
+}
+
+/// Lex arbitrary source bytes. Locations count the original bytes, while each
+/// Go rune-decoding path replaces an invalid byte individually. Quoted token
+/// data and one-line C comments retain their raw bytes.
+pub fn lex_bytes(diagnostic_filename: &str, input: &[u8]) -> Result<Vec<Token>, Error> {
 	let mut l = Lexer::new(diagnostic_filename, input);
 
 	loop {
@@ -767,10 +780,10 @@ fn strip_whitespace(text: &str, margin: usize) -> String {
 }
 
 /// Go's `lineSplit`: split on newlines and strip each line.
-fn line_split(text: &str, margin: usize) -> Vec<String> {
+fn line_split(text: &[u8], margin: usize) -> Vec<String> {
 	let mut lines = Vec::new();
 	let mut current = String::new();
-	for c in text.chars() {
+	for c in runes(text) {
 		if c == '\n' {
 			lines.push(strip_whitespace(&current, margin));
 			current.clear();
@@ -787,8 +800,7 @@ fn line_split(text: &str, margin: usize) -> Vec<String> {
 /// Returns 0 when `b` fails to match, and also when `a` has no leading
 /// whitespace at all — the caller reads 0 as "this line ends the block", which
 /// is how a `|||` block knows where it stops.
-fn check_whitespace(a: &str, b: &str) -> usize {
-	let (a, b) = (a.as_bytes(), b.as_bytes());
+fn check_whitespace(a: &[u8], b: &[u8]) -> usize {
 	let mut i = 0;
 	while i < a.len() {
 		if a[i] != b' ' && a[i] != b'\t' {
@@ -879,7 +891,11 @@ mod tests {
 					element.kind,
 					element.blanks,
 					element.indent,
-					element.comment.clone(),
+					element
+						.comment
+						.iter()
+						.map(|text| text.as_str().expect("UTF-8 fixture").to_owned())
+						.collect(),
 				)
 			})
 			.collect()
@@ -961,7 +977,7 @@ mod tests {
 		let operators: Vec<&str> = tokens
 			.iter()
 			.filter(|token| token.kind == TokenKind::Operator)
-			.map(|token| token.data.as_str())
+			.map(|token| token.data.as_str().expect("ASCII operator"))
 			.collect();
 		assert_eq!(operators, vec!["+", "+", "+"]);
 	}
@@ -972,7 +988,7 @@ mod tests {
 		let operators: Vec<&str> = tokens
 			.iter()
 			.filter(|token| token.kind == TokenKind::Operator)
-			.map(|token| token.data.as_str())
+			.map(|token| token.data.as_str().expect("ASCII operator"))
 			.collect();
 		assert_eq!(operators, vec![">="]);
 	}
@@ -1095,7 +1111,14 @@ mod tests {
 		assert_eq!(
 			last.fodder
 				.iter()
-				.map(|element| (element.kind, element.comment.clone()))
+				.map(|element| (
+					element.kind,
+					element
+						.comment
+						.iter()
+						.map(|text| text.as_str().expect("UTF-8 fixture").to_owned())
+						.collect::<Vec<_>>()
+				))
 				.collect::<Vec<_>>(),
 			vec![
 				(FodderKind::LineEnd, Vec::new()),

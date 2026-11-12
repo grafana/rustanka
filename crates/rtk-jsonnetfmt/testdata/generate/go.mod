@@ -3,7 +3,8 @@
 //     cd crates/rtk-jsonnetfmt/testdata/generate
 //     go mod tidy && go run . <repo root> <corpus dir>
 //
-// or, from the repo root, `make update-fmt-corpus`.
+// The lexer/string oracles are regenerated from the repository root with
+// `make update-fmt-lexer-oracle`; their inputs do not depend on a corpus.
 //
 // `go mod tidy` pinned go-jsonnet v0.22.0, which is the version the committed
 // goldens came from; the generated manifest.json records it too, read from the

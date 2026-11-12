@@ -6,7 +6,7 @@
 //! `Expected token "}" but got …`, and the lexer oracle records them, so a
 //! renaming here is a visible behaviour change.
 
-use crate::{fodder::Fodder, location::LocationRange};
+use crate::{Text, fodder::Fodder, location::LocationRange};
 
 /// `parser.tokenKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +131,7 @@ pub struct Token {
 	/// The token's content, where it has any. A string token's data excludes
 	/// its quotes but keeps its escape sequences unprocessed, because the
 	/// formatter has to write them back out as they were.
-	pub data: String,
+	pub data: Text,
 	/// The whitespace that indented a `|||` block. Only set on a
 	/// [`TokenKind::StringBlock`].
 	pub string_block_indent: String,
@@ -143,14 +143,28 @@ pub struct Token {
 
 impl Token {
 	/// Go's `token.String()`, used in parser error messages.
+	/// Human-readable projection; parser diagnostics must use `display_bytes`.
 	pub fn display(&self) -> String {
+		String::from_utf8_lossy(&self.display_bytes()).into_owned()
+	}
+
+	/// Go's token rendering, preserving any raw bytes in quoted token text.
+	pub fn display_bytes(&self) -> Vec<u8> {
 		if self.data.is_empty() {
-			self.kind.name().to_owned()
-		} else if self.kind.has_content() {
-			format!("({}, \"{}\")", self.kind.name(), self.data)
-		} else {
-			format!("\"{}\"", self.data)
+			return self.kind.name().as_bytes().to_vec();
 		}
+		let mut out = if self.kind.has_content() {
+			format!("({}, \"", self.kind.name()).into_bytes()
+		} else {
+			b"\"".to_vec()
+		};
+		out.extend_from_slice(self.data.as_bytes());
+		out.extend_from_slice(if self.kind.has_content() {
+			b"\")"
+		} else {
+			b"\""
+		});
+		out
 	}
 }
 
@@ -267,11 +281,18 @@ mod tests {
 	}
 
 	#[test]
+	fn token_diagnostics_keep_invalid_source_bytes() {
+		let tokens = crate::lexer::lex_bytes("f", b"\"\xff\"").expect("raw string token");
+		assert_eq!(tokens[0].display_bytes(), b"(STRING_DOUBLE, \"\xff\")");
+		assert!(tokens[0].data.as_str().is_err());
+	}
+
+	#[test]
 	fn token_display_distinguishes_content_from_symbols() {
 		let bare = Token {
 			kind: TokenKind::BraceR,
 			fodder: Fodder::new(),
-			data: String::new(),
+			data: Text::default(),
 			string_block_indent: String::new(),
 			string_block_term_indent: String::new(),
 			location: LocationRange::point("f", crate::location::Location::default()),
@@ -280,7 +301,7 @@ mod tests {
 
 		let identifier = Token {
 			kind: TokenKind::Identifier,
-			data: "foo".to_owned(),
+			data: "foo".into(),
 			..bare.clone()
 		};
 		assert_eq!(identifier.display(), "(IDENTIFIER, \"foo\")");
@@ -289,7 +310,7 @@ mod tests {
 		// how an operator reaches `Not a binary operator: …`.
 		let operator = Token {
 			kind: TokenKind::Comma,
-			data: ",".to_owned(),
+			data: ",".into(),
 			..bare
 		};
 		assert_eq!(operator.display(), "\",\"");

@@ -42,11 +42,13 @@
 package parser
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/go-jsonnet/ast"
 )
@@ -55,14 +57,19 @@ import (
 // left as the integer, so a reader of the JSON does not need go-jsonnet's
 // iota order in front of them.
 type FodderElementDump struct {
-	Kind    string   `json:"kind"`
-	Blanks  int      `json:"blanks"`
-	Indent  int      `json:"indent"`
-	Comment []string `json:"comment,omitempty"`
+	CommentHex []string `json:"commentHex,omitempty"`
+	Kind       string   `json:"kind"`
+	Blanks     int      `json:"blanks"`
+	Indent     int      `json:"indent"`
+	Comment    []string `json:"comment,omitempty"`
 }
 
 // TokenDump is one token together with the fodder that preceded it.
 type TokenDump struct {
+	DataHex string `json:"dataHex,omitempty"`
+	// One-based lines and byte columns; End is exclusive, including for EOF.
+	Begin  [2]int              `json:"begin"`
+	End    [2]int              `json:"end"`
 	Kind   string              `json:"kind"`
 	Data   string              `json:"data,omitempty"`
 	Fodder []FodderElementDump `json:"fodder,omitempty"`
@@ -96,14 +103,39 @@ func fodderKindName(kind ast.FodderKind) string {
 	}
 }
 
+// JSON strings cannot preserve invalid UTF-8. Hex is authoritative only
+// where the raw value is invalid; ordinary fixtures stay readable.
+func rawText(text string) string {
+	if utf8.ValidString(text) {
+		return ""
+	}
+	return hex.EncodeToString([]byte(text))
+}
+
+func rawComments(comments []string) []string {
+	invalid := false
+	for _, comment := range comments {
+		invalid = invalid || !utf8.ValidString(comment)
+	}
+	if !invalid {
+		return nil
+	}
+	out := make([]string, len(comments))
+	for i, comment := range comments {
+		out[i] = hex.EncodeToString([]byte(comment))
+	}
+	return out
+}
+
 func dumpFodder(fodder ast.Fodder) []FodderElementDump {
 	out := make([]FodderElementDump, 0, len(fodder))
 	for _, element := range fodder {
 		out = append(out, FodderElementDump{
-			Kind:    fodderKindName(element.Kind),
-			Blanks:  element.Blanks,
-			Indent:  element.Indent,
-			Comment: element.Comment,
+			CommentHex: rawComments(element.Comment),
+			Kind:       fodderKindName(element.Kind),
+			Blanks:     element.Blanks,
+			Indent:     element.Indent,
+			Comment:    element.Comment,
 		})
 	}
 	if len(out) == 0 {
@@ -115,8 +147,9 @@ func dumpFodder(fodder ast.Fodder) []FodderElementDump {
 // Snippet is one entry of lexer-snippets.json. `why` is documentation for
 // human readers and is ignored here.
 type Snippet struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	SourceHex string `json:"sourceHex"`
 }
 
 // dumpOne lexes `content` under the name `source`, recording either its tokens
@@ -132,8 +165,11 @@ func dumpOne(source, content string) FileDump {
 	}
 	for _, token := range tokens {
 		dump.Tokens = append(dump.Tokens, TokenDump{
+			Begin:                 [2]int{token.loc.Begin.Line, token.loc.Begin.Column},
+			End:                   [2]int{token.loc.End.Line, token.loc.End.Column},
 			Kind:                  token.kind.String(),
 			Data:                  token.data,
+			DataHex:               rawText(token.data),
 			Fodder:                dumpFodder(token.fodder),
 			StringBlockIndent:     token.stringBlockIndent,
 			StringBlockTermIndent: token.stringBlockTermIndent,
@@ -163,7 +199,15 @@ func TestDumpFodder(t *testing.T) {
 			t.Fatalf("parsing %s: %v", snippetFile, err)
 		}
 		for _, snippet := range snippets {
-			dumps = append(dumps, dumpOne(snippet.Name, snippet.Source))
+			source := snippet.Source
+			if snippet.SourceHex != "" {
+				bytes, err := hex.DecodeString(snippet.SourceHex)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source = string(bytes)
+			}
+			dumps = append(dumps, dumpOne(snippet.Name, source))
 		}
 	} else {
 		if root == "" {
@@ -195,4 +239,54 @@ func TestDumpFodder(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("dumped %d files to %s", len(dumps), out)
+}
+
+// String-unescaping errors can contain incomplete UTF-8 prefixes. Record
+// bytes as hex so neither JSON nor a test harness can replace them.
+func TestDumpStrings(t *testing.T) {
+	input := os.Getenv("FODDERDUMP_STRINGS")
+	output := os.Getenv("FODDERDUMP_OUT")
+	if input == "" || output == "" {
+		t.Skip("string dump not requested")
+	}
+	raw, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snippets []Snippet
+	if err := json.Unmarshal(raw, &snippets); err != nil {
+		t.Fatal(err)
+	}
+	if len(snippets) == 0 {
+		t.Fatal("empty string snippets")
+	}
+	type result struct {
+		Name      string `json:"name"`
+		InputHex  string `json:"inputHex"`
+		OutputHex string `json:"outputHex"`
+		ErrorHex  string `json:"errorHex"`
+	}
+	var results []result
+	for _, snippet := range snippets {
+		source := []byte(snippet.Source)
+		if snippet.SourceHex != "" {
+			source, err = hex.DecodeString(snippet.SourceHex)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		value, failure := StringUnescape(&ast.LocationRange{}, string(source))
+		entry := result{Name: snippet.Name, InputHex: hex.EncodeToString(source), OutputHex: hex.EncodeToString([]byte(value))}
+		if failure != nil {
+			entry.ErrorHex = hex.EncodeToString([]byte(failure.Error()))
+		}
+		results = append(results, entry)
+	}
+	encoded, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, append(encoded, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -16,7 +16,11 @@
 
 use std::fmt::Write as _;
 
-use crate::{Error, location::LocationRange};
+use crate::{
+	Error,
+	location::LocationRange,
+	text::{decode_rune, runes},
+};
 
 /// Go's `StringUnescape`: resolve the escape sequences of a string literal.
 ///
@@ -24,16 +28,20 @@ use crate::{Error, location::LocationRange};
 /// messages and the surrogate-pair lookahead are both defined in terms of
 /// them.
 pub fn string_unescape(location: &LocationRange, text: &str) -> Result<String, Error> {
-	let bytes = text.as_bytes();
+	string_unescape_bytes(location, text.as_bytes())
+}
+
+/// Decode a quoted token's raw content using Go's one-invalid-byte-per-rune rule.
+/// Use this at the parser boundary; do not first convert token data lossily.
+pub fn string_unescape_bytes(location: &LocationRange, text: &[u8]) -> Result<String, Error> {
+	let bytes = text;
 	let mut out = String::with_capacity(text.len());
 	let mut index = 0;
 
-	// Go decodes a rune at a time with `utf8.DecodeRuneInString`. Slicing a
-	// `&str` at a non-boundary would panic here, so the walk steps by whole
-	// characters, which is the same thing for well-formed UTF-8.
+	// Indices remain offsets in the original bytes, including malformed UTF-8.
 	while index < bytes.len() {
-		let current = next_char(text, index);
-		index += current.len_utf8();
+		let (current, width) = decode_rune(&text[index..]).expect("index is in bounds");
+		index += width;
 
 		if current != '\\' {
 			out.push(current);
@@ -47,8 +55,8 @@ pub fn string_unescape(location: &LocationRange, text: &str) -> Result<String, E
 			));
 		}
 
-		let escaped = next_char(text, index);
-		index += escaped.len_utf8();
+		let (escaped, width) = decode_rune(&text[index..]).expect("index is in bounds");
+		index += width;
 
 		match escaped {
 			'"' => out.push('"'),
@@ -85,15 +93,6 @@ pub fn string_unescape(location: &LocationRange, text: &str) -> Result<String, E
 	Ok(out)
 }
 
-/// The character at `index`, which the caller has established is in bounds and
-/// on a character boundary.
-fn next_char(text: &str, index: usize) -> char {
-	text[index..]
-		.chars()
-		.next()
-		.expect("the caller checked there is a character here")
-}
-
 /// Read four hex digits as a UTF-16 code unit, advancing `index` past them.
 ///
 /// Works on **bytes**, as Go does. Slicing the `&str` instead would panic
@@ -104,12 +103,12 @@ fn next_char(text: &str, index: usize) -> char {
 /// `low` only selects which of the two upstream messages to use; they differ by
 /// one word.
 fn read_hex4(
-	text: &str,
+	text: &[u8],
 	index: &mut usize,
 	location: &LocationRange,
 	low: bool,
 ) -> Result<u32, Error> {
-	let bytes = text.as_bytes();
+	let bytes = text;
 	if *index + 4 > bytes.len() {
 		return Err(Error::from_static(
 			location,
@@ -125,20 +124,16 @@ fn read_hex4(
 		// rather than the offending escape, so `'ab\uZZZZ'` reports `ab\u`.
 		// Reproduced, not fixed.
 		//
-		// Lossily, because those four bytes need not be valid UTF-8 on their
-		// own and a Rust `String` has to be. Go emits the partial sequence
-		// raw; reaching that difference takes a malformed escape in a string
-		// whose first four bytes split a character.
-		let prefix = String::from_utf8_lossy(&bytes[..4]);
+		// The prefix can end inside a UTF-8 character. Keep Go's raw bytes;
+		// a CLI must use Error::write_to rather than its Display projection.
 		let what = if low {
 			"Unicode low surrogate"
 		} else {
 			"Unicode"
 		};
-		return Err(Error::from_static(
-			location,
-			&format!("{what} escape sequence was malformed: {prefix}"),
-		));
+		let mut message = format!("{what} escape sequence was malformed: ").into_bytes();
+		message.extend_from_slice(&bytes[..4]);
+		return Err(Error::from_static_bytes(location, &message));
 	}
 
 	let code = digits
@@ -166,12 +161,12 @@ fn is_surrogate(code: u32) -> bool {
 
 /// Consume the `\uXXXX` that must follow a high surrogate, and combine them.
 fn read_low_surrogate(
-	text: &str,
+	text: &[u8],
 	index: &mut usize,
 	location: &LocationRange,
 	high: u32,
 ) -> Result<u32, Error> {
-	let bytes = text.as_bytes();
+	let bytes = text;
 	// Six bytes: `\uXXXX`.
 	if *index + 6 > bytes.len() {
 		return Err(Error::from_static(
@@ -212,8 +207,13 @@ fn decode_surrogate_pair(high: u32, low: u32) -> u32 {
 /// has to be escaped. Note that it escapes **only** that quote, which is what
 /// lets the pass pick whichever syntax avoids escaping.
 pub fn string_escape(text: &str, single: bool) -> String {
+	string_escape_bytes(text.as_bytes(), single)
+}
+
+/// Go's rune-based escaping for byte-valued strings.
+pub fn string_escape_bytes(text: &[u8], single: bool) -> String {
 	let mut out = String::with_capacity(text.len());
-	for c in text.chars() {
+	for c in runes(text) {
 		match c {
 			'"' => {
 				if !single {
@@ -259,6 +259,28 @@ mod tests {
 	}
 
 	#[test]
+	fn invalid_utf8_is_decoded_one_byte_at_a_time() {
+		for input in [
+			&b"\xff"[..],
+			&b"\xe2\x82"[..],
+			&b"\xf0\x9f\x98"[..],
+			&b"\xc0\xaf"[..],
+			&b"\xed\xa0\x80"[..],
+		] {
+			let expected = "�".repeat(input.len());
+			assert_eq!(
+				string_unescape_bytes(&loc(), input).expect("Go accepts invalid bytes"),
+				expected
+			);
+			assert_eq!(string_escape_bytes(input, true), expected);
+		}
+		assert_eq!(
+			string_unescape_bytes(&loc(), "é€😀".as_bytes()).unwrap(),
+			"é€😀"
+		);
+	}
+
+	#[test]
 	fn the_simple_escapes_are_all_resolved() {
 		assert_eq!(
 			unescape(r#"a\"b\'c\\d\/e\bf\fg\nh\ri\tj"#).expect("valid"),
@@ -267,15 +289,63 @@ mod tests {
 	}
 
 	#[test]
-	fn a_unicode_escape_becomes_its_character() {
+	fn decoded_unicode_characters_are_preserved() {
 		assert_eq!(unescape(r"A").expect("valid"), "A");
 		assert_eq!(unescape(r"é").expect("valid"), "é");
 	}
 
 	#[test]
-	fn a_surrogate_pair_is_combined() {
+	fn a_decoded_supplementary_character_is_preserved() {
 		// U+1F600, which only fits in UTF-16 as a pair.
 		assert_eq!(unescape(r"😀").expect("valid"), "😀");
+	}
+
+	#[test]
+	fn unicode_escapes_and_surrogate_boundaries_are_decoded() {
+		for (input, expected) in [
+			(r"\u0041", "A"),
+			(r"\u00e9", "é"),
+			(r"\ud83d\ude00", "😀"),
+			(r"\u0000", "\0"),
+			(r"\ud7ff", "\u{d7ff}"),
+			(r"\ue000", "\u{e000}"),
+			(r"\ud800\udc00", "\u{10000}"),
+			(r"\udbff\udfff", "\u{10ffff}"),
+			(r"\udc00\ud800", "\u{fffd}"),
+			(r"\ud800\u0041", "\u{fffd}"),
+		] {
+			assert_eq!(unescape(input).expect("valid escape"), expected, "{input}");
+		}
+	}
+
+	#[test]
+	fn malformed_and_truncated_unicode_escapes_are_rejected() {
+		for input in [r"\u", r"\u0", r"\u00", r"\u004"] {
+			assert!(
+				unescape(input)
+					.unwrap_err()
+					.message()
+					.ends_with("Truncated unicode escape sequence in string literal."),
+				"{input}"
+			);
+		}
+		for input in [r"\u+001", r"\uZZZZ", r"\u12€x"] {
+			assert!(
+				unescape(input)
+					.unwrap_err()
+					.message()
+					.contains("Unicode escape sequence was malformed:"),
+				"{input}"
+			);
+		}
+		for input in [r"\ud800", r"\udfff", r"\ud800\u000"] {
+			assert!(
+				unescape(input).unwrap_err().message().ends_with(
+					"Truncated unicode surrogate pair escape sequence in string literal."
+				),
+				"{input}"
+			);
+		}
 	}
 
 	#[test]
@@ -317,6 +387,30 @@ mod tests {
 			unescape(r"ab\uZZZZ").expect_err("malformed").message(),
 			"f.jsonnet:1:1 Unicode escape sequence was malformed: ab\\u"
 		);
+	}
+
+	#[test]
+	fn malformed_escape_diagnostics_preserve_partial_utf8_bytes() {
+		for (input, what) in [
+			(r"é€\uZZZZ", "Unicode"),
+			(r"é€\ud800\uZZZZ", "Unicode low surrogate"),
+		] {
+			let error = unescape(input).expect_err("malformed");
+			let mut expected =
+				format!("f.jsonnet:1:1 {what} escape sequence was malformed: ").into_bytes();
+			expected.extend_from_slice(&[0xc3, 0xa9, 0xe2, 0x82]);
+			assert_eq!(error.message_bytes(), expected);
+			let mut stderr = Vec::new();
+			error.write_to(&mut stderr).expect("write diagnostic");
+			stderr.push(b'\n');
+			expected.push(b'\n');
+			assert_eq!(stderr, expected);
+			assert!(String::from_utf8(stderr).is_err());
+			let contextual = error.in_context("parsing string");
+			expected.pop();
+			expected.extend_from_slice(b" while parsing string");
+			assert_eq!(contextual.message_bytes(), expected);
+		}
 	}
 
 	#[test]

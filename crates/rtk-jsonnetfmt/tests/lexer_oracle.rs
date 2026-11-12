@@ -15,9 +15,14 @@
 //! file, token index, and the two fodder values — since that is what you act
 //! on.
 
-use std::{collections::BTreeMap, fmt::Write as _, fs, path::PathBuf};
+use std::{
+	collections::BTreeMap,
+	fmt::Write as _,
+	fs,
+	path::{Path, PathBuf},
+};
 
-use rtk_jsonnetfmt::lexer::lex;
+use rtk_jsonnetfmt::{Text, lexer::lex_bytes};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -31,9 +36,47 @@ struct FileDump {
 	error: String,
 }
 
+impl FileDump {
+	fn read(path: &Path) -> Result<Vec<Self>, String> {
+		let raw = fs::read(path).map_err(|err| format!("reading {}: {err}", path.display()))?;
+		let dumps: Vec<Self> = serde_json::from_slice(&raw)
+			.map_err(|err| format!("parsing {}: {err}", path.display()))?;
+		if dumps.is_empty() {
+			return Err(format!("{}: required oracle is empty", path.display()));
+		}
+		for dump in &dumps {
+			if dump.source.is_empty() || dump.tokens.is_empty() == dump.error.is_empty() {
+				return Err(format!(
+					"{}: each source must have tokens or an error",
+					path.display()
+				));
+			}
+		}
+		Ok(dumps)
+	}
+}
+
+#[test]
+fn required_oracles_fail_closed() {
+	let dir = tempfile::tempdir().expect("temporary directory");
+	let missing = dir.path().join("missing.json");
+	assert!(FileDump::read(&missing).unwrap_err().contains("reading"));
+	// A directory is an unreadable data file even when running as root.
+	assert!(FileDump::read(dir.path()).unwrap_err().contains("reading"));
+	let file = dir.path().join("oracle.json");
+	for contents in ["", "{", "[]", "[{}]", r#"[{"source":"empty.jsonnet"}]"#] {
+		fs::write(&file, contents).expect("write fixture");
+		assert!(FileDump::read(&file).is_err(), "accepted {contents:?}");
+	}
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TokenDump {
+	#[serde(default)]
+	data_hex: Option<String>,
+	begin: [usize; 2],
+	end: [usize; 2],
 	kind: String,
 	#[serde(default)]
 	data: String,
@@ -46,12 +89,61 @@ struct TokenDump {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FodderElementDump {
+	#[serde(default)]
+	comment_hex: Option<Vec<String>>,
 	kind: String,
 	blanks: usize,
 	indent: usize,
 	#[serde(default)]
 	comment: Vec<String>,
+}
+
+fn decode_hex(hex: &str) -> Vec<u8> {
+	assert!(
+		hex.len().is_multiple_of(2),
+		"hex fixture must have complete bytes"
+	);
+	hex.as_bytes()
+		.as_chunks::<2>()
+		.0
+		.iter()
+		.map(|pair| {
+			u8::from_str_radix(std::str::from_utf8(pair).expect("ASCII hex"), 16)
+				.expect("hex fixture")
+		})
+		.collect()
+}
+
+impl TokenDump {
+	fn data_bytes(&self) -> Vec<u8> {
+		self.data_hex
+			.as_ref()
+			.map_or_else(|| self.data.as_bytes().to_vec(), |hex| decode_hex(hex))
+	}
+}
+
+impl FodderElementDump {
+	fn comment_bytes(&self) -> Vec<Text> {
+		self.comment_hex.as_ref().map_or_else(
+			|| self.comment.iter().cloned().map(Text::from).collect(),
+			|comments| {
+				comments
+					.iter()
+					.map(|hex| Text::from(decode_hex(hex)))
+					.collect()
+			},
+		)
+	}
+}
+
+impl Snippet {
+	fn source_bytes(&self) -> Vec<u8> {
+		self.source_hex
+			.as_ref()
+			.map_or_else(|| self.source.as_bytes().to_vec(), |hex| decode_hex(hex))
+	}
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,15 +176,18 @@ fn describe_dumped_fodder(fodder: &[FodderElementDump]) -> Vec<String> {
 		.map(|element| {
 			format!(
 				"{}(blanks={}, indent={}, comment={:?})",
-				element.kind, element.blanks, element.indent, element.comment
+				element.kind,
+				element.blanks,
+				element.indent,
+				element.comment_bytes()
 			)
 		})
 		.collect()
 }
 
 /// The first way this file disagrees with go-jsonnet, or `None`.
-fn first_divergence(dump: &FileDump, input: &str) -> Option<String> {
-	let actual = lex(&dump.source, input);
+fn first_divergence(dump: &FileDump, input: &[u8]) -> Option<String> {
+	let actual = lex_bytes(&dump.source, input);
 
 	if !dump.error.is_empty() {
 		return match actual {
@@ -131,6 +226,15 @@ fn first_divergence(dump: &FileDump, input: &str) -> Option<String> {
 
 	for (index, (expected, got)) in dump.tokens.iter().zip(&tokens).enumerate() {
 		let at = format!("token {index}");
+		let begin = [got.location.begin.line, got.location.begin.column];
+		let end = [got.location.end.line, got.location.end.column];
+		if begin != expected.begin || end != expected.end {
+			return Some(format!(
+				"{at}: location differs: go-jsonnet {:?}..{:?}, rtk {begin:?}..{end:?}",
+				expected.begin, expected.end
+			));
+		}
+
 		if got.kind.name() != expected.kind {
 			return Some(format!(
 				"{at}: kind differs: go-jsonnet {:?}, rtk {:?}",
@@ -138,7 +242,7 @@ fn first_divergence(dump: &FileDump, input: &str) -> Option<String> {
 				got.kind.name()
 			));
 		}
-		if got.data != expected.data {
+		if got.data.as_bytes() != expected.data_bytes() {
 			return Some(format!(
 				"{at} ({}): data differs\n    go-jsonnet: {:?}\n    rtk:        {:?}",
 				expected.kind, expected.data, got.data
@@ -173,17 +277,7 @@ fn first_divergence(dump: &FileDump, input: &str) -> Option<String> {
 #[test]
 fn lexer_matches_go_jsonnet_at_the_recorded_rate() {
 	let oracle_path = crate_dir().join("testdata/lexer-oracle.json");
-	let Ok(raw) = fs::read_to_string(&oracle_path) else {
-		eprintln!(
-			"no lexer oracle at {}; generate it with `make update-fmt-lexer-oracle` (needs Go). \
-			 Skipping.",
-			oracle_path.display()
-		);
-		return;
-	};
-
-	let dumps: Vec<FileDump> = serde_json::from_str(&raw).expect("the oracle is valid JSON");
-	assert!(!dumps.is_empty(), "the oracle is empty");
+	let dumps = FileDump::read(&oracle_path).unwrap_or_else(|err| panic!("{err}"));
 
 	let baseline_path = crate_dir().join("testdata/lexer-baseline.toml");
 	let baseline: Baseline = toml::from_str(
@@ -192,12 +286,26 @@ fn lexer_matches_go_jsonnet_at_the_recorded_rate() {
 	)
 	.unwrap_or_else(|err| panic!("parsing {}: {err}", baseline_path.display()));
 
+	let sources_path = crate_dir().join("testdata/lexer-sources.json");
+	let sources: Vec<String> = serde_json::from_slice(
+		&fs::read(&sources_path).expect("required lexer source manifest must be readable"),
+	)
+	.expect("lexer source manifest must be valid JSON");
+	assert_eq!(
+		sources,
+		dumps
+			.iter()
+			.map(|dump| dump.source.clone())
+			.collect::<Vec<_>>(),
+		"lexer oracle sources must match the required manifest"
+	);
+
 	let root = repo_root();
 	let mut matching = 0;
 	let mut divergences: BTreeMap<String, String> = BTreeMap::new();
 
 	for dump in &dumps {
-		let input = fs::read_to_string(root.join(&dump.source))
+		let input = fs::read(root.join(&dump.source))
 			.unwrap_or_else(|err| panic!("reading {}: {err}", dump.source));
 
 		match first_divergence(dump, &input) {
@@ -238,7 +346,10 @@ fn lexer_matches_go_jsonnet_at_the_recorded_rate() {
 #[derive(Debug, Deserialize)]
 struct Snippet {
 	name: String,
+	#[serde(default)]
 	source: String,
+	#[serde(default, rename = "sourceHex")]
+	source_hex: Option<String>,
 }
 
 /// The snippets, which cover what the corpus cannot reach.
@@ -253,17 +364,7 @@ struct Snippet {
 #[test]
 fn snippets_match_go_jsonnet_exactly() {
 	let oracle_path = crate_dir().join("testdata/lexer-snippet-oracle.json");
-	let Ok(raw) = fs::read_to_string(&oracle_path) else {
-		eprintln!(
-			"no snippet oracle at {}; generate it with `make update-fmt-lexer-oracle` (needs Go). \
-			 Skipping.",
-			oracle_path.display()
-		);
-		return;
-	};
-
-	let dumps: Vec<FileDump> =
-		serde_json::from_str(&raw).expect("the snippet oracle is valid JSON");
+	let dumps = FileDump::read(&oracle_path).unwrap_or_else(|err| panic!("{err}"));
 
 	let snippets_path = crate_dir().join("testdata/lexer-snippets.json");
 	let snippets: Vec<Snippet> = serde_json::from_str(
@@ -283,7 +384,7 @@ fn snippets_match_go_jsonnet_exactly() {
 
 	let mut failures: Vec<String> = Vec::new();
 	for (snippet, dump) in snippets.iter().zip(&dumps) {
-		if let Some(detail) = first_divergence(dump, &snippet.source) {
+		if let Some(detail) = first_divergence(dump, &snippet.source_bytes()) {
 			failures.push(format!("{}\n    {detail}", snippet.name));
 		}
 	}
@@ -300,4 +401,59 @@ fn snippets_match_go_jsonnet_exactly() {
 		"lexer snippets: all {} match go-jsonnet token for token",
 		snippets.len()
 	);
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnescapeDump {
+	name: String,
+	input_hex: String,
+	output_hex: String,
+	error_hex: String,
+}
+
+#[test]
+fn string_unescaping_matches_go_as_raw_bytes() {
+	use rtk_jsonnetfmt::{
+		location::{Location, LocationRange},
+		string_util::string_unescape_bytes,
+	};
+	let data = crate_dir().join("testdata");
+	let dumps: Vec<UnescapeDump> = serde_json::from_slice(
+		&fs::read(data.join("string-oracle.json")).expect("required string oracle"),
+	)
+	.expect("valid string oracle");
+	assert!(!dumps.is_empty(), "required string oracle is empty");
+	let snippets: Vec<Snippet> = serde_json::from_slice(
+		&fs::read(data.join("string-snippets.json")).expect("required string snippets"),
+	)
+	.expect("valid string snippets");
+	assert_eq!(dumps.len(), snippets.len(), "string oracle is stale");
+	let location = LocationRange::point("", Location::default());
+	for (dump, snippet) in dumps.iter().zip(&snippets) {
+		assert_eq!(dump.name, snippet.name);
+		let input = decode_hex(&dump.input_hex);
+		assert_eq!(
+			input,
+			snippet.source_bytes(),
+			"string oracle input is stale"
+		);
+		match string_unescape_bytes(&location, &input) {
+			Ok(value) => {
+				assert!(dump.error_hex.is_empty(), "Go rejected {}", dump.name);
+				assert_eq!(
+					value.as_bytes(),
+					decode_hex(&dump.output_hex),
+					"{}",
+					dump.name
+				);
+			}
+			Err(error) => {
+				assert!(!dump.error_hex.is_empty(), "Go accepted {}", dump.name);
+				let mut stderr = Vec::new();
+				error.write_to(&mut stderr).expect("write raw diagnostic");
+				assert_eq!(stderr, decode_hex(&dump.error_hex), "{}", dump.name);
+			}
+		}
+	}
 }

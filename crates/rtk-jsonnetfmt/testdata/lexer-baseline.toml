@@ -1,5 +1,5 @@
 # How many of the 138 corpus files the lexer port lexes **identically** to
-# go-jsonnet — same tokens, same data, same fodder, same block-string indents.
+# go-jsonnet — same tokens, same data, same fodder, same block-string indents and locations.
 #
 # Ratcheted the same way as `corpus-baseline.toml`: exact match required in both
 # directions, so an improvement is a reviewed number rather than a silent drift.

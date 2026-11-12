@@ -183,5 +183,299 @@
     "name": "only_whitespace.jsonnet",
     "why": "And whitespace alone produces no fodder, because final whitespace is discarded.",
     "source": "\n\n  \n"
+  },
+  {
+    "name": "utf8_locations.jsonnet",
+    "source": "[\"é€😀\", @'é'] // €\n\ttrue\r\n",
+    "why": "Byte columns after multibyte strings and comments, tabs, CRLF, and EOF."
+  },
+  {
+    "name": "block_utf8_locations.jsonnet",
+    "source": "|||\r\n  é€😀\r\n||| /* trailing é */",
+    "why": "Block-string end positions and trailing trivia without final newline."
+  },
+  {
+    "name": "byte_quoted_0.jsonnet",
+    "sourceHex": "22ff222074727565"
+  },
+  {
+    "name": "byte_single_quoted_0.jsonnet",
+    "sourceHex": "27ff272074727565"
+  },
+  {
+    "name": "byte_line_comment_0.jsonnet",
+    "sourceHex": "2f2fff0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_0.jsonnet",
+    "sourceHex": "23ff0a74727565"
+  },
+  {
+    "name": "byte_c_comment_0.jsonnet",
+    "sourceHex": "2f2aff2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_0.jsonnet",
+    "sourceHex": "2f2a0a20ff0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_0.jsonnet",
+    "sourceHex": "4027ff272074727565"
+  },
+  {
+    "name": "byte_block_0.jsonnet",
+    "sourceHex": "7c7c7c0a2020ff0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_1.jsonnet",
+    "sourceHex": "22e282222074727565"
+  },
+  {
+    "name": "byte_single_quoted_1.jsonnet",
+    "sourceHex": "27e282272074727565"
+  },
+  {
+    "name": "byte_line_comment_1.jsonnet",
+    "sourceHex": "2f2fe2820d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_1.jsonnet",
+    "sourceHex": "23e2820a74727565"
+  },
+  {
+    "name": "byte_c_comment_1.jsonnet",
+    "sourceHex": "2f2ae2822a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_1.jsonnet",
+    "sourceHex": "2f2a0a20e2820a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_1.jsonnet",
+    "sourceHex": "4027e282272074727565"
+  },
+  {
+    "name": "byte_block_1.jsonnet",
+    "sourceHex": "7c7c7c0a2020e2820a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_2.jsonnet",
+    "sourceHex": "22f09f98222074727565"
+  },
+  {
+    "name": "byte_single_quoted_2.jsonnet",
+    "sourceHex": "27f09f98272074727565"
+  },
+  {
+    "name": "byte_line_comment_2.jsonnet",
+    "sourceHex": "2f2ff09f980d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_2.jsonnet",
+    "sourceHex": "23f09f980a74727565"
+  },
+  {
+    "name": "byte_c_comment_2.jsonnet",
+    "sourceHex": "2f2af09f982a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_2.jsonnet",
+    "sourceHex": "2f2a0a20f09f980a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_2.jsonnet",
+    "sourceHex": "4027f09f98272074727565"
+  },
+  {
+    "name": "byte_block_2.jsonnet",
+    "sourceHex": "7c7c7c0a2020f09f980a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_3.jsonnet",
+    "sourceHex": "22c0af222074727565"
+  },
+  {
+    "name": "byte_single_quoted_3.jsonnet",
+    "sourceHex": "27c0af272074727565"
+  },
+  {
+    "name": "byte_line_comment_3.jsonnet",
+    "sourceHex": "2f2fc0af0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_3.jsonnet",
+    "sourceHex": "23c0af0a74727565"
+  },
+  {
+    "name": "byte_c_comment_3.jsonnet",
+    "sourceHex": "2f2ac0af2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_3.jsonnet",
+    "sourceHex": "2f2a0a20c0af0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_3.jsonnet",
+    "sourceHex": "4027c0af272074727565"
+  },
+  {
+    "name": "byte_block_3.jsonnet",
+    "sourceHex": "7c7c7c0a2020c0af0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_4.jsonnet",
+    "sourceHex": "22eda080222074727565"
+  },
+  {
+    "name": "byte_single_quoted_4.jsonnet",
+    "sourceHex": "27eda080272074727565"
+  },
+  {
+    "name": "byte_line_comment_4.jsonnet",
+    "sourceHex": "2f2feda0800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_4.jsonnet",
+    "sourceHex": "23eda0800a74727565"
+  },
+  {
+    "name": "byte_c_comment_4.jsonnet",
+    "sourceHex": "2f2aeda0802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_4.jsonnet",
+    "sourceHex": "2f2a0a20eda0800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_4.jsonnet",
+    "sourceHex": "4027eda080272074727565"
+  },
+  {
+    "name": "byte_block_4.jsonnet",
+    "sourceHex": "7c7c7c0a2020eda0800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_5.jsonnet",
+    "sourceHex": "22f4908080222074727565"
+  },
+  {
+    "name": "byte_single_quoted_5.jsonnet",
+    "sourceHex": "27f4908080272074727565"
+  },
+  {
+    "name": "byte_line_comment_5.jsonnet",
+    "sourceHex": "2f2ff49080800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_5.jsonnet",
+    "sourceHex": "23f49080800a74727565"
+  },
+  {
+    "name": "byte_c_comment_5.jsonnet",
+    "sourceHex": "2f2af49080802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_5.jsonnet",
+    "sourceHex": "2f2a0a20f49080800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_5.jsonnet",
+    "sourceHex": "4027f4908080272074727565"
+  },
+  {
+    "name": "byte_block_5.jsonnet",
+    "sourceHex": "7c7c7c0a2020f49080800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_6.jsonnet",
+    "sourceHex": "228041ff222074727565"
+  },
+  {
+    "name": "byte_single_quoted_6.jsonnet",
+    "sourceHex": "278041ff272074727565"
+  },
+  {
+    "name": "byte_line_comment_6.jsonnet",
+    "sourceHex": "2f2f8041ff0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_6.jsonnet",
+    "sourceHex": "238041ff0a74727565"
+  },
+  {
+    "name": "byte_c_comment_6.jsonnet",
+    "sourceHex": "2f2a8041ff2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_6.jsonnet",
+    "sourceHex": "2f2a0a208041ff0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_6.jsonnet",
+    "sourceHex": "40278041ff272074727565"
+  },
+  {
+    "name": "byte_block_6.jsonnet",
+    "sourceHex": "7c7c7c0a20208041ff0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_7.jsonnet",
+    "sourceHex": "22c3a9e282acf09f9880222074727565"
+  },
+  {
+    "name": "byte_single_quoted_7.jsonnet",
+    "sourceHex": "27c3a9e282acf09f9880272074727565"
+  },
+  {
+    "name": "byte_line_comment_7.jsonnet",
+    "sourceHex": "2f2fc3a9e282acf09f98800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_7.jsonnet",
+    "sourceHex": "23c3a9e282acf09f98800a74727565"
+  },
+  {
+    "name": "byte_c_comment_7.jsonnet",
+    "sourceHex": "2f2ac3a9e282acf09f98802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_7.jsonnet",
+    "sourceHex": "2f2a0a20c3a9e282acf09f98800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_7.jsonnet",
+    "sourceHex": "4027c3a9e282acf09f9880272074727565"
+  },
+  {
+    "name": "byte_block_7.jsonnet",
+    "sourceHex": "7c7c7c0a2020c3a9e282acf09f98800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_error.jsonnet",
+    "sourceHex": "22ff22203f"
+  },
+  {
+    "name": "byte_escape.jsonnet",
+    "sourceHex": "225ce28222"
+  },
+  {
+    "name": "byte_eof.jsonnet",
+    "sourceHex": "2f2fff"
+  },
+  {
+    "name": "byte_verbatim_error.jsonnet",
+    "sourceHex": "40ff"
+  },
+  {
+    "name": "number_eof.jsonnet",
+    "source": "1e"
+  },
+  {
+    "name": "coalesce_extension.jsonnet",
+    "source": "a ?? b"
+  },
+  {
+    "name": "short_c_comment.jsonnet",
+    "source": "/*/"
   }
 ]

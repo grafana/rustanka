@@ -1,6 +1,16 @@
 name: Test
 on: [ workflow_call ]
 jobs:
+  check-fmt-lexer-oracle:
+    name: Check lexer oracle regeneration
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: go1.27.1
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+      - name: Check saved lexer tokens, fodder, and locations
+        run: make check-fmt-lexer-oracle
+
   check-golden-fixtures:
     name: Check golden files
     runs-on: ubuntu-latest

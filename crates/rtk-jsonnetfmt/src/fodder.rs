@@ -13,6 +13,8 @@
 //! Rendering this model changes tabs, CRLF, trailing whitespace, and spacing
 //! before line-end comments even when every formatting pass is disabled.
 
+use crate::Text;
+
 /// `ast.FodderKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FodderKind {
@@ -59,7 +61,7 @@ pub struct FodderElement {
 	/// 8 by the lexer. Always 0 for an interstitial.
 	pub indent: usize,
 	/// The comment, one entry per line, each already right-trimmed.
-	pub comment: Vec<String>,
+	pub comment: Vec<Text>,
 }
 
 impl FodderElement {
@@ -73,7 +75,7 @@ impl FodderElement {
 	///
 	/// If the combination of kind, blanks, indent and comment is one the model
 	/// does not allow.
-	pub fn new(kind: FodderKind, blanks: usize, indent: usize, comment: Vec<String>) -> Self {
+	pub fn new(kind: FodderKind, blanks: usize, indent: usize, comment: Vec<Text>) -> Self {
 		match kind {
 			FodderKind::LineEnd => assert!(
 				comment.len() <= 1,
@@ -92,7 +94,7 @@ impl FodderElement {
 				);
 			}
 			FodderKind::Paragraph => {
-				assert!(!comment.is_empty(), "FodderParagraph but comment was empty")
+				assert!(!comment.is_empty(), "FodderParagraph but comment was empty");
 			}
 		}
 		Self {
@@ -146,6 +148,22 @@ impl FodderElement {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Fodder {
 	elements: Vec<FodderElement>,
+}
+
+impl<'a> IntoIterator for &'a Fodder {
+	type Item = &'a FodderElement;
+	type IntoIter = std::slice::Iter<'a, FodderElement>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter()
+	}
+}
+
+impl<'a> IntoIterator for &'a mut Fodder {
+	type Item = &'a mut FodderElement;
+	type IntoIter = std::slice::IterMut<'a, FodderElement>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter_mut()
+	}
 }
 
 impl Fodder {
@@ -281,6 +299,7 @@ impl Fodder {
 	}
 
 	/// `ast.FodderConcat`: append `other`, keeping the invariant at the seam.
+	#[must_use]
 	pub fn concat(mut self, other: Self) -> Self {
 		if self.is_empty() {
 			return other;
@@ -325,8 +344,8 @@ impl Fodder {
 mod tests {
 	use super::*;
 
-	fn comment(text: &str) -> Vec<String> {
-		vec![text.to_owned()]
+	fn comment(text: &str) -> Vec<Text> {
+		vec![text.into()]
 	}
 
 	fn interstitial(text: &str) -> FodderElement {
@@ -338,7 +357,7 @@ mod tests {
 			FodderKind::Paragraph,
 			blanks,
 			indent,
-			lines.iter().map(|line| (*line).to_owned()).collect(),
+			lines.iter().map(|line| Text::from(*line)).collect(),
 		)
 	}
 
@@ -515,7 +534,7 @@ mod tests {
 			FodderKind::LineEnd,
 			0,
 			0,
-			vec!["// a".to_owned(), "// b".to_owned()],
+			vec!["// a".into(), "// b".into()],
 		);
 	}
 }
