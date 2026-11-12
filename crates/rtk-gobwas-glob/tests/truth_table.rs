@@ -2,11 +2,11 @@
 //!
 //! The table is the oracle, not the library's documentation: the two disagree
 //! about separators, and it is the table that decides which files `rtk fmt`
-//! touches. `testdata/generate/` holds the generator; regenerate with
-//! `go run . > ../gobwas-glob-v0.2.3.json` from that directory whenever
-//! the pinned version of the library moves.
+//! touches. `testdata/generate/` holds the pinned generator. This test runs it
+//! at runtime and compares its stdout directly; no large answer file is saved.
+//! Go is required, and unavailable or failed generation is a test failure.
 
-use std::{fs, path::PathBuf};
+use std::{path::PathBuf, process::Command};
 
 use rtk_gobwas_glob::Glob;
 use serde::Deserialize;
@@ -31,17 +31,31 @@ struct Case {
 	rejects_hex: Vec<String>,
 }
 
-fn table_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/gobwas-glob-v0.2.3.json")
+impl Case {
+	fn generate() -> Vec<Self> {
+		let generator = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/generate");
+		let output = Command::new("go")
+			.args(["run", "-mod=readonly", "."])
+			.env("GOFLAGS", "-buildvcs=false")
+			.current_dir(generator)
+			.output()
+			.expect("glob parity requires Go; the generator must run");
+		assert!(
+			output.status.success(),
+			"Go truth-table generation failed ({}):\n{}",
+			output.status,
+			String::from_utf8_lossy(&output.stderr)
+		);
+		let cases: Vec<Self> =
+			serde_json::from_slice(&output.stdout).expect("generated truth table is valid JSON");
+		assert!(!cases.is_empty(), "generated truth table is empty");
+		cases
+	}
 }
 
 #[test]
 fn matches_the_generated_truth_table() {
-	let path = table_path();
-	let raw = fs::read_to_string(&path).expect("checked-in gobwas/glob truth table is readable");
-
-	let cases: Vec<Case> = serde_json::from_str(&raw).expect("truth table is valid JSON");
-	assert!(!cases.is_empty(), "truth table is empty");
+	let cases = Case::generate();
 
 	let mut failures: Vec<String> = Vec::new();
 

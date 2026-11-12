@@ -1,10 +1,6 @@
-// Not part of any build. Regenerates ../gobwas-glob-v0.2.3.json:
-//
-//     cd crates/rtk-gobwas-glob/testdata/generate
-//     go mod tidy && go run . > ../gobwas-glob-v0.2.3.json
-//
-// Pin this to whatever version of the library Tanka links; the answers in the
-// table are only meaningful for that one. `go mod tidy` writes the go.sum.
+// Used by the Rust parity test to generate reference answers at runtime.
+// Run `go run -mod=readonly .` here to inspect the answers manually.
+// Keep the gobwas/glob version pinned to the version Tanka links.
 module generate
 
 go 1.21
