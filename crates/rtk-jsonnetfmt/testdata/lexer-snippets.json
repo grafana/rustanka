@@ -1,0 +1,481 @@
+[
+  {
+    "name": "verbatim_double.jsonnet",
+    "why": "The corpus contains no verbatim string at all, so neither verbatim path is graded by it. Doubled quotes are resolved here and put back by the unparser.",
+    "source": "@\"a\"\"b\"\n"
+  },
+  {
+    "name": "verbatim_single.jsonnet",
+    "why": "The single-quoted verbatim path, likewise ungraded by the corpus.",
+    "source": "@'a''b'\n"
+  },
+  {
+    "name": "verbatim_junk.jsonnet",
+    "why": "Upstream formats the offending rune with %v, which prints its numeric value rather than the character.",
+    "source": "@x\n"
+  },
+  {
+    "name": "unterminated_single.jsonnet",
+    "why": "No corpus file provokes a lexer error, so every message below is ungraded by it.",
+    "source": "'abc"
+  },
+  {
+    "name": "unterminated_in_object.jsonnet",
+    "why": "The same error with a non-trivial column, which is what the parse-error fixture pins.",
+    "source": "{ a: 'oops }\n"
+  },
+  {
+    "name": "unterminated_verbatim.jsonnet",
+    "source": "@\"abc"
+  },
+  {
+    "name": "bad_character.jsonnet",
+    "why": "A character that starts no token at all.",
+    "source": "`\n"
+  },
+  {
+    "name": "number_underscores.jsonnet",
+    "why": "Separators are dropped from the token data, so the formatter writes 1000 where the author wrote 1_000.",
+    "source": "1_000\n"
+  },
+  {
+    "name": "number_leading_zero_underscore.jsonnet",
+    "source": "0_1\n"
+  },
+  {
+    "name": "number_junk_after_dot.jsonnet",
+    "source": "1.x\n"
+  },
+  {
+    "name": "number_junk_after_e.jsonnet",
+    "source": "1ex\n"
+  },
+  {
+    "name": "number_junk_after_exp_sign.jsonnet",
+    "source": "1e+x\n"
+  },
+  {
+    "name": "number_junk_after_underscore.jsonnet",
+    "source": "1_x\n"
+  },
+  {
+    "name": "number_exponents.jsonnet",
+    "why": "The accepting paths through the state machine, not just the rejecting ones.",
+    "source": "[1e10, 1.5E-3, 0.5, 1_0.0_1e1_0]\n"
+  },
+  {
+    "name": "operator_plus_run.jsonnet",
+    "why": "The wind-back reads its deciding character once and never reassigns it, so a run of + cannot form one operator.",
+    "source": "+++\n"
+  },
+  {
+    "name": "operator_multi_symbol.jsonnet",
+    "why": "And a multi-symbol operator that does not end in one of + - ~ ! $ survives intact.",
+    "source": "a >= b\n"
+  },
+  {
+    "name": "operator_ends_with_bang.jsonnet",
+    "why": "Wind-back again, on an operator that genuinely ends with a forbidden character.",
+    "source": "a ==! b\n"
+  },
+  {
+    "name": "dollar.jsonnet",
+    "why": "$ reaches the lexer through the operator path and is then re-labelled.",
+    "source": "$\n"
+  },
+  {
+    "name": "tab_indent.jsonnet",
+    "why": "A tab counts as 8 spaces of indent and nothing downstream recovers it.",
+    "source": "a\n\tb\n"
+  },
+  {
+    "name": "mixed_tab_space_indent.jsonnet",
+    "why": "Spaces then a tab, which is the ill-advised case the lexer comments on.",
+    "source": "a\n  \tb\n"
+  },
+  {
+    "name": "crlf.jsonnet",
+    "why": "\\r is consumed as whitespace and contributes no indent, which is half of why a CRLF file does not round-trip.",
+    "source": "a\r\n  b\r\n"
+  },
+  {
+    "name": "comment_paragraph.jsonnet",
+    "why": "First on its line, so a paragraph.",
+    "source": "// c\nx\n"
+  },
+  {
+    "name": "comment_line_end.jsonnet",
+    "why": "After a token on the same line, so a line end carrying the comment.",
+    "source": "x  // c\ny\n"
+  },
+  {
+    "name": "comment_hash.jsonnet",
+    "source": "# c\nx\n"
+  },
+  {
+    "name": "comment_trailing_whitespace.jsonnet",
+    "why": "Trailing horizontal whitespace is stripped at lex time and never restored.",
+    "source": "// c   \nx\n"
+  },
+  {
+    "name": "c_comment_interstitial.jsonnet",
+    "why": "One line, so it flows after the token it follows.",
+    "source": "a /* c */ b\n"
+  },
+  {
+    "name": "c_comment_paragraph.jsonnet",
+    "why": "More than one line, so a paragraph — and this is where the dead allStar hack lives.",
+    "source": "/* a\n b */\nx\n"
+  },
+  {
+    "name": "c_comment_star_lhs.jsonnet",
+    "why": "Every continuation line begins with *, which is exactly what allStar claims to handle — and it still does not fire, because the first line begins with the comment's own /.",
+    "source": "/* a\n * b\n * c */\nx\n"
+  },
+  {
+    "name": "c_comment_unterminated.jsonnet",
+    "source": "/* a"
+  },
+  {
+    "name": "blank_line_run.jsonnet",
+    "why": "Blank lines become a count, and the indent is whatever follows the last newline.",
+    "source": "a\n\n\n  b\n"
+  },
+  {
+    "name": "text_block.jsonnet",
+    "why": "Both indents are recorded and the unparser reproduces them verbatim.",
+    "source": "|||\n  a\n|||\n"
+  },
+  {
+    "name": "text_block_chomp.jsonnet",
+    "why": "|||- drops the final newline.",
+    "source": "|||-\n  a\n|||\n"
+  },
+  {
+    "name": "text_block_blank_lines.jsonnet",
+    "why": "Leading and interior blank lines, which are handled before and inside the indent loop respectively.",
+    "source": "|||\n\n  a\n\n  b\n|||\n"
+  },
+  {
+    "name": "text_block_term_indent.jsonnet",
+    "why": "The closing ||| may be indented less than the body, and that indent is kept separately.",
+    "source": "{\n  a: |||\n    x\n  |||,\n}\n"
+  },
+  {
+    "name": "text_block_no_whitespace.jsonnet",
+    "source": "|||\na\n|||\n"
+  },
+  {
+    "name": "text_block_no_newline.jsonnet",
+    "source": "||| a\n"
+  },
+  {
+    "name": "eof_fodder.jsonnet",
+    "why": "Final whitespace is discarded, so a trailing comment lands on the end-of-file token and nothing else does.",
+    "source": "x\n// last\n"
+  },
+  {
+    "name": "empty.jsonnet",
+    "why": "An empty file still produces an end-of-file token.",
+    "source": ""
+  },
+  {
+    "name": "only_whitespace.jsonnet",
+    "why": "And whitespace alone produces no fodder, because final whitespace is discarded.",
+    "source": "\n\n  \n"
+  },
+  {
+    "name": "utf8_locations.jsonnet",
+    "source": "[\"é€😀\", @'é'] // €\n\ttrue\r\n",
+    "why": "Byte columns after multibyte strings and comments, tabs, CRLF, and EOF."
+  },
+  {
+    "name": "block_utf8_locations.jsonnet",
+    "source": "|||\r\n  é€😀\r\n||| /* trailing é */",
+    "why": "Block-string end positions and trailing trivia without final newline."
+  },
+  {
+    "name": "byte_quoted_0.jsonnet",
+    "sourceHex": "22ff222074727565"
+  },
+  {
+    "name": "byte_single_quoted_0.jsonnet",
+    "sourceHex": "27ff272074727565"
+  },
+  {
+    "name": "byte_line_comment_0.jsonnet",
+    "sourceHex": "2f2fff0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_0.jsonnet",
+    "sourceHex": "23ff0a74727565"
+  },
+  {
+    "name": "byte_c_comment_0.jsonnet",
+    "sourceHex": "2f2aff2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_0.jsonnet",
+    "sourceHex": "2f2a0a20ff0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_0.jsonnet",
+    "sourceHex": "4027ff272074727565"
+  },
+  {
+    "name": "byte_block_0.jsonnet",
+    "sourceHex": "7c7c7c0a2020ff0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_1.jsonnet",
+    "sourceHex": "22e282222074727565"
+  },
+  {
+    "name": "byte_single_quoted_1.jsonnet",
+    "sourceHex": "27e282272074727565"
+  },
+  {
+    "name": "byte_line_comment_1.jsonnet",
+    "sourceHex": "2f2fe2820d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_1.jsonnet",
+    "sourceHex": "23e2820a74727565"
+  },
+  {
+    "name": "byte_c_comment_1.jsonnet",
+    "sourceHex": "2f2ae2822a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_1.jsonnet",
+    "sourceHex": "2f2a0a20e2820a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_1.jsonnet",
+    "sourceHex": "4027e282272074727565"
+  },
+  {
+    "name": "byte_block_1.jsonnet",
+    "sourceHex": "7c7c7c0a2020e2820a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_2.jsonnet",
+    "sourceHex": "22f09f98222074727565"
+  },
+  {
+    "name": "byte_single_quoted_2.jsonnet",
+    "sourceHex": "27f09f98272074727565"
+  },
+  {
+    "name": "byte_line_comment_2.jsonnet",
+    "sourceHex": "2f2ff09f980d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_2.jsonnet",
+    "sourceHex": "23f09f980a74727565"
+  },
+  {
+    "name": "byte_c_comment_2.jsonnet",
+    "sourceHex": "2f2af09f982a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_2.jsonnet",
+    "sourceHex": "2f2a0a20f09f980a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_2.jsonnet",
+    "sourceHex": "4027f09f98272074727565"
+  },
+  {
+    "name": "byte_block_2.jsonnet",
+    "sourceHex": "7c7c7c0a2020f09f980a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_3.jsonnet",
+    "sourceHex": "22c0af222074727565"
+  },
+  {
+    "name": "byte_single_quoted_3.jsonnet",
+    "sourceHex": "27c0af272074727565"
+  },
+  {
+    "name": "byte_line_comment_3.jsonnet",
+    "sourceHex": "2f2fc0af0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_3.jsonnet",
+    "sourceHex": "23c0af0a74727565"
+  },
+  {
+    "name": "byte_c_comment_3.jsonnet",
+    "sourceHex": "2f2ac0af2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_3.jsonnet",
+    "sourceHex": "2f2a0a20c0af0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_3.jsonnet",
+    "sourceHex": "4027c0af272074727565"
+  },
+  {
+    "name": "byte_block_3.jsonnet",
+    "sourceHex": "7c7c7c0a2020c0af0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_4.jsonnet",
+    "sourceHex": "22eda080222074727565"
+  },
+  {
+    "name": "byte_single_quoted_4.jsonnet",
+    "sourceHex": "27eda080272074727565"
+  },
+  {
+    "name": "byte_line_comment_4.jsonnet",
+    "sourceHex": "2f2feda0800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_4.jsonnet",
+    "sourceHex": "23eda0800a74727565"
+  },
+  {
+    "name": "byte_c_comment_4.jsonnet",
+    "sourceHex": "2f2aeda0802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_4.jsonnet",
+    "sourceHex": "2f2a0a20eda0800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_4.jsonnet",
+    "sourceHex": "4027eda080272074727565"
+  },
+  {
+    "name": "byte_block_4.jsonnet",
+    "sourceHex": "7c7c7c0a2020eda0800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_5.jsonnet",
+    "sourceHex": "22f4908080222074727565"
+  },
+  {
+    "name": "byte_single_quoted_5.jsonnet",
+    "sourceHex": "27f4908080272074727565"
+  },
+  {
+    "name": "byte_line_comment_5.jsonnet",
+    "sourceHex": "2f2ff49080800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_5.jsonnet",
+    "sourceHex": "23f49080800a74727565"
+  },
+  {
+    "name": "byte_c_comment_5.jsonnet",
+    "sourceHex": "2f2af49080802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_5.jsonnet",
+    "sourceHex": "2f2a0a20f49080800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_5.jsonnet",
+    "sourceHex": "4027f4908080272074727565"
+  },
+  {
+    "name": "byte_block_5.jsonnet",
+    "sourceHex": "7c7c7c0a2020f49080800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_6.jsonnet",
+    "sourceHex": "228041ff222074727565"
+  },
+  {
+    "name": "byte_single_quoted_6.jsonnet",
+    "sourceHex": "278041ff272074727565"
+  },
+  {
+    "name": "byte_line_comment_6.jsonnet",
+    "sourceHex": "2f2f8041ff0d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_6.jsonnet",
+    "sourceHex": "238041ff0a74727565"
+  },
+  {
+    "name": "byte_c_comment_6.jsonnet",
+    "sourceHex": "2f2a8041ff2a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_6.jsonnet",
+    "sourceHex": "2f2a0a208041ff0a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_6.jsonnet",
+    "sourceHex": "40278041ff272074727565"
+  },
+  {
+    "name": "byte_block_6.jsonnet",
+    "sourceHex": "7c7c7c0a20208041ff0a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_quoted_7.jsonnet",
+    "sourceHex": "22c3a9e282acf09f9880222074727565"
+  },
+  {
+    "name": "byte_single_quoted_7.jsonnet",
+    "sourceHex": "27c3a9e282acf09f9880272074727565"
+  },
+  {
+    "name": "byte_line_comment_7.jsonnet",
+    "sourceHex": "2f2fc3a9e282acf09f98800d0a74727565"
+  },
+  {
+    "name": "byte_hash_comment_7.jsonnet",
+    "sourceHex": "23c3a9e282acf09f98800a74727565"
+  },
+  {
+    "name": "byte_c_comment_7.jsonnet",
+    "sourceHex": "2f2ac3a9e282acf09f98802a2f74727565"
+  },
+  {
+    "name": "byte_multiline_comment_7.jsonnet",
+    "sourceHex": "2f2a0a20c3a9e282acf09f98800a2a2f74727565"
+  },
+  {
+    "name": "byte_verbatim_7.jsonnet",
+    "sourceHex": "4027c3a9e282acf09f9880272074727565"
+  },
+  {
+    "name": "byte_block_7.jsonnet",
+    "sourceHex": "7c7c7c0a2020c3a9e282acf09f98800a7c7c7c2074727565"
+  },
+  {
+    "name": "byte_error.jsonnet",
+    "sourceHex": "22ff22203f"
+  },
+  {
+    "name": "byte_escape.jsonnet",
+    "sourceHex": "225ce28222"
+  },
+  {
+    "name": "byte_eof.jsonnet",
+    "sourceHex": "2f2fff"
+  },
+  {
+    "name": "byte_verbatim_error.jsonnet",
+    "sourceHex": "40ff"
+  },
+  {
+    "name": "number_eof.jsonnet",
+    "source": "1e"
+  },
+  {
+    "name": "coalesce_extension.jsonnet",
+    "source": "a ?? b"
+  },
+  {
+    "name": "short_c_comment.jsonnet",
+    "source": "/*/"
+  }
+]

@@ -1,0 +1,4034 @@
+[
+  {
+    "source": "verbatim_double.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          8
+        ],
+        "kind": "VERBATIM_STRING_DOUBLE",
+        "data": "a\"b"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "verbatim_single.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          8
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "a'b"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "verbatim_junk.jsonnet",
+    "error": "verbatim_junk.jsonnet:1:1 Couldn't lex verbatim string, junk after '@': 120"
+  },
+  {
+    "source": "unterminated_single.jsonnet",
+    "error": "unterminated_single.jsonnet:1:1 Unterminated String"
+  },
+  {
+    "source": "unterminated_in_object.jsonnet",
+    "error": "unterminated_in_object.jsonnet:1:6 Unterminated String"
+  },
+  {
+    "source": "unterminated_verbatim.jsonnet",
+    "error": "unterminated_verbatim.jsonnet:1:1 Unterminated String"
+  },
+  {
+    "source": "bad_character.jsonnet",
+    "error": "bad_character.jsonnet:1:1 Could not lex the character '`'"
+  },
+  {
+    "source": "number_underscores.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "NUMBER",
+        "data": "1000"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "number_leading_zero_underscore.jsonnet",
+    "error": "number_leading_zero_underscore.jsonnet:1:2 Couldn't lex number, _ not allowed after leading 0"
+  },
+  {
+    "source": "number_junk_after_dot.jsonnet",
+    "error": "number_junk_after_dot.jsonnet:1:3 Couldn't lex number, junk after decimal point: 'x'"
+  },
+  {
+    "source": "number_junk_after_e.jsonnet",
+    "error": "number_junk_after_e.jsonnet:1:3 Couldn't lex number, junk after 'E': 'x'"
+  },
+  {
+    "source": "number_junk_after_exp_sign.jsonnet",
+    "error": "number_junk_after_exp_sign.jsonnet:1:4 Couldn't lex number, junk after exponent sign: 'x'"
+  },
+  {
+    "source": "number_junk_after_underscore.jsonnet",
+    "error": "number_junk_after_underscore.jsonnet:1:3 Couldn't lex number, junk after '_': 'x'"
+  },
+  {
+    "source": "number_exponents.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "\"[\"",
+        "data": "["
+      },
+      {
+        "begin": [
+          1,
+          2
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "NUMBER",
+        "data": "1e10"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          14
+        ],
+        "kind": "NUMBER",
+        "data": "1.5E-3"
+      },
+      {
+        "begin": [
+          1,
+          14
+        ],
+        "end": [
+          1,
+          15
+        ],
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "begin": [
+          1,
+          16
+        ],
+        "end": [
+          1,
+          19
+        ],
+        "kind": "NUMBER",
+        "data": "0.5"
+      },
+      {
+        "begin": [
+          1,
+          19
+        ],
+        "end": [
+          1,
+          20
+        ],
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "begin": [
+          1,
+          21
+        ],
+        "end": [
+          1,
+          32
+        ],
+        "kind": "NUMBER",
+        "data": "10.01e10"
+      },
+      {
+        "begin": [
+          1,
+          32
+        ],
+        "end": [
+          1,
+          33
+        ],
+        "kind": "\"]\"",
+        "data": "]"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_plus_run.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "begin": [
+          1,
+          2
+        ],
+        "end": [
+          1,
+          3
+        ],
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "begin": [
+          1,
+          3
+        ],
+        "end": [
+          1,
+          4
+        ],
+        "kind": "OPERATOR",
+        "data": "+"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_multi_symbol.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          1,
+          3
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "OPERATOR",
+        "data": "\u003e="
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "operator_ends_with_bang.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          1,
+          3
+        ],
+        "end": [
+          1,
+          4
+        ],
+        "kind": "OPERATOR",
+        "data": "="
+      },
+      {
+        "begin": [
+          1,
+          4
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "OPERATOR",
+        "data": "="
+      },
+      {
+        "begin": [
+          1,
+          5
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "OPERATOR",
+        "data": "!"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          8
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "dollar.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "\"$\"",
+        "data": "$"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "tab_indent.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          2,
+          2
+        ],
+        "end": [
+          2,
+          3
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 8
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "mixed_tab_space_indent.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          2,
+          4
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 10
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "crlf.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          2,
+          3
+        ],
+        "end": [
+          2,
+          4
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_paragraph.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_line_end.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x"
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "y",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_hash.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "# c"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "comment_trailing_whitespace.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// c"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_interstitial.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* c */"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_paragraph.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* a",
+              " b */"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          4,
+          1
+        ],
+        "end": [
+          4,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_star_lhs.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          4,
+          1
+        ],
+        "end": [
+          4,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* a",
+              " * b",
+              " * c */"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          5,
+          1
+        ],
+        "end": [
+          5,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "c_comment_unterminated.jsonnet",
+    "error": "c_comment_unterminated.jsonnet:1:1 Multi-line comment has no terminating */"
+  },
+  {
+    "source": "blank_line_run.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a"
+      },
+      {
+        "begin": [
+          4,
+          3
+        ],
+        "end": [
+          4,
+          4
+        ],
+        "kind": "IDENTIFIER",
+        "data": "b",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 2,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "begin": [
+          5,
+          1
+        ],
+        "end": [
+          5,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "a\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          4,
+          1
+        ],
+        "end": [
+          4,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_chomp.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "a",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          4,
+          1
+        ],
+        "end": [
+          4,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_blank_lines.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          6,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "\na\n\nb\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          7,
+          1
+        ],
+        "end": [
+          7,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_term_indent.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "\"{\"",
+        "data": "{"
+      },
+      {
+        "begin": [
+          2,
+          3
+        ],
+        "end": [
+          2,
+          4
+        ],
+        "kind": "IDENTIFIER",
+        "data": "a",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 2
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          4
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "OPERATOR",
+        "data": ":"
+      },
+      {
+        "begin": [
+          2,
+          6
+        ],
+        "end": [
+          4,
+          6
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "x\n",
+        "stringBlockIndent": "    ",
+        "stringBlockTermIndent": "  "
+      },
+      {
+        "begin": [
+          4,
+          6
+        ],
+        "end": [
+          4,
+          7
+        ],
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "begin": [
+          5,
+          1
+        ],
+        "end": [
+          5,
+          2
+        ],
+        "kind": "\"}\"",
+        "data": "}",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          }
+        ]
+      },
+      {
+        "begin": [
+          6,
+          1
+        ],
+        "end": [
+          6,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "text_block_no_whitespace.jsonnet",
+    "error": "text_block_no_whitespace.jsonnet:1:1 Text block's first line must start with whitespace"
+  },
+  {
+    "source": "text_block_no_newline.jsonnet",
+    "error": "text_block_no_newline.jsonnet:1:1 Text block requires new line after |||."
+  },
+  {
+    "source": "eof_fodder.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "IDENTIFIER",
+        "data": "x"
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "// last"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "empty.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "only_whitespace.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          4,
+          1
+        ],
+        "end": [
+          4,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "utf8_locations.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          2
+        ],
+        "kind": "\"[\"",
+        "data": "["
+      },
+      {
+        "begin": [
+          1,
+          2
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "é€😀"
+      },
+      {
+        "begin": [
+          1,
+          13
+        ],
+        "end": [
+          1,
+          14
+        ],
+        "kind": "\",\"",
+        "data": ","
+      },
+      {
+        "begin": [
+          1,
+          15
+        ],
+        "end": [
+          1,
+          20
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "é"
+      },
+      {
+        "begin": [
+          1,
+          20
+        ],
+        "end": [
+          1,
+          21
+        ],
+        "kind": "\"]\"",
+        "data": "]"
+      },
+      {
+        "begin": [
+          2,
+          2
+        ],
+        "end": [
+          2,
+          6
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 8,
+            "comment": [
+              "// €"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          1
+        ],
+        "end": [
+          3,
+          1
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "block_utf8_locations.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "é€😀\r\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          22
+        ],
+        "end": [
+          3,
+          22
+        ],
+        "kind": "end of file",
+        "fodder": [
+          {
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/* trailing é */"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_0.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "ff",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          4
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "�"
+      },
+      {
+        "begin": [
+          1,
+          5
+        ],
+        "end": [
+          1,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          9
+        ],
+        "end": [
+          1,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_0.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "ff",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          4
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "�"
+      },
+      {
+        "begin": [
+          1,
+          5
+        ],
+        "end": [
+          1,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          9
+        ],
+        "end": [
+          1,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//�"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#�"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2aff2a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*�*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " �",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "�"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_0.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "�\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_1.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "e282",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_1.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "e282",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//��"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#��"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2ae2822a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*��*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " ��",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_1.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "��\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_2.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "f09f98",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_2.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "f09f98",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//���"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#���"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2af09f982a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*���*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " ���",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_2.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "���\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_3.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "c0af",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_3.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "c0af",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          5
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          10
+        ],
+        "end": [
+          1,
+          10
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//��"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#��"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2ac0af2a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*��*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " ��",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "��"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_3.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "��\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_4.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "eda080",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_4.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "eda080",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//���"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#���"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2aeda0802a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*���*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " ���",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "���"
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_4.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "���\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_5.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "f4908080",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "����"
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_5.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "f4908080",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "����"
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//����"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#����"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          9
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2af49080802a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*����*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          13
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " ����",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          8
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "����"
+      },
+      {
+        "begin": [
+          1,
+          9
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          13
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_5.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "����\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_6.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "8041ff",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "�A�"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_6.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "8041ff",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "�A�"
+      },
+      {
+        "begin": [
+          1,
+          7
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          11
+        ],
+        "end": [
+          1,
+          11
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//�A�"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#�A�"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "commentHex": [
+              "2f2a8041ff2a2f"
+            ],
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*�A�*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " �A�",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          7
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "�A�"
+      },
+      {
+        "begin": [
+          1,
+          8
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          12
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_6.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "�A�\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_quoted_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "é€😀"
+      },
+      {
+        "begin": [
+          1,
+          13
+        ],
+        "end": [
+          1,
+          17
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          17
+        ],
+        "end": [
+          1,
+          17
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_single_quoted_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          12
+        ],
+        "kind": "STRING_SINGLE",
+        "data": "é€😀"
+      },
+      {
+        "begin": [
+          1,
+          13
+        ],
+        "end": [
+          1,
+          17
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          17
+        ],
+        "end": [
+          1,
+          17
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_line_comment_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//é€😀"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_hash_comment_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          2,
+          1
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "#é€😀"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          2,
+          5
+        ],
+        "end": [
+          2,
+          5
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_c_comment_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          14
+        ],
+        "end": [
+          1,
+          18
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "Interstitial",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*é€😀*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          1,
+          18
+        ],
+        "end": [
+          1,
+          18
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_multiline_comment_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          3,
+          3
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "true",
+        "data": "true",
+        "fodder": [
+          {
+            "kind": "LineEnd",
+            "blanks": 0,
+            "indent": 0
+          },
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "/*",
+              " é€😀",
+              "*/"
+            ]
+          }
+        ]
+      },
+      {
+        "begin": [
+          3,
+          7
+        ],
+        "end": [
+          3,
+          7
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          13
+        ],
+        "kind": "VERBATIM_STRING_SINGLE",
+        "data": "é€😀"
+      },
+      {
+        "begin": [
+          1,
+          14
+        ],
+        "end": [
+          1,
+          18
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          1,
+          18
+        ],
+        "end": [
+          1,
+          18
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_block_7.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          3,
+          4
+        ],
+        "kind": "STRING_BLOCK",
+        "data": "é€😀\n",
+        "stringBlockIndent": "  "
+      },
+      {
+        "begin": [
+          3,
+          5
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "true",
+        "data": "true"
+      },
+      {
+        "begin": [
+          3,
+          9
+        ],
+        "end": [
+          3,
+          9
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_error.jsonnet",
+    "error": "byte_error.jsonnet:1:5 Could not lex the character '?'"
+  },
+  {
+    "source": "byte_escape.jsonnet",
+    "tokens": [
+      {
+        "dataHex": "5ce282",
+        "begin": [
+          1,
+          1
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "STRING_DOUBLE",
+        "data": "\\��"
+      },
+      {
+        "begin": [
+          1,
+          6
+        ],
+        "end": [
+          1,
+          6
+        ],
+        "kind": "end of file"
+      }
+    ]
+  },
+  {
+    "source": "byte_eof.jsonnet",
+    "tokens": [
+      {
+        "begin": [
+          1,
+          4
+        ],
+        "end": [
+          1,
+          4
+        ],
+        "kind": "end of file",
+        "fodder": [
+          {
+            "kind": "Paragraph",
+            "blanks": 0,
+            "indent": 0,
+            "comment": [
+              "//�"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "byte_verbatim_error.jsonnet",
+    "error": "byte_verbatim_error.jsonnet:1:1 Couldn't lex verbatim string, junk after '@': 65533"
+  },
+  {
+    "source": "number_eof.jsonnet",
+    "error": "number_eof.jsonnet:1:3 Couldn't lex number, junk after 'E': '\\ufffd'"
+  },
+  {
+    "source": "coalesce_extension.jsonnet",
+    "error": "coalesce_extension.jsonnet:1:3 Could not lex the character '?'"
+  },
+  {
+    "source": "short_c_comment.jsonnet",
+    "error": "short_c_comment.jsonnet:1:1 Multi-line comment has no terminating */"
+  }
+]

@@ -1,0 +1,152 @@
+[
+  {
+    "name": "0",
+    "inputHex": "5c7530303431",
+    "outputHex": "41",
+    "errorHex": ""
+  },
+  {
+    "name": "1",
+    "inputHex": "5c7530306539",
+    "outputHex": "c3a9",
+    "errorHex": ""
+  },
+  {
+    "name": "2",
+    "inputHex": "5c75643833645c7564653030",
+    "outputHex": "f09f9880",
+    "errorHex": ""
+  },
+  {
+    "name": "3",
+    "inputHex": "5c7530303030",
+    "outputHex": "00",
+    "errorHex": ""
+  },
+  {
+    "name": "4",
+    "inputHex": "5c7564376666",
+    "outputHex": "ed9fbf",
+    "errorHex": ""
+  },
+  {
+    "name": "5",
+    "inputHex": "5c7565303030",
+    "outputHex": "ee8080",
+    "errorHex": ""
+  },
+  {
+    "name": "6",
+    "inputHex": "5c75643830305c7564633030",
+    "outputHex": "f0908080",
+    "errorHex": ""
+  },
+  {
+    "name": "7",
+    "inputHex": "5c75646266665c7564666666",
+    "outputHex": "f48fbfbf",
+    "errorHex": ""
+  },
+  {
+    "name": "8",
+    "inputHex": "5c75646330305c7564383030",
+    "outputHex": "efbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "9",
+    "inputHex": "5c75643830305c7530303431",
+    "outputHex": "efbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "10",
+    "inputHex": "5c75",
+    "outputHex": "",
+    "errorHex": "205472756e636174656420756e69636f6465206573636170652073657175656e636520696e20737472696e67206c69746572616c2e"
+  },
+  {
+    "name": "11",
+    "inputHex": "5c75303034",
+    "outputHex": "",
+    "errorHex": "205472756e636174656420756e69636f6465206573636170652073657175656e636520696e20737472696e67206c69746572616c2e"
+  },
+  {
+    "name": "12",
+    "inputHex": "5c752b303031",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206573636170652073657175656e636520776173206d616c666f726d65643a205c752b30"
+  },
+  {
+    "name": "13",
+    "inputHex": "5c755a5a5a5a",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206573636170652073657175656e636520776173206d616c666f726d65643a205c755a5a"
+  },
+  {
+    "name": "14",
+    "inputHex": "5c753132e282ac78",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206573636170652073657175656e636520776173206d616c666f726d65643a205c753132"
+  },
+  {
+    "name": "15",
+    "inputHex": "5c7564666666",
+    "outputHex": "",
+    "errorHex": "205472756e636174656420756e69636f646520737572726f676174652070616972206573636170652073657175656e636520696e20737472696e67206c69746572616c2e"
+  },
+  {
+    "name": "16",
+    "inputHex": "5c75643830305c75303030",
+    "outputHex": "",
+    "errorHex": "205472756e636174656420756e69636f646520737572726f676174652070616972206573636170652073657175656e636520696e20737472696e67206c69746572616c2e"
+  },
+  {
+    "name": "17",
+    "inputHex": "c3a9e282ac5c755a5a5a5a",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206573636170652073657175656e636520776173206d616c666f726d65643a20c3a9e282"
+  },
+  {
+    "name": "18",
+    "inputHex": "c3a9e282ac5c75643830305c755a5a5a5a",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206c6f7720737572726f67617465206573636170652073657175656e636520776173206d616c666f726d65643a20c3a9e282"
+  },
+  {
+    "name": "bytes-0",
+    "inputHex": "ff",
+    "outputHex": "efbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "bytes-1",
+    "inputHex": "e282",
+    "outputHex": "efbfbdefbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "bytes-2",
+    "inputHex": "f09f98",
+    "outputHex": "efbfbdefbfbdefbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "bytes-3",
+    "inputHex": "eda080",
+    "outputHex": "efbfbdefbfbdefbfbd",
+    "errorHex": ""
+  },
+  {
+    "name": "bytes-4",
+    "inputHex": "ff5c755a5a5a5a",
+    "outputHex": "",
+    "errorHex": "20556e69636f6465206573636170652073657175656e636520776173206d616c666f726d65643a20ff5c755a"
+  },
+  {
+    "name": "bytes-5",
+    "inputHex": "5cff",
+    "outputHex": "",
+    "errorHex": "20556e6b6e6f776e206573636170652073657175656e636520696e20737472696e67206c69746572616c3a205cefbfbd"
+  }
+]
