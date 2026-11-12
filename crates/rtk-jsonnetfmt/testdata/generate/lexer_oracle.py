@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the required lexer oracles using pinned go-jsonnet in a temporary copy."""
+"""Generate runtime corpus answers or regenerate small saved regression oracles."""
 
 import argparse
 import json
@@ -12,7 +12,9 @@ import tempfile
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="compare without changing fixtures")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="compare small saved fixtures without changing them")
+    mode.add_argument("--corpus-output", type=Path, help="generate the corpus oracle at this temporary output path")
     args = parser.parse_args()
     generator = Path(__file__).resolve().parent
     data = generator.parent
@@ -46,12 +48,14 @@ def main():
         source_list = stage / "sources.txt"
         source_list.write_text("\n".join(sources) + "\n")
         generated = []
-        for name, inputs in [
+        cases = [
             ("lexer-oracle.json", {"FODDERDUMP_ROOT": str(root),
                                    "FODDERDUMP_SOURCES": str(source_list)}),
+        ] if args.corpus_output else [
             ("lexer-snippet-oracle.json", {"FODDERDUMP_SNIPPETS": str(data / "lexer-snippets.json")}),
             ("string-oracle.json", {"FODDERDUMP_STRINGS": str(data / "string-snippets.json")}),
-        ]:
+        ]
+        for name, inputs in cases:
             output = stage / name
             run_env = {key: value for key, value in env.items() if not key.startswith("FODDERDUMP_")}
             run_env.update(inputs, FODDERDUMP_OUT=str(output))
@@ -59,11 +63,13 @@ def main():
                            cwd=upstream, env=run_env, check=True)
             generated.append((data / name, output.read_bytes()))
         # Do not replace any saved oracle until all generators have succeeded.
-        if args.check:
+        if args.corpus_output:
+            args.corpus_output.write_bytes(generated[0][1])
+        elif args.check:
             stale = [str(path) for path, content in generated if path.read_bytes() != content]
             if stale:
                 raise SystemExit("stale lexer oracles; run make update-fmt-lexer-oracle:\n" + "\n".join(stale))
-            print("All lexer/string oracles match go-jsonnet v0.22.0 byte for byte")
+            print("Small lexer/string oracles match go-jsonnet v0.22.0 byte for byte")
         else:
             for path, content in generated:
                 path.write_bytes(content)

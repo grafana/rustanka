@@ -68,39 +68,45 @@ the byte formatter entrypoint, write output and diagnostics as bytes, and
 compare captured stdout/stderr as `Vec<u8>`. Its file/stdin integration tests
 remain owned by that PR. Native filenames are a separate FMT-02 concern.
 
-## FMT-08 / FMT-09 / FMT-11: required saved evidence
+## FMT-08 / FMT-09 / FMT-11: runtime corpus and saved regressions
 
-Run `cargo test -p rtk-jsonnetfmt` without Go. Checked-in oracles are mandatory:
-missing, unreadable, malformed, empty, or structurally incomplete data fails.
-The source manifest must match the corpus oracle; snippet names and string
-inputs are checked against their corresponding saved results. Failure-mode
-tests use disposable files/directories rather than renaming repository data.
-The original decoded-character tests remain alongside actual Unicode escape,
-surrogate boundary, and malformed-sequence tests.
+`cargo test -p rtk-jsonnetfmt` generates the large corpus oracle at runtime using
+Python 3 and pinned go-jsonnet v0.22.0. The answer lives in a fresh temporary
+directory and is deleted after the test; it is not committed. The 138 inputs in
+`lexer-sources.json`, the baseline, and all token/fodder/location comparisons are
+unchanged. Missing Go/Python, failed generation, or missing, malformed or empty
+output fails the test; there is no availability-based skip.
 
-Run `make update-fmt-lexer-oracle` to regenerate all three artifacts:
+The small lexer snippets and raw-byte string regressions remain saved, so they
+can run without Go by selecting their Rust tests. Required saved fixtures still
+fail closed. The source manifest must match the generated corpus; snippet names
+and string inputs must match their saved results. Failure-mode tests use
+throwaway files/directories. The decoded-character tests remain alongside actual
+Unicode escape, surrogate boundary, and malformed-sequence tests.
 
-- `testdata/lexer-oracle.json` from `lexer-sources.json` (138 existing sources);
+`make update-fmt-lexer-oracle` regenerates only the small saved artifacts:
+
 - `testdata/lexer-snippet-oracle.json` from `lexer-snippets.json`;
-- `testdata/string-oracle.json` from `string-snippets.json` (raw unescape bytes).
+- `testdata/string-oracle.json` from `string-snippets.json`.
 
-The target requires Python 3 and Go. It copies pinned go-jsonnet v0.22.0 into a
-fresh temporary directory, stages the internal parser dumper, and only writes
-saved files after all generation succeeds. It does not need the later PR's
-formatter corpus manifest and does not invoke Git. Module checksums are checked
-by Go. Invalid token/comment/diagnostic bytes use hex in the JSON so JSON's UTF-8
-replacement cannot hide a difference.
+`make check-fmt-lexer-oracle` compares those two artifacts byte for byte without
+rewriting them. CI installs Go 1.27.1 explicitly for both this check and the main
+Rust test job, where the live corpus comparison is mandatory.
 
-`make check-fmt-lexer-oracle` regenerates into a temporary directory and compares
-all artifacts byte for byte without rewriting them. The CI job runs this with
-Go 1.27.1. Regular Rust tests keep using required saved fixtures; live Go is a
-regeneration check, not a prerequisite for every Rust test run.
+The generator copies pinned go-jsonnet into a temporary directory and stages an
+internal parser test. Installed `tk`/`jsonnet` binaries alone cannot expose token
+fodder and locations. Go verifies module checksums; generation does not invoke
+Git. Invalid token/comment/diagnostic bytes use hex in JSON so UTF-8 replacement
+cannot hide a mismatch. To inspect a runtime answer manually:
+
+```sh
+python3 crates/rtk-jsonnetfmt/testdata/generate/lexer_oracle.py \
+  --corpus-output /tmp/rtk-lexer-oracle.json
+```
 
 ## FMT-02: inherited dependency
 
-PR #58 is still based on discovery commit `868be41fa0a54dbf7820301cfdc4251756270b3c`.
-Corrected PR #57 head `0cee1d86ba06732e93365f09f6a38c440ed2e46f` owns native
-`PathBuf` discovery, parent cleaning and Unicode glob fixes. Those changes were
-verified separately and were not duplicated here. Stack maintenance must carry
-that head forward before downstream CLI/acceptance adaptation. No branch,
+PR #58 now inherits PR #57's native `PathBuf` discovery, parent cleaning, and
+Unicode glob fixes. Keep those changes when carrying this stack forward; native
+filename handling remains separate from source-byte decoding. No branch,
 history, review, or GitHub state change is part of these local fixes.

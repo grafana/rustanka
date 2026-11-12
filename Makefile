@@ -17,8 +17,8 @@ help:
 	@echo "  check-rtk              - Run rtk checks only (fmt-check, lint, test-rtk)"
 	@echo "  ci                     - Run CI checks locally (fmt, lint-ci, test-rtk)"
 	@echo "  ci-full                - Run full CI checks (fmt, lint-ci, all tests)"
-	@echo "  update-fmt-lexer-oracle - Regenerate required lexer and string oracles"
-	@echo "  check-fmt-lexer-oracle  - Compare saved lexer/string oracles with pinned Go"
+	@echo "  update-fmt-lexer-oracle - Regenerate small lexer and string regression oracles"
+	@echo "  check-fmt-lexer-oracle  - Compare small saved lexer/string oracles with pinned Go"
 	@echo "  update-golden-fixtures - Regenerate golden files in test_fixtures using tk export"
 	@echo "  check-golden-fixtures  - Check that golden files are up to date (requires tk)"
 
@@ -82,7 +82,7 @@ check-golden-fixtures: target/release/jrsonnet target/release/tk-compare
 	@target/release/tk-compare --jrsonnet-path $(CURDIR)/target/release/jrsonnet golden-fixtures --dry-run --fixtures-dir $(GOLDEN_FIXTURES_DIR)
 	@echo "Golden files are up to date."
 
-# Required saved lexer fixtures; staging and comparisons never modify upstream.
+# Small saved regressions only. cargo test generates the large corpus oracle at runtime.
 .PHONY: update-fmt-lexer-oracle check-fmt-lexer-oracle
 update-fmt-lexer-oracle:
 	python3 crates/rtk-jsonnetfmt/testdata/generate/lexer_oracle.py

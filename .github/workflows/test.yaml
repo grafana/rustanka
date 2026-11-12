@@ -8,7 +8,11 @@ jobs:
       GOTOOLCHAIN: go1.27.1
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
-      - name: Check saved lexer tokens, fodder, and locations
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Check small saved lexer and string regressions
         run: make check-fmt-lexer-oracle
 
   check-golden-fixtures:
@@ -35,6 +39,7 @@ jobs:
     name: Run tests
     runs-on: ubuntu-latest
     env:
+      # Glob and lexer corpus parity tests generate Go answers at runtime.
       GOTOOLCHAIN: go1.27.1
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4

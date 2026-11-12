@@ -1,5 +1,6 @@
 //! Grades the lexer port against the tokens and fodder go-jsonnet's own lexer
-//! produces.
+//! produces. The corpus answer is generated at runtime in a temporary directory;
+//! small targeted regression answers remain checked in.
 //!
 //! This is the sharpest oracle in the crate, and the reason it exists at all is
 //! that the corpus is too far downstream: a lexer mistake only reaches text
@@ -37,6 +38,23 @@ struct FileDump {
 }
 
 impl FileDump {
+	fn generate_corpus(path: &Path) {
+		let generator = crate_dir().join("testdata/generate/lexer_oracle.py");
+		let output = std::process::Command::new("python3")
+			.arg(generator)
+			.arg("--corpus-output")
+			.arg(path)
+			.output()
+			.expect("corpus parity requires Python 3 and Go; generator must run");
+		assert!(
+			output.status.success(),
+			"Go corpus oracle generation failed ({}):\n{}\n{}",
+			output.status,
+			String::from_utf8_lossy(&output.stdout),
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+
 	fn read(path: &Path) -> Result<Vec<Self>, String> {
 		let raw = fs::read(path).map_err(|err| format!("reading {}: {err}", path.display()))?;
 		let dumps: Vec<Self> = serde_json::from_slice(&raw)
@@ -276,7 +294,9 @@ fn first_divergence(dump: &FileDump, input: &[u8]) -> Option<String> {
 
 #[test]
 fn lexer_matches_go_jsonnet_at_the_recorded_rate() {
-	let oracle_path = crate_dir().join("testdata/lexer-oracle.json");
+	let temporary = tempfile::tempdir().expect("temporary corpus oracle directory");
+	let oracle_path = temporary.path().join("lexer-oracle.json");
+	FileDump::generate_corpus(&oracle_path);
 	let dumps = FileDump::read(&oracle_path).unwrap_or_else(|err| panic!("{err}"));
 
 	let baseline_path = crate_dir().join("testdata/lexer-baseline.toml");
