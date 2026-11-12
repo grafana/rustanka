@@ -482,7 +482,8 @@ impl<'a> InlineCollector<'a> {
 					&& object
 						.get("kind", Hidden::Skip)?
 						.and_then(|kind| kind.as_str())
-						.as_deref() == Some("Environment")
+						.as_deref()
+						== Some("Environment")
 				{
 					let environment: Environment<'static> = deserializable.deserialize()?;
 					self.found.push(Discovered::from_environment(

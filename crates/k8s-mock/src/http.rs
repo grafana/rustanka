@@ -665,7 +665,8 @@ fn supports_strategic_merge_patch(path: &str) -> bool {
 	matches!(
 		group,
 		"apps"
-			| "batch" | "autoscaling"
+			| "batch"
+			| "autoscaling"
 			| "policy"
 			| "rbac.authorization.k8s.io"
 			| "networking.k8s.io"
