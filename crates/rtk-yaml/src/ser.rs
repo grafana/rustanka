@@ -1077,7 +1077,8 @@ impl<'a, W: Write> YamlSer<'a, W> {
 					let next_is_space = i + 1 < chars.len() && chars[i + 1] == ' ';
 					let should_break = !spaces
 						&& column > wrap_col
-						&& i > 0 && i < chars.len() - 1
+						&& i > 0
+						&& i < chars.len() - 1
 						&& !next_is_space;
 
 					if should_break {
@@ -2029,12 +2030,13 @@ impl<'a, 'b, W: Write> Serializer for &'a mut YamlSer<'b, W> {
 					// - does NOT contain `: ` (colon-space requires quoting, matches Go yaml.v3)
 					// - no control chars, tabs, or newlines
 					// - no trailing whitespace (trailing space requires quoting in YAML)
-					let can_use_folded_with_quotes =
-						v.contains('\'')
-							&& !v.starts_with('\'')
-							&& starts_with_letter && !has_colon_space
-							&& !v.chars().any(|c| c.is_control() || c == '\t' || c == '\n')
-							&& !v.ends_with(' ') && !v.ends_with('\t');
+					let can_use_folded_with_quotes = v.contains('\'')
+						&& !v.starts_with('\'')
+						&& starts_with_letter
+						&& !has_colon_space
+						&& !v.chars().any(|c| c.is_control() || c == '\t' || c == '\n')
+						&& !v.ends_with(' ')
+						&& !v.ends_with('\t');
 					let only_single_quotes = !is_plain_safe && can_use_folded_with_quotes;
 
 					// Use folded scalar (plain multiline) for:
@@ -4015,17 +4017,24 @@ impl<'a> Serializer for &'a mut KeyScalarSink<'a> {
 					|| matches!(
 						c,
 						'\n' | '\r'
-							| '\t' | '\0' | '\u{7}'
-							| '\u{8}' | '\u{b}' | '\u{c}'
-							| '\u{1b}' | '\u{FEFF}'
-							| '\u{0085}' | '\u{2028}'
+							| '\t'
+							| '\0'
+							| '\u{7}'
+							| '\u{8}'
+							| '\u{b}'
+							| '\u{c}'
+							| '\u{1b}'
+							| '\u{FEFF}'
+							| '\u{0085}'
+							| '\u{2028}'
 							| '\u{2029}'
 					)
 			});
 
 			// Check if string looks like another YAML type (needs double quotes to disambiguate)
 			let looks_like_other_type = v.is_empty()
-				|| v == "~" || v.eq_ignore_ascii_case("null")
+				|| v == "~"
+				|| v.eq_ignore_ascii_case("null")
 				|| v.eq_ignore_ascii_case("true")
 				|| v.eq_ignore_ascii_case("false");
 

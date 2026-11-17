@@ -56,12 +56,18 @@ pub(crate) fn is_plain_safe(s: &str) -> bool {
 		|| matches!(
 			bytes[0],
 			b'[' | b']'
-				| b'{' | b'}'
-				| b'#' | b'&'
-				| b'*' | b'!'
-				| b'|' | b'>'
-				| b'\'' | b'"'
-				| b'%' | b'@'
+				| b'{'
+				| b'}'
+				| b'#'
+				| b'&'
+				| b'*'
+				| b'!'
+				| b'|'
+				| b'>'
+				| b'\''
+				| b'"'
+				| b'%'
+				| b'@'
 				| b'`'
 		) {
 		return false;
@@ -134,12 +140,18 @@ pub(crate) fn is_plain_value_safe(s: &str) -> bool {
 		|| matches!(
 			bytes[0],
 			b'[' | b']'
-				| b'{' | b'}'
-				| b'#' | b'&'
-				| b'*' | b'!'
-				| b'|' | b'>'
-				| b'\'' | b'"'
-				| b'%' | b'@'
+				| b'{'
+				| b'}'
+				| b'#'
+				| b'&'
+				| b'*'
+				| b'!'
+				| b'|'
+				| b'>'
+				| b'\''
+				| b'"'
+				| b'%'
+				| b'@'
 				| b'`'
 		) {
 		return false;
@@ -229,12 +241,18 @@ pub(crate) fn is_plain_block_value_safe(s: &str) -> bool {
 		|| matches!(
 			bytes[0],
 			b'[' | b']'
-				| b'{' | b'}'
-				| b'#' | b'&'
-				| b'*' | b'!'
-				| b'|' | b'>'
-				| b'\'' | b'"'
-				| b'%' | b'@'
+				| b'{'
+				| b'}'
+				| b'#'
+				| b'&'
+				| b'*'
+				| b'!'
+				| b'|'
+				| b'>'
+				| b'\''
+				| b'"'
+				| b'%'
+				| b'@'
 				| b'`'
 		) {
 		return false;
