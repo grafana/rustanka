@@ -1,9 +1,9 @@
 //! Integration tests for ClusterConnection using HTTP mock server.
 
 use assert_matches::assert_matches;
-use k8s_mock::{discovery::DiscoveryMode, http::HttpMockK8sServer};
 use k8s_openapi::apimachinery::pkg::version::Info;
 use rtk::k8s::client::{ClusterConnection, ConnectionError};
+use rtk_k8s_mock::{discovery::DiscoveryMode, http::HttpMockK8sServer};
 use rtk_spec::canonical::EnvironmentSpec;
 
 async fn test_connect_with_api_server_impl(discovery_mode: DiscoveryMode) {

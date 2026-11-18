@@ -156,7 +156,7 @@ class BenchmarkRunner:
         if not self.config.skip_tk:
             required.append("tk")
         # Only need cargo if we're building rtk from source
-        # (mock-k8s-server for diff mode may also need cargo, but we check that later)
+        # (rtk-mock-k8s-server for diff mode may also need cargo, but we check that later)
         if not self.rtk_path:
             required.append("cargo")
         if self.config.mode == "generated":
@@ -173,7 +173,7 @@ class BenchmarkRunner:
                 sys.exit(1)
 
     def build_binaries(self) -> None:
-        """Build rtk (and mock-k8s-server for diff mode) in release mode."""
+        """Build rtk (and rtk-mock-k8s-server for diff mode) in release mode."""
         # Use pre-built rtk if provided
         if self.rtk_path:
             if not self.rtk_path.exists():
@@ -189,21 +189,21 @@ class BenchmarkRunner:
             print(
                 f"Using pre-built rtk: {self.rtk} ({version})", file=sys.stderr)
 
-            # Look for mock-k8s-server next to the rtk binary (for diff mode)
+            # Look for rtk-mock-k8s-server next to the rtk binary (for diff mode)
             if self.config.mode == "diff":
-                mock_server_path = self.rtk.parent / "mock-k8s-server"
+                mock_server_path = self.rtk.parent / "rtk-mock-k8s-server"
                 if mock_server_path.exists():
                     self.mock_server = mock_server_path
                     print(
-                        f"Using pre-built mock-k8s-server: {self.mock_server}", file=sys.stderr)
+                        f"Using pre-built rtk-mock-k8s-server: {self.mock_server}", file=sys.stderr)
                 else:
-                    print("Building mock-k8s-server in release mode...", file=sys.stderr)
+                    print("Building rtk-mock-k8s-server in release mode...", file=sys.stderr)
                     subprocess.run(
-                        ["cargo", "build", "--release", "-p=mock-k8s-server"],
+                        ["cargo", "build", "--release", "-p=rtk-mock-k8s-server"],
                         cwd=self.repo_root,
                         check=True,
                     )
-                    self.mock_server = self.repo_root / "target" / "release" / "mock-k8s-server"
+                    self.mock_server = self.repo_root / "target" / "release" / "rtk-mock-k8s-server"
         else:
             print("Building rtk in release mode...", file=sys.stderr)
             subprocess.run(
@@ -213,15 +213,15 @@ class BenchmarkRunner:
             )
             self.rtk = self.repo_root / "target" / "release" / "rtk"
 
-            # Build mock-k8s-server if needed (diff mode only)
+            # Build rtk-mock-k8s-server if needed (diff mode only)
             if self.config.mode == "diff":
-                print("Building mock-k8s-server in release mode...", file=sys.stderr)
+                print("Building rtk-mock-k8s-server in release mode...", file=sys.stderr)
                 subprocess.run(
-                    ["cargo", "build", "--release", "-p=mock-k8s-server"],
+                    ["cargo", "build", "--release", "-p=rtk-mock-k8s-server"],
                     cwd=self.repo_root,
                     check=True,
                 )
-                self.mock_server = self.repo_root / "target" / "release" / "mock-k8s-server"
+                self.mock_server = self.repo_root / "target" / "release" / "rtk-mock-k8s-server"
 
     def build_rtk_base(self) -> None:
         """Build rtk from base branch if BENCHMARK_BASE_REF is set, or use --rtk-base-binary-path."""

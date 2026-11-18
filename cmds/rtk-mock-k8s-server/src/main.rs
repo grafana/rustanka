@@ -11,12 +11,12 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use nix::unistd::{fork, pipe, setsid, write, ForkResult};
+use rtk_k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use tracing::{debug, info};
 
 #[derive(Parser)]
-#[command(name = "mock-k8s-server")]
+#[command(name = "rtk-mock-k8s-server")]
 #[command(about = "Standalone mock Kubernetes API server for testing")]
 struct Cli {
 	/// Directory containing YAML manifests to serve as cluster state
@@ -99,8 +99,8 @@ fn run_server(cli: Cli, ready_fd: Option<OwnedFd>) -> Result<()> {
 	tracing_subscriber::fmt()
 		.with_env_filter(
 			tracing_subscriber::EnvFilter::from_default_env()
-				.add_directive("k8s_mock=debug".parse().unwrap())
-				.add_directive("mock_k8s_server=debug".parse().unwrap()),
+				.add_directive("rtk_k8s_mock=debug".parse().unwrap())
+				.add_directive("rtk_mock_k8s_server=debug".parse().unwrap()),
 		)
 		.with_writer(io::stderr)
 		.init();

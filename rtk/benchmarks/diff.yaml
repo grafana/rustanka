@@ -7,7 +7,7 @@ fixtures_dir: "cmds/rtk/tests/testdata/diff"
 
 # Each test fixture directory contains:
 #   environment/ - the Tanka environment
-#   cluster/     - YAML files representing cluster state (served by mock-k8s-server)
+#   cluster/     - YAML files representing cluster state (served by rtk-mock-k8s-server)
 
 tests:
   - name: "cluster_scoped"

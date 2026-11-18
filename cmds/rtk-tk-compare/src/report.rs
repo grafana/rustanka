@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use k8s_mock::HttpExchange;
 use rtk_diff::SimilarityScore;
+use rtk_k8s_mock::HttpExchange;
 use serde::Serialize;
 
 use crate::types::Pair;
@@ -171,9 +171,9 @@ pub fn summarize(reports: &[CommandReport]) -> SummaryStats {
 /// - comparer subprocess output (`stdout`/`stderr`)
 /// - raw command output from both executors (`tk_*` and `rtk_*`)
 pub struct CompareOutput {
-	/// Stdout emitted by the comparer subprocess (`tk-compare compare ...`).
+	/// Stdout emitted by the comparer subprocess (`rtk-tk-compare compare ...`).
 	pub stdout: String,
-	/// Stderr emitted by the comparer subprocess (`tk-compare compare ...`).
+	/// Stderr emitted by the comparer subprocess (`rtk-tk-compare compare ...`).
 	pub stderr: String,
 	/// Raw stdout from the `tk` command invocation for this test.
 	pub tk_stdout: String,

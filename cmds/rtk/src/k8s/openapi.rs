@@ -12,8 +12,8 @@ use std::{
 	time::{Duration, SystemTime},
 };
 
-use k8s::strategicpatch::{builtin_schemas::has_builtin_coverage, PatchStrategy};
 use kube::{core::GroupVersionKind, Client};
+use rtk_k8s::strategicpatch::{builtin_schemas::has_builtin_coverage, PatchStrategy};
 use thiserror::Error;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, instrument, warn};

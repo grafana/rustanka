@@ -1,4 +1,4 @@
-//! Shared types for tk-compare.
+//! Shared types for rtk-tk-compare.
 
 /// A pair of values, one for each executable being compared.
 #[derive(Debug, Clone)]

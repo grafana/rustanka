@@ -36,7 +36,7 @@ impl RunTempDir {
 			.unwrap_or_default()
 			.as_millis();
 		let path =
-			std::env::temp_dir().join(format!("tk-compare-run-{}-{}", std::process::id(), now));
+			std::env::temp_dir().join(format!("rtk-tk-compare-run-{}-{}", std::process::id(), now));
 		std::fs::create_dir_all(&path)?;
 		Ok(Self { path, keep: false })
 	}
@@ -600,7 +600,7 @@ fn failure_flag_suffix(event: &TestEvent) -> String {
 
 fn print_mock_http_if_present(
 	progress: Option<&ProgressBar>,
-	exchanges: &[k8s_mock::HttpExchange],
+	exchanges: &[rtk_k8s_mock::HttpExchange],
 ) {
 	let Some(pb) = progress else {
 		return;

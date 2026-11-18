@@ -1,5 +1,5 @@
 // Test cases for empty/null field handling differences between tk and rtk
-// Issues reproduced from tk-compare comparison:
+// Issues reproduced from rtk-tk-compare comparison:
 // 1. Empty matchLabels in PodDisruptionBudget (tk: {name: x}, rtk: {})
 // 2. Empty annotations in Ingress resources
 // 3. Potential null/empty resource name issues

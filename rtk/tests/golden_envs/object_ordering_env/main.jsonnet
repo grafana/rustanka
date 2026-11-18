@@ -1,5 +1,5 @@
 // Test cases for object key ordering and field serialization differences between tk and rtk
-// Issues reproduced from tk-compare comparison:
+// Issues reproduced from rtk-tk-compare comparison:
 // 1. Object key ordering in ConfigMaps (affects config hashes)
 // 2. Numeric string key ordering (10,67,100 vs 10,100,67)
 

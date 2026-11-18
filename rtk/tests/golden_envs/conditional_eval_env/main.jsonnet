@@ -1,5 +1,5 @@
 // Test cases for conditional evaluation and null handling differences between tk and rtk
-// Issues reproduced from tk-compare comparison:
+// Issues reproduced from rtk-tk-compare comparison:
 // 1. Empty metadata.name causing "--no-value-" filenames (ScaledObject, Service)
 // 2. Empty matchLabels in PodDisruptionBudget when selector.matchLabels should have values
 // 3. Service missing selector/ports when they should be present

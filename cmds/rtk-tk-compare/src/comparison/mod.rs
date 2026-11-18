@@ -1,4 +1,4 @@
-//! Output comparison strategies for tk-compare.
+//! Output comparison strategies for rtk-tk-compare.
 //!
 //! This module provides different strategies for comparing command outputs,
 //! abstracted behind the [`Comparer`] trait.

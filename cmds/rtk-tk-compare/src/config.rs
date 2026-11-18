@@ -481,10 +481,11 @@ mod tests {
 			cluster_dir: None,
 		};
 
-		let compare = cmd.compare_argv("/bin/tk-compare", "case-a", "fixtures/case-a", "/tmp/t");
+		let compare =
+			cmd.compare_argv("/bin/rtk-tk-compare", "case-a", "fixtures/case-a", "/tmp/t");
 		assert_eq!(
 			compare,
-			vec!["/bin/tk-compare", "compare", "json", "case-a"]
+			vec!["/bin/rtk-tk-compare", "compare", "json", "case-a"]
 		);
 	}
 

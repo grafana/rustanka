@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use globset::Glob;
 
 #[derive(Parser)]
-#[command(name = "tk-compare")]
+#[command(name = "rtk-tk-compare")]
 #[command(about = "Integration testing and benchmarking tool for comparing two executables")]
 #[command(version)]
 pub struct Cli {
@@ -99,7 +99,7 @@ impl fmt::Display for DiscoveryModeArg {
 	}
 }
 
-impl From<DiscoveryModeArg> for k8s_mock::DiscoveryMode {
+impl From<DiscoveryModeArg> for rtk_k8s_mock::DiscoveryMode {
 	fn from(value: DiscoveryModeArg) -> Self {
 		match value {
 			DiscoveryModeArg::Aggregated => Self::Aggregated,

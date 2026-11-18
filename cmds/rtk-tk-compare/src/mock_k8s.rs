@@ -12,7 +12,7 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use anyhow::{Context, Result};
-use k8s_mock::{
+use rtk_k8s_mock::{
 	extract_crd_metadata, DiscoveryMode, HttpExchange, HttpMockK8sServer, RunningHttpMockK8sServer,
 };
 
@@ -54,7 +54,7 @@ impl MockCluster {
 			rtk_yaml::to_string(&kubeconfig).context("failed to serialize kubeconfig")?;
 
 		// Write kubeconfig to a temporary file
-		let kubeconfig_path = format!("/tmp/tk-compare-kubeconfig-{}.yaml", std::process::id());
+		let kubeconfig_path = format!("/tmp/rtk-tk-compare-kubeconfig-{}.yaml", std::process::id());
 		fs::write(&kubeconfig_path, &kubeconfig_yaml)
 			.with_context(|| format!("failed to write kubeconfig to {}", kubeconfig_path))?;
 

@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use k8s_mock::{extract_crd_metadata, DiscoveryMode, HttpMockK8sServer, RunningHttpMockK8sServer};
 use rtk::k8s::client::ClusterConnection;
+use rtk_k8s_mock::{
+	extract_crd_metadata, DiscoveryMode, HttpMockK8sServer, RunningHttpMockK8sServer,
+};
 use rtk_spec::canonical::EnvironmentSpec;
 
 /// Load manifests from YAML files in a directory.

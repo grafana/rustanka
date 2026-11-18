@@ -1,5 +1,5 @@
 // Test cases for YAML line wrapping differences between tk and rtk
-// Issues reproduced from tk-compare comparison:
+// Issues reproduced from rtk-tk-compare comparison:
 // 1. Shell commands breaking at different positions (e.g., before '|' vs after space)
 // 2. ScaledObject PromQL queries with different line breaks
 // 3. Long strings in nested contexts wrapping differently

@@ -102,8 +102,8 @@ pub fn execute(cli: GoldenFixturesCli, global: &GlobalOptions) -> Result<()> {
 
 		let staged = prepare_fixture_for_export(&fixture_dir, jrsonnet_path.as_deref())
 			.with_context(|| format!("failed to stage fixture {}", fixture_dir.display()))?;
-		let generated =
-			TempDir::create("tk-compare-golden-generated").context("failed creating temp dir")?;
+		let generated = TempDir::create("rtk-tk-compare-golden-generated")
+			.context("failed creating temp dir")?;
 		let generated_dir = generated.path().to_path_buf();
 
 		let export_result = run_tk_export(
@@ -211,7 +211,7 @@ fn prepare_fixture_for_export(
 		});
 	}
 
-	let temp = TempDir::create("tk-compare-golden-stage")?;
+	let temp = TempDir::create("rtk-tk-compare-golden-stage")?;
 	let staged = temp.path().join("fixture");
 	copy_dir_recursive(fixture_dir, &staged)?;
 	if let Some(path) = jrsonnet_path {
@@ -412,7 +412,7 @@ mod tests {
 
 	#[test]
 	fn test_discover_fixture_dirs_sorted() {
-		let root = TempDir::create("tk-compare-golden-discover-test").unwrap();
+		let root = TempDir::create("rtk-tk-compare-golden-discover-test").unwrap();
 		fs::create_dir_all(root.path().join("b")).unwrap();
 		fs::create_dir_all(root.path().join("a")).unwrap();
 		fs::write(root.path().join("not-a-dir"), "").unwrap();
@@ -427,7 +427,7 @@ mod tests {
 
 	#[test]
 	fn test_rewrite_jrsonnet_binary_path() {
-		let root = TempDir::create("tk-compare-golden-rewrite-test").unwrap();
+		let root = TempDir::create("rtk-tk-compare-golden-rewrite-test").unwrap();
 		let jsonnet = root.path().join("main.jsonnet");
 		fs::write(
 			&jsonnet,
@@ -442,7 +442,7 @@ mod tests {
 
 	#[test]
 	fn test_load_fixture_command_args_uses_suite_and_fixture_layers() {
-		let root = TempDir::create("tk-compare-golden-args-test").unwrap();
+		let root = TempDir::create("rtk-tk-compare-golden-args-test").unwrap();
 		let suite = root.path().join("suite");
 		let fixture = suite.join("case-a");
 		fs::create_dir_all(&fixture).unwrap();

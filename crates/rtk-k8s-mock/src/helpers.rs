@@ -1,6 +1,8 @@
 //! Helper functions for mock Kubernetes testing.
 
-use k8s::strategicpatch::{merge::apply_strategic_patch, schema::BuiltinSchemaLookup, MergeType};
+use rtk_k8s::strategicpatch::{
+	merge::apply_strategic_patch, schema::BuiltinSchemaLookup, MergeType,
+};
 
 /// Deep merge two JSON values using strategic merge patch semantics with a specific merge type.
 ///

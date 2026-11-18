@@ -1,7 +1,7 @@
 # Configuration for comparing Grafana Tanka (tk) with rustanka (rtk)
 #
 # Usage:
-#   cargo run -p tk-compare --release -- run rtk/tk-compare-grafana.toml
+#   cargo run -p rtk-tk-compare --release -- run rtk/tk-compare-grafana.toml
 #
 # Environment variables:
 #   TK_PATH  - Path to tk executable (optional; default: tk)

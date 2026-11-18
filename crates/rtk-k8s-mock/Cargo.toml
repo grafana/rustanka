@@ -1,12 +1,12 @@
 [package]
-name = "k8s-mock"
+name = "rtk-k8s-mock"
 version = "0.1.0"
 edition = "2021"
 description = "Mock Kubernetes API server for testing"
 
 [dependencies]
 bon = "3.8.2"
-k8s = { path = "../k8s" }
+rtk-k8s = { path = "../rtk-k8s" }
 k8s-openapi.workspace = true
 kube.workspace = true
 serde = { version = "1.0", features = ["derive"] }

@@ -1,4 +1,4 @@
-//! Environment variable configuration for tk-compare.
+//! Environment variable configuration for rtk-tk-compare.
 
 use regex::Regex;
 

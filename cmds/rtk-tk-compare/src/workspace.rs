@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::types::Pair;
 
-const BASE_PATH: &str = ".tk-compare-workspace";
+const BASE_PATH: &str = ".rtk-tk-compare-workspace";
 
 /// Manages workspace directories for isolated command execution.
 #[derive(Debug)]

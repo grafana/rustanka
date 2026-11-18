@@ -9,10 +9,10 @@ use std::{
 };
 
 use bon::Builder;
-use k8s::strategicpatch::MergeType;
 use kube::config::{
 	AuthInfo, Cluster, Context, Kubeconfig, NamedAuthInfo, NamedCluster, NamedContext,
 };
+use rtk_k8s::strategicpatch::MergeType;
 use tracing::{debug, trace};
 use typed_headers::{
 	http::{
@@ -1163,7 +1163,7 @@ async fn mount_openapi(
 
 #[cfg(test)]
 mod tests {
-	use k8s::strategicpatch::MergeType;
+	use rtk_k8s::strategicpatch::MergeType;
 	use wiremock::{
 		http::{HeaderMap, HeaderValue, Method},
 		Request,

@@ -1,10 +1,10 @@
 [package]
-name = "tk-compare"
+name = "rtk-tk-compare"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "tk-compare"
+name = "rtk-tk-compare"
 path = "src/main.rs"
 
 [dependencies]
@@ -18,8 +18,8 @@ regex = "1.10"
 serde-saphyr.workspace = true
 rtk-yaml.workspace = true
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
-rtk-diff = { path = "../../crates/diff" }
-k8s-mock = { version = "0.1.0", path = "../../crates/k8s-mock" }
+rtk-diff = { path = "../../crates/rtk-diff" }
+rtk-k8s-mock = { version = "0.1.0", path = "../../crates/rtk-k8s-mock" }
 bon = "3.8.2"
 which = "8.0.0"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

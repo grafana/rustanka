@@ -31,9 +31,9 @@ jobs:
             package: "rtk"
             profile: "release"
             ref: "${{ github.event.pull_request.base.ref }}"
-          - name: "mock-k8s-server"
-            id: "mock-k8s-server"
-            package: "mock-k8s-server"
+          - name: "rtk-mock-k8s-server"
+            id: "rtk-mock-k8s-server"
+            package: "rtk-mock-k8s-server"
             profile: "release"
             ref: ""
     steps:
@@ -141,10 +141,10 @@ jobs:
           name: rtk-base
           path: bin
 
-      - name: Download mock-k8s-server
+      - name: Download rtk-mock-k8s-server
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
-          name: mock-k8s-server
+          name: rtk-mock-k8s-server
           path: bin
 
       - name: Make binaries executable

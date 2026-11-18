@@ -1,5 +1,5 @@
 // Test cases for multiline string wrapping differences between tk and rtk
-// Issues reproduced from tk-compare comparison:
+// Issues reproduced from rtk-tk-compare comparison:
 // 1. Long shell commands breaking at different positions (| cut -f1 vs \n| cut -f1)
 // 2. ScaledObject PromQL queries with different line breaks
 // 3. Long command-line args wrapping differently
