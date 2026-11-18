@@ -239,6 +239,8 @@ mod collect;
 #[cfg(test)]
 mod debug;
 mod ref_count;
+#[cfg(feature = "scoped-arena")]
+pub mod scoped;
 #[cfg(feature = "sync")]
 mod sync;
 #[cfg(test)]
