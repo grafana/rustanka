@@ -28,15 +28,6 @@ enum Opts {
 		#[arg(long)]
 		fix: bool,
 	},
-	/// Build and run test file from `bindings/c`
-	TestCBindings {
-		#[arg(long, default_value = env!("TARGET_PLATFORM"))]
-		target: String,
-		/// Which bindings file to build and run
-		#[arg(long, default_value = "libjsonnet_test_file")]
-		test_file: String,
-		args: Vec<String>,
-	},
 	/// Benchmark a command: repeated runs, reports time + RSS stats (Linux only)
 	#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 	Bench {
@@ -94,30 +85,6 @@ fn main() -> Result<()> {
 		Opts::Lint { fix } => {
 			let fmt_check = if fix { None } else { Some("--check") };
 			cmd!(sh, "cargo fmt {fmt_check...}").run()?;
-			Ok(())
-		}
-		Opts::TestCBindings {
-			target,
-			test_file,
-			args,
-		} => {
-			cmd!(
-				sh,
-				"cargo build -p libjsonnet --target={target} --release --no-default-features --features=interop-common,interop-threading"
-			)
-			.run()?;
-			let built = format!("./target/{target}/release/libjsonnet.a");
-			let c_bindings = "./bindings/c/";
-			cmd!(sh, "cp {built} {c_bindings}").run()?;
-			sh.change_dir(c_bindings);
-
-			// TODO: Pass target to gcc?
-			cmd!(sh, "gcc -c {test_file}.c").run()?;
-			cmd!(sh, "gcc -o {test_file} -lc -lm {test_file}.o libjsonnet.a").run()?;
-			let sh = Shell::new()?;
-
-			cmd!(sh, "{c_bindings}{test_file} {args...}").run()?;
-
 			Ok(())
 		}
 		#[cfg(all(target_arch = "x86_64", target_os = "linux"))]

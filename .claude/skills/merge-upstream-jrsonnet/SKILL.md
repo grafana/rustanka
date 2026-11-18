@@ -91,7 +91,7 @@ fork behavior in files that don't conflict** — verify these after each stage:
   duplicate definitions. Prefer whole-file from the correct side + surgical
   re-application of the fork delta (extract with
   `git diff <upstream-sha> <ours> -- <file>`).
-- Omit upstream Nix build tooling. For xtask and bindings, take theirs. Workspace `Cargo.toml`: take theirs,
+- Omit upstream Nix build tooling, bindings, and their xtask and workspace entries. Workspace `Cargo.toml`: take theirs,
   then re-add fork-only entries (`jrsonnet-lint`) and restore pins.
 - rtk API seam (all rustanka↔jrsonnet coupling is in `cmds/rtk` + `tests/`):
   compiler-driven; three evaluator-setup sites must change in lockstep

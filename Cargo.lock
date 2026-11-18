@@ -625,16 +625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console_error_panic_hook"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
-dependencies = [
- "cfg-if",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3377,26 +3367,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jrsonnet-web"
-version = "0.5.0-pre99"
-dependencies = [
- "console_error_panic_hook",
- "getrandom 0.3.4",
- "hi-doc",
- "jrsonnet-evaluator",
- "jrsonnet-formatter",
- "jrsonnet-gcmodule",
- "jrsonnet-stdlib",
- "jrsonnet-types",
- "js-sys",
- "num-bigint",
- "rustc-hash 2.1.1",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "js-sys"
 version = "0.3.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3621,17 +3591,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "no_std_io2",
  "rle-decode-fast",
-]
-
-[[package]]
-name = "libjsonnet"
-version = "0.5.0-pre99"
-dependencies = [
- "jrsonnet-evaluator",
- "jrsonnet-gcmodule",
- "jrsonnet-interner",
- "jrsonnet-ir",
- "jrsonnet-stdlib",
 ]
 
 [[package]]
