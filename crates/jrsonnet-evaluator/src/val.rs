@@ -8,7 +8,7 @@ use std::{
 	rc::Rc,
 };
 
-use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::{BinaryOpType, TrivialVal};
 pub use jrsonnet_macros::Thunk;
@@ -83,14 +83,96 @@ impl<D: Trace, T: Trace + Clone> ThunkValue for MemoizedClosureThunk<D, T> {
 	}
 }
 
-cc_dyn!(
-	/// Lazily evaluated value
-	#[derive(Clone)] Thunk<V: Trace>,
-	ThunkValue<Output = V>,
-	pub fn new() {...}
-);
+mod thunk_storage {
+	use super::{Cc, ThunkValue, Trace};
+
+	jrsonnet_gcmodule::cc_dyn!(Shell<V: Trace>, ThunkValue<Output = V>);
+
+	impl<V: Trace> Shell<V> {
+		pub(super) fn allocate(
+			payload: impl ThunkValue<Output = V>,
+		) -> Cc<dyn ThunkValue<Output = V>> {
+			#[cfg(feature = "scoped-arena")]
+			return crate::with_lazy_allocator(|alloc| match alloc {
+				Some(alloc) => Self::allocate_in(payload, alloc),
+				None => Self::new(payload).0,
+			});
+			#[cfg(not(feature = "scoped-arena"))]
+			Self::new(payload).0
+		}
+
+		#[cfg(feature = "scoped-arena")]
+		fn allocate_in(
+			payload: impl ThunkValue<Output = V>,
+			alloc: &rtk_arena_allocator::SharedArenaAlloc,
+		) -> Cc<dyn ThunkValue<Output = V>> {
+			Self::new(ArenaPayload(Box::new_in(payload, alloc.clone()))).0
+		}
+	}
+
+	#[cfg(all(test, feature = "scoped-arena"))]
+	mod tests {
+		use std::{cell::RefCell, rc::Rc};
+
+		use super::{Cc, Shell};
+		use crate::val::{MemoizedClosureThunk, Thunk};
+		use rtk_arena_allocator::{Arena, SharedArenaAlloc};
+
+		#[test]
+		fn collector_releases_unforced_payload_and_its_arena() {
+			let arena = Rc::new(Arena::new());
+			let weak = Rc::downgrade(&arena);
+			let edge = Cc::new(RefCell::new(None::<Thunk<()>>));
+			let payload = MemoizedClosureThunk::new(edge.clone(), |_| panic!("unexpected force"));
+			let thunk = Thunk(Shell::allocate_in(payload, &SharedArenaAlloc::from(arena)));
+			*edge.borrow_mut() = Some(thunk);
+			drop(edge);
+			assert!(weak.upgrade().is_some());
+			jrsonnet_gcmodule::collect_thread_cycles();
+			assert!(weak.upgrade().is_none());
+		}
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	struct ArenaPayload<P>(Box<P, rtk_arena_allocator::SharedArenaAlloc>);
+
+	#[cfg(feature = "scoped-arena")]
+	impl<P: Trace> Trace for ArenaPayload<P> {
+		fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
+			self.0.as_ref().trace(tracer);
+		}
+
+		fn is_type_tracked() -> bool {
+			P::is_type_tracked()
+		}
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	impl<P: ThunkValue> ThunkValue for ArenaPayload<P> {
+		type Output = P::Output;
+
+		fn get(&self) -> crate::Result<Self::Output> {
+			self.0.get()
+		}
+	}
+}
+
+/// Lazily evaluated value.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct Thunk<V>(Cc<dyn ThunkValue<Output = V>>);
+
+impl<V: 'static> Trace for Thunk<V> {
+	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
+		Cc::trace(&self.0, tracer);
+	}
+}
 
 impl<T: Trace> Thunk<T> {
+	pub fn new<P: ThunkValue<Output = T>>(payload: P) -> Self {
+		Self(thunk_storage::Shell::allocate(payload))
+	}
+
 	pub fn evaluated(val: T) -> Self
 	where
 		T: Clone,
@@ -496,6 +578,26 @@ impl Ord for StrValue {
 		let a = self.clone().into_flat();
 		let b = other.clone().into_flat();
 		a.cmp(&b)
+	}
+}
+
+#[cfg(test)]
+mod thunk_tests {
+	use super::{Cc, MemoizedClosureThunk, Thunk};
+	use std::cell::Cell;
+
+	#[test]
+	fn clones_share_lazy_computation() {
+		let calls = Cc::new(Cell::new(0));
+		let thunk = Thunk::new(MemoizedClosureThunk::new(calls.clone(), |calls| {
+			calls.set(calls.get() + 1);
+			Ok(42)
+		}));
+		let alias = thunk.clone();
+		assert_eq!(calls.get(), 0);
+		alias.force().unwrap();
+		assert_eq!(thunk.evaluate().unwrap(), 42);
+		assert_eq!(calls.get(), 1);
 	}
 }
 

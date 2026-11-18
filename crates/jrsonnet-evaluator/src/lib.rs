@@ -305,6 +305,10 @@ impl FileData {
 
 #[derive(Trace)]
 pub struct EvaluationStateInternals {
+	// Owns raw pages only. Each arena-backed payload retains its own handle.
+	#[cfg(feature = "scoped-arena")]
+	#[trace(skip)]
+	lazy_allocator: Option<rtk_arena_allocator::SharedArenaAlloc>,
 	/// Internal state
 	file_cache: RefCell<FxHashMap<SourcePath, FileData>>,
 	prepared_import_cache: Option<PreparedImportCache>,
@@ -320,7 +324,7 @@ pub struct EvaluationStateInternals {
 pub struct State(Cc<EvaluationStateInternals>);
 
 thread_local! {
-	pub static DEFAULT_STATE: State = State::builder().build();
+	pub static DEFAULT_STATE: State = State::builder().build_inner(false);
 	pub static STATE: RefCell<Option<State>> = const {RefCell::new(None)};
 }
 pub struct StateEnterGuard(PhantomData<()>);
@@ -328,6 +332,19 @@ impl Drop for StateEnterGuard {
 	fn drop(&mut self) {
 		STATE.with_borrow_mut(|v| *v = None);
 	}
+}
+
+#[cfg(feature = "scoped-arena")]
+fn with_lazy_allocator<R>(
+	f: impl FnOnce(Option<&rtk_arena_allocator::SharedArenaAlloc>) -> R,
+) -> R {
+	// TLS selects storage only at construction. Releasing a box never consults TLS.
+	// Release the slot borrow before constructing user-defined thunks or GC nodes.
+	let alloc = STATE
+		.try_with(|s| s.try_borrow().ok()?.as_ref()?.0.lazy_allocator.clone())
+		.ok()
+		.flatten();
+	f(alloc.as_ref())
 }
 
 pub fn with_state<V>(v: impl FnOnce(State) -> V) -> V {
@@ -741,8 +758,13 @@ impl StateBuilder {
 			.insert(CcContextInitializer::new(context_initializer));
 		self
 	}
-	pub fn build(mut self) -> State {
+	pub fn build(self) -> State {
+		self.build_inner(true)
+	}
+	fn build_inner(mut self, _evaluation_local: bool) -> State {
 		State(Cc::new(EvaluationStateInternals {
+			#[cfg(feature = "scoped-arena")]
+			lazy_allocator: _evaluation_local.then(rtk_arena_allocator::SharedArenaAlloc::new),
 			file_cache: RefCell::new(FxHashMap::new()),
 			prepared_import_cache: self.prepared_import_cache.take(),
 			context_initializer: self
