@@ -17,7 +17,9 @@ workspace = true
 
 [features]
 default = ["explaining-traces", "ir-parser"]
-# Use per-traversal scratch storage for concatenated strings.
+# Allocate thunk and object payloads in the active evaluation's arena.
+# Escaped payloads retain the pages they need; GC headers remain global.
+# Concatenated string walks use a separate short-lived scratch arena.
 scoped-arena = ["jrsonnet-gcmodule/scoped-arena", "dep:rtk-arena-allocator"]
 # Rustc-like trace visualization
 explaining-traces = ["hi-doc"]

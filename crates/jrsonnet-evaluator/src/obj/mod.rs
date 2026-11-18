@@ -407,23 +407,14 @@ impl LayeredCores {
 
 #[derive(Trace, Educe)]
 #[educe(Debug)]
-struct ObjValueInner {
+struct ObjPayload {
 	cores: LayeredCores,
 	assertions_ran: Cell<bool>,
+	running_assertions: Cell<bool>,
 	has_assertions: bool,
 	value_cache: RefCell<FxHashMap<(IStr, CoreIdx), CacheValue>>,
 }
 
-thread_local! {
-	static RUNNING_ASSERTIONS: RefCell<FxHashSet<ObjValue>> = RefCell::default();
-}
-fn is_asserting(obj: &ObjValue) -> bool {
-	RUNNING_ASSERTIONS.with_borrow(|v| v.contains(obj))
-}
-/// Returns false if already asserting
-fn start_asserting(obj: &ObjValue) -> bool {
-	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.insert(obj.clone()))
-}
 // == Rustanka custom features ==
 
 // Feature 1: SKIP_ASSERTIONS - skip all assertions during manifest generation (Go-Tanka compat)
@@ -444,43 +435,88 @@ thread_local! {
 pub fn is_in_assertion() -> bool {
 	ASSERTION_DEPTH.with(|v| v.get() > 0)
 }
-struct AssertionGuard;
-impl AssertionGuard {
-	fn new() -> Self {
+struct AssertionGuard<'a>(&'a Cell<bool>);
+impl<'a> AssertionGuard<'a> {
+	fn enter(obj: &'a ObjValue) -> Option<Self> {
+		let running = &obj.0.running_assertions;
+		if running.replace(true) {
+			return None;
+		}
 		ASSERTION_DEPTH.with(|v| v.set(v.get() + 1));
-		AssertionGuard
+		Some(Self(running))
 	}
 }
-impl Drop for AssertionGuard {
+impl Drop for AssertionGuard<'_> {
 	fn drop(&mut self) {
+		self.0.set(false);
 		ASSERTION_DEPTH.with(|v| v.set(v.get() - 1));
 	}
 }
 
-/// Resets all thread-local state in obj to defaults.
+/// Reset assertion policy without disturbing any active assertion guards.
 pub fn reset_obj_thread_locals() {
-	RUNNING_ASSERTIONS.with_borrow_mut(|v| v.clear());
 	SKIP_ASSERTIONS.with(|v| v.set(false));
-	ASSERTION_DEPTH.with(|v| v.set(0));
 }
 
-fn finish_asserting(obj: &ObjValue) {
-	RUNNING_ASSERTIONS.with_borrow_mut(|v| {
-		let r = v.remove(obj);
-		debug_assert!(
-			r,
-			"finish_asserting was called before start_asserting or twice"
-		);
-	});
+impl ObjPayload {
+	fn new(cores: LayeredCores, has_assertions: bool) -> Self {
+		Self {
+			cores,
+			assertions_ran: Cell::new(!has_assertions),
+			running_assertions: Cell::new(false),
+			has_assertions,
+			value_cache: RefCell::default(),
+		}
+	}
+}
+
+#[cfg(not(feature = "scoped-arena"))]
+type ObjValueInner = ObjPayload;
+
+#[cfg(feature = "scoped-arena")]
+#[derive(Debug)]
+enum ObjValueInner {
+	Global(Box<ObjPayload>),
+	Arena(Box<ObjPayload, rtk_arena_allocator::SharedArenaAlloc>),
+}
+
+#[cfg(feature = "scoped-arena")]
+impl ObjValueInner {
+	fn new(payload: ObjPayload, alloc: Option<&rtk_arena_allocator::SharedArenaAlloc>) -> Self {
+		match alloc {
+			Some(a) => Self::Arena(Box::new_in(payload, a.clone())),
+			None => Self::Global(Box::new(payload)),
+		}
+	}
+}
+
+#[cfg(feature = "scoped-arena")]
+impl std::ops::Deref for ObjValueInner {
+	type Target = ObjPayload;
+	fn deref(&self) -> &ObjPayload {
+		match self {
+			Self::Global(p) => p,
+			Self::Arena(p) => p,
+		}
+	}
+}
+
+#[cfg(feature = "scoped-arena")]
+impl Trace for ObjValueInner {
+	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
+		// Both boxes own exactly one payload; the allocator owns raw pages, not GC edges.
+		(**self).trace(tracer);
+	}
 }
 
 thread_local! {
-	static EMPTY_OBJ: ObjValue = ObjValue(Cc::new(ObjValueInner {
-		cores: LayeredCores::empty(),
-		assertions_ran: Cell::new(true),
-		has_assertions: false,
-		value_cache: RefCell::default(),
-	}))
+	static EMPTY_OBJ: ObjValue = {
+		// First access can happen during an evaluation. Never store its allocator in TLS.
+		let payload = ObjPayload::new(LayeredCores::empty(), false);
+		#[cfg(feature = "scoped-arena")]
+		let payload = ObjValueInner::new(payload, None);
+		ObjValue(Cc::new(payload))
+	};
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -713,12 +749,14 @@ impl ObjValue {
 		let cores = sup.0.cores.clone().extend_layered(self.0.cores.clone());
 
 		let has_assertions = sup.0.has_assertions || self.0.has_assertions;
-		ObjValue(Cc::new(ObjValueInner {
-			cores,
-			value_cache: RefCell::default(),
-			assertions_ran: Cell::new(!has_assertions),
-			has_assertions,
-		}))
+		Self::from_cores(cores, has_assertions)
+	}
+
+	fn from_cores(cores: LayeredCores, has_assertions: bool) -> Self {
+		let payload = ObjPayload::new(cores, has_assertions);
+		#[cfg(feature = "scoped-arena")]
+		let payload = crate::with_lazy_allocator(|a| ObjValueInner::new(payload, a));
+		Self(Cc::new(payload))
 	}
 	// #[must_use]
 	// pub fn with_this(&self, this: Self) -> Self {
@@ -829,7 +867,7 @@ impl ObjValue {
 				Entry::Occupied(v) => match v.get() {
 					CacheValue::Cached(v) => return v.clone(),
 					CacheValue::Pending => {
-						if !is_asserting(self) && !is_in_assertion() {
+						if !self.0.running_assertions.get() && !is_in_assertion() {
 							bail!(InfiniteRecursionDetected);
 						}
 					}
@@ -975,10 +1013,9 @@ impl ObjValue {
 		if self.0.assertions_ran.get() {
 			return Ok(());
 		}
-		if !start_asserting(self) {
+		let Some(_guard) = AssertionGuard::enter(self) else {
 			return Ok(());
-		}
-		let _guard = AssertionGuard::new();
+		};
 		let mut assertion_err: Option<crate::error::Error> = None;
 		self.0.cores.for_each_enumerated(&mut |idx, ele| {
 			if assertion_err.is_some() {
@@ -993,10 +1030,8 @@ impl ObjValue {
 			}
 		});
 		if let Some(e) = assertion_err {
-			finish_asserting(self);
 			return Err(e);
 		}
-		finish_asserting(self);
 		self.0.assertions_ran.set(true);
 		Ok(())
 	}
@@ -1360,6 +1395,91 @@ impl<Kind> ObjMemberBuilder<Kind> {
 				location: self.location,
 			},
 		)
+	}
+}
+
+#[cfg(test)]
+mod storage_tests {
+	use super::*;
+
+	#[test]
+	fn native_assertion_unwind_allows_retry_and_release() {
+		use std::panic::{AssertUnwindSafe, catch_unwind};
+
+		#[derive(Trace)]
+		struct PanicOnce(Cell<bool>);
+		impl ObjectAssertion for PanicOnce {
+			fn run(&self, ctx: SupThis) -> Result<()> {
+				// Re-entering this object must not finish its outer assertion.
+				ctx.this.run_assertions()?;
+				assert!(ctx.this.0.running_assertions.get());
+				if !self.0.replace(true) {
+					panic!("native assertion");
+				}
+				Ok(())
+			}
+		}
+
+		let obj = {
+			let state = crate::State::default();
+			let _entered = state.enter();
+			let mut builder = ObjValueBuilder::new();
+			builder.assert(PanicOnce(Cell::new(false)));
+			builder.build()
+		};
+		let weak = obj.clone().downgrade();
+		let panic = catch_unwind(AssertUnwindSafe(|| obj.run_assertions())).unwrap_err();
+		assert_eq!(panic.downcast_ref::<&str>(), Some(&"native assertion"));
+		assert!(!is_in_assertion());
+		assert!(!obj.0.running_assertions.get());
+		assert!(!obj.0.assertions_ran.get());
+		obj.run_assertions().unwrap();
+		assert!(obj.0.assertions_ran.get());
+		drop(obj);
+		assert!(weak.upgrade().is_none());
+	}
+
+	#[test]
+	fn lazy_field_outlives_evaluation_and_cached_self_is_collectible() {
+		let (field, weak) = {
+			let state = crate::State::default();
+			let _entered = state.enter();
+			let Val::Obj(obj) = state.evaluate_snippet("object", "{ again: self }").unwrap() else {
+				panic!("expected object");
+			};
+			#[cfg(feature = "scoped-arena")]
+			{
+				assert!(matches!(&*obj.0, ObjValueInner::Arena(_)));
+				assert!(matches!(&*ObjValue::empty().0, ObjValueInner::Global(_)));
+			}
+			let field = obj.get_lazy("again".into()).unwrap();
+			(field, obj.downgrade())
+		};
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
+		let Val::Obj(value) = field.evaluate().unwrap() else {
+			panic!("expected self")
+		};
+		assert!(ObjValue::ptr_eq(&value, &weak.upgrade().unwrap()));
+		drop((field, value));
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
+		assert!(weak.upgrade().is_none());
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	#[test]
+	fn weak_object_does_not_pin_arena_pages() {
+		use std::rc::Rc;
+		let arena = Rc::new(rtk_arena_allocator::Arena::new());
+		let pages = Rc::downgrade(&arena);
+		let obj = ObjValue(Cc::new(ObjValueInner::new(
+			ObjPayload::new(LayeredCores::empty(), false),
+			Some(&arena.into()),
+		)));
+		let weak = obj.clone().downgrade();
+		assert!(pages.upgrade().is_some());
+		drop(obj);
+		assert!(weak.upgrade().is_none());
+		assert!(pages.upgrade().is_none());
 	}
 }
 
