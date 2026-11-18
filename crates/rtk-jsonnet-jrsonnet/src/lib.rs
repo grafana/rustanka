@@ -503,18 +503,25 @@ impl rtk_jsonnet_core::EvaluatorError for EvaluatorError {
 	}
 }
 
-#[derive(Debug)]
 pub struct Evaluation {
 	value: Option<Value>,
 	context: Option<StdRc<Evaluator>>,
+	// External evaluators can install their state separately from `with_current`.
+	external_state: Option<State>,
+}
+
+impl fmt::Debug for Evaluation {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Evaluation")
+			.field("value", &self.value)
+			.field("context", &self.context)
+			.finish_non_exhaustive()
+	}
 }
 
 impl Evaluation {
 	pub fn new(context: Evaluator, value: Value) -> Self {
-		Self {
-			value: Some(value),
-			context: Some(StdRc::new(context)),
-		}
+		Self::with_shared_context(StdRc::new(context), value)
 	}
 
 	/// Pair a value with a context that is already shared, as
@@ -522,6 +529,10 @@ impl Evaluation {
 	pub fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
 		Self {
 			value: Some(value),
+			external_state: context
+				.state
+				.is_none()
+				.then(|| jrsonnet_evaluator::with_state(|s| s)),
 			context: Some(context),
 		}
 	}
@@ -538,14 +549,21 @@ impl Evaluation {
 			.expect("the evaluation is only empty while being dropped")
 	}
 
+	/// Run with the state that owns this evaluation. Panics before invoking the
+	/// callback if a different jrsonnet state is already active.
 	pub fn with_context<T>(&self, callback: impl FnOnce(&Evaluator) -> T) -> T {
 		let evaluator = self
 			.context
 			.as_ref()
 			.expect("the evaluation is only empty while being dropped");
 		Evaluator::CURRENT.with(|current| {
+			let state = evaluator
+				.state
+				.as_ref()
+				.or(self.external_state.as_ref())
+				.expect("a live evaluation has an owner state");
+			let _state_guard = state.enter_or_reuse();
 			let _guard = CurrentEvaluatorGuard::new(current, StdRc::clone(evaluator));
-			let _state_guard = evaluator.state.as_ref().and_then(State::try_enter);
 			callback(evaluator)
 		})
 	}
@@ -561,6 +579,7 @@ impl Drop for Evaluation {
 	fn drop(&mut self) {
 		self.value = None;
 		self.context = None;
+		self.external_state = None;
 		let collect = EVALUATIONS_UNTIL_COLLECTION.with(|counter| {
 			let remaining = counter.get() - 1;
 			if remaining == 0 {
@@ -776,6 +795,80 @@ impl FromStr for OutputFormat {
 			"jrsonnet" => Ok(OutputFormat::Jrsonnet),
 			_ => Err(OutputFormatFromStrError),
 		}
+	}
+}
+
+#[cfg(test)]
+mod reentry_tests {
+	use std::panic::{AssertUnwindSafe, catch_unwind};
+
+	use super::{Evaluation, Evaluator, Implementation, State, StdRc, Val, Value};
+	use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
+
+	fn evaluator() -> Evaluator {
+		Implementation::new(std::iter::empty())
+			.unwrap()
+			.create_evaluator()
+	}
+
+	#[test]
+	fn foreign_evaluation_is_rejected_before_callback() {
+		let outer = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
+		let inner = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
+		outer.with_context(|ctx| {
+			let mut ran = false;
+			assert!(catch_unwind(AssertUnwindSafe(|| inner.with_context(|_| ran = true))).is_err());
+			assert!(!ran);
+			assert!(std::ptr::eq(ctx, Evaluator::current().unwrap().as_ref()));
+			assert!(ctx.state.as_ref().unwrap().enter_or_reuse().is_none());
+		});
+		inner.with_context(|_| ());
+	}
+
+	#[test]
+	fn same_state_nesting_restores_both_scopes_on_unwind() {
+		let outer = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
+		let inner = Evaluation::new(outer.context().clone(), outer.value().clone());
+		let mut reached_inner = false;
+		outer.with_context(|ctx| {
+			assert!(
+				catch_unwind(AssertUnwindSafe(|| inner.with_context(|nested| {
+					assert!(std::ptr::eq(nested, Evaluator::current().unwrap().as_ref()));
+					reached_inner = true;
+					panic!("inner callback");
+				})))
+				.is_err()
+			);
+			assert!(std::ptr::eq(ctx, Evaluator::current().unwrap().as_ref()));
+			assert!(ctx.state.as_ref().unwrap().enter_or_reuse().is_none());
+		});
+		assert!(reached_inner);
+		assert!(
+			catch_unwind(AssertUnwindSafe(
+				|| outer.with_context(|_| panic!("outer callback"))
+			))
+			.is_err()
+		);
+		assert!(Evaluator::current().is_none());
+		assert!(
+			outer
+				.context()
+				.state
+				.as_ref()
+				.unwrap()
+				.try_enter()
+				.is_some()
+		);
+	}
+
+	#[test]
+	fn captured_external_state_is_reentered() {
+		let state = State::builder().build();
+		let captured = {
+			let _guard = state.enter();
+			Evaluation::with_shared_context(StdRc::new(evaluator()), Value(Val::Null))
+		};
+		captured.with_context(|_| assert!(state.enter_or_reuse().is_none()));
 	}
 }
 

@@ -340,6 +340,23 @@ pub fn with_state<V>(v: impl FnOnce(State) -> V) -> V {
 }
 
 impl State {
+	/// Enter this state, borrowing the existing scope on same-state re-entry.
+	/// Panics if a different state is active on this thread.
+	pub fn enter_or_reuse(&self) -> Option<StateEnterGuard> {
+		STATE.with_borrow_mut(|active| {
+			if let Some(active) = active {
+				assert!(
+					Cc::ptr_eq(&self.0, &active.0),
+					"a different jrsonnet state is active"
+				);
+				None
+			} else {
+				*active = Some(self.clone());
+				Some(StateEnterGuard(PhantomData))
+			}
+		})
+	}
+
 	pub fn enter(&self) -> StateEnterGuard {
 		self.try_enter().expect("entered state already exists")
 	}
