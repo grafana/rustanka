@@ -8,6 +8,8 @@ use ::serde::{Deserialize, Deserializer, Serializer};
 use rtk_spec::canonical::{EnvironmentSpec, JsonentImplementationOrConfig, Rc};
 
 mod native;
+mod traversal;
+pub use traversal::{EvaluationResult, ScopedArray, ScopedEvaluator, ScopedObject, ScopedValue};
 pub mod serde;
 
 pub use crate::native::{

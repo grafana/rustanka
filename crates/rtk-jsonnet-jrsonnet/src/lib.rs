@@ -569,6 +569,22 @@ impl Evaluation {
 	}
 }
 
+impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
+	type Owner = Evaluation;
+	fn visit_root<R>(
+		owner: &Self::Owner,
+		visit: impl FnOnce(&Self::Context, Self::Value) -> R,
+	) -> R {
+		owner.with_context(|context| visit(context, owner.value().clone()))
+	}
+	fn deserialize_data<'de, T: ::serde::Deserialize<'de>>(
+		_: &Evaluator,
+		value: Value,
+	) -> Result<T, EvaluatorError> {
+		T::deserialize(ValueDeserializer::<false>(value))
+	}
+}
+
 impl From<(Evaluator, Value)> for Evaluation {
 	fn from((context, value): (Evaluator, Value)) -> Self {
 		Self::new(context, value)
@@ -809,6 +825,74 @@ mod reentry_tests {
 		Implementation::new(std::iter::empty())
 			.unwrap()
 			.create_evaluator()
+	}
+
+	#[test]
+	fn scoped_children_are_lazy_and_use_the_owner() {
+		use rtk_jsonnet_core::{Hidden, RawValue, ScopedEvaluator as _};
+		let mut ev = evaluator();
+		ev.with_external_variable("answer", "yes").unwrap();
+		let result = ev
+			.evaluate_snippet_result("{a: [std.extVar('answer'), error 'later'], h:: null}")
+			.unwrap();
+		let answer = result.with_root(|root| {
+			assert!(Evaluator::current().is_some());
+			let obj = root.as_object().unwrap();
+			assert_eq!(obj.field_names(Hidden::Skip).len(), 1);
+			assert!(obj.has("h", Hidden::Include).unwrap());
+			let arr = obj
+				.get_or_bail("a", Hidden::Skip)
+				.unwrap()
+				.as_array()
+				.unwrap();
+			assert!(arr.get(2).unwrap().is_none());
+			let mut items = arr.iter();
+			let answer = items
+				.next()
+				.unwrap()
+				.unwrap()
+				.deserialize::<String>()
+				.unwrap();
+			assert!(items.next().unwrap().is_err());
+			answer
+		});
+		assert_eq!(answer, "yes");
+		assert!(Evaluator::current().is_none());
+		result.with_root(|root| {
+			let arr = root
+				.as_object()
+				.unwrap()
+				.get_or_bail("a", Hidden::Skip)
+				.unwrap();
+			assert!(
+				arr.deserialize::<Vec<RawValue<Value>>>()
+					.unwrap_err()
+					.to_string()
+					.contains("cannot detach")
+			);
+		});
+	}
+
+	#[test]
+	fn traversal_strings_outlive_the_evaluation() {
+		use rtk_jsonnet_core::{Hidden, ScopedEvaluator as _};
+		let (names, text): (Vec<String>, String) = {
+			let result = evaluator()
+				.evaluate_snippet_result("{ greeting: 'hello' }")
+				.unwrap();
+			result.with_root(|root| {
+				let obj = root.as_object().unwrap();
+				let names = obj.field_names(Hidden::Skip);
+				let text = obj
+					.get_or_bail(&names[0], Hidden::Skip)
+					.unwrap()
+					.as_str()
+					.unwrap();
+				(names, text)
+			})
+		};
+		assert_eq!(names, ["greeting"]);
+		assert_eq!(text, "hello");
 	}
 
 	#[test]

@@ -40,14 +40,15 @@ impl Arguments {
 			{
 				match self.0.next() {
 					Some(Some(thunk)) => match thunk.evaluate() {
-						Ok(value) => {
-							Ok(Some(T::deserialize(seed, ValueDeserializer(Value(value)))?))
-						}
+						Ok(value) => Ok(Some(T::deserialize(
+							seed,
+							ValueDeserializer::<true>(Value(value)),
+						)?)),
 						Err(error) => Err(error.into()),
 					},
 					Some(None) => Ok(Some(T::deserialize(
 						seed,
-						ValueDeserializer(Value(Val::Null)),
+						ValueDeserializer::<true>(Value(Val::Null)),
 					)?)),
 					None => Ok(None),
 				}
@@ -100,7 +101,7 @@ impl<'de> Deserialize<'de> for Value {
 /// This is the eager path: every thunk a requested field transitively
 /// contains is forced, and functions error. Use [`Value`]'s
 /// `into_array`/`into_object` navigation to walk a tree lazily instead.
-pub struct ValueDeserializer(pub(crate) Value);
+pub struct ValueDeserializer<const RAW: bool = true>(pub(crate) Value);
 
 impl rtk_jsonnet_core::ValueDeserializer for ValueDeserializer {
 	type Evaluator = Evaluator;
@@ -111,7 +112,7 @@ impl rtk_jsonnet_core::ValueDeserializer for ValueDeserializer {
 	}
 }
 
-impl<'de> Deserializer<'de> for ValueDeserializer {
+impl<'de, const RAW: bool> Deserializer<'de> for ValueDeserializer<RAW> {
 	type Error = EvaluatorError;
 
 	fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -133,8 +134,8 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 					visitor.visit_f64(number)
 				}
 			}
-			Val::Arr(array) => visitor.visit_seq(SeqDeserializer::new(array)),
-			Val::Obj(object) => visitor.visit_map(MapDeserializer::new(object)),
+			Val::Arr(array) => visitor.visit_seq(SeqDeserializer::<RAW>::new(array)),
+			Val::Obj(object) => visitor.visit_map(MapDeserializer::<RAW>::new(object)),
 			Val::Func(_) => Err(de::Error::custom("tried to manifest function")),
 		}
 	}
@@ -161,6 +162,11 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		V: Visitor<'de>,
 	{
 		if name == RAW_VALUE_TOKEN {
+			if !RAW {
+				return Err(de::Error::custom(
+					"cannot detach a raw Jsonnet value during scoped traversal",
+				));
+			}
 			let _guard = self.0.park();
 			return visitor.visit_unit();
 		}
@@ -177,7 +183,7 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.0.0 {
-			Val::Str(string) => visitor.visit_enum(EnumDeserializer {
+			Val::Str(string) => visitor.visit_enum(EnumDeserializer::<RAW> {
 				variant: string.into_flat(),
 				value: None,
 			}),
@@ -188,7 +194,7 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 				let value = object
 					.get(variant.clone())?
 					.expect("iterating over fields; the field exists");
-				visitor.visit_enum(EnumDeserializer {
+				visitor.visit_enum(EnumDeserializer::<RAW> {
 					variant,
 					value: Some(Value(value)),
 				})
@@ -228,11 +234,11 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.0.0 {
-			Val::Obj(object) => visitor.visit_map(StructDeserializer::new(object, fields)),
+			Val::Obj(object) => visitor.visit_map(StructDeserializer::<RAW>::new(object, fields)),
 			// A struct does not have to come from an object: serde builds one
 			// from a sequence as happily, and everything else still has to
 			// report the type it actually is.
-			value => ValueDeserializer(Value(value)).deserialize_any(visitor),
+			value => ValueDeserializer::<RAW>(Value(value)).deserialize_any(visitor),
 		}
 	}
 
@@ -243,18 +249,18 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 	}
 }
 
-struct SeqDeserializer {
+struct SeqDeserializer<const RAW: bool> {
 	array: ArrValue,
 	index: usize,
 }
 
-impl SeqDeserializer {
+impl<const RAW: bool> SeqDeserializer<RAW> {
 	fn new(array: ArrValue) -> Self {
 		SeqDeserializer { array, index: 0 }
 	}
 }
 
-impl<'de> SeqAccess<'de> for SeqDeserializer {
+impl<'de, const RAW: bool> SeqAccess<'de> for SeqDeserializer<RAW> {
 	type Error = EvaluatorError;
 
 	fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -265,7 +271,7 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
 			return Ok(None);
 		};
 		self.index += 1;
-		seed.deserialize(ValueDeserializer(Value(element)))
+		seed.deserialize(ValueDeserializer::<RAW>(Value(element)))
 			.map(Some)
 	}
 
@@ -274,13 +280,13 @@ impl<'de> SeqAccess<'de> for SeqDeserializer {
 	}
 }
 
-struct MapDeserializer {
+struct MapDeserializer<const RAW: bool> {
 	object: ObjValue,
 	fields: std::vec::IntoIter<IStr>,
 	field: Option<IStr>,
 }
 
-impl MapDeserializer {
+impl<const RAW: bool> MapDeserializer<RAW> {
 	fn new(object: ObjValue) -> Self {
 		let fields = object.fields().into_iter();
 		MapDeserializer {
@@ -291,7 +297,7 @@ impl MapDeserializer {
 	}
 }
 
-impl<'de> MapAccess<'de> for MapDeserializer {
+impl<'de, const RAW: bool> MapAccess<'de> for MapDeserializer<RAW> {
 	type Error = EvaluatorError;
 
 	fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -318,7 +324,7 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 			.object
 			.get(field)?
 			.expect("iterating over fields; the field exists");
-		seed.deserialize(ValueDeserializer(Value(value)))
+		seed.deserialize(ValueDeserializer::<RAW>(Value(value)))
 	}
 
 	fn size_hint(&self) -> Option<usize> {
@@ -328,13 +334,13 @@ impl<'de> MapAccess<'de> for MapDeserializer {
 
 /// Reads a struct's declared fields out of an object, in the order the struct
 /// declared them, skipping the ones it does not have.
-struct StructDeserializer {
+struct StructDeserializer<const RAW: bool> {
 	object: ObjValue,
 	fields: std::slice::Iter<'static, &'static str>,
 	field: Option<IStr>,
 }
 
-impl StructDeserializer {
+impl<const RAW: bool> StructDeserializer<RAW> {
 	fn new(object: ObjValue, fields: &'static [&'static str]) -> Self {
 		StructDeserializer {
 			object,
@@ -344,7 +350,7 @@ impl StructDeserializer {
 	}
 }
 
-impl<'de> MapAccess<'de> for StructDeserializer {
+impl<'de, const RAW: bool> MapAccess<'de> for StructDeserializer<RAW> {
 	type Error = EvaluatorError;
 
 	fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -384,18 +390,18 @@ impl<'de> MapAccess<'de> for StructDeserializer {
 			.object
 			.get(field)?
 			.expect("the field was there when it was asked about");
-		seed.deserialize(ValueDeserializer(Value(value)))
+		seed.deserialize(ValueDeserializer::<RAW>(Value(value)))
 	}
 }
 
-struct EnumDeserializer {
+struct EnumDeserializer<const RAW: bool> {
 	variant: IStr,
 	value: Option<Value>,
 }
 
-impl<'de> EnumAccess<'de> for EnumDeserializer {
+impl<'de, const RAW: bool> EnumAccess<'de> for EnumDeserializer<RAW> {
 	type Error = EvaluatorError;
-	type Variant = VariantDeserializer;
+	type Variant = VariantDeserializer<RAW>;
 
 	fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
 	where
@@ -408,11 +414,11 @@ impl<'de> EnumAccess<'de> for EnumDeserializer {
 	}
 }
 
-struct VariantDeserializer {
+struct VariantDeserializer<const RAW: bool> {
 	value: Option<Value>,
 }
 
-impl<'de> VariantAccess<'de> for VariantDeserializer {
+impl<'de, const RAW: bool> VariantAccess<'de> for VariantDeserializer<RAW> {
 	type Error = EvaluatorError;
 
 	fn unit_variant(self) -> Result<(), Self::Error> {
@@ -430,7 +436,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		T: DeserializeSeed<'de>,
 	{
 		match self.value {
-			Some(value) => seed.deserialize(ValueDeserializer(value)),
+			Some(value) => seed.deserialize(ValueDeserializer::<RAW>(value)),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"newtype variant",
@@ -443,7 +449,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.value {
-			Some(value) => ValueDeserializer(value).deserialize_seq(visitor),
+			Some(value) => ValueDeserializer::<RAW>(value).deserialize_seq(visitor),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"tuple variant",
@@ -460,7 +466,7 @@ impl<'de> VariantAccess<'de> for VariantDeserializer {
 		V: Visitor<'de>,
 	{
 		match self.value {
-			Some(value) => ValueDeserializer(value).deserialize_map(visitor),
+			Some(value) => ValueDeserializer::<RAW>(value).deserialize_map(visitor),
 			None => Err(de::Error::invalid_type(
 				Unexpected::UnitVariant,
 				&"struct variant",
@@ -915,7 +921,7 @@ mod tests {
 	}
 
 	fn from_val<'de, T: Deserialize<'de>>(snippet: &str) -> Result<T, EvaluatorError> {
-		T::deserialize(ValueDeserializer(Value(eval(snippet))))
+		T::deserialize(ValueDeserializer::<true>(Value(eval(snippet))))
 	}
 
 	fn to_val<T: Serialize>(value: &T) -> Result<Val, jrsonnet_evaluator::Error> {
@@ -1163,7 +1169,7 @@ mod tests {
 			let val = State::builder()
 				.build()
 				.evaluate_snippet("test", r#"{ bad: error "boom" }"#)?;
-			Failing::deserialize(ValueDeserializer(Value(val)))
+			Failing::deserialize(ValueDeserializer::<true>(Value(val)))
 		})();
 		let error = result.expect_err("field evaluation fails");
 		assert!(
@@ -1278,22 +1284,24 @@ mod tests {
 
 		use crate::{Array, Object};
 
-		let array = Array::deserialize(ValueDeserializer(Value(eval("[1, 2]")))).unwrap();
+		let array = Array::deserialize(ValueDeserializer::<true>(Value(eval("[1, 2]")))).unwrap();
 		assert_eq!(array.len(), 2);
 		assert_eq!(serde_json::to_string(&array).unwrap(), "[1,2]");
-		assert!(Array::deserialize(ValueDeserializer(Value(eval("{}")))).is_err());
+		assert!(Array::deserialize(ValueDeserializer::<true>(Value(eval("{}")))).is_err());
 
-		let object = Object::deserialize(ValueDeserializer(Value(eval("{ a: 1 }")))).unwrap();
+		let object =
+			Object::deserialize(ValueDeserializer::<true>(Value(eval("{ a: 1 }")))).unwrap();
 		assert!(object.has("a", rtk_jsonnet_core::Hidden::Skip).unwrap());
 		assert_eq!(serde_json::to_string(&object).unwrap(), r#"{"a":1}"#);
-		assert!(Object::deserialize(ValueDeserializer(Value(eval("[]")))).is_err());
+		assert!(Object::deserialize(ValueDeserializer::<true>(Value(eval("[]")))).is_err());
 	}
 
 	#[test]
 	fn deserializes_val_from_serde_data() {
-		let value =
-			Value::deserialize(ValueDeserializer(Value(eval(r#"{ a: [1, "two", null] }"#))))
-				.unwrap();
+		let value = Value::deserialize(ValueDeserializer::<true>(Value(eval(
+			r#"{ a: [1, "two", null] }"#,
+		))))
+		.unwrap();
 		let obj = value.0.as_obj().expect("an object");
 		assert_eq!(obj.fields().len(), 1);
 	}
@@ -1379,7 +1387,7 @@ mod tests {
 		let fixture = fixture();
 		let value = to_val(&fixture).unwrap();
 		assert_eq!(
-			Fixture::deserialize(ValueDeserializer(Value(value))).unwrap(),
+			Fixture::deserialize(ValueDeserializer::<true>(Value(value))).unwrap(),
 			fixture
 		);
 
@@ -1390,7 +1398,7 @@ mod tests {
 		] {
 			let value = to_val(&variant).unwrap();
 			assert_eq!(
-				TaggedEnum::deserialize(ValueDeserializer(Value(value))).unwrap(),
+				TaggedEnum::deserialize(ValueDeserializer::<true>(Value(value))).unwrap(),
 				variant
 			);
 		}

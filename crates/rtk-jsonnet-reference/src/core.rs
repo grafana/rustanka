@@ -355,6 +355,22 @@ impl Evaluator {
 		Ok((self, Value(serde_json::from_str(&output)?)))
 	}
 }
+impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
+	type Owner = (Evaluator, Value);
+	fn visit_root<R>(
+		owner: &Self::Owner,
+		visit: impl FnOnce(&Self::Context, Self::Value) -> R,
+	) -> R {
+		visit(&owner.0, owner.1.clone())
+	}
+	fn deserialize_data<'de, T: ::serde::Deserialize<'de>>(
+		_: &Evaluator,
+		value: Value,
+	) -> Result<T, EvaluatorError> {
+		T::deserialize(value.0).map_err(EvaluatorError::from)
+	}
+}
+
 impl core::Evaluator for Evaluator {
 	type Implementation = Implementation;
 	type Arguments = Arguments;
@@ -494,6 +510,31 @@ mod tests {
 	struct Data {
 		name: String,
 		numbers: Vec<i32>,
+	}
+
+	#[test]
+	fn scoped_result_traverses_manifested_data() {
+		use rtk_jsonnet_core::{RawValue, ScopedEvaluator as _};
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let result = core::Implementation::create_evaluator(&implementation)
+			.evaluate_snippet_result("{numbers: [1, 2], hidden:: true}")
+			.unwrap();
+		let numbers = result.with_root(|root| {
+			let obj = root.as_object().unwrap();
+			assert_eq!(obj.field_names(core::Hidden::Include), ["numbers"]);
+			let numbers = obj.values().next().unwrap().unwrap();
+			assert_eq!(numbers.as_array().unwrap().len(), 2);
+			numbers.deserialize::<Vec<i32>>().unwrap()
+		});
+		assert_eq!(numbers, [1, 2]);
+		assert!(
+			result
+				.deserialize::<std::collections::BTreeMap<String, RawValue<Value>>>()
+				.is_err()
+		);
+		assert_eq!(result.manifest().unwrap(), r#"{"numbers":[1,2]}"#);
 	}
 
 	#[test]
