@@ -253,14 +253,15 @@ pub fn builtin_strip_chars(str: IStr, chars: IndexableVal) -> Result<IStr> {
 
 #[builtin]
 pub fn builtin_trim(str: IStr) -> String {
-	let filter =
-		|v: char| {
-			v == ' '
-				|| v == '\t' || v == '\n'
-				|| v == '\u{000c}'
-				|| v == '\r' || v == '\u{0085}'
-				|| v == '\u{00a0}'
-		};
+	let filter = |v: char| {
+		v == ' '
+			|| v == '\t'
+			|| v == '\n'
+			|| v == '\u{000c}'
+			|| v == '\r'
+			|| v == '\u{0085}'
+			|| v == '\u{00a0}'
+	};
 	str.as_str().trim_matches(filter).to_string()
 }
 
