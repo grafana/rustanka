@@ -207,7 +207,7 @@ impl Engine {
 			None => evaluator.evaluate_file(jpath.entrypoint)?,
 		};
 
-		Engine::materialize(&evaluation.into_value())
+		evaluation.with_root(Engine::materialize)
 	}
 
 	/// Discover and evaluate exactly one environment or bare Jsonnet entrypoint.
@@ -321,7 +321,7 @@ impl Engine {
 		let evaluation =
 			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, "main"))?;
 
-		let data = Engine::materialize(&evaluation.into_value())?;
+		let data = evaluation.with_root(Engine::materialize)?;
 		LoadedEnvironment::bare(data)
 	}
 
@@ -361,7 +361,7 @@ impl Engine {
 		let evaluation =
 			evaluator.evaluate_snippet(self.entrypoint_snippet(&jpath.entrypoint, &script))?;
 
-		Engine::materialize(&evaluation.into_value())
+		evaluation.with_root(Engine::materialize)
 	}
 }
 

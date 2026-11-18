@@ -1,22 +1,18 @@
+use crate::Evaluation;
 use std::convert::Infallible;
 use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::rc::Rc as StdRc;
 use std::sync::{Arc, RwLock, Weak};
 
-use rtk_jsonnet_core::{
-	Context as _, Evaluator as _, FlagsExt, Function, Hidden, Implementation, RawValue,
-	ScopedEvaluator as _, Value as _,
-};
+use rtk_jsonnet_core::{Evaluator as _, FlagsExt, Function, Implementation, ScopedEvaluator as _};
 use rtk_jsonnet_jrsonnet::{
-	Error as JrsonnetError, Evaluation as JrsonnetEvaluation, Evaluator as JrsonnetEvaluator,
+	Error as JrsonnetError, Evaluator as JrsonnetEvaluator,
 	EvaluatorError as JrsonnetEvaluatorError, Flag as JrsonnetFlag,
 	Implementation as JrsonnetImplementation,
 };
 use rtk_jsonnet_reference::{
 	Evaluator as ReferenceEvaluator, Implementation as ReferenceImplementation,
-	Value as ReferenceValue,
 };
 use rtk_spec::DeepMerge;
 use rtk_spec::canonical::{EnvironmentSpec, JsonnetImplementation, Rc};
@@ -43,11 +39,6 @@ pub enum Error {
 
 	#[error("a jrsonnet context is unavailable for the reference Jsonnet evaluator")]
 	JrsonnetContextOnReference,
-
-	#[error(
-		"a raw value can only be attached to an evaluation by the implementation that captured it"
-	)]
-	ForeignRawValue,
 
 	#[error("reading {path}: {source}")]
 	Rc {
@@ -171,15 +162,6 @@ impl JrsonnetContext {
 
 	pub fn with_current<T>(&self, callback: impl FnOnce() -> T) -> T {
 		self.0.with_current(callback)
-	}
-}
-
-#[derive(Clone)]
-pub struct ReferenceContext(ReferenceEvaluator);
-
-impl fmt::Debug for ReferenceContext {
-	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-		formatter.write_str("ReferenceContext")
 	}
 }
 
@@ -308,16 +290,12 @@ impl Evaluator {
 	{
 		match self.into_implementation()? {
 			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
-				.evaluate_file(path)
-				.map(JrsonnetEvaluation::from)
-				.map(Evaluation::Jrsonnet)
+				.evaluate_file_result(path)
+				.map(Evaluation::jr)
 				.map_err(|error| JrsonnetError::Evaluator(error).into()),
 			ImplementationEvaluator::Reference(evaluator) => evaluator
-				.evaluate_file(path)
-				.map(|(context, value)| Evaluation::Reference {
-					context: ReferenceContext(context),
-					value,
-				})
+				.evaluate_file_result(path)
+				.map(Evaluation::reference)
 				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
 		}
 	}
@@ -332,16 +310,12 @@ impl Evaluator {
 		}
 		match self.evaluator.take().expect("evaluator was populated") {
 			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
-				.evaluate_snippet(snippet)
-				.map(JrsonnetEvaluation::from)
-				.map(Evaluation::Jrsonnet)
+				.evaluate_snippet_result(snippet)
+				.map(Evaluation::jr)
 				.map_err(|error| JrsonnetError::Evaluator(error).into()),
 			ImplementationEvaluator::Reference(evaluator) => evaluator
-				.evaluate_snippet(snippet)
-				.map(|(context, value)| Evaluation::Reference {
-					context: ReferenceContext(context),
-					value,
-				})
+				.evaluate_snippet_result(snippet)
+				.map(Evaluation::reference)
 				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
 		}
 	}
@@ -449,690 +423,6 @@ impl fmt::Debug for ImplementationEvaluator {
 		match self {
 			Self::Jrsonnet(value) => value.fmt(formatter),
 			Self::Reference(_) => formatter.write_str("ReferenceEvaluator"),
-		}
-	}
-}
-
-#[derive(Debug)]
-pub enum Evaluation {
-	Jrsonnet(JrsonnetEvaluation),
-	Reference {
-		context: ReferenceContext,
-		value: ReferenceValue,
-	},
-}
-
-impl Evaluation {
-	pub fn into_value(self) -> EvaluationValue {
-		match self {
-			Evaluation::Jrsonnet(evaluation) => {
-				let value = evaluation.value().clone();
-				EvaluationValue::Jrsonnet {
-					evaluation: StdRc::new(evaluation),
-					value,
-				}
-			}
-			Evaluation::Reference { context, value } => {
-				EvaluationValue::Reference { context, value }
-			}
-		}
-	}
-}
-
-impl serde::Serialize for Evaluation {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			Evaluation::Jrsonnet(evaluation) => evaluation.serialize(serializer),
-			Evaluation::Reference { value, .. } => value.serialize(serializer),
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub enum EvaluationValue {
-	Jrsonnet {
-		// Drop the value before the evaluation: dropping the evaluation collects
-		// cycles, and a live root makes it traverse the whole graph for nothing.
-		value: rtk_jsonnet_jrsonnet::Value,
-		evaluation: StdRc<JrsonnetEvaluation>,
-	},
-	Reference {
-		context: ReferenceContext,
-		value: ReferenceValue,
-	},
-}
-
-impl serde::Serialize for EvaluationValue {
-	/// Serializes through the serde data model, which is lossy for numbers no
-	/// data model can represent: use [`EvaluationValue::manifest_into`] for
-	/// output that has to match another Jsonnet implementation exactly.
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => {
-				evaluation.with_context(|_| value.serialize(serializer))
-			}
-			EvaluationValue::Reference { value, .. } => value.serialize(serializer),
-		}
-	}
-}
-
-/// A value captured out of an evaluation without deserializing it.
-///
-/// Produced by deserializing anything that holds a
-/// [`RawValue`](rtk_jsonnet_core::RawValue) — an [`Environment`]'s `data`, in
-/// practice — and turned back into an [`EvaluationValue`] with
-/// [`EvaluationValue::attach`].
-///
-/// [`Environment`]: rtk_spec::canonical::Environment
-#[derive(Clone, Debug, Default)]
-pub enum RawEvaluationValue {
-	Jrsonnet(RawValue<rtk_jsonnet_jrsonnet::Value>),
-	Reference(RawValue<ReferenceValue>),
-	/// Nothing was captured, because there was nothing to capture — a field
-	/// left to its default. It belongs to no implementation, so it attaches to
-	/// any evaluation as that evaluation's `null`.
-	#[default]
-	Absent,
-}
-
-impl<'de> serde::Deserialize<'de> for RawEvaluationValue {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		struct RawVisitor;
-
-		impl<'de> serde::de::Visitor<'de> for RawVisitor {
-			type Value = RawEvaluationValue;
-
-			fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-				formatter.write_str("a value parked by a jsonnet deserializer")
-			}
-
-			fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-				if let Some(value) = rtk_jsonnet_jrsonnet::Value::take_parked() {
-					return Ok(RawEvaluationValue::Jrsonnet(RawValue::new(value)));
-				}
-				if let Some(value) = ReferenceValue::take_parked() {
-					return Ok(RawEvaluationValue::Reference(RawValue::new(value)));
-				}
-				Err(E::custom(
-					"a raw value can only be deserialized by the jsonnet implementation that produced it",
-				))
-			}
-
-			fn visit_newtype_struct<D: serde::Deserializer<'de>>(
-				self,
-				_: D,
-			) -> Result<Self::Value, D::Error> {
-				self.visit_unit()
-			}
-		}
-
-		deserializer.deserialize_newtype_struct(rtk_jsonnet_core::RAW_VALUE_TOKEN, RawVisitor)
-	}
-}
-
-impl serde::Serialize for RawEvaluationValue {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			RawEvaluationValue::Jrsonnet(value) => value.serialize(serializer),
-			RawEvaluationValue::Reference(value) => value.serialize(serializer),
-			RawEvaluationValue::Absent => serializer.serialize_unit(),
-		}
-	}
-}
-
-impl DeepMerge for RawEvaluationValue {
-	/// Values are opaque, so merging can only replace.
-	fn merge_from(&mut self, other: Self) {
-		*self = other;
-	}
-}
-
-impl rtk_spec::v1alpha1::EnvironmentData<'_> for RawEvaluationValue {
-	fn present() -> bool {
-		true
-	}
-}
-
-impl EvaluationValue {
-	/// Rebuild a value captured during a deserialization that is still going on.
-	///
-	/// Deserializing happens inside the evaluation's context, so a value
-	/// captured there can be paired with that context immediately, which is what
-	/// makes captured data usable without having to hold on to the evaluation it
-	/// came from. Returns [`None`] when called outside a deserialization, where
-	/// there is no context to pair it with.
-	///
-	/// Only jrsonnet deserializes inside a live context. A reference value is
-	/// plain JSON with nothing to pair it with, so it always returns [`None`];
-	/// use [`EvaluationValue::attach`] for it instead.
-	pub fn current(raw: RawEvaluationValue) -> Option<EvaluationValue> {
-		let value = match raw {
-			RawEvaluationValue::Jrsonnet(raw) => raw.into_inner(),
-			RawEvaluationValue::Absent => rtk_jsonnet_jrsonnet::Value::default(),
-			RawEvaluationValue::Reference(_) => return None,
-		};
-		let context = rtk_jsonnet_jrsonnet::Evaluator::current()?;
-		Some(EvaluationValue::Jrsonnet {
-			evaluation: StdRc::new(JrsonnetEvaluation::with_shared_context(
-				context,
-				value.clone(),
-			)),
-			value,
-		})
-	}
-
-	/// Pair a value captured out of *this* evaluation with its context again.
-	///
-	/// A value captured by a different implementation cannot be attached and is
-	/// refused; an [absent](RawEvaluationValue::Absent) one attaches to any
-	/// evaluation as its `null`.
-	pub fn attach(&self, raw: RawEvaluationValue) -> Result<EvaluationValue, Error> {
-		match (self, raw) {
-			(EvaluationValue::Jrsonnet { evaluation, .. }, RawEvaluationValue::Jrsonnet(raw)) => {
-				Ok(EvaluationValue::Jrsonnet {
-					evaluation: StdRc::clone(evaluation),
-					value: raw.into_inner(),
-				})
-			}
-			(EvaluationValue::Jrsonnet { evaluation, .. }, RawEvaluationValue::Absent) => {
-				Ok(EvaluationValue::Jrsonnet {
-					evaluation: StdRc::clone(evaluation),
-					value: rtk_jsonnet_jrsonnet::Value::default(),
-				})
-			}
-			(EvaluationValue::Reference { context, .. }, RawEvaluationValue::Reference(raw)) => {
-				Ok(EvaluationValue::Reference {
-					context: context.clone(),
-					value: raw.into_inner(),
-				})
-			}
-			(EvaluationValue::Reference { context, .. }, RawEvaluationValue::Absent) => {
-				Ok(EvaluationValue::Reference {
-					context: context.clone(),
-					value: ReferenceValue::default(),
-				})
-			}
-			(EvaluationValue::Jrsonnet { .. }, RawEvaluationValue::Reference(_))
-			| (EvaluationValue::Reference { .. }, RawEvaluationValue::Jrsonnet(_)) => {
-				Err(Error::ForeignRawValue)
-			}
-		}
-	}
-
-	/// Append this value's canonical JSON text to `buffer`.
-	///
-	/// This is the implementation's own manifestification rather than a serde
-	/// round-trip, so output derived from it matches tk byte for byte. See
-	/// [`rtk_jsonnet_core::Value::manifest_into`].
-	pub fn manifest_into(&self, buffer: &mut String) -> Result<(), Error> {
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => evaluation
-				.with_context(|_| value.manifest_into(buffer))
-				.map_err(Error::from),
-			EvaluationValue::Reference { value, .. } => value
-				.manifest_into(buffer)
-				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
-		}
-	}
-
-	/// [`EvaluationValue::manifest_into`] into a fresh [`String`].
-	pub fn manifest(&self) -> Result<String, Error> {
-		let mut buffer = String::new();
-		self.manifest_into(&mut buffer)?;
-		Ok(buffer)
-	}
-
-	/// Like [`EvaluationValue::into_array`], but without giving up ownership.
-	pub fn as_array(&self) -> Option<EvaluationArray> {
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => {
-				value.as_array().map(|array| EvaluationArray::Jrsonnet {
-					evaluation: StdRc::clone(evaluation),
-					array,
-				})
-			}
-			EvaluationValue::Reference { context, value } => {
-				value.as_array().map(|array| EvaluationArray::Reference {
-					context: context.clone(),
-					array,
-				})
-			}
-		}
-	}
-
-	/// Like [`EvaluationValue::into_object`], but without giving up ownership.
-	pub fn as_object(&self) -> Option<EvaluationObject> {
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => {
-				value.as_object().map(|object| EvaluationObject::Jrsonnet {
-					evaluation: StdRc::clone(evaluation),
-					object,
-				})
-			}
-			EvaluationValue::Reference { context, value } => {
-				value.as_object().map(|object| EvaluationObject::Reference {
-					context: context.clone(),
-					object,
-				})
-			}
-		}
-	}
-
-	/// This value as a string, if it is one.
-	///
-	/// None of the accessors need the evaluation's context: a value in hand has
-	/// been evaluated already. Reach for these rather than
-	/// [`EvaluationValue::deserialize`] when all that is wanted is to look at a
-	/// value.
-	pub fn as_str(&self) -> Option<EvaluationStr> {
-		match self {
-			EvaluationValue::Jrsonnet { value, .. } => value.as_str().map(EvaluationStr::Jrsonnet),
-			EvaluationValue::Reference { value, .. } => {
-				value.as_str().map(EvaluationStr::Reference)
-			}
-		}
-	}
-
-	/// This value as a number, if it is one.
-	pub fn as_number(&self) -> Option<f64> {
-		match self {
-			EvaluationValue::Jrsonnet { value, .. } => value.as_number(),
-			EvaluationValue::Reference { value, .. } => value.as_number(),
-		}
-	}
-
-	/// This value as a boolean, if it is one.
-	pub fn as_bool(&self) -> Option<bool> {
-		match self {
-			EvaluationValue::Jrsonnet { value, .. } => value.as_bool(),
-			EvaluationValue::Reference { value, .. } => value.as_bool(),
-		}
-	}
-
-	/// Whether this value is `null`.
-	pub fn is_null(&self) -> bool {
-		match self {
-			EvaluationValue::Jrsonnet { value, .. } => value.is_null(),
-			EvaluationValue::Reference { value, .. } => value.is_null(),
-		}
-	}
-
-	pub fn into_array(self) -> Result<EvaluationArray, Self> {
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => match value.into_array() {
-				Ok(array) => Ok(EvaluationArray::Jrsonnet { evaluation, array }),
-				Err(value) => Err(EvaluationValue::Jrsonnet { evaluation, value }),
-			},
-			EvaluationValue::Reference { context, value } => match value.into_array() {
-				Ok(array) => Ok(EvaluationArray::Reference { context, array }),
-				Err(value) => Err(EvaluationValue::Reference { context, value }),
-			},
-		}
-	}
-
-	pub fn into_object(self) -> Result<EvaluationObject, Self> {
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => match value.into_object() {
-				Ok(object) => Ok(EvaluationObject::Jrsonnet { evaluation, object }),
-				Err(value) => Err(EvaluationValue::Jrsonnet { evaluation, value }),
-			},
-			EvaluationValue::Reference { context, value } => match value.into_object() {
-				Ok(object) => Ok(EvaluationObject::Reference { context, object }),
-				Err(value) => Err(EvaluationValue::Reference { context, value }),
-			},
-		}
-	}
-
-	pub fn deserialize<'de, T>(self) -> Result<T, Error>
-	where
-		T: serde::Deserialize<'de>,
-	{
-		match self {
-			EvaluationValue::Jrsonnet { evaluation, value } => evaluation
-				.with_context(|context| T::deserialize(context.create_deserializer(value)))
-				.map_err(Error::from),
-			EvaluationValue::Reference { context, value } => {
-				T::deserialize(context.0.create_deserializer(value))
-					.map_err(|error| rtk_jsonnet_reference::Error::from(error).into())
-			}
-		}
-	}
-}
-
-/// A string read out of an [`EvaluationValue`].
-///
-/// Derefs to [`str`], and cloning it is cheap, so it can be held on to as
-/// happily as it can be compared.
-#[derive(Clone, Debug)]
-pub enum EvaluationStr {
-	Jrsonnet(rtk_jsonnet_jrsonnet::Str),
-	Reference(String),
-}
-
-impl std::ops::Deref for EvaluationStr {
-	type Target = str;
-
-	fn deref(&self) -> &str {
-		match self {
-			EvaluationStr::Jrsonnet(string) => string,
-			EvaluationStr::Reference(string) => string,
-		}
-	}
-}
-
-impl fmt::Display for EvaluationStr {
-	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-		formatter.write_str(self)
-	}
-}
-
-impl PartialEq<str> for EvaluationStr {
-	fn eq(&self, other: &str) -> bool {
-		**self == *other
-	}
-}
-
-impl PartialEq<&str> for EvaluationStr {
-	fn eq(&self, other: &&str) -> bool {
-		**self == **other
-	}
-}
-
-#[derive(Clone, Debug)]
-pub enum EvaluationArray {
-	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
-		array: rtk_jsonnet_jrsonnet::Array,
-	},
-	Reference {
-		context: ReferenceContext,
-		array: rtk_jsonnet_reference::Array,
-	},
-}
-
-impl EvaluationArray {
-	pub fn into_values(self) -> EvaluationArrayValues {
-		match self {
-			EvaluationArray::Jrsonnet { evaluation, array } => EvaluationArrayValues::Jrsonnet {
-				evaluation,
-				values: array.into_values(),
-			},
-			EvaluationArray::Reference { context, array } => EvaluationArrayValues::Reference {
-				context,
-				values: Box::new(array.0.into_iter().map(ReferenceValue)),
-			},
-		}
-	}
-}
-
-pub enum EvaluationArrayValues {
-	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
-		values: rtk_jsonnet_jrsonnet::ArrayValues,
-	},
-	Reference {
-		context: ReferenceContext,
-		values: Box<dyn Iterator<Item = ReferenceValue>>,
-	},
-}
-
-impl Iterator for EvaluationArrayValues {
-	type Item = Result<EvaluationValue, Error>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			EvaluationArrayValues::Jrsonnet { evaluation, values } => {
-				evaluation.with_context(|_| {
-					values.next().map(|value| {
-						value
-							.map(|value| EvaluationValue::Jrsonnet {
-								evaluation: StdRc::clone(evaluation),
-								value,
-							})
-							.map_err(Error::from)
-					})
-				})
-			}
-			EvaluationArrayValues::Reference { context, values } => values.next().map(|value| {
-				Ok(EvaluationValue::Reference {
-					context: context.clone(),
-					value,
-				})
-			}),
-		}
-	}
-}
-
-#[derive(Clone, Debug)]
-pub enum EvaluationObject {
-	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
-		object: rtk_jsonnet_jrsonnet::Object,
-	},
-	Reference {
-		context: ReferenceContext,
-		object: rtk_jsonnet_reference::Object,
-	},
-}
-
-impl EvaluationObject {
-	/// This object's field names, without forcing their values.
-	pub fn field_names(&self, hidden: Hidden) -> Vec<EvaluationStr> {
-		match self {
-			EvaluationObject::Jrsonnet { object, .. } => object
-				.field_names(hidden)
-				.into_iter()
-				.map(EvaluationStr::Jrsonnet)
-				.collect(),
-			EvaluationObject::Reference { object, .. } => object
-				.0
-				.keys()
-				.cloned()
-				.map(EvaluationStr::Reference)
-				.collect(),
-		}
-	}
-
-	/// Evaluate this object's assertions without forcing its fields.
-	pub fn run_assertions(&self) -> Result<(), Error> {
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
-				.with_context(|_| object.run_assertions())
-				.map_err(Error::from),
-			EvaluationObject::Reference { .. } => Ok(()),
-		}
-	}
-
-	/// Whether the object has a field by this name.
-	///
-	/// Does not force the field.
-	pub fn has(&self, key: &str, hidden: Hidden) -> Result<bool, Error> {
-		use rtk_jsonnet_core::Object as _;
-
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
-				.with_context(|_| object.has(key, hidden))
-				.map_err(Error::from),
-			EvaluationObject::Reference { object, .. } => object
-				.has(key, hidden)
-				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
-		}
-	}
-
-	/// The field's value, or [`None`] if the object has no such field.
-	///
-	/// Forces the field. Use [`EvaluationObject::has`] to ask about a field
-	/// whose value is not wanted.
-	pub fn get(&self, key: &str, hidden: Hidden) -> Result<Option<EvaluationValue>, Error> {
-		use rtk_jsonnet_core::Object as _;
-
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
-				.with_context(|_| object.get(key, hidden))
-				.map(|value| {
-					value.map(|value| EvaluationValue::Jrsonnet {
-						evaluation: StdRc::clone(evaluation),
-						value,
-					})
-				})
-				.map_err(Error::from),
-			EvaluationObject::Reference { context, object } => object
-				.get(key, hidden)
-				.map(|value| {
-					value.map(|value| EvaluationValue::Reference {
-						context: context.clone(),
-						value,
-					})
-				})
-				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
-		}
-	}
-
-	/// [`EvaluationObject::get`], failing when the field is absent.
-	pub fn get_or_bail(&self, key: &str, hidden: Hidden) -> Result<EvaluationValue, Error> {
-		use rtk_jsonnet_core::Object as _;
-
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => evaluation
-				.with_context(|_| object.get_or_bail(key, hidden))
-				.map(|value| EvaluationValue::Jrsonnet {
-					evaluation: StdRc::clone(evaluation),
-					value,
-				})
-				.map_err(Error::from),
-			EvaluationObject::Reference { context, object } => object
-				.get_or_bail(key, hidden)
-				.map(|value| EvaluationValue::Reference {
-					context: context.clone(),
-					value,
-				})
-				.map_err(|error| rtk_jsonnet_reference::Error::from(error).into()),
-		}
-	}
-
-	pub fn into_values(self) -> EvaluationObjectValues {
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => EvaluationObjectValues::Jrsonnet {
-				evaluation,
-				values: object.into_values(),
-			},
-			EvaluationObject::Reference { context, object } => EvaluationObjectValues::Reference {
-				context,
-				values: Box::new(object.0.into_values().map(ReferenceValue)),
-			},
-		}
-	}
-
-	/// Like [`EvaluationObject::into_values`], but keeping each value's field
-	/// name.
-	pub fn into_fields(self) -> EvaluationObjectFields {
-		match self {
-			EvaluationObject::Jrsonnet { evaluation, object } => EvaluationObjectFields::Jrsonnet {
-				evaluation,
-				fields: object.into_fields(),
-			},
-			EvaluationObject::Reference { context, object } => EvaluationObjectFields::Reference {
-				context,
-				fields: Box::new(
-					object
-						.0
-						.into_iter()
-						.map(|(key, value)| (key.into_boxed_str(), ReferenceValue(value))),
-				),
-			},
-		}
-	}
-}
-
-pub enum EvaluationObjectFields {
-	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
-		fields: rtk_jsonnet_jrsonnet::ObjectFields,
-	},
-	Reference {
-		context: ReferenceContext,
-		fields: Box<dyn Iterator<Item = (Box<str>, ReferenceValue)>>,
-	},
-}
-
-impl Iterator for EvaluationObjectFields {
-	type Item = (Box<str>, Result<EvaluationValue, Error>);
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			EvaluationObjectFields::Jrsonnet { evaluation, fields } => {
-				evaluation.with_context(|_| {
-					let (field, value) = fields.next()?;
-					let value = value
-						.map(|value| EvaluationValue::Jrsonnet {
-							evaluation: StdRc::clone(evaluation),
-							value,
-						})
-						.map_err(Error::from);
-					Some((field, value))
-				})
-			}
-			EvaluationObjectFields::Reference { context, fields } => {
-				fields.next().map(|(field, value)| {
-					(
-						field,
-						Ok(EvaluationValue::Reference {
-							context: context.clone(),
-							value,
-						}),
-					)
-				})
-			}
-		}
-	}
-}
-
-pub enum EvaluationObjectValues {
-	Jrsonnet {
-		evaluation: StdRc<JrsonnetEvaluation>,
-		values: rtk_jsonnet_jrsonnet::ObjectValues,
-	},
-	Reference {
-		context: ReferenceContext,
-		values: Box<dyn Iterator<Item = ReferenceValue>>,
-	},
-}
-
-impl Iterator for EvaluationObjectValues {
-	type Item = Result<EvaluationValue, Error>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			EvaluationObjectValues::Jrsonnet { evaluation, values } => {
-				evaluation.with_context(|_| {
-					values.next().map(|value| {
-						value
-							.map(|value| EvaluationValue::Jrsonnet {
-								evaluation: StdRc::clone(evaluation),
-								value,
-							})
-							.map_err(Error::from)
-					})
-				})
-			}
-			EvaluationObjectValues::Reference { context, values } => values.next().map(|value| {
-				Ok(EvaluationValue::Reference {
-					context: context.clone(),
-					value,
-				})
-			}),
 		}
 	}
 }
@@ -1387,6 +677,7 @@ impl Options {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::Hidden;
 	use std::fs;
 
 	#[test]
@@ -1737,7 +1028,7 @@ mod tests {
 			.create_evaluator()
 			.evaluate_snippet("1");
 		match result {
-			Ok(evaluation) => assert!(matches!(evaluation, Evaluation::Reference { .. })),
+			Ok(evaluation) => assert!(evaluation.is_reference()),
 			Err(Error::Reference(
 				rtk_jsonnet_reference::Error::Load { .. }
 				| rtk_jsonnet_reference::Error::Version { .. },
@@ -1766,10 +1057,7 @@ mod tests {
 		let environment = environment_spec(Some("c++"));
 		let mut evaluator = engine.create_evaluator_for(Some(&environment));
 		engine.options().apply(&mut evaluator).unwrap();
-		assert!(matches!(
-			evaluator.evaluate_snippet("1").unwrap(),
-			Evaluation::Reference { .. }
-		));
+		assert!(evaluator.evaluate_snippet("1").unwrap().is_reference());
 	}
 
 	#[test]
@@ -1780,29 +1068,30 @@ mod tests {
 		let value = engine
 			.create_evaluator()
 			.evaluate_snippet(r#"{ label: "hello", items: [false, 2], hidden:: error "hidden" }"#)
-			.unwrap()
-			.into_value();
-		let object = value.as_object().unwrap();
-		assert_eq!(object.field_names(Hidden::Skip).len(), 2);
-		assert!(object.get("hidden", Hidden::Include).unwrap().is_none());
-		assert_eq!(
-			object
-				.get_or_bail("label", Hidden::Skip)
-				.unwrap()
-				.as_str()
-				.as_deref(),
-			Some("hello")
-		);
-		let items = object
-			.get_or_bail("items", Hidden::Skip)
-			.unwrap()
-			.into_array()
 			.unwrap();
-		let items: Vec<_> = items
-			.into_values()
-			.map(|v| v.unwrap().manifest().unwrap())
-			.collect();
-		assert_eq!(items, ["false", "2"]);
+		value.with_root(|value| {
+			let object = value.as_object().unwrap();
+			assert_eq!(object.field_names(Hidden::Skip).len(), 2);
+			assert!(object.get("hidden", Hidden::Include).unwrap().is_none());
+			assert_eq!(
+				object
+					.get_or_bail("label", Hidden::Skip)
+					.unwrap()
+					.as_str()
+					.as_deref(),
+				Some("hello")
+			);
+			let items = object
+				.get_or_bail("items", Hidden::Skip)
+				.unwrap()
+				.as_array()
+				.unwrap();
+			let items: Vec<_> = items
+				.iter()
+				.map(|v| v.unwrap().manifest().unwrap())
+				.collect();
+			assert_eq!(items, ["false", "2"]);
+		});
 		assert!(
 			engine
 				.create_evaluator()
@@ -1814,15 +1103,13 @@ mod tests {
 				.create_evaluator()
 				.evaluate_snippet(r#"std.native("regexMatch")("^a", "abc")"#)
 				.unwrap()
-				.into_value()
-				.as_bool(),
+				.with_root(|v| v.as_bool()),
 			Some(true)
 		);
 	}
 
 	#[test]
-	fn reference_transfers_raw_environment_data() {
-		use rtk_spec::canonical::Environment;
+	fn reference_retains_environment_data() {
 		let Some(engine) = reference_engine() else {
 			return;
 		};
@@ -1835,85 +1122,49 @@ mod tests {
 			data: { resources: [{ kind: "ConfigMap", apiVersion: "v1" }] },
 		}"#,
 			)
-			.unwrap()
-			.into_value();
-		let environment: Environment<'_, RawEvaluationValue> = value.clone().deserialize().unwrap();
-		let data = value.attach(environment.data).unwrap();
-		assert_eq!(
-			data.as_object()
+			.unwrap();
+		let data = value.with_root(|root| {
+			root.as_object()
 				.unwrap()
-				.get_or_bail("resources", Hidden::Skip)
+				.get_or_bail("data", Hidden::Skip)
 				.unwrap()
-				.as_array()
-				.unwrap()
-				.into_values()
-				.count(),
-			1
-		);
+				.retain()
+		});
+		drop(value);
+		data.with_root(|v| {
+			assert_eq!(
+				v.as_object()
+					.unwrap()
+					.get_or_bail("resources", Hidden::Skip)
+					.unwrap()
+					.as_array()
+					.unwrap()
+					.len(),
+				1
+			)
+		});
 	}
 
 	#[test]
-	fn absent_raw_values_attach_to_either_implementation() {
-		let jrsonnet = Engine::new(Options::default())
-			.create_evaluator()
-			.evaluate_snippet("{}")
-			.unwrap()
-			.into_value();
-		assert!(
-			jrsonnet
-				.attach(RawEvaluationValue::default())
+	fn missing_field_stays_absent_on_either_implementation() {
+		for engine in [Some(Engine::new(Options::default())), reference_engine()]
+			.into_iter()
+			.flatten()
+		{
+			engine
+				.create_evaluator()
+				.evaluate_snippet("{}")
 				.unwrap()
-				.is_null()
-		);
-
-		let Some(engine) = reference_engine() else {
-			return;
-		};
-		let reference = engine
-			.create_evaluator()
-			.evaluate_snippet("{}")
-			.unwrap()
-			.into_value();
-		assert!(
-			reference
-				.attach(RawEvaluationValue::default())
-				.unwrap()
-				.is_null()
-		);
-	}
-
-	#[test]
-	fn a_raw_value_from_another_implementation_is_refused() {
-		use rtk_spec::canonical::Environment;
-		let Some(engine) = reference_engine() else {
-			return;
-		};
-		let snippet = r#"{
-			apiVersion: "tanka.dev/v1alpha1", kind: "Environment",
-			metadata: { name: "demo" }, spec: {}, data: { answer: 42 },
-		}"#;
-		let jrsonnet = Engine::new(Options::default())
-			.create_evaluator()
-			.evaluate_snippet(snippet)
-			.unwrap()
-			.into_value();
-		let reference = engine
-			.create_evaluator()
-			.evaluate_snippet(snippet)
-			.unwrap()
-			.into_value();
-		let from_jrsonnet: Environment<'_, RawEvaluationValue> =
-			jrsonnet.clone().deserialize().unwrap();
-		let from_reference: Environment<'_, RawEvaluationValue> =
-			reference.clone().deserialize().unwrap();
-		assert!(matches!(
-			reference.attach(from_jrsonnet.data),
-			Err(Error::ForeignRawValue)
-		));
-		assert!(matches!(
-			jrsonnet.attach(from_reference.data),
-			Err(Error::ForeignRawValue)
-		));
+				.with_root(|v| {
+					assert!(
+						v.as_object()
+							.unwrap()
+							.get("data", Hidden::Skip)
+							.unwrap()
+							.is_none()
+					)
+				});
+		}
 	}
 
 	#[test]
@@ -1944,10 +1195,7 @@ mod tests {
 		for _ in 0..3 {
 			let mut evaluator = engine.create_evaluator();
 			engine.options().apply(&mut evaluator).unwrap();
-			assert!(matches!(
-				evaluator.evaluate_snippet("1").unwrap(),
-				Evaluation::Jrsonnet(_)
-			));
+			assert!(!evaluator.evaluate_snippet("1").unwrap().is_reference());
 		}
 		let implementations = engine.0.implementations.read().unwrap();
 		assert_eq!(
@@ -1976,15 +1224,14 @@ mod tests {
 		let file = directory.path().join("main.jsonnet");
 		fs::write(&file, r"{ answer: 42 }").unwrap();
 		let result = engine.create_evaluator().evaluate_file(&file).unwrap();
-		assert!(matches!(result, Evaluation::Reference { .. }));
+		assert!(result.is_reference());
 		assert_eq!(
-			result
-				.into_value()
+			result.with_root(|v| v
 				.as_object()
 				.unwrap()
 				.get_or_bail("answer", Hidden::Skip)
 				.unwrap()
-				.as_number(),
+				.as_number()),
 			Some(42.0)
 		);
 
@@ -2254,50 +1501,46 @@ mod tests {
 					object: { value: std.native("sha256")("object") },
 				}"#,
 			)
-			.unwrap()
-			.into_value();
-		let object = value.into_object().expect("an object");
-
-		let array = object
-			.get_or_bail("array", Hidden::Skip)
-			.unwrap()
-			.into_array()
-			.expect("an array");
-		let array_value: String = array
-			.into_values()
-			.next()
-			.expect("an element")
-			.unwrap()
-			.deserialize()
 			.unwrap();
-		assert_eq!(
-			array_value,
-			"dbe42cc09c16704aa3d60127c60b4e1646fc6da1d4764aa517de053e65a663d7"
-		);
+		value.with_root(|value| {
+			let object = value.as_object().expect("an object");
 
-		let nested = object
-			.get_or_bail("object", Hidden::Skip)
-			.unwrap()
-			.into_object()
-			.expect("an object");
-		let object_value: String = nested
-			.get_or_bail("value", Hidden::Skip)
-			.unwrap()
-			.deserialize()
-			.unwrap();
-		assert_eq!(
-			object_value,
-			"2958d416d08aa5a472d7b509036cb7eafd542add84527e66a145ea64cb4cdc75"
-		);
+			let array = object
+				.get_or_bail("array", Hidden::Skip)
+				.unwrap()
+				.as_array()
+				.expect("an array");
+			let array_value: String = array
+				.iter()
+				.next()
+				.expect("an element")
+				.unwrap()
+				.deserialize()
+				.unwrap();
+			assert_eq!(
+				array_value,
+				"dbe42cc09c16704aa3d60127c60b4e1646fc6da1d4764aa517de053e65a663d7"
+			);
+
+			let nested = object
+				.get_or_bail("object", Hidden::Skip)
+				.unwrap()
+				.as_object()
+				.expect("an object");
+			let object_value: String = nested
+				.get_or_bail("value", Hidden::Skip)
+				.unwrap()
+				.deserialize()
+				.unwrap();
+			assert_eq!(
+				object_value,
+				"2958d416d08aa5a472d7b509036cb7eafd542add84527e66a145ea64cb4cdc75"
+			);
+		});
 	}
 
 	#[test]
 	fn captured_child_keeps_its_evaluation_after_another_evaluator_runs() {
-		#[derive(serde::Deserialize)]
-		struct Captured {
-			child: RawEvaluationValue,
-		}
-
 		let engine = Engine::new(Options::default());
 		let evaluate = |dir: &Path, label: &str| {
 			fs::write(dir.join("owner.txt"), label).unwrap();
@@ -2315,31 +1558,31 @@ mod tests {
 					} }"#,
 				)
 				.unwrap()
-				.into_value()
 		};
-		let result = |child: EvaluationValue| {
-			child
-				.into_object()
-				.unwrap()
-				.get_or_bail("result", Hidden::Skip)
-				.unwrap()
-				.deserialize::<String>()
-				.unwrap()
+		let child = |root: Evaluation| {
+			root.with_root(|v| {
+				v.as_object()
+					.unwrap()
+					.get_or_bail("child", Hidden::Skip)
+					.unwrap()
+					.retain()
+			})
 		};
-
+		let result = |child: Evaluation| {
+			child.with_root(|v| {
+				v.as_object()
+					.unwrap()
+					.get_or_bail("result", Hidden::Skip)
+					.unwrap()
+					.deserialize::<String>()
+					.unwrap()
+			})
+		};
 		let a = tempfile::tempdir().unwrap();
-		let child = {
-			let root = evaluate(a.path(), "A");
-			let captured: Captured = root.clone().deserialize().unwrap();
-			root.attach(captured.child).unwrap()
-		};
 		let b = tempfile::tempdir().unwrap();
-		let other = evaluate(b.path(), "B").into_object().unwrap();
-		assert_eq!(
-			result(other.get_or_bail("child", Hidden::Skip).unwrap()),
-			r"B\.B"
-		);
-		assert_eq!(result(child), r"A\.A");
+		let retained = child(evaluate(a.path(), "A"));
+		assert_eq!(result(child(evaluate(b.path(), "B"))), r"B\.B");
+		assert_eq!(result(retained), r"A\.A");
 	}
 
 	#[test]
@@ -2347,34 +1590,35 @@ mod tests {
 		let value = Engine::new(Options::default())
 			.create_evaluator()
 			.evaluate_snippet(r#"{ broken: error "forced", item10: 10, item2: 2, tucked:: 3 }"#)
-			.unwrap()
-			.into_value();
-		let object = value.as_object().expect("an object");
+			.unwrap();
+		value.with_root(|value| {
+			let object = value.as_object().expect("an object");
 
-		let names = |hidden| {
-			object
-				.field_names(hidden)
-				.iter()
-				.map(ToString::to_string)
-				.collect::<Vec<String>>()
-		};
+			let names = |hidden| {
+				object
+					.field_names(hidden)
+					.iter()
+					.map(ToString::to_string)
+					.collect::<Vec<String>>()
+			};
 
-		assert_eq!(names(Hidden::Skip), ["broken", "item10", "item2"]);
-		assert_eq!(
-			names(Hidden::Include),
-			["broken", "item10", "item2", "tucked"]
-		);
-		assert_eq!(
-			object
-				.get_or_bail("item2", Hidden::Skip)
-				.unwrap()
-				.as_number(),
-			Some(2.0)
-		);
+			assert_eq!(names(Hidden::Skip), ["broken", "item10", "item2"]);
+			assert_eq!(
+				names(Hidden::Include),
+				["broken", "item10", "item2", "tucked"]
+			);
+			assert_eq!(
+				object
+					.get_or_bail("item2", Hidden::Skip)
+					.unwrap()
+					.as_number(),
+				Some(2.0)
+			);
+		});
 	}
 
 	#[test]
-	fn captures_environment_data_lazily_and_manifests_it_after_attaching() {
+	fn retains_environment_data_lazily_and_manifests_it_later() {
 		use rtk_spec::canonical::Environment;
 
 		let value = Engine::new(Options::default())
@@ -2391,39 +1635,43 @@ mod tests {
 					},
 				}"#,
 			)
-			.unwrap()
-			.into_value();
+			.unwrap();
 
-		// Deserializing the environment captures `data` without walking it.
-		let environment: Environment<'_, RawEvaluationValue> = value.clone().deserialize().unwrap();
+		let environment: Environment<'_> = value.with_root(|v| v.deserialize()).unwrap();
 		assert_eq!(
 			environment.metadata.name.as_deref(),
 			Some("environments/demo")
 		);
 
-		// Re-attached to its evaluation, the captured value is walkable and
-		// manifests the way tk would print it.
-		let data = value.attach(environment.data).unwrap();
-		let object = data.into_object().expect("an object");
-		assert_eq!(
-			object
-				.get_or_bail("lazy", Hidden::Skip)
+		let data = value.with_root(|v| {
+			v.as_object()
 				.unwrap()
-				.manifest()
-				.unwrap(),
-			"{\n    \"nested\": 5\n}"
-		);
-		assert_eq!(
-			serde_json::from_str::<serde_json::Value>(
-				&object
-					.get_or_bail("big", Hidden::Skip)
+				.get_or_bail("data", Hidden::Skip)
+				.unwrap()
+				.retain()
+		});
+		data.with_root(|v| {
+			let object = v.as_object().expect("an object");
+			assert_eq!(
+				object
+					.get_or_bail("lazy", Hidden::Skip)
 					.unwrap()
 					.manifest()
-					.unwrap()
-			)
-			.unwrap()
-			.as_f64(),
-			Some(1e100)
-		);
+					.unwrap(),
+				"{\n    \"nested\": 5\n}"
+			);
+			assert_eq!(
+				serde_json::from_str::<serde_json::Value>(
+					&object
+						.get_or_bail("big", Hidden::Skip)
+						.unwrap()
+						.manifest()
+						.unwrap()
+				)
+				.unwrap()
+				.as_f64(),
+				Some(1e100)
+			);
+		});
 	}
 }

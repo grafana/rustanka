@@ -1,5 +1,5 @@
-//! Context-bound access to evaluation results. Keep the result, not a child;
-//! call `with_root` again to traverse it later.
+//! Context-bound access to evaluation results. Re-enter a root with `with_root`;
+//! use `ScopedValue::into_owned` to retain just a subtree for later.
 
 use crate::{Array, Evaluator, Hidden, Object, Value};
 use serde::Deserialize;
@@ -10,12 +10,10 @@ type Obj<E> = <<E as Evaluator>::Value as Value>::Object;
 
 /// Backend integration for context-bound traversal.
 pub trait ScopedEvaluator: Evaluator {
-	type Owner: From<(Self::Context, Self::Value)>;
-
 	/// Install the owner's execution context and pass its matching root to the callback.
 	fn visit_root<R>(
 		owner: &Self::Owner,
-		visit: impl FnOnce(&Self::Context, Self::Value) -> R,
+		visit: RootVisitor<impl for<'s> FnOnce(ScopedValue<'s, Self>) -> R>,
 	) -> R;
 
 	/// Deserialize through serde's data model, without transferring native values
@@ -29,15 +27,14 @@ pub trait ScopedEvaluator: Evaluator {
 		self,
 		path: impl AsRef<Path> + fmt::Debug,
 	) -> Result<EvaluationResult<Self>, Self::Error> {
-		self.evaluate_file(path)
-			.map(EvaluationResult::from_evaluation)
+		self.evaluate_file(path).map(EvaluationResult::from_owner)
 	}
 	fn evaluate_snippet_result(
 		self,
 		snippet: impl AsRef<str> + fmt::Debug,
 	) -> Result<EvaluationResult<Self>, Self::Error> {
 		self.evaluate_snippet(snippet)
-			.map(EvaluationResult::from_evaluation)
+			.map(EvaluationResult::from_owner)
 	}
 }
 
@@ -72,19 +69,17 @@ pub trait ScopedEvaluator: Evaluator {
 /// ```compile_fail
 /// use rtk_jsonnet_core::{EvaluationResult, ScopedEvaluator};
 /// fn assemble<E: ScopedEvaluator>(ctx: E::Context, value: E::Value) -> EvaluationResult<E> {
-///     (ctx, value).into()
+///     EvaluationResult::from_owner((ctx, value).into())
 /// }
 /// ```
 pub struct EvaluationResult<E: ScopedEvaluator>(E::Owner);
 
 impl<E: ScopedEvaluator> EvaluationResult<E> {
-	fn from_evaluation(parts: (E::Context, E::Value)) -> Self {
-		Self(parts.into())
+	pub fn from_owner(owner: E::Owner) -> Self {
+		Self(owner)
 	}
 	pub fn with_root<R>(&self, visit: impl for<'s> FnOnce(ScopedValue<'s, E>) -> R) -> R {
-		E::visit_root(&self.0, |context, value| {
-			visit(ScopedValue { context, value })
-		})
+		E::visit_root(&self.0, RootVisitor(visit))
 	}
 	pub fn deserialize<'de, T: Deserialize<'de>>(&self) -> Result<T, E::Error> {
 		self.with_root(|root| root.deserialize())
@@ -92,6 +87,41 @@ impl<E: ScopedEvaluator> EvaluationResult<E> {
 	pub fn manifest(&self) -> Result<String, E::Error> {
 		self.with_root(|root| root.manifest())
 	}
+}
+
+impl<E: ScopedEvaluator> serde::Serialize for EvaluationResult<E>
+where
+	E::Value: serde::Serialize,
+{
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		self.with_root(|root| root.value.serialize(serializer))
+	}
+}
+
+/// Backend end of a traversal. Only core can wrap a caller's callback; the
+/// caller receives a scoped view, never the backend arguments to `visit`.
+pub struct RootVisitor<F>(F);
+
+impl<F> RootVisitor<F> {
+	pub fn visit<E: ScopedEvaluator, R>(
+		self,
+		context: &E::Context,
+		value: E::Value,
+		retain: &dyn Fn(E::Value) -> E::Owner,
+	) -> R
+	where
+		F: for<'s> FnOnce(ScopedValue<'s, E>) -> R,
+	{
+		(self.0)(ScopedValue {
+			scope: &Scope { context, retain },
+			value,
+		})
+	}
+}
+
+struct Scope<'s, E: ScopedEvaluator> {
+	context: &'s E::Context,
+	retain: &'s dyn Fn(E::Value) -> E::Owner,
 }
 
 /// A value supplied by a traversal, not constructible from independent parts.
@@ -102,19 +132,23 @@ impl<E: ScopedEvaluator> EvaluationResult<E> {
 /// }
 /// ```
 pub struct ScopedValue<'s, E: ScopedEvaluator> {
-	context: &'s E::Context,
+	scope: &'s Scope<'s, E>,
 	value: E::Value,
 }
 impl<'s, E: ScopedEvaluator> ScopedValue<'s, E> {
+	/// Keep this subtree without forcing it or detaching it from its owner.
+	pub fn into_owned(self) -> EvaluationResult<E> {
+		EvaluationResult::from_owner((self.scope.retain)(self.value))
+	}
 	pub fn as_array(&self) -> Option<ScopedArray<'s, E>> {
 		self.value.as_array().map(|array| ScopedArray {
-			context: self.context,
+			scope: self.scope,
 			array,
 		})
 	}
 	pub fn as_object(&self) -> Option<ScopedObject<'s, E>> {
 		self.value.as_object().map(|object| ScopedObject {
-			context: self.context,
+			scope: self.scope,
 			object,
 		})
 	}
@@ -138,12 +172,12 @@ impl<'s, E: ScopedEvaluator> ScopedValue<'s, E> {
 		self.value.manifest()
 	}
 	pub fn deserialize<'de, T: Deserialize<'de>>(self) -> Result<T, E::Error> {
-		E::deserialize_data(self.context, self.value)
+		E::deserialize_data(self.scope.context, self.value)
 	}
 }
 
 pub struct ScopedArray<'s, E: ScopedEvaluator> {
-	context: &'s E::Context,
+	scope: &'s Scope<'s, E>,
 	array: Arr<E>,
 }
 impl<'s, E: ScopedEvaluator> ScopedArray<'s, E> {
@@ -155,14 +189,14 @@ impl<'s, E: ScopedEvaluator> ScopedArray<'s, E> {
 	}
 	pub fn get(&self, index: usize) -> Result<Option<ScopedValue<'s, E>>, E::Error> {
 		Ok(self.array.get(index)?.map(|value| ScopedValue {
-			context: self.context,
+			scope: self.scope,
 			value,
 		}))
 	}
 	pub fn iter(&self) -> impl Iterator<Item = Result<ScopedValue<'s, E>, E::Error>> + '_ {
 		self.array.iter().map(|item| {
 			item.map(|value| ScopedValue {
-				context: self.context,
+				scope: self.scope,
 				value,
 			})
 		})
@@ -170,7 +204,7 @@ impl<'s, E: ScopedEvaluator> ScopedArray<'s, E> {
 }
 
 pub struct ScopedObject<'s, E: ScopedEvaluator> {
-	context: &'s E::Context,
+	scope: &'s Scope<'s, E>,
 	object: Obj<E>,
 }
 impl<'s, E: ScopedEvaluator> ScopedObject<'s, E> {
@@ -179,13 +213,13 @@ impl<'s, E: ScopedEvaluator> ScopedObject<'s, E> {
 	}
 	pub fn get(&self, key: &str, hidden: Hidden) -> Result<Option<ScopedValue<'s, E>>, E::Error> {
 		Ok(self.object.get(key, hidden)?.map(|value| ScopedValue {
-			context: self.context,
+			scope: self.scope,
 			value,
 		}))
 	}
 	pub fn get_or_bail(&self, key: &str, hidden: Hidden) -> Result<ScopedValue<'s, E>, E::Error> {
 		Ok(ScopedValue {
-			context: self.context,
+			scope: self.scope,
 			value: self.object.get_or_bail(key, hidden)?,
 		})
 	}
@@ -203,7 +237,7 @@ impl<'s, E: ScopedEvaluator> ScopedObject<'s, E> {
 	pub fn values(&self) -> impl Iterator<Item = Result<ScopedValue<'s, E>, E::Error>> + '_ {
 		self.object.values().map(|item| {
 			item.map(|value| ScopedValue {
-				context: self.context,
+				scope: self.scope,
 				value,
 			})
 		})

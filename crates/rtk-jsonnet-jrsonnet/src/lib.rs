@@ -265,6 +265,7 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 
 	type Arguments = Arguments;
 	type Context = Self;
+	type Owner = Evaluation;
 	type Error = EvaluatorError;
 	type Value = Value;
 
@@ -439,7 +440,7 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 	}
 
 	#[tracing::instrument(skip(self))]
-	fn evaluate_file<P>(mut self, path: P) -> Result<(Self::Context, Self::Value), Self::Error>
+	fn evaluate_file<P>(mut self, path: P) -> Result<Evaluation, Self::Error>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
@@ -455,15 +456,15 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 				.map_err(EvaluatorError)
 				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
 
-			Ok(((*current_evaluator).clone(), Value(value)))
+			Ok(Evaluation::with_shared_context(
+				current_evaluator,
+				Value(value),
+			))
 		})
 	}
 
 	#[tracing::instrument(skip(self))]
-	fn evaluate_snippet<S>(
-		mut self,
-		snippet: S,
-	) -> Result<(Self::Context, Self::Value), Self::Error>
+	fn evaluate_snippet<S>(mut self, snippet: S) -> Result<Evaluation, Self::Error>
 	where
 		S: AsRef<str> + fmt::Debug,
 	{
@@ -479,7 +480,10 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 				.map_err(EvaluatorError)
 				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
 
-			Ok(((*current_evaluator).clone(), Value(value)))
+			Ok(Evaluation::with_shared_context(
+				current_evaluator,
+				Value(value),
+			))
 		})
 	}
 }
@@ -520,13 +524,7 @@ impl fmt::Debug for Evaluation {
 }
 
 impl Evaluation {
-	pub fn new(context: Evaluator, value: Value) -> Self {
-		Self::with_shared_context(StdRc::new(context), value)
-	}
-
-	/// Pair a value with a context that is already shared, as
-	/// [`Evaluator::current`] hands it out.
-	pub fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
+	fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
 		Self {
 			value: Some(value),
 			external_state: context
@@ -537,13 +535,14 @@ impl Evaluation {
 		}
 	}
 
-	pub fn context(&self) -> &Evaluator {
+	#[cfg(test)]
+	fn context(&self) -> &Evaluator {
 		self.context
 			.as_deref()
 			.expect("the evaluation is only empty while being dropped")
 	}
 
-	pub fn value(&self) -> &Value {
+	fn value(&self) -> &Value {
 		self.value
 			.as_ref()
 			.expect("the evaluation is only empty while being dropped")
@@ -551,7 +550,7 @@ impl Evaluation {
 
 	/// Run with the state that owns this evaluation. Panics before invoking the
 	/// callback if a different jrsonnet state is already active.
-	pub fn with_context<T>(&self, callback: impl FnOnce(&Evaluator) -> T) -> T {
+	fn with_context<T>(&self, callback: impl FnOnce(&Evaluator) -> T) -> T {
 		let evaluator = self
 			.context
 			.as_ref()
@@ -570,24 +569,26 @@ impl Evaluation {
 }
 
 impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
-	type Owner = Evaluation;
 	fn visit_root<R>(
 		owner: &Self::Owner,
-		visit: impl FnOnce(&Self::Context, Self::Value) -> R,
+		visit: rtk_jsonnet_core::RootVisitor<
+			impl for<'s> FnOnce(rtk_jsonnet_core::ScopedValue<'s, Self>) -> R,
+		>,
 	) -> R {
-		owner.with_context(|context| visit(context, owner.value().clone()))
+		owner.with_context(|context| {
+			visit.visit::<Self, _>(context, owner.value().clone(), &|value| {
+				Evaluation::with_shared_context(
+					StdRc::clone(owner.context.as_ref().unwrap()),
+					value,
+				)
+			})
+		})
 	}
 	fn deserialize_data<'de, T: ::serde::Deserialize<'de>>(
 		_: &Evaluator,
 		value: Value,
 	) -> Result<T, EvaluatorError> {
 		T::deserialize(ValueDeserializer::<false>(value))
-	}
-}
-
-impl From<(Evaluator, Value)> for Evaluation {
-	fn from((context, value): (Evaluator, Value)) -> Self {
-		Self::new(context, value)
 	}
 }
 
@@ -897,8 +898,8 @@ mod reentry_tests {
 
 	#[test]
 	fn foreign_evaluation_is_rejected_before_callback() {
-		let outer = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
-		let inner = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
+		let outer = evaluator().evaluate_snippet("{}").unwrap();
+		let inner = evaluator().evaluate_snippet("{}").unwrap();
 		outer.with_context(|ctx| {
 			let mut ran = false;
 			assert!(catch_unwind(AssertUnwindSafe(|| inner.with_context(|_| ran = true))).is_err());
@@ -911,8 +912,11 @@ mod reentry_tests {
 
 	#[test]
 	fn same_state_nesting_restores_both_scopes_on_unwind() {
-		let outer = Evaluation::from(evaluator().evaluate_snippet("{}").unwrap());
-		let inner = Evaluation::new(outer.context().clone(), outer.value().clone());
+		let outer = evaluator().evaluate_snippet("{}").unwrap();
+		let inner = Evaluation::with_shared_context(
+			StdRc::new(outer.context().clone()),
+			outer.value().clone(),
+		);
 		let mut reached_inner = false;
 		outer.with_context(|ctx| {
 			assert!(
@@ -989,9 +993,34 @@ mod native_function_tests {
 		evaluator.with_native_function("add", Add).unwrap();
 		let evaluation = evaluator
 			.evaluate_snippet(snippet)
-			.map(super::Evaluation::from)
 			.map_err(|error| error.to_string())?;
 		serde_json::to_value(evaluation).map_err(|error| error.to_string())
+	}
+
+	#[test]
+	fn retained_child_reenters_its_owner_for_a_lazy_native_call() {
+		use rtk_jsonnet_core::{Hidden, ScopedEvaluator as _};
+		let implementation = super::Implementation::new(std::iter::empty()).unwrap();
+		let child = {
+			let mut evaluator = implementation.create_evaluator();
+			evaluator.with_native_function("add", Add).unwrap();
+			let result = evaluator
+				.evaluate_snippet_result(
+					"{ child: [std.native('add')(2, 3)], unused: error 'not forced' }",
+				)
+				.unwrap();
+			result.with_root(|v| {
+				v.as_object()
+					.unwrap()
+					.get_or_bail("child", Hidden::Skip)
+					.unwrap()
+					.into_owned()
+			})
+		};
+		assert!(super::Evaluator::current().is_none());
+		assert_eq!(child.deserialize::<Vec<i64>>().unwrap(), [5]);
+		assert_eq!(serde_json::to_value(child).unwrap(), serde_json::json!([5]));
+		assert!(super::Evaluator::current().is_none());
 	}
 
 	#[test]
