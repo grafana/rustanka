@@ -17,6 +17,8 @@ workspace = true
 
 [features]
 default = ["explaining-traces", "ir-parser"]
+# Use per-traversal scratch storage for concatenated strings.
+scoped-arena = ["jrsonnet-gcmodule/scoped-arena", "dep:rtk-arena-allocator"]
 # Rustc-like trace visualization
 explaining-traces = ["hi-doc"]
 # Allows library authors to throw custom errors
@@ -62,6 +64,7 @@ jrsonnet-ir-parser = { workspace = true, optional = true }
 jrsonnet-types.workspace = true
 jrsonnet-macros.workspace = true
 jrsonnet-gcmodule.workspace = true
+rtk-arena-allocator = { path = "../rtk-arena-allocator", optional = true }
 
 pathdiff.workspace = true
 static_assertions.workspace = true

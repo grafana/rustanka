@@ -359,29 +359,79 @@ impl StrValue {
 		}
 	}
 	pub fn chunks(&self, c: &mut impl FnMut(&IStr)) {
-		fn write_buf(s: &StrValue, c: &mut impl FnMut(&IStr)) {
-			match s {
-				StrValue::Flat(f) => c(f),
-				StrValue::Tree(t) => {
-					write_buf(&t.0, c);
-					write_buf(&t.1, c);
+		match self {
+			Self::Flat(f) => c(f),
+			#[cfg(not(feature = "scoped-arena"))]
+			Self::Tree(t) => {
+				t.0.chunks(c);
+				t.1.chunks(c);
+			}
+			#[cfg(feature = "scoped-arena")]
+			Self::Tree(_) => {
+				let arena = rtk_arena_allocator::Arena::new();
+				jrsonnet_gcmodule::scoped::scope_in(&arena.allocator(), |registry| {
+					self.walk_chunks(registry, c);
+				});
+			}
+		}
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	fn walk_chunks<'id>(
+		&'id self,
+		registry: &mut jrsonnet_gcmodule::scoped::Arena<
+			'id,
+			'_,
+			rtk_arena_allocator::ArenaAlloc<'_>,
+		>,
+		visit: &mut impl FnMut(&IStr),
+	) {
+		use std::cell::Cell;
+
+		use jrsonnet_gcmodule::scoped::Handle;
+
+		// A frame at each occupied depth remembers the right subtree to visit
+		// after the left. Recycle popped frames: a shared subtree may be walked
+		// many times, but only maximum pending depth costs registry slots.
+		type Link<'id> = Option<Handle<'id, Frame<'id>>>;
+		struct Frame<'id> {
+			right: Cell<&'id StrValue>,
+			next: Cell<Link<'id>>,
+		}
+
+		let mut pending: Link<'id> = None;
+		let mut spare: Link<'id> = None;
+		let mut node = self;
+		loop {
+			match node {
+				Self::Tree(t) => {
+					pending = Some(if let Some(h) = spare {
+						let frame = registry.get(h);
+						spare = frame.next.replace(pending);
+						frame.right.set(&t.1);
+						h
+					} else {
+						registry.alloc(Frame {
+							right: Cell::new(&t.1),
+							next: Cell::new(pending),
+						})
+					});
+					node = &t.0;
+				}
+				Self::Flat(f) => {
+					visit(f);
+					let Some(h) = pending else { break };
+					let frame = registry.get(h);
+					node = frame.right.get();
+					pending = frame.next.replace(spare);
+					spare = Some(h);
 				}
 			}
 		}
-		write_buf(self, c);
 	}
 	pub fn into_flat_in(&self, out: &mut String) {
-		fn write_buf(s: &StrValue, out: &mut String) {
-			match s {
-				StrValue::Flat(f) => out.push_str(f),
-				StrValue::Tree(t) => {
-					write_buf(&t.0, out);
-					write_buf(&t.1, out);
-				}
-			}
-		}
 		out.reserve(self.len());
-		write_buf(self, out);
+		self.chunks(&mut |chunk| out.push_str(chunk));
 	}
 	pub fn into_flat(&self) -> IStr {
 		match self {
@@ -446,6 +496,43 @@ impl Ord for StrValue {
 		let a = self.clone().into_flat();
 		let b = other.clone().into_flat();
 		a.cmp(&b)
+	}
+}
+
+#[cfg(test)]
+mod string_walk_tests {
+	use super::StrValue;
+
+	#[test]
+	fn shared_branches_keep_chunk_order_across_nested_walks() {
+		let left = "λ".repeat(64);
+		let pair = StrValue::concat(left.as_str().into(), "!".into());
+		let root = StrValue::concat(pair.clone(), pair.clone());
+		let mut out = String::from(":");
+		let mut chunks = Vec::new();
+		root.chunks(&mut |chunk| {
+			chunks.push(chunk.to_string());
+			pair.into_flat_in(&mut out);
+		});
+		assert_eq!(chunks, [left.as_str(), "!", left.as_str(), "!"]);
+		assert_eq!(out, format!(":{}", format!("{left}!").repeat(4)));
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	#[test]
+	fn deep_left_spine_flattens_without_recursive_visits() {
+		let mut root = StrValue::from("a".repeat(100));
+		let leaf = StrValue::from("b");
+		let mut ancestors = Vec::new();
+		for _ in 0..8192 {
+			ancestors.push(root.clone());
+			root = StrValue::concat(root, leaf.clone());
+		}
+		let flat = root.into_flat();
+		// Rc destruction is not part of the scoped traversal.
+		drop(root);
+		while ancestors.pop().is_some() {}
+		assert_eq!(&*flat, format!("{}{}", "a".repeat(100), "b".repeat(8192)));
 	}
 }
 
