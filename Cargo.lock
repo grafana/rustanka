@@ -4802,6 +4802,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtk-arena-allocator"
+version = "0.1.0"
+
+[[package]]
 name = "rtk-diff"
 version = "0.1.0"
 dependencies = [
