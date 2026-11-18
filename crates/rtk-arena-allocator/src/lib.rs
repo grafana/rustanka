@@ -17,6 +17,7 @@
 use std::alloc::{AllocError, Allocator, Global, Layout};
 use std::cell::RefCell;
 use std::ptr::NonNull;
+use std::rc::Rc;
 
 const PAGE_SIZE: usize = 4096;
 
@@ -113,6 +114,8 @@ impl Drop for Page {
 	fn drop(&mut self) {
 		// SAFETY: the page uniquely owns this Global allocation and retains its layout.
 		unsafe { Global.deallocate(self.base, self.layout) };
+		#[cfg(test)]
+		tests::PAGES_RELEASED.set(tests::PAGES_RELEASED.get() + 1);
 	}
 }
 
@@ -171,9 +174,102 @@ unsafe impl Allocator for ArenaAlloc<'_> {
 	}
 }
 
+/// A single-threaded allocator that keeps its arena alive through an [`Rc`].
+/// Clones share pages and can free or grow each other's allocations. Unlike
+/// [`ArenaAlloc`], this handle lets a container outlive its creator:
+///
+/// ```
+/// use rtk_arena_allocator::SharedArenaAlloc;
+///
+/// fn values() -> Vec<u8, SharedArenaAlloc> {
+///     let alloc = SharedArenaAlloc::new();
+///     let mut values = Vec::new_in(alloc);
+///     values.push(42);
+///     values
+/// }
+/// assert_eq!(values().as_slice(), &[42]);
+/// ```
+///
+/// Containers own and drop their elements; the arena owns only the backing
+/// storage, so it has no owning reference back to the containers. Pages are
+/// released when the last strong owner drops. A raw allocation alone does not
+/// keep the arena alive.
+#[derive(Clone, Default)]
+pub struct SharedArenaAlloc(Rc<Arena>);
+
+impl SharedArenaAlloc {
+	/// Creates a fresh arena with no pages. Clone the handle to share it.
+	pub fn new() -> Self {
+		Self::default()
+	}
+}
+
+impl From<Rc<Arena>> for SharedArenaAlloc {
+	fn from(arena: Rc<Arena>) -> Self {
+		Self(arena)
+	}
+}
+
+// SAFETY: moving or cloning the Rc preserves the identity and address of the
+// arena. Every operation therefore uses the same borrowed allocator domain.
+unsafe impl Allocator for SharedArenaAlloc {
+	fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+		self.0.allocator().allocate(layout)
+	}
+
+	unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+		// SAFETY: the caller guarantees this block and layout belong to this arena.
+		unsafe { self.0.allocator().deallocate(ptr, layout) };
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	thread_local! {
+		pub(super) static PAGES_RELEASED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	}
+
+	#[test]
+	fn escaped_containers_drop_values_before_releasing_pages() {
+		let before = PAGES_RELEASED.get();
+		let value = Rc::new(42);
+		let (mut values, boxed) = {
+			let alloc = SharedArenaAlloc::new();
+			let mut values = Vec::with_capacity_in(1, alloc.clone());
+			values.push(value.clone());
+			(values, Box::new_in([7u8; PAGE_SIZE], alloc))
+		};
+		values.push(value.clone()); // grow after the creator's scope ends
+		assert_eq!(**values.last().unwrap(), 42);
+		drop(values);
+		assert_eq!(Rc::strong_count(&value), 1);
+		assert_eq!(boxed[PAGE_SIZE - 1], 7);
+		assert_eq!(PAGES_RELEASED.get(), before);
+		drop(boxed);
+		assert_eq!(PAGES_RELEASED.get(), before + 2);
+	}
+
+	#[test]
+	fn clones_can_grow_and_free_each_others_blocks() {
+		let a = SharedArenaAlloc::new();
+		let b = a.clone();
+		let old = Layout::new::<u8>();
+		let new = Layout::new::<[u8; 32]>();
+		let ptr = a.allocate(old).unwrap().cast::<u8>();
+		// SAFETY: both handles share one arena; each operation uses the live
+		// pointer and its current layout. Only the initialized byte is read.
+		unsafe {
+			ptr.write(13);
+			let grown = b.grow(ptr, old, new).unwrap().cast::<u8>();
+			assert_eq!(grown.read(), 13);
+			a.deallocate(grown, new);
+		}
+		let pages = b.0.pages.borrow();
+		assert_eq!(pages.len(), 1);
+		assert_eq!(pages[0].live, 0);
+	}
 
 	#[test]
 	fn explicit_pages_and_reuse() {
