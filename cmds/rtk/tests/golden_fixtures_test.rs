@@ -78,14 +78,14 @@ fn load_fixture_export_config(suite_path: &Path, env_path: &Path) -> (Vec<String
 	(export_paths, config.args_for_command("export"))
 }
 
-/// Helper function to get absolute path to test_fixtures
+/// Helper function to get absolute path to rtk/tests
 fn fixtures_path(subpath: &str) -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.unwrap()
 		.parent()
 		.unwrap()
-		.join("test_fixtures")
+		.join("rtk/tests")
 		.join(subpath)
 }
 
@@ -114,7 +114,7 @@ fn stage_fixture(src: &Path, dst: &Path) {
 	}
 }
 
-/// Discover all golden test environments in test_fixtures/golden_envs/
+/// Discover all golden test environments in rtk/tests/golden_envs/
 /// Returns a list of (env_name, env_path) tuples
 fn discover_golden_envs() -> Vec<(String, PathBuf)> {
 	let golden_envs_dir = fixtures_path("golden_envs");
@@ -280,7 +280,7 @@ fn test_all_golden_fixtures() {
 
 	assert!(
 		!envs.is_empty(),
-		"No golden test environments found in test_fixtures/golden_envs/"
+		"No golden test environments found in rtk/tests/golden_envs/"
 	);
 
 	println!("Discovered {} golden test environments:", envs.len());

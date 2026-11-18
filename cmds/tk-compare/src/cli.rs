@@ -152,6 +152,6 @@ pub struct GoldenFixturesCli {
 	pub dry_run: bool,
 
 	/// Path to golden fixtures suite root
-	#[arg(long, default_value = "test_fixtures/golden_envs")]
+	#[arg(long, default_value = "rtk/tests/golden_envs")]
 	pub fixtures_dir: String,
 }

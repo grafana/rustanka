@@ -1,7 +1,7 @@
 name: "Export (Large)"
 id: "export-large"
 description: "Compare rtk with rtk-base on a large export with allocation-heavy Jsonnet evaluation."
-fixtures_dir: "rtk-benchmarks/export-large"
+fixtures_dir: "rtk/benchmarks/export-large"
 skip_tk: true
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
 tests:

@@ -6,7 +6,7 @@
 // exported text is chosen by the YAML library, not by Jsonnet — tk's is
 // gopkg.in/yaml.v2, which formats with strconv.FormatFloat(f, 'g', -1, 64).
 //
-// Nothing else in test_fixtures covers this: float_rounding_env looks like it
+// Nothing else in rtk/tests covers this: float_rounding_env looks like it
 // does, but it exercises std.format, which produces a *string* and so never
 // reaches the float formatting at all. These are numbers, exported as scalars.
 

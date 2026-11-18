@@ -3,7 +3,7 @@ use std::process::Command;
 #[test]
 fn exporter_profiling_configuration_works_in_fresh_processes() {
 	let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("../../test_fixtures/golden_envs/number_formatting_env");
+		.join("../../rtk/tests/golden_envs/number_formatting_env");
 	for enabled in [Some("false"), Some("true"), None] {
 		let output_dir = tempfile::tempdir().unwrap();
 		let mut command = Command::new(env!("CARGO_BIN_EXE_rtk"));

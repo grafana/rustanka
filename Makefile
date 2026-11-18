@@ -17,7 +17,7 @@ help:
 	@echo "  check-rtk              - Run rtk checks only (fmt-check, lint, test-rtk)"
 	@echo "  ci                     - Run CI checks locally (fmt, lint-ci, test-rtk)"
 	@echo "  ci-full                - Run full CI checks (fmt, lint-ci, all tests)"
-	@echo "  update-golden-fixtures - Regenerate golden files in test_fixtures using tk export"
+	@echo "  update-golden-fixtures - Regenerate golden files in rtk/tests using tk export"
 	@echo "  check-golden-fixtures  - Check that golden files are up to date (requires tk)"
 
 target/release/jrsonnet:
@@ -30,7 +30,7 @@ target/release/tk-compare:
 	@cargo build --release -p tk-compare
 
 tk-compare: target/release/rtk target/release/tk-compare
-	@target/release/tk-compare -- run tk-compare-grafana.toml --jrsonnet-path=target/release/jrsonnet --rtk=target/release/rtk
+	@target/release/tk-compare run rtk/tk-compare-grafana.toml --jrsonnet-path=target/release/jrsonnet --rtk=target/release/rtk
 
 lint:
 	@cargo clippy -p rtk --all-targets
@@ -66,9 +66,9 @@ ci: fmt-check lint-ci test-rtk
 ci-full: fmt-check lint-ci test
 	@echo "All CI checks passed (full)!"
 
-# Generate golden files for test_fixtures using tk export
+# Generate golden files for rtk/tests using tk export
 # Uses .golden extension to prevent accidental reformatting
-GOLDEN_FIXTURES_DIR := test_fixtures/golden_envs
+GOLDEN_FIXTURES_DIR := rtk/tests/golden_envs
 
 update-golden-fixtures: target/release/jrsonnet target/release/tk-compare
 	@echo "Generating golden files for $(GOLDEN_FIXTURES_DIR)..."

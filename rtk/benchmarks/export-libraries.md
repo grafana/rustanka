@@ -34,7 +34,7 @@ Run from the repository root with release binaries built before and after the
 cache change:
 
 ```sh
-uv run rtk-benchmarks/run-benchmark.py rtk-benchmarks/export-libraries.yaml \
+uv run rtk/benchmarks/run-benchmark.py rtk/benchmarks/export-libraries.yaml \
   --rtk-binary-path /path/to/rtk-current \
   --rtk-base-binary-path /path/to/rtk-base -- --runs 5
 ```

@@ -23,7 +23,7 @@ rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Ta
 
 Use the `merge-upstream-jrsonnet` skill (`.claude/skills/merge-upstream-jrsonnet/`)
 for merging in upstream jrsonnet. The last merged upstream commit is recorded in
-`.jrsonnet-upstream-base`; the skill covers staged merging, the rustanka features
+`rtk/.jrsonnet-upstream-base`; the skill covers staged merging, the rustanka features
 that must survive, and the signed-commit linearization the org requires.
 
 ## Key Dependencies
@@ -375,7 +375,7 @@ tk uses.
 
 ### Benchmarking
 
-`rtk-benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
+`rtk/benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
 runs the same comparisons CI does. The jobs validate that rtk's output still
 matches tk's, but nothing gates on timing, so a regression lands green.
 
@@ -416,7 +416,7 @@ and made that export much slower. Single evaluations keep eager collection.
 
 ### Golden Tests
 
-- Located in `test_fixtures/golden_envs/`
+- Located in `rtk/tests/golden_envs/`
 - Each env has a `golden/` subdirectory with expected output
 - Run specific golden tests: `cargo test -p rtk --test golden_fixtures_test`
 
@@ -425,7 +425,7 @@ and made that export much slower. Single evaluations keep eager collection.
 Golden fixtures are generated from **tk** (real Tanka), and the test verifies that **rtk** produces identical output.
 
 When investigating rtk vs tk differences:
-1. Reproduce the issue in a golden test by adding a test case to `test_fixtures/golden_envs/`
+1. Reproduce the issue in a golden test by adding a test case to `rtk/tests/golden_envs/`
 2. Run `make update-golden-fixtures` to regenerate golden files using tk
 3. Run `make test` to verify the test fails (showing rtk doesn't match tk)
 4. Fix the issue in rtk code (may require serde-saphyr changes)

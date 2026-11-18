@@ -6,7 +6,7 @@ description: "Comparing rtk with tk for exporting an environment that renders a 
 # (no mock Kubernetes server). The fixture defines 60 inline environments that
 # each render the same local chart, so rtk's in-memory helm cache collapses them
 # to a single helm invocation.
-fixtures_dir: "rtk-benchmarks/helm-template"
+fixtures_dir: "rtk/benchmarks/helm-template"
 
 # Clear the export dir before each benchmark iteration.
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"

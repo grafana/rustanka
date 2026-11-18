@@ -8,7 +8,7 @@ fixtures:
   envs_per_inline_file: 0
   resources_per_env: 8
 
-fixture_generator: 'python3 "{repo_root}/rtk-benchmarks/lib/generate-library-fixtures.py" "{fixtures_dir}" --environments {static_envs}'
+fixture_generator: 'python3 "{repo_root}/rtk/benchmarks/lib/generate-library-fixtures.py" "{fixtures_dir}" --environments {static_envs}'
 prepare: "rm -rf {export_dir} && mkdir -p {export_dir}"
 
 tests:

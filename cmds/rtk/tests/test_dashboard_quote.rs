@@ -4,7 +4,7 @@ use std::fs;
 fn test_dashboard_y_key_quoted() {
 	// Load the actual dashboard JSON file
 	let dashboard_json = fs::read_to_string(
-		"../../test_fixtures/golden_envs/yaml_output_env_jrsonnet/dashboard-promtail.json",
+		"../../rtk/tests/golden_envs/yaml_output_env_jrsonnet/dashboard-promtail.json",
 	)
 	.unwrap();
 	let data: serde_json::Value = serde_json::from_str(&dashboard_json).unwrap();

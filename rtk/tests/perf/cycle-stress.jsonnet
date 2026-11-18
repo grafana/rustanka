@@ -3,7 +3,7 @@
 // auto-collection behavior (grafana leak-fix fork): without in-evaluation
 // collection, cycles accumulate until the evaluation ends (~2.5x peak RSS).
 // Used manually during upstream merges:
-//   /usr/bin/time -v jrsonnet test_fixtures/perf/cycle-stress.jsonnet
+//   /usr/bin/time -v jrsonnet rtk/tests/perf/cycle-stress.jsonnet
 local mk(i) =
   local o = { name: 'obj%d' % i, self_ref():: o, data: std.repeat('y', 200) };
   o { extra: super.name }.name;

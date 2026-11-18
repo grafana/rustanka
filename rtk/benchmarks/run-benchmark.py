@@ -310,7 +310,7 @@ class BenchmarkRunner:
         NUM_INLINE_FILES={self.config.fixtures.inline_files}
         ENVS_PER_INLINE_FILE={self.config.fixtures.envs_per_inline_file}
         NUM_RESOURCES_PER_ENV={self.config.fixtures.resources_per_env}
-        source "{self.repo_root}/rtk-benchmarks/lib/generate-fixtures.sh"
+        source "{self.repo_root}/rtk/benchmarks/lib/generate-fixtures.sh"
         generate_fixtures "{fixtures_dir}"
         """
         subprocess.run(["bash", "-c", script], check=True)
@@ -973,7 +973,7 @@ def main():
     if hyperfine_args and hyperfine_args[0] == "--":
         hyperfine_args = hyperfine_args[1:]
 
-    repo_root = Path(__file__).parent.parent.resolve()
+    repo_root = Path(__file__).resolve().parents[2]
     config = BenchmarkConfig.from_yaml(args.config, repo_root)
     config.skip_tk = config.skip_tk or args.skip_tk
     runner = BenchmarkRunner(

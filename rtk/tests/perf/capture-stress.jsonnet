@@ -2,7 +2,7 @@
 // large lexical scope. Guards the memory behavior that context capture
 // analysis (upstream explicit captures, formerly rustanka UsedVars trimming)
 // provides. Used manually during upstream merges:
-//   /usr/bin/time -v jrsonnet test_fixtures/perf/capture-stress.jsonnet
+//   /usr/bin/time -v jrsonnet rtk/tests/perf/capture-stress.jsonnet
 // Compare "Maximum resident set size" against the previous release binary.
 local big = { ['field%d' % i]: { value: i, pad: std.repeat('x', 100) } for i in std.range(0, 2000) };
 local mk(i) =

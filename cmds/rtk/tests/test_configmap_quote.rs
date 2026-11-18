@@ -25,7 +25,7 @@ fn sort_json_keys(value: serde_json::Value) -> serde_json::Value {
 fn test_configmap_with_nested_dashboard() {
 	// Load the actual dashboard JSON file
 	let dashboard_json = fs::read_to_string(
-		"../../test_fixtures/golden_envs/yaml_output_env_jrsonnet/dashboard-promtail.json",
+		"../../rtk/tests/golden_envs/yaml_output_env_jrsonnet/dashboard-promtail.json",
 	)
 	.unwrap();
 	let dashboard: serde_json::Value = serde_json::from_str(&dashboard_json).unwrap();

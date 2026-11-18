@@ -2,7 +2,7 @@ name: "Helm Template (Warm Disk Cache)"
 id: "helm-template-cache"
 description: "Benchmarking an export whose Helm render is already persisted in the project target directory."
 
-fixtures_dir: "rtk-benchmarks/helm-template"
+fixtures_dir: "rtk/benchmarks/helm-template"
 skip_tk: true
 
 # Populate target/helm once, then clear only exported manifests between runs.
