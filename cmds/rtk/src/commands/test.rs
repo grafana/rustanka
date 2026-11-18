@@ -107,10 +107,7 @@ impl Runner {
 			.map_err(|error| anyhow::anyhow!(error.to_string()))?;
 		// Force every visible field so assertions outside the suite summary also run.
 		let value: serde_json::Value = evaluator
-			.evaluate_file(path)
-			.map_err(|error| anyhow::anyhow!(error.to_string()))?
-			.into_value()
-			.deserialize()
+			.deserialize_file(path)
 			.map_err(|error| anyhow::anyhow!(error.to_string()))?;
 		ensure!(
 			value.get("allTestsPassed") != Some(&serde_json::Value::Bool(false)),
@@ -209,7 +206,10 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		for (name, code) in [
 			("assert_test.jsonnet", "assert true; {}"),
-			("pass_test.jsonnet", "{allTestsPassed: true}"),
+			(
+				"pass_test.jsonnet",
+				"{allTestsPassed: true, hidden:: error 'must not be forced'}",
+			),
 			(
 				"suite_test.libsonnet",
 				"{allTestsPassed: false, failure: 'expected 1, got 2'}",

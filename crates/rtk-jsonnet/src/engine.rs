@@ -6,7 +6,8 @@ use std::rc::Rc as StdRc;
 use std::sync::{Arc, RwLock, Weak};
 
 use rtk_jsonnet_core::{
-	Context as _, Evaluator as _, FlagsExt, Function, Hidden, Implementation, RawValue, Value as _,
+	Context as _, Evaluator as _, FlagsExt, Function, Hidden, Implementation, RawValue,
+	ScopedEvaluator as _, Value as _,
 };
 use rtk_jsonnet_jrsonnet::{
 	Error as JrsonnetError, Evaluation as JrsonnetEvaluation, Evaluator as JrsonnetEvaluator,
@@ -278,15 +279,34 @@ impl Evaluator {
 		Ok(self)
 	}
 
-	pub fn evaluate_file<P>(mut self, path: P) -> Result<Evaluation, Error>
-	where
-		P: AsRef<Path> + fmt::Debug,
-	{
+	fn into_implementation(mut self) -> Result<ImplementationEvaluator, Error> {
 		if self.evaluator.is_none() {
 			let implementation = self.selected_implementation();
 			self.populate_evaluator(implementation)?;
 		}
-		match self.evaluator.take().expect("evaluator was populated") {
+		Ok(self.evaluator.take().expect("evaluator was populated"))
+	}
+
+	/// Read owned Serde data while the file's evaluation context is active.
+	pub fn deserialize_file<T: serde::de::DeserializeOwned>(
+		self,
+		path: impl AsRef<Path> + fmt::Debug,
+	) -> Result<T, Error> {
+		match self.into_implementation()? {
+			ImplementationEvaluator::Jrsonnet(evaluator) => {
+				Ok(evaluator.evaluate_file_result(path)?.deserialize()?)
+			}
+			ImplementationEvaluator::Reference(evaluator) => {
+				Ok(evaluator.evaluate_file_result(path)?.deserialize()?)
+			}
+		}
+	}
+
+	pub fn evaluate_file<P>(self, path: P) -> Result<Evaluation, Error>
+	where
+		P: AsRef<Path> + fmt::Debug,
+	{
+		match self.into_implementation()? {
 			ImplementationEvaluator::Jrsonnet(evaluator) => evaluator
 				.evaluate_file(path)
 				.map(JrsonnetEvaluation::from)
