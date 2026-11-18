@@ -5,6 +5,8 @@ members = [
   "tests",
   "xtask",
 ]
+# The vendored collector maintains its own derive and cargo-fuzz workspace.
+exclude = ["crates/jrsonnet-gcmodule"]
 default-members = [
   "cmds/jrsonnet",
   "cmds/jrsonnet-fmt",
