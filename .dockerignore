@@ -48,10 +48,6 @@ tests/tests
 # Build config (not needed in image)
 .cargo
 .cargo/
-flake.nix
-flake.lock
-nix
-nix/
 
 # Python scripts
 *.py
