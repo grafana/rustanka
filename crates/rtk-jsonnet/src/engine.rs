@@ -2292,6 +2292,57 @@ mod tests {
 	}
 
 	#[test]
+	fn captured_child_keeps_its_evaluation_after_another_evaluator_runs() {
+		#[derive(serde::Deserialize)]
+		struct Captured {
+			child: RawEvaluationValue,
+		}
+
+		let engine = Engine::new(Options::default());
+		let evaluate = |dir: &Path, label: &str| {
+			fs::write(dir.join("owner.txt"), label).unwrap();
+			let mut evaluator = engine.create_evaluator();
+			evaluator.with_import_paths(vec![dir.to_owned()]).unwrap();
+			evaluator.with_external_variable("owner", label).unwrap();
+			evaluator
+				.evaluate_snippet(
+					r#"{ child: {
+						result: std.native("escapeStringRegex")(
+							std.extVar("owner") + "." + importstr "owner.txt"
+						),
+						unused: error "must stay lazy",
+						hidden:: error "must stay hidden",
+					} }"#,
+				)
+				.unwrap()
+				.into_value()
+		};
+		let result = |child: EvaluationValue| {
+			child
+				.into_object()
+				.unwrap()
+				.get_or_bail("result", Hidden::Skip)
+				.unwrap()
+				.deserialize::<String>()
+				.unwrap()
+		};
+
+		let a = tempfile::tempdir().unwrap();
+		let child = {
+			let root = evaluate(a.path(), "A");
+			let captured: Captured = root.clone().deserialize().unwrap();
+			root.attach(captured.child).unwrap()
+		};
+		let b = tempfile::tempdir().unwrap();
+		let other = evaluate(b.path(), "B").into_object().unwrap();
+		assert_eq!(
+			result(other.get_or_bail("child", Hidden::Skip).unwrap()),
+			r"B\.B"
+		);
+		assert_eq!(result(child), r"A\.A");
+	}
+
+	#[test]
 	fn lists_object_field_names_without_forcing_values() {
 		let value = Engine::new(Options::default())
 			.create_evaluator()
