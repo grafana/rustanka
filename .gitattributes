@@ -1,1 +1,3 @@
 # Collapse generated parity answers in GitHub; keep the generator visible.
+/crates/rtk-jsonnetfmt/testdata/lexer-snippet-oracle.json linguist-generated=true
+/crates/rtk-jsonnetfmt/testdata/string-oracle.json linguist-generated=true

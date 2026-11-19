@@ -1,0 +1,102 @@
+[
+  {
+    "name": "0",
+    "source": "\\u0041"
+  },
+  {
+    "name": "1",
+    "source": "\\u00e9"
+  },
+  {
+    "name": "2",
+    "source": "\\ud83d\\ude00"
+  },
+  {
+    "name": "3",
+    "source": "\\u0000"
+  },
+  {
+    "name": "4",
+    "source": "\\ud7ff"
+  },
+  {
+    "name": "5",
+    "source": "\\ue000"
+  },
+  {
+    "name": "6",
+    "source": "\\ud800\\udc00"
+  },
+  {
+    "name": "7",
+    "source": "\\udbff\\udfff"
+  },
+  {
+    "name": "8",
+    "source": "\\udc00\\ud800"
+  },
+  {
+    "name": "9",
+    "source": "\\ud800\\u0041"
+  },
+  {
+    "name": "10",
+    "source": "\\u"
+  },
+  {
+    "name": "11",
+    "source": "\\u004"
+  },
+  {
+    "name": "12",
+    "source": "\\u+001"
+  },
+  {
+    "name": "13",
+    "source": "\\uZZZZ"
+  },
+  {
+    "name": "14",
+    "source": "\\u12€x"
+  },
+  {
+    "name": "15",
+    "source": "\\udfff"
+  },
+  {
+    "name": "16",
+    "source": "\\ud800\\u000"
+  },
+  {
+    "name": "17",
+    "source": "é€\\uZZZZ"
+  },
+  {
+    "name": "18",
+    "source": "é€\\ud800\\uZZZZ"
+  },
+  {
+    "name": "bytes-0",
+    "sourceHex": "ff"
+  },
+  {
+    "name": "bytes-1",
+    "sourceHex": "e282"
+  },
+  {
+    "name": "bytes-2",
+    "sourceHex": "f09f98"
+  },
+  {
+    "name": "bytes-3",
+    "sourceHex": "eda080"
+  },
+  {
+    "name": "bytes-4",
+    "sourceHex": "ff5c755a5a5a5a"
+  },
+  {
+    "name": "bytes-5",
+    "sourceHex": "5cff"
+  }
+]
