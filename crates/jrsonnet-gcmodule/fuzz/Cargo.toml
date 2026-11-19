@@ -1,0 +1,24 @@
+
+[package]
+name = "gcmodule-fuzz"
+version = "0.0.0"
+authors = ["Jun Wu <quark@lihdd.net>"]
+publish = false
+edition.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.10"
+
+[dependencies.jrsonnet-gcmodule]
+path = ".."
+features = ["testutil"]
+
+[[bin]]
+name = "graph16"
+path = "fuzz_targets/graph16.rs"
+
+[lints]
+workspace = true

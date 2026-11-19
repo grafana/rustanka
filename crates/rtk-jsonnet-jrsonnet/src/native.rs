@@ -305,6 +305,12 @@ impl jsonnet::Object for Object {
 		Ok(Value(self.0.get_or_bail(key)?))
 	}
 
+	fn field_names(&self, hidden: Hidden) -> Vec<Str> {
+		self.field_names(hidden)
+	}
+	fn run_assertions(&self) -> Result<(), EvaluatorError> {
+		self.run_assertions()
+	}
 	fn values(&self) -> Self::ValuesIter<'_> {
 		Box::new(
 			self.0

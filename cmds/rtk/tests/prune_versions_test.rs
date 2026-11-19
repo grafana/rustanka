@@ -1,8 +1,8 @@
-use k8s_mock::{DiscoveryMode, HttpMockK8sServer, MockApiResource, MockDiscovery};
 use rtk::k8s::{
 	client::ClusterConnection,
 	diff::{DiffEngine, DiffStatus, DiffStrategy},
 };
+use rtk_k8s_mock::{DiscoveryMode, HttpMockK8sServer, MockApiResource, MockDiscovery};
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread")]

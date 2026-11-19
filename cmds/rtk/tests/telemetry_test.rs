@@ -50,7 +50,7 @@ fn exporter_delivers_traces_without_profiling(#[case] protocol: Option<&str>) {
 	});
 
 	let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("../../test_fixtures/golden_envs/number_formatting_env");
+		.join("../../rtk/tests/golden_envs/number_formatting_env");
 	let output_dir = tempfile::tempdir().unwrap();
 	let mut command = Command::new(env!("CARGO_BIN_EXE_rtk"));
 	for (name, _) in std::env::vars_os() {

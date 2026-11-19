@@ -6,7 +6,7 @@
 
 use rustc_hash::FxHashSet;
 
-use rtk_jsonnet::{EvaluationValue, Hidden};
+use rtk_jsonnet::{Hidden, ScopedValue};
 use rtk_spec::canonical::Environment;
 use rtk_spec::v1alpha1::EnvironmentData;
 use serde::ser::{SerializeMap as _, SerializeSeq as _};
@@ -699,7 +699,7 @@ impl crate::Engine {
 	/// as integers where they fit, as canonical JSON does, so that the YAML
 	/// formatting applied later is the same formatting tk gets from manifesting
 	/// through JSON text.
-	pub(crate) fn materialize(value: &EvaluationValue) -> Result<serde_json::Value, Error> {
+	pub(crate) fn materialize(value: ScopedValue<'_>) -> Result<serde_json::Value, Error> {
 		if value.is_null() {
 			return Ok(serde_json::Value::Null);
 		}
@@ -710,12 +710,12 @@ impl crate::Engine {
 			return Ok(serde_json::Value::Number(Self::materialize_number(number)?));
 		}
 		if let Some(string) = value.as_str() {
-			return Ok(serde_json::Value::String(string.to_string()));
+			return Ok(serde_json::Value::String(string));
 		}
 		if let Some(array) = value.as_array() {
-			let mut values = Vec::new();
-			for value in array.into_values() {
-				values.push(Self::materialize(&value?)?);
+			let mut values = Vec::with_capacity(array.len());
+			for value in array.iter() {
+				values.push(Self::materialize(value?)?);
 			}
 			return Ok(serde_json::Value::Array(values));
 		}
@@ -728,7 +728,7 @@ impl crate::Engine {
 			let mut values = serde_json::Map::with_capacity(fields.len());
 			for field in fields {
 				let value = object.get_or_bail(&field, Hidden::Skip)?;
-				values.insert(field.to_string(), Self::materialize(&value)?);
+				values.insert(field, Self::materialize(value)?);
 			}
 			return Ok(serde_json::Value::Object(values));
 		}
@@ -1152,6 +1152,40 @@ mod tests {
 	}
 
 	#[test]
+	fn materialize_reads_lazy_fields_from_their_original_environment() {
+		let engine = rtk_jsonnet::Engine::new(rtk_jsonnet::Options::default());
+		let evaluate = |name| {
+			let mut evaluator = engine.create_evaluator();
+			evaluator
+				.with_external_variable("environment", name)
+				.unwrap();
+			evaluator
+				.evaluate_snippet("[{ data: std.extVar('environment'), ignored:: error 'hidden' }]")
+				.unwrap()
+		};
+		let first = evaluate("first");
+		let second = evaluate("second");
+		for (result, expected) in [(second, "second"), (first, "first")] {
+			assert_eq!(
+				result.with_root(crate::Engine::materialize).unwrap(),
+				json!([{ "data": expected }])
+			);
+		}
+	}
+
+	#[test]
+	fn materialize_checks_assertions_even_in_empty_objects() {
+		let evaluation = rtk_jsonnet::Engine::new(rtk_jsonnet::Options::default())
+			.create_evaluator()
+			.evaluate_snippet("[{ assert false : 'invalid manifest' }]")
+			.unwrap();
+		let error = evaluation
+			.with_root(crate::Engine::materialize)
+			.unwrap_err();
+		assert!(error.to_string().contains("invalid manifest"), "{error}");
+	}
+
+	#[test]
 	fn processing_leaves_the_manifest_the_environment_evaluated() {
 		// Injection happens after the environment has been evaluated and
 		// materialized, so a manifest reading its own `metadata` sees what it
@@ -1166,10 +1200,11 @@ mod tests {
   sawInjectedNamespace: std.objectHas(self.metadata, 'namespace'),
 }",
 			)
-			.expect("valid Jsonnet")
-			.into_value();
+			.expect("valid Jsonnet");
 		let manifest = processed(
-			crate::Engine::materialize(&value).expect("materializable"),
+			value
+				.with_root(crate::Engine::materialize)
+				.expect("materializable"),
 			&environment(|_| {}),
 		);
 

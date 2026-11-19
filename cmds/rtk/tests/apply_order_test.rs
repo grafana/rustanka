@@ -49,8 +49,8 @@ async fn applies_in_tanka_dependency_order() {
 	);
 
 	for discovery_mode in [
-		k8s_mock::DiscoveryMode::Aggregated,
-		k8s_mock::DiscoveryMode::Legacy,
+		rtk_k8s_mock::DiscoveryMode::Aggregated,
+		rtk_k8s_mock::DiscoveryMode::Legacy,
 	] {
 		for strategy in [ApplyStrategy::Server, ApplyStrategy::Client] {
 			for diff_strategy in [
@@ -59,15 +59,15 @@ async fn applies_in_tanka_dependency_order() {
 				DiffStrategy::Subset,
 				DiffStrategy::Validate,
 			] {
-				let (discovery, schemas) = k8s_mock::extract_crd_metadata(&[crd.clone()]);
+				let (discovery, schemas) = rtk_k8s_mock::extract_crd_metadata(&[crd.clone()]);
 				let discovery = discovery.with_group(
 					"apiextensions.k8s.io/v1",
-					vec![k8s_mock::MockApiResource::cluster_scoped(
+					vec![rtk_k8s_mock::MockApiResource::cluster_scoped(
 						"customresourcedefinitions",
 						"CustomResourceDefinition",
 					)],
 				);
-				let server = k8s_mock::HttpMockK8sServer::builder()
+				let server = rtk_k8s_mock::HttpMockK8sServer::builder()
 					.discovery_mode(discovery_mode)
 					.discovery(discovery)
 					.openapi_schemas(schemas)
@@ -146,14 +146,14 @@ async fn pending_crds_are_added_without_a_namespace_pending_message() {
 		] {
 			let crd = json!({"apiVersion":"apiextensions.k8s.io/v1", "kind":"CustomResourceDefinition", "metadata":{"name":"widgets.test.example.com"}, "spec":{"group":"test.example.com", "scope":scope, "names":{"kind":"Widget", "plural":"widgets"}, "versions":[{"name":"v1", "served":true, "storage":true}]}});
 			let widget = json!({"apiVersion":"test.example.com/v1", "kind":"Widget", "metadata":{"name":"example", "namespace":"default"}});
-			let discovery = k8s_mock::MockDiscovery::default().with_group(
+			let discovery = rtk_k8s_mock::MockDiscovery::default().with_group(
 				"apiextensions.k8s.io/v1",
-				vec![k8s_mock::MockApiResource::cluster_scoped(
+				vec![rtk_k8s_mock::MockApiResource::cluster_scoped(
 					"customresourcedefinitions",
 					"CustomResourceDefinition",
 				)],
 			);
-			let server = k8s_mock::HttpMockK8sServer::builder()
+			let server = rtk_k8s_mock::HttpMockK8sServer::builder()
 				.discovery(discovery)
 				.resources(vec![
 					json!({"apiVersion":"v1", "kind":"Namespace", "metadata":{"name":"default"}}),

@@ -5,7 +5,7 @@
 //! caller instead of being silently swallowed.
 //!
 //! Structure:
-//! - test_fixtures/env_list_error_parity/<name>/
+//! - rtk/tests/env_list_error_parity/<name>/
 //!   - main.jsonnet (and other source files)
 //!   - jsonnetfile.json (project root marker)
 //!   - expected_error.txt (substring expected in both tk and rtk error output)
@@ -24,7 +24,7 @@ fn fixtures_path(subpath: &str) -> PathBuf {
 		.unwrap()
 		.parent()
 		.unwrap()
-		.join("test_fixtures")
+		.join("rtk/tests")
 		.join(subpath)
 }
 

@@ -23,7 +23,7 @@ rustanka/rtk is a Rust implementation aiming to be a drop-in replacement for [Ta
 
 Use the `merge-upstream-jrsonnet` skill (`.claude/skills/merge-upstream-jrsonnet/`)
 for merging in upstream jrsonnet. The last merged upstream commit is recorded in
-`.jrsonnet-upstream-base`; the skill covers staged merging, the rustanka features
+`rtk/.jrsonnet-upstream-base`; the skill covers staged merging, the rustanka features
 that must survive, and the signed-commit linearization the org requires.
 
 ## Key Dependencies
@@ -375,7 +375,7 @@ tk uses.
 
 ### Benchmarking
 
-`rtk-benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
+`rtk/benchmarks/run-benchmark.py <config> --rtk-binary-path X --rtk-base-binary-path Y`
 runs the same comparisons CI does. The jobs validate that rtk's output still
 matches tk's, but nothing gates on timing, so a regression lands green.
 
@@ -391,18 +391,17 @@ introduced mid-branch is diluted by everything else on it.
 
 ### The evaluation GC
 
-`Drop for Evaluation` clears the live value and evaluator context before it runs
-`collect_thread_cycles()` (`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Both are
-roots: the context owns the evaluator state and its import cache, so collecting
-before either has gone traverses the entire evaluated graph without reclaiming
-it.
+Discovery and export traverse values inside `Evaluation::with_root`. A child
+explicitly retained for later use shares its originating evaluator. Dropping the
+last owner releases its roots and requests cycle collection, including on bulk
+export workers; cleanup does not wait for the next environment or thread exit.
+Requests made during an active traversal or collection are deferred until it is
+safe to collect. See `crates/rtk-jsonnet-jrsonnet/src/lib.rs`.
 
-Bulk export is the exception. Its Rayon pool is created for one export and then
-destroyed, so those workers collect every other evaluation and their
-thread-local object spaces collect anything left at worker exit. Collecting
-after every environment consumed 26% of CPU in a representative recursive
-export, while waiting until worker exit allowed cyclic garbage to accumulate
-and made that export much slower. Single evaluations keep eager collection.
+Lazy object and thunk payloads can use the evaluation arena. Weak handles keep
+only their global control blocks, not arena pages. Native code that independently
+retains a strong value or evaluator state is still a root: owner teardown must
+not force-free storage reachable through it.
 
 ## Testing
 
@@ -416,7 +415,7 @@ and made that export much slower. Single evaluations keep eager collection.
 
 ### Golden Tests
 
-- Located in `test_fixtures/golden_envs/`
+- Located in `rtk/tests/golden_envs/`
 - Each env has a `golden/` subdirectory with expected output
 - Run specific golden tests: `cargo test -p rtk --test golden_fixtures_test`
 
@@ -425,7 +424,7 @@ and made that export much slower. Single evaluations keep eager collection.
 Golden fixtures are generated from **tk** (real Tanka), and the test verifies that **rtk** produces identical output.
 
 When investigating rtk vs tk differences:
-1. Reproduce the issue in a golden test by adding a test case to `test_fixtures/golden_envs/`
+1. Reproduce the issue in a golden test by adding a test case to `rtk/tests/golden_envs/`
 2. Run `make update-golden-fixtures` to regenerate golden files using tk
 3. Run `make test` to verify the test fails (showing rtk doesn't match tk)
 4. Fix the issue in rtk code (may require serde-saphyr changes)

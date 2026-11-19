@@ -9,12 +9,12 @@ mod test_utils;
 
 use std::path::Path;
 
-use k8s_mock::DiscoveryMode;
 use rtk::commands::{
 	apply::{apply_environment, ApplyOpts, ApplyStrategy, AutoApprove},
 	diff::ColorMode,
 };
 use rtk::k8s::diff::DiffStrategy;
+use rtk_k8s_mock::DiscoveryMode;
 use rtk_spec::canonical::EnvironmentSpec;
 use serde_json::json;
 
@@ -112,7 +112,7 @@ async fn run_apply_failure_preserves_api_error(test_dir: &std::path::Path) {
 		"code": 403
 	});
 
-	let server = k8s_mock::HttpMockK8sServer::builder()
+	let server = rtk_k8s_mock::HttpMockK8sServer::builder()
 		.discovery_mode(DiscoveryMode::Aggregated)
 		.resources(cluster_state)
 		.fail_writes(fail_writes)
@@ -324,7 +324,7 @@ async fn subset_array_changes_match_tanka_and_are_applied() {
 		};
 		let (server, connection) = test_utils::setup_connection_from_cluster_state(
 			vec![manifest(&live_names)],
-			k8s_mock::DiscoveryMode::Aggregated,
+			rtk_k8s_mock::DiscoveryMode::Aggregated,
 			false,
 		)
 		.await;

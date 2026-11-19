@@ -17,7 +17,7 @@ fn staged_environment() -> tempfile::TempDir {
 		.parent()
 		.and_then(Path::parent)
 		.expect("the repository root")
-		.join("test_fixtures/golden_envs/helm_template_env");
+		.join("rtk/tests/golden_envs/helm_template_env");
 
 	let staged = tempfile::Builder::new()
 		.prefix("rtk-helm-cache")

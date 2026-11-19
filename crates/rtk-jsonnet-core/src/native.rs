@@ -181,6 +181,12 @@ where
 		}
 	}
 
+	/// Field names without forcing field values.
+	fn field_names(&self, hidden: Hidden) -> Vec<<Self::Value as Value>::Str>;
+
+	/// Check assertions without forcing unrelated fields.
+	fn run_assertions(&self) -> Result<(), <Self::Evaluator as Evaluator>::Error>;
+
 	fn values(&self) -> Self::ValuesIter<'_>;
 }
 

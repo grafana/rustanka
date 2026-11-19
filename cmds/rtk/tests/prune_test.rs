@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 #[path = "test_utils.rs"]
 mod test_utils;
 
-use k8s_mock::DiscoveryMode;
 use rtk::{
 	commands::{
 		diff::ColorMode,
@@ -18,6 +17,7 @@ use rtk::{
 	},
 	k8s::{client::ClusterConnection, diff::ResourceDiff},
 };
+use rtk_k8s_mock::DiscoveryMode;
 
 fn fixture_dir(name: &str) -> PathBuf {
 	test_utils::diff_fixture_dir(name)
@@ -26,7 +26,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 async fn setup_connection(
 	test_dir: &Path,
 	discovery_mode: DiscoveryMode,
-) -> (k8s_mock::RunningHttpMockK8sServer, ClusterConnection) {
+) -> (rtk_k8s_mock::RunningHttpMockK8sServer, ClusterConnection) {
 	let cluster_state = test_utils::load_manifests_from_dir(&test_dir.join("cluster"));
 	test_utils::setup_connection_from_cluster_state(cluster_state, discovery_mode, false).await
 }

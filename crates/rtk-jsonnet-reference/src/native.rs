@@ -108,6 +108,12 @@ impl core::Object for Object {
 	fn get(&self, key: &str, _: Hidden) -> Result<Option<Value>, EvaluatorError> {
 		Ok(self.0.get(key).cloned().map(Value))
 	}
+	fn field_names(&self, _: Hidden) -> Vec<String> {
+		self.0.keys().cloned().collect()
+	}
+	fn run_assertions(&self) -> Result<(), EvaluatorError> {
+		Ok(())
+	}
 	fn values(&self) -> Self::ValuesIter<'_> {
 		self.0.values().map(|v| Ok(Value(v.clone())))
 	}

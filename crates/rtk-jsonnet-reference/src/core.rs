@@ -296,7 +296,7 @@ impl Evaluator {
 	fn evaluate(
 		self,
 		run: impl FnOnce(&mut Vm<'_>) -> Result<String, Error>,
-	) -> Result<(Self, Value), EvaluatorError> {
+	) -> Result<Evaluation, EvaluatorError> {
 		// Contexts outlive the VM, including its destruction. Each context owns
 		// a clone of the evaluator so Function::call can use a valid reference.
 		let mut contexts: Vec<Box<CallbackContext>> = Vec::new();
@@ -352,13 +352,41 @@ impl Evaluator {
 		drop(vm);
 		drop(contexts);
 		let output = output?;
-		Ok((self, Value(serde_json::from_str(&output)?)))
+		Ok(Evaluation {
+			context: Shared::new(self),
+			value: Value(serde_json::from_str(&output)?),
+		})
 	}
 }
+/// A manifested JSON root with the context used by its serde and native routes.
+pub struct Evaluation {
+	context: Shared<Evaluator>,
+	value: Value,
+}
+
+impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
+	fn visit_root<R>(
+		owner: &Self::Owner,
+		visit: core::RootVisitor<impl for<'s> FnOnce(core::ScopedValue<'s, Self>) -> R>,
+	) -> R {
+		visit.visit::<Self, _>(&owner.context, owner.value.clone(), &|value| Evaluation {
+			context: owner.context.clone(),
+			value,
+		})
+	}
+	fn deserialize_data<'de, T: ::serde::Deserialize<'de>>(
+		_: &Evaluator,
+		value: Value,
+	) -> Result<T, EvaluatorError> {
+		T::deserialize(value.0).map_err(EvaluatorError::from)
+	}
+}
+
 impl core::Evaluator for Evaluator {
 	type Implementation = Implementation;
 	type Arguments = Arguments;
 	type Context = Self;
+	type Owner = Evaluation;
 	type Error = EvaluatorError;
 	type Value = Value;
 	fn new(implementation: &Implementation) -> Self {
@@ -469,13 +497,13 @@ impl core::Evaluator for Evaluator {
 	fn evaluate_file<P: AsRef<Path> + fmt::Debug>(
 		self,
 		path: P,
-	) -> Result<(Self, Value), EvaluatorError> {
+	) -> Result<Evaluation, EvaluatorError> {
 		self.evaluate(|vm| vm.evaluate_file(path.as_ref()))
 	}
 	fn evaluate_snippet<S: AsRef<str> + fmt::Debug>(
 		self,
 		snippet: S,
-	) -> Result<(Self, Value), EvaluatorError> {
+	) -> Result<Evaluation, EvaluatorError> {
 		self.evaluate(|vm| vm.evaluate_snippet("<anonymous>", snippet.as_ref()))
 	}
 }
@@ -497,13 +525,47 @@ mod tests {
 	}
 
 	#[test]
+	fn scoped_result_traverses_manifested_data() {
+		use rtk_jsonnet_core::{RawValue, ScopedEvaluator as _};
+		let Some(implementation) = implementation() else {
+			return;
+		};
+		let result = core::Implementation::create_evaluator(&implementation)
+			.evaluate_snippet_result("{numbers: [1, 2], hidden:: true}")
+			.unwrap();
+		let numbers = result.with_root(|root| {
+			let obj = root.as_object().unwrap();
+			assert_eq!(obj.field_names(core::Hidden::Include), ["numbers"]);
+			let numbers = obj.values().next().unwrap().unwrap();
+			assert_eq!(numbers.as_array().unwrap().len(), 2);
+			numbers.deserialize::<Vec<i32>>().unwrap()
+		});
+		assert_eq!(numbers, [1, 2]);
+		let child = result.with_root(|v| {
+			v.as_object()
+				.unwrap()
+				.get_or_bail("numbers", core::Hidden::Skip)
+				.unwrap()
+				.into_owned()
+		});
+		assert!(
+			result
+				.deserialize::<std::collections::BTreeMap<String, RawValue<Value>>>()
+				.is_err()
+		);
+		assert_eq!(result.manifest().unwrap(), r#"{"numbers":[1,2]}"#);
+		drop(result);
+		assert_eq!(child.manifest().unwrap(), "[1,2]");
+	}
+
+	#[test]
 	fn core_evaluation_and_serde_round_trip() {
 		let Some(implementation) = implementation() else {
 			return;
 		};
 		let mut evaluator = core::Implementation::create_evaluator(&implementation);
 		evaluator.with_external_variable("name", "world").unwrap();
-		let (context, value) = evaluator
+		let Evaluation { context, value } = evaluator
 			.evaluate_snippet("{name: std.extVar('name'), numbers: [1, 2], secret:: 4}")
 			.unwrap();
 		let object = value.as_object().unwrap();
@@ -556,7 +618,7 @@ mod tests {
 		};
 		let mut evaluator = core::Implementation::create_evaluator(&implementation);
 		evaluator.with_native_function("add", Add).unwrap();
-		let (_, value) = evaluator
+		let Evaluation { value, .. } = evaluator
 			.clone()
 			.evaluate_snippet("std.native('add')(2, 3)")
 			.unwrap();
@@ -587,7 +649,7 @@ mod tests {
 		let mut evaluator = core::Implementation::create_evaluator(&implementation);
 		evaluator.with_native_function("negate", Negate).unwrap();
 		for (input, expected) in [("true", false), ("false", true)] {
-			let (_, value) = evaluator
+			let Evaluation { value, .. } = evaluator
 				.clone()
 				.evaluate_snippet(format!("std.native('negate')({input})"))
 				.unwrap();
@@ -613,7 +675,7 @@ mod tests {
 		};
 		let mut evaluator = core::Implementation::create_evaluator(&implementation);
 		evaluator.with_native_function("wrap", Wrap).unwrap();
-		let (_, value) = evaluator
+		let Evaluation { value, .. } = evaluator
 			.clone()
 			.evaluate_snippet("std.native('wrap')('hi')")
 			.unwrap();
@@ -638,7 +700,7 @@ mod tests {
 		let Some(implementation) = implementation() else {
 			return;
 		};
-		let (context, value) = core::Implementation::create_evaluator(&implementation)
+		let Evaluation { context, value } = core::Implementation::create_evaluator(&implementation)
 			.evaluate_snippet("[{One: null}, {Two: {count: 2}}]")
 			.unwrap();
 		let choices = Vec::<Choice>::deserialize(context.create_deserializer(value)).unwrap();
@@ -659,7 +721,7 @@ mod tests {
 		});
 		let mut evaluator = core::Implementation::create_evaluator(&implementation);
 		evaluator.with_import_paths(paths.to_vec()).unwrap();
-		let (_, value) = evaluator.evaluate_snippet("import 'x.libsonnet'").unwrap();
+		let Evaluation { value, .. } = evaluator.evaluate_snippet("import 'x.libsonnet'").unwrap();
 		assert_eq!(value.as_str().as_deref(), Some("first"));
 	}
 
@@ -708,7 +770,7 @@ mod tests {
 		let evaluate = move |value: u32| {
 			let mut evaluator = core::Implementation::create_evaluator(&implementation);
 			evaluator.with_rtk_memoize().unwrap();
-			let (_, value) = evaluator
+			let Evaluation { value, .. } = evaluator
 				.evaluate_snippet(format!(
 					"std.native('rtkMemoize')('reference-memo-threads', {value})"
 				))
