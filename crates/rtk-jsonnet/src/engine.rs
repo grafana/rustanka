@@ -1123,6 +1123,9 @@ mod tests {
 		}"#,
 			)
 			.unwrap();
+		let environment: rtk_spec::canonical::Environment<'_> =
+			value.with_root(|root| root.deserialize()).unwrap();
+		assert_eq!(environment.metadata.name.as_deref(), Some("demo"));
 		let data = value.with_root(|root| {
 			root.as_object()
 				.unwrap()
@@ -1139,32 +1142,52 @@ mod tests {
 					.unwrap()
 					.as_array()
 					.unwrap()
-					.len(),
-				1
+					.iter()
+					.map(|item| item.unwrap().deserialize::<serde_json::Value>().unwrap())
+					.collect::<Vec<_>>(),
+				[serde_json::json!({ "kind": "ConfigMap", "apiVersion": "v1" })]
 			)
 		});
 	}
 
 	#[test]
-	fn missing_field_stays_absent_on_either_implementation() {
+	fn missing_and_null_fields_are_distinct_on_either_implementation() {
 		for engine in [Some(Engine::new(Options::default())), reference_engine()]
 			.into_iter()
 			.flatten()
 		{
 			engine
 				.create_evaluator()
-				.evaluate_snippet("{}")
+				.evaluate_snippet("{ present: null }")
 				.unwrap()
 				.with_root(|v| {
+					let object = v.as_object().unwrap();
+					assert!(object.get("data", Hidden::Skip).unwrap().is_none());
 					assert!(
-						v.as_object()
+						object
+							.get_or_bail("present", Hidden::Skip)
 							.unwrap()
-							.get("data", Hidden::Skip)
-							.unwrap()
-							.is_none()
-					)
+							.is_null()
+					);
 				});
 		}
+	}
+
+	#[test]
+	fn scoped_deserialization_cannot_detach_nested_jrsonnet_values() {
+		use rtk_jsonnet_core::RawValue;
+		use rtk_jsonnet_jrsonnet::Value;
+		use std::collections::BTreeMap;
+
+		let value = Engine::new(Options::default())
+			.create_evaluator()
+			.evaluate_snippet("{ data: [42] }")
+			.unwrap();
+		let err = value
+			.with_root(|v| v.deserialize::<BTreeMap<String, Vec<RawValue<Value>>>>())
+			.err()
+			.expect("nested raw value must not escape the scope");
+		assert!(err.to_string().contains("cannot detach"), "{err}");
 	}
 
 	#[test]
@@ -1630,6 +1653,7 @@ mod tests {
 					metadata: { name: "environments/demo" },
 					spec: { namespace: "demo" },
 					data: {
+						unused: error "data was forced",
 						big: 1e100,
 						lazy: { nested: 2 + 3 },
 					},
@@ -1650,6 +1674,7 @@ mod tests {
 				.unwrap()
 				.retain()
 		});
+		drop(value);
 		data.with_root(|v| {
 			let object = v.as_object().expect("an object");
 			assert_eq!(
