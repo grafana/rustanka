@@ -31,9 +31,9 @@ jobs:
             package: "rtk"
             profile: "release"
             ref: "${{ github.event.pull_request.base.ref }}"
-          - name: "mock-k8s-server"
-            id: "mock-k8s-server"
-            package: "mock-k8s-server"
+          - name: "rtk-mock-k8s-server"
+            id: "rtk-mock-k8s-server"
+            package: "rtk-mock-k8s-server"
             profile: "release"
             ref: ""
     steps:
@@ -86,43 +86,43 @@ jobs:
       matrix:
         benchmark:
           - name: "Env List"
-            config: "rtk-benchmarks/env-list.yaml"
+            config: "rtk/benchmarks/env-list.yaml"
             id: "env-list"
           - name: "Eval"
-            config: "rtk-benchmarks/eval.yaml"
+            config: "rtk/benchmarks/eval.yaml"
             id: "eval"
           - name: "Export (Full)"
-            config: "rtk-benchmarks/export-full.yaml"
+            config: "rtk/benchmarks/export-full.yaml"
             id: "export-full"
           - name: "Export (Large)"
-            config: "rtk-benchmarks/export-large.yaml"
+            config: "rtk/benchmarks/export-large.yaml"
             id: "export-large"
           - name: "Export (Memoize)"
-            config: "rtk-benchmarks/export-memoize.yaml"
+            config: "rtk/benchmarks/export-memoize.yaml"
             id: "export-memoize"
           - name: "Export (Shared Libraries)"
-            config: "rtk-benchmarks/export-libraries.yaml"
+            config: "rtk/benchmarks/export-libraries.yaml"
             id: "export-libraries"
           - name: "Export (Replace)"
-            config: "rtk-benchmarks/export-replace.yaml"
+            config: "rtk/benchmarks/export-replace.yaml"
             id: "export-replace"
           - name: "Tool Importers"
-            config: "rtk-benchmarks/tool-importers.yaml"
+            config: "rtk/benchmarks/tool-importers.yaml"
             id: "tool-importers"
           - name: "Tool Imports"
-            config: "rtk-benchmarks/tool-imports.yaml"
+            config: "rtk/benchmarks/tool-imports.yaml"
             id: "tool-imports"
           - name: "Tool Importers Count"
-            config: "rtk-benchmarks/tool-importers-count.yaml"
+            config: "rtk/benchmarks/tool-importers-count.yaml"
             id: "tool-importers-count"
           - name: "Diff"
-            config: "rtk-benchmarks/diff.yaml"
+            config: "rtk/benchmarks/diff.yaml"
             id: "diff"
           - name: "Validate Manifests"
-            config: "rtk-benchmarks/validate-manifests.yaml"
+            config: "rtk/benchmarks/validate-manifests.yaml"
             id: "validate-manifests"
           - name: "Helm Template"
-            config: "rtk-benchmarks/helm-template.yaml"
+            config: "rtk/benchmarks/helm-template.yaml"
             id: "helm-template"
     steps:
       - name: Checkout
@@ -141,10 +141,10 @@ jobs:
           name: rtk-base
           path: bin
 
-      - name: Download mock-k8s-server
+      - name: Download rtk-mock-k8s-server
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
-          name: mock-k8s-server
+          name: rtk-mock-k8s-server
           path: bin
 
       - name: Make binaries executable
@@ -174,7 +174,7 @@ jobs:
 
       - name: Test benchmark runner
         if: matrix.benchmark.id == 'export-large'
-        run: uv run --with pyyaml python -m unittest discover -s rtk-benchmarks -p 'test_run_benchmark.py'
+        run: uv run --with pyyaml python -m unittest discover -s rtk/benchmarks -p 'test_run_benchmark.py'
 
       - name: Run benchmark
         env:
@@ -195,7 +195,7 @@ jobs:
           elif [ "${{ matrix.benchmark.id }}" = "export-libraries" ]; then
             ARGS="$ARGS -- --runs 5"
           fi
-          ./rtk-benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
+          ./rtk/benchmarks/run-benchmark.py ${{ matrix.benchmark.config }} $ARGS | tee benchmark-results.md
 
       - name: Upload benchmark output
         if: always()

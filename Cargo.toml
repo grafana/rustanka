@@ -1,8 +1,6 @@
 [workspace]
 members = [
   "crates/*",
-  "bindings/jrsonnet-web",
-  "bindings/jsonnet",
   "cmds/*",
   "tests",
   "xtask",
@@ -11,7 +9,6 @@ default-members = [
   "cmds/jrsonnet",
   "cmds/jrsonnet-fmt",
   "cmds/jrb",
-  "bindings/jsonnet",
 ]
 resolver = "2"
 

@@ -7,11 +7,11 @@
 #[path = "test_utils.rs"]
 mod test_utils;
 
-use k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use rtk::{
 	commands::diff::{diff_environment, ColorMode, DiffOpts},
 	k8s::{client::ClusterConnection, diff::DiffStrategy},
 };
+use rtk_k8s_mock::{DiscoveryMode, HttpMockK8sServer};
 use rtk_spec::canonical::EnvironmentSpec;
 
 fn mock_spec() -> EnvironmentSpec {
@@ -80,11 +80,11 @@ async fn run_diff_test_with_opts(
 #[cfg(test)]
 mod error_tests {
 	use assert_matches::assert_matches;
-	use k8s_mock::DiscoveryMode;
 	use rtk::k8s::{
 		diff::{DiffEngine, DiffError},
 		discovery::DiscoveryError,
 	};
+	use rtk_k8s_mock::DiscoveryMode;
 
 	use super::*;
 
@@ -338,11 +338,11 @@ mod crd_tests {
 	use std::collections::HashMap;
 
 	use indoc::indoc;
-	use k8s_mock::{DiscoveryMode, HttpMockK8sServer, MockApiResource, MockDiscovery};
 	use rtk::k8s::{
 		client::ClusterConnection,
 		diff::{DiffEngine, DiffStrategy},
 	};
+	use rtk_k8s_mock::{DiscoveryMode, HttpMockK8sServer, MockApiResource, MockDiscovery};
 
 	/// Test that CRD merge keys from OpenAPI schemas are respected during diff.
 	///

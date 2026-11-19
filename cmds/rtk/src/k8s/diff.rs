@@ -10,12 +10,12 @@ use std::{
 };
 
 use clap::ValueEnum;
-use k8s::strategicpatch::CombinedSchemaLookup;
 use kube::{
 	api::{Api, DynamicObject, ListParams, Patch, PatchParams, PostParams},
 	core::GroupVersionKind,
 	Client,
 };
+use rtk_k8s::strategicpatch::CombinedSchemaLookup;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::{sync::Semaphore, task::JoinSet};
@@ -1223,7 +1223,7 @@ impl DiffEngine {
 		);
 
 		// Create a three-way strategic merge patch
-		let patch = k8s::strategicpatch::create_three_way_merge_patch(
+		let patch = rtk_k8s::strategicpatch::create_three_way_merge_patch(
 			original.as_ref(),
 			&modified,
 			&current_json,

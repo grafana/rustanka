@@ -6,7 +6,7 @@
 //! 2. Both error messages contain the expected pattern
 //!
 //! Structure:
-//! - test_fixtures/error_parity/<test_name>/
+//! - rtk/tests/error_parity/<test_name>/
 //!   - main.jsonnet (and other source files)
 //!   - jsonnetfile.json (for env discovery)
 //!   - expected_error.txt (the error pattern that should appear in both tk and rtk output)
@@ -19,14 +19,14 @@ use std::{
 
 use rtk::commands::eval;
 
-/// Helper function to get absolute path to test_fixtures
+/// Helper function to get absolute path to rtk/tests
 fn fixtures_path(subpath: &str) -> PathBuf {
 	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 		.parent()
 		.unwrap()
 		.parent()
 		.unwrap()
-		.join("test_fixtures")
+		.join("rtk/tests")
 		.join(subpath)
 }
 
@@ -146,7 +146,7 @@ fn test_error_parity() {
 	let tests = discover_error_tests();
 
 	if tests.is_empty() {
-		println!("No error parity tests found in test_fixtures/error_parity/");
+		println!("No error parity tests found in rtk/tests/error_parity/");
 		return;
 	}
 
