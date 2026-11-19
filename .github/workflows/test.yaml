@@ -24,9 +24,15 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: go1.27.1
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: false
       - name: Install tk (tanka)
         run: |
           TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
