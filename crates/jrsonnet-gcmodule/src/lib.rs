@@ -233,6 +233,11 @@
 
 extern crate self as jrsonnet_gcmodule;
 
+#[cfg(feature = "arena-payload")]
+mod arena_payload;
+#[cfg(feature = "arena-payload")]
+pub use arena_payload::{ArenaAllocator, ArenaCc, ArenaWeak};
+
 mod cc;
 mod cc_impls;
 mod collect;
@@ -254,7 +259,7 @@ pub use trace_impls::TraceBox;
 
 pub use cc::{Cc, RawCc, RawWeak, Weak};
 pub use collect::{
-    ObjectSpace, collect_thread_cycles, count_thread_tracked, with_thread_object_space,
+	ObjectSpace, collect_thread_cycles, count_thread_tracked, with_thread_object_space,
 };
 pub use trace::{Acyclic, Trace, Tracer};
 
@@ -290,16 +295,16 @@ pub use jrsonnet_gcmodule_derive::{Acyclic, Trace};
 
 #[cfg(not(test))]
 mod debug {
-    #[cfg(any(feature = "debug", feature = "testutil", test))]
-    thread_local!(pub(crate) static NEXT_DEBUG_NAME: std::cell::Cell<usize> = std::cell::Cell::default());
-    #[cfg(any(feature = "debug", test))]
-    thread_local!(pub(crate) static GC_DROPPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
-    pub(crate) fn log<S1: ToString, S2: ToString>(func: impl Fn() -> (S1, S2)) {
-        if cfg!(feature = "debug") {
-            let (name, message) = func();
-            eprintln!("[gc] {} {}", name.to_string(), message.to_string());
-        }
-    }
+	#[cfg(any(feature = "debug", feature = "testutil", test))]
+	thread_local!(pub(crate) static NEXT_DEBUG_NAME: std::cell::Cell<usize> = std::cell::Cell::default());
+	#[cfg(any(feature = "debug", test))]
+	thread_local!(pub(crate) static GC_DROPPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+	pub(crate) fn log<S1: ToString, S2: ToString>(func: impl Fn() -> (S1, S2)) {
+		if cfg!(feature = "debug") {
+			let (name, message) = func();
+			eprintln!("[gc] {} {}", name.to_string(), message.to_string());
+		}
+	}
 }
 
 /// Whether the `debug` feature is enabled.
@@ -313,113 +318,113 @@ pub const DEBUG_ENABLED: bool = cfg!(feature = "debug");
 // It won't be able to preserve debug state.
 #[cfg(not(any(test, feature = "debug")))]
 pub mod interop {
-    use std::mem;
+	use std::mem;
 
-    use crate::collect::{OwnedGcHeader, THREAD_OBJECT_SPACE, new_gc_list};
+	use crate::collect::{OwnedGcHeader, THREAD_OBJECT_SPACE, new_gc_list};
 
-    /// Type-erased gc object list
-    pub enum GcState {}
+	/// Type-erased gc object list
+	pub enum GcState {}
 
-    type UnerasedState = OwnedGcHeader;
+	type UnerasedState = OwnedGcHeader;
 
-    /// Dump current interned string pool, to be restored by
-    /// `reenter_thread`
-    ///
-    /// # Safety
-    ///
-    /// Current thread gc becomes broken after this call, you should not use gc after this
-    /// call, and before `reenter_thread` call.
-    #[must_use]
-    pub unsafe fn exit_thread() -> *mut GcState {
-        let object_list: UnerasedState = THREAD_OBJECT_SPACE
-            .with(|space| mem::replace(&mut *space.list.borrow_mut(), new_gc_list()));
-        Box::into_raw(Box::new(object_list)).cast()
-    }
+	/// Dump current interned string pool, to be restored by
+	/// `reenter_thread`
+	///
+	/// # Safety
+	///
+	/// Current thread gc becomes broken after this call, you should not use gc after this
+	/// call, and before `reenter_thread` call.
+	#[must_use]
+	pub unsafe fn exit_thread() -> *mut GcState {
+		let object_list: UnerasedState = THREAD_OBJECT_SPACE
+			.with(|space| mem::replace(&mut *space.list.borrow_mut(), new_gc_list()));
+		Box::into_raw(Box::new(object_list)).cast()
+	}
 
-    /// Reenter thread, using state dumped by `exit_thread`.
-    ///
-    /// # Safety
-    ///
-    /// `state` should be acquired from `exit_thread`, it is not allowed
-    /// to reuse state to reenter multiple threads.
-    pub unsafe fn reenter_thread(state: *mut GcState) {
-        let ptr: *mut UnerasedState = state.cast();
-        // SAFETY: ptr is an unique state per method safety requirements.
-        let ptr: Box<UnerasedState> = unsafe { Box::from_raw(ptr) };
-        let ptr: UnerasedState = *ptr;
-        THREAD_OBJECT_SPACE.with(|space| {
-            let _ = mem::replace(&mut *space.list.borrow_mut(), ptr);
-        });
-    }
+	/// Reenter thread, using state dumped by `exit_thread`.
+	///
+	/// # Safety
+	///
+	/// `state` should be acquired from `exit_thread`, it is not allowed
+	/// to reuse state to reenter multiple threads.
+	pub unsafe fn reenter_thread(state: *mut GcState) {
+		let ptr: *mut UnerasedState = state.cast();
+		// SAFETY: ptr is an unique state per method safety requirements.
+		let ptr: Box<UnerasedState> = unsafe { Box::from_raw(ptr) };
+		let ptr: UnerasedState = *ptr;
+		THREAD_OBJECT_SPACE.with(|space| {
+			let _ = mem::replace(&mut *space.list.borrow_mut(), ptr);
+		});
+	}
 }
 
 #[cfg(test)]
 mod dyn_cc {
-    use crate::Trace;
-    use std::fmt::Debug;
+	use crate::Trace;
+	use std::fmt::Debug;
 
-    use crate::cc_dyn;
+	use crate::cc_dyn;
 
-    #[derive(Debug, Trace)]
-    struct Test {
-        a: String,
-    }
+	#[derive(Debug, Trace)]
+	struct Test {
+		a: String,
+	}
 
-    trait DebugAndTrace: Debug + Trace {}
-    impl<T> DebugAndTrace for T where T: Debug + Trace {}
-    cc_dyn!(
-        #[derive(Debug)]
-        CcDebugAndTrace,
-        DebugAndTrace
-    );
+	trait DebugAndTrace: Debug + Trace {}
+	impl<T> DebugAndTrace for T where T: Debug + Trace {}
+	cc_dyn!(
+		#[derive(Debug)]
+		CcDebugAndTrace,
+		DebugAndTrace
+	);
 
-    trait BorrowTy<O> {
-        fn borrow_ty(&self) -> &O;
-    }
-    cc_dyn!(CcBorrowTy<O>, BorrowTy<O>);
-    cc_dyn!(
-        CcBorrowTyAlsoDebug<O: Debug>,
-        BorrowTy<O>
-    );
+	trait BorrowTy<O> {
+		fn borrow_ty(&self) -> &O;
+	}
+	cc_dyn!(CcBorrowTy<O>, BorrowTy<O>);
+	cc_dyn!(
+		CcBorrowTyAlsoDebug<O: Debug>,
+		BorrowTy<O>
+	);
 
-    #[derive(Trace)]
-    struct Borrowable<T: Trace> {
-        v: T,
-    }
-    impl<T: Trace> BorrowTy<T> for Borrowable<T> {
-        fn borrow_ty(&self) -> &T {
-            &self.v
-        }
-    }
+	#[derive(Trace)]
+	struct Borrowable<T: Trace> {
+		v: T,
+	}
+	impl<T: Trace> BorrowTy<T> for Borrowable<T> {
+		fn borrow_ty(&self) -> &T {
+			&self.v
+		}
+	}
 
-    #[test]
-    fn test_dyn() {
-        let test = Test {
-            a: "hello".to_owned(),
-        };
+	#[test]
+	fn test_dyn() {
+		let test = Test {
+			a: "hello".to_owned(),
+		};
 
-        let dynccgeneric = CcBorrowTy::new(Borrowable { v: 1u32 });
-        let v = dynccgeneric.0.borrow_ty();
-        assert_eq!(*v, 1);
+		let dynccgeneric = CcBorrowTy::new(Borrowable { v: 1u32 });
+		let v = dynccgeneric.0.borrow_ty();
+		assert_eq!(*v, 1);
 
-        let dynccgeneric = CcBorrowTyAlsoDebug::new(Borrowable { v: 1u32 });
-        let v = dynccgeneric.0.borrow_ty();
-        assert_eq!(*v, 1);
+		let dynccgeneric = CcBorrowTyAlsoDebug::new(Borrowable { v: 1u32 });
+		let v = dynccgeneric.0.borrow_ty();
+		assert_eq!(*v, 1);
 
-        let dyncc = CcDebugAndTrace::new(test);
-        assert_eq!(
-            format!("{dyncc:?}"),
-            "CcDebugAndTrace(Cc(Test { a: \"hello\" }))"
-        );
-        let dyncc_is_trace = dyncc;
-        assert_eq!(
-            format!("{dyncc_is_trace:?}"),
-            "CcDebugAndTrace(Cc(Test { a: \"hello\" }))"
-        );
-        let dyncc_is_trace_as_dyn = CcDebugAndTrace::new(dyncc_is_trace);
-        assert_eq!(
-            format!("{dyncc_is_trace_as_dyn:?}"),
-            "CcDebugAndTrace(Cc(CcDebugAndTrace(Cc(Test { a: \"hello\" }))))"
-        );
-    }
+		let dyncc = CcDebugAndTrace::new(test);
+		assert_eq!(
+			format!("{dyncc:?}"),
+			"CcDebugAndTrace(Cc(Test { a: \"hello\" }))"
+		);
+		let dyncc_is_trace = dyncc;
+		assert_eq!(
+			format!("{dyncc_is_trace:?}"),
+			"CcDebugAndTrace(Cc(Test { a: \"hello\" }))"
+		);
+		let dyncc_is_trace_as_dyn = CcDebugAndTrace::new(dyncc_is_trace);
+		assert_eq!(
+			format!("{dyncc_is_trace_as_dyn:?}"),
+			"CcDebugAndTrace(Cc(CcDebugAndTrace(Cc(Test { a: \"hello\" }))))"
+		);
+	}
 }

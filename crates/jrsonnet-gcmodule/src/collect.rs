@@ -60,10 +60,38 @@ pub struct ObjectSpace {
     /// Linked list to the tracked objects.
     pub(crate) list: RefCell<OwnedGcHeader>,
 
+    collection: CollectionGate,
+
     /// Mark `ObjectSpace` as `!Send` and `!Sync`. This enforces thread-exclusive
     /// access to the linked list so methods can use `&self` instead of
     /// `&mut self`, together with usage of interior mutability.
     _phantom: PhantomData<Cc<()>>,
+}
+
+enum CollectionGate {
+    Local(Cell<PassState>),
+    Thread,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PassState {
+    Idle,
+    Running,
+    Requested,
+}
+
+// Unlike THREAD_OBJECT_SPACE, this key has no destructor. It remains usable
+// when a payload requests collection from the thread-space destructor.
+thread_local!(static THREAD_PASS: Cell<PassState> = const { Cell::new(PassState::Idle) });
+
+impl PassState {
+    fn defer_if_running(state: &Cell<Self>) -> bool {
+        if state.get() == Self::Idle {
+            return false;
+        }
+        state.set(Self::Requested);
+        true
+    }
 }
 
 /// This is a private type.
@@ -133,9 +161,16 @@ impl AbstractObjectSpace for ObjectSpace {
 impl Default for ObjectSpace {
     /// Constructs an empty [`ObjectSpace`](struct.ObjectSpace.html).
     fn default() -> Self {
+        Self::with_gate(CollectionGate::Local(Cell::new(PassState::Idle)))
+    }
+}
+
+impl ObjectSpace {
+    fn with_gate(collection: CollectionGate) -> Self {
         let header = new_gc_list();
         Self {
             list: RefCell::new(header),
+            collection,
             _phantom: PhantomData,
         }
     }
@@ -152,11 +187,34 @@ impl ObjectSpace {
     }
 
     /// Collect cyclic garbage tracked by this [`ObjectSpace`](struct.ObjectSpace.html).
-    /// Return the number of objects collected.
+    /// A nested call for this space returns zero and requests another pass.
+    /// The outer call returns the total collected across all passes.
     pub fn collect_cycles(&self) -> usize {
-        let list = self.list.borrow();
-        let list: &GcHeader = list.inner();
-        collect_list(list, ())
+        match &self.collection {
+            CollectionGate::Local(state) => self.collect_guarded(state),
+            CollectionGate::Thread => THREAD_PASS.with(|state| self.collect_guarded(state)),
+        }
+    }
+
+    fn collect_guarded(&self, state: &Cell<PassState>) -> usize {
+        if PassState::defer_if_running(state) {
+            return 0;
+        }
+        struct Reset<'a>(&'a Cell<PassState>);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.0.set(PassState::Idle);
+            }
+        }
+        let _reset = Reset(state);
+        let mut total = 0;
+        loop {
+            state.set(PassState::Running);
+            total += collect_list(self.list.borrow().inner(), ());
+            if state.get() != PassState::Requested {
+                return total;
+            }
+        }
     }
 
     /// Constructs a new [`Cc<T>`](type.Cc.html) in this
@@ -248,11 +306,20 @@ impl GcHeader {
 
 /// Collect cyclic garbage in the current thread created by
 /// [`Cc::new`](type.Cc.html#method.new).
-/// Return the number of objects collected.
+/// Returns the total collected, including deferred passes. A nested call
+/// requests a follow-up pass and returns zero. After thread-space teardown,
+/// there is no space left to collect and this also returns zero.
 #[must_use]
 pub fn collect_thread_cycles() -> usize {
-    debug::log(|| ("collect", "collect_thread_cycles"));
-    THREAD_OBJECT_SPACE.with(ObjectSpace::collect_cycles)
+    if THREAD_PASS.with(PassState::defer_if_running) {
+        return 0;
+    }
+    THREAD_OBJECT_SPACE
+        .try_with(|space| {
+            debug::log(|| ("collect", "collect_thread_cycles"));
+            space.collect_cycles()
+        })
+        .unwrap_or(0)
 }
 
 /// Count number of objects tracked by the collector in the current thread
@@ -263,7 +330,7 @@ pub fn count_thread_tracked() -> usize {
     THREAD_OBJECT_SPACE.with(ObjectSpace::count_tracked)
 }
 
-thread_local!(pub(crate) static THREAD_OBJECT_SPACE: ObjectSpace = ObjectSpace::default());
+thread_local!(pub(crate) static THREAD_OBJECT_SPACE: ObjectSpace = ObjectSpace::with_gate(CollectionGate::Thread));
 
 /// Acquire reference to thread-local global object space
 pub fn with_thread_object_space<R>(handler: impl FnOnce(&ObjectSpace) -> R) -> R {
@@ -521,5 +588,78 @@ fn debug_name<L: Linked>(header: &L) -> String {
     #[cfg(not(feature = "debug"))]
     {
         "(enable gcmodule \"debug\" feature for debugging)".to_string()
+    }
+}
+
+#[cfg(test)]
+mod reentry_tests {
+    use super::*;
+    use crate::Tracer;
+    use std::sync::mpsc;
+
+    thread_local!(static ROOT: RefCell<Option<Cc<Node>>> = const { RefCell::new(None) });
+
+    struct Node {
+        edge: RefCell<Option<Cc<Node>>>,
+        request: bool,
+        events: mpsc::Sender<&'static str>,
+    }
+    impl Trace for Node {
+        fn trace(&self, tracer: &mut Tracer) {
+            self.edge.trace(tracer);
+        }
+    }
+    impl Drop for Node {
+        fn drop(&mut self) {
+            if self.request {
+                ROOT.with(|root| root.borrow_mut().take());
+                assert_eq!(collect_thread_cycles(), 0);
+                assert_eq!(collect_thread_cycles(), 0);
+                self.events.send("nested calls returned").unwrap();
+            } else {
+                self.events.send("released cycle dropped").unwrap();
+            }
+        }
+    }
+
+    // The second cycle is rooted during marking. Only a pass *after* the
+    // first payload's destructor can collect it.
+    fn check_nested(thread_exit: bool) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            ROOT.with(|root| {
+                for request in [false, true] {
+                    let node = Cc::new(Node {
+                        edge: RefCell::default(),
+                        request,
+                        events: tx.clone(),
+                    });
+                    *node.edge.borrow_mut() = Some(node.clone());
+                    if !request {
+                        *root.borrow_mut() = Some(node);
+                    }
+                }
+            });
+            if !thread_exit {
+                assert_eq!(collect_thread_cycles(), 2);
+                assert_eq!(count_thread_tracked(), 0);
+            }
+        })
+        .join()
+        .unwrap();
+        assert_eq!(
+            rx.try_iter().collect::<Vec<_>>(),
+            ["nested calls returned", "released cycle dropped"]
+        );
+    }
+
+    #[test]
+    fn external_pass_services_destructor_request() {
+        check_nested(false);
+    }
+
+    #[test]
+    fn thread_space_drop_services_destructor_request() {
+        check_nested(true);
     }
 }

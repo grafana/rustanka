@@ -20,7 +20,7 @@ default = ["explaining-traces", "ir-parser", "scoped-arena"]
 # Allocate thunk and object payloads in the active evaluation's arena.
 # Escaped payloads retain the pages they need; GC headers remain global.
 # Concatenated string walks use a separate short-lived scratch arena.
-scoped-arena = ["jrsonnet-gcmodule/scoped-arena", "dep:rtk-arena-allocator"]
+scoped-arena = ["jrsonnet-gcmodule/scoped-arena", "jrsonnet-gcmodule/arena-payload", "dep:rtk-arena-allocator"]
 # Rustc-like trace visualization
 explaining-traces = ["hi-doc"]
 # Allows library authors to throw custom errors

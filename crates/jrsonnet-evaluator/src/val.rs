@@ -83,93 +83,66 @@ impl<D: Trace, T: Trace + Clone> ThunkValue for MemoizedClosureThunk<D, T> {
 	}
 }
 
+#[cfg(feature = "scoped-arena")]
+use crate::gc::payload::PayloadAlloc;
+#[cfg(feature = "scoped-arena")]
+type ThunkPtr<V> = jrsonnet_gcmodule::ArenaCc<dyn ThunkValue<Output = V>, PayloadAlloc>;
+#[cfg(not(feature = "scoped-arena"))]
+type ThunkPtr<V> = Cc<dyn ThunkValue<Output = V>>;
+#[cfg(not(feature = "scoped-arena"))]
 mod thunk_storage {
-	use super::{Cc, ThunkValue, Trace};
-
+	use super::{ThunkValue, Trace};
 	jrsonnet_gcmodule::cc_dyn!(Shell<V: Trace>, ThunkValue<Output = V>);
-
 	impl<V: Trace> Shell<V> {
-		pub(super) fn allocate(
-			payload: impl ThunkValue<Output = V>,
-		) -> Cc<dyn ThunkValue<Output = V>> {
-			#[cfg(feature = "scoped-arena")]
-			return crate::with_lazy_allocator(|alloc| match alloc {
-				Some(alloc) => Self::allocate_in(payload, alloc),
-				None => Self::new(payload).0,
-			});
-			#[cfg(not(feature = "scoped-arena"))]
+		pub(super) fn allocate(payload: impl ThunkValue<Output = V>) -> super::ThunkPtr<V> {
 			Self::new(payload).0
 		}
-
-		#[cfg(feature = "scoped-arena")]
-		fn allocate_in(
-			payload: impl ThunkValue<Output = V>,
-			alloc: &rtk_arena_allocator::SharedArenaAlloc,
-		) -> Cc<dyn ThunkValue<Output = V>> {
-			Self::new(ArenaPayload(Box::new_in(payload, alloc.clone()))).0
-		}
 	}
+}
 
-	#[cfg(all(test, feature = "scoped-arena"))]
-	mod tests {
-		use std::{cell::RefCell, rc::Rc};
+#[cfg(all(test, feature = "scoped-arena"))]
+mod thunk_storage_tests {
+	use super::{Cc, MemoizedClosureThunk, RefCell, Thunk};
 
-		use super::{Cc, Shell};
-		use crate::val::{MemoizedClosureThunk, Thunk};
-		use rtk_arena_allocator::{Arena, SharedArenaAlloc};
-
-		#[test]
-		fn collector_releases_unforced_payload_and_its_arena() {
-			let arena = Rc::new(Arena::new());
-			let weak = Rc::downgrade(&arena);
-			let edge = Cc::new(RefCell::new(None::<Thunk<()>>));
-			let payload = MemoizedClosureThunk::new(edge.clone(), |_| panic!("unexpected force"));
-			let thunk = Thunk(Shell::allocate_in(payload, &SharedArenaAlloc::from(arena)));
-			*edge.borrow_mut() = Some(thunk);
-			drop(edge);
-			assert!(weak.upgrade().is_some());
-			jrsonnet_gcmodule::collect_thread_cycles();
-			assert!(weak.upgrade().is_none());
-		}
-	}
-
-	#[cfg(feature = "scoped-arena")]
-	struct ArenaPayload<P>(Box<P, rtk_arena_allocator::SharedArenaAlloc>);
-
-	#[cfg(feature = "scoped-arena")]
-	impl<P: Trace> Trace for ArenaPayload<P> {
-		fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
-			self.0.as_ref().trace(tracer);
-		}
-
-		fn is_type_tracked() -> bool {
-			P::is_type_tracked()
-		}
-	}
-
-	#[cfg(feature = "scoped-arena")]
-	impl<P: ThunkValue> ThunkValue for ArenaPayload<P> {
-		type Output = P::Output;
-
-		fn get(&self) -> crate::Result<Self::Output> {
-			self.0.get()
-		}
+	#[test]
+	fn collector_releases_unforced_payload_and_its_arena() {
+		let edge = Cc::new(RefCell::new(None::<Thunk<()>>));
+		let payload = MemoizedClosureThunk::new(edge.clone(), |_| panic!("unexpected force"));
+		let (thunk, probe) = {
+			let state = crate::State::default();
+			let _entered = state.enter();
+			(Thunk::new(payload), state.arena_probe().unwrap())
+		};
+		*edge.borrow_mut() = Some(thunk);
+		drop(edge);
+		assert!(probe.page_count().is_some_and(|pages| pages > 0));
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
+		assert_eq!(probe.page_count(), None);
 	}
 }
 
 /// Lazily evaluated value.
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct Thunk<V>(Cc<dyn ThunkValue<Output = V>>);
+pub struct Thunk<V: 'static>(ThunkPtr<V>);
+
+#[cfg(feature = "scoped-arena")]
+const _: () = assert!(size_of::<Thunk<Val>>() == size_of::<usize>());
 
 impl<V: 'static> Trace for Thunk<V> {
 	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
-		Cc::trace(&self.0, tracer);
+		ThunkPtr::trace(&self.0, tracer);
 	}
 }
 
 impl<T: Trace> Thunk<T> {
 	pub fn new<P: ThunkValue<Output = T>>(payload: P) -> Self {
+		#[cfg(feature = "scoped-arena")]
+		return Self(ThunkPtr::from_box(Box::new_in(
+			payload,
+			PayloadAlloc::current(),
+		)));
+		#[cfg(not(feature = "scoped-arena"))]
 		Self(thunk_storage::Shell::allocate(payload))
 	}
 
@@ -329,7 +302,7 @@ impl<T: Debug + Trace> Debug for Thunk<T> {
 }
 impl<T: Trace> PartialEq for Thunk<T> {
 	fn eq(&self, other: &Self) -> bool {
-		Cc::ptr_eq(&self.0, &other.0)
+		ThunkPtr::ptr_eq(&self.0, &other.0)
 	}
 }
 

@@ -11,7 +11,7 @@ use std::{
 };
 
 use educe::Educe;
-use jrsonnet_gcmodule::{Acyclic, Cc, Trace, Weak, cc_dyn};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -29,7 +29,6 @@ use crate::{
 	bail,
 	error::{ErrorKind::*, suggest_object_fields},
 	evaluate::operator::evaluate_add_op,
-	identity_hash,
 	val::{ArrValue, ThunkValue},
 };
 
@@ -212,7 +211,7 @@ pub trait ObjectCore: Trace + Any + Debug {
 }
 
 #[derive(Clone, Trace)]
-pub struct WeakObjValue(#[trace(skip)] Weak<ObjValueInner>);
+pub struct WeakObjValue(#[trace(skip)] WeakObjPtr, usize);
 impl WeakObjValue {
 	/// Returns `true` if the referenced object is still alive.
 	pub fn is_alive(&self) -> bool {
@@ -232,16 +231,15 @@ impl Debug for WeakObjValue {
 
 impl PartialEq for WeakObjValue {
 	fn eq(&self, other: &Self) -> bool {
-		Weak::ptr_eq(&self.0, &other.0)
+		WeakObjPtr::ptr_eq(&self.0, &other.0)
 	}
 }
 
 impl Eq for WeakObjValue {}
 impl Hash for WeakObjValue {
 	fn hash<H: Hasher>(&self, hasher: &mut H) {
-		// Safety: usize is POD
-		let addr = unsafe { *std::ptr::addr_of!(self.0).cast() };
-		hasher.write_usize(addr);
+		// Hash must stay stable even after the payload is gone.
+		hasher.write_usize(self.1);
 	}
 }
 
@@ -470,61 +468,51 @@ impl ObjPayload {
 	}
 }
 
+#[cfg(feature = "scoped-arena")]
+use crate::gc::payload::PayloadAlloc;
+#[cfg(feature = "scoped-arena")]
+type ObjPtr = jrsonnet_gcmodule::ArenaCc<ObjPayload, PayloadAlloc>;
+#[cfg(feature = "scoped-arena")]
+type WeakObjPtr = jrsonnet_gcmodule::ArenaWeak<ObjPayload, PayloadAlloc>;
 #[cfg(not(feature = "scoped-arena"))]
-type ObjValueInner = ObjPayload;
-
-#[cfg(feature = "scoped-arena")]
-#[derive(Debug)]
-enum ObjValueInner {
-	Global(Box<ObjPayload>),
-	Arena(Box<ObjPayload, rtk_arena_allocator::SharedArenaAlloc>),
-}
-
-#[cfg(feature = "scoped-arena")]
-impl ObjValueInner {
-	fn new(payload: ObjPayload, alloc: Option<&rtk_arena_allocator::SharedArenaAlloc>) -> Self {
-		match alloc {
-			Some(a) => Self::Arena(Box::new_in(payload, a.clone())),
-			None => Self::Global(Box::new(payload)),
-		}
-	}
-}
-
-#[cfg(feature = "scoped-arena")]
-impl std::ops::Deref for ObjValueInner {
-	type Target = ObjPayload;
-	fn deref(&self) -> &ObjPayload {
-		match self {
-			Self::Global(p) => p,
-			Self::Arena(p) => p,
-		}
-	}
-}
-
-#[cfg(feature = "scoped-arena")]
-impl Trace for ObjValueInner {
-	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
-		// Both boxes own exactly one payload; the allocator owns raw pages, not GC edges.
-		(**self).trace(tracer);
-	}
-}
+type ObjPtr = Cc<ObjPayload>;
+#[cfg(not(feature = "scoped-arena"))]
+type WeakObjPtr = jrsonnet_gcmodule::Weak<ObjPayload>;
 
 thread_local! {
 	static EMPTY_OBJ: ObjValue = {
 		// First access can happen during an evaluation. Never store its allocator in TLS.
 		let payload = ObjPayload::new(LayeredCores::empty(), false);
 		#[cfg(feature = "scoped-arena")]
-		let payload = ObjValueInner::new(payload, None);
-		ObjValue(Cc::new(payload))
+		let ptr = ObjPtr::new_in(payload, PayloadAlloc(None));
+		#[cfg(not(feature = "scoped-arena"))]
+		let ptr = ObjPtr::new(payload);
+		ObjValue(ptr)
 	};
 }
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone, Trace, Debug, Educe)]
-#[educe(PartialEq, Hash, Eq)]
-pub struct ObjValue(
-	#[educe(PartialEq(method(Cc::ptr_eq)), Hash(method(identity_hash)))] Cc<ObjValueInner>,
-);
+#[derive(Clone, Educe)]
+#[educe(PartialEq, Eq)]
+pub struct ObjValue(#[educe(PartialEq(method(ObjPtr::ptr_eq)))] ObjPtr);
+
+impl Trace for ObjValue {
+	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
+		ObjPtr::trace(&self.0, tracer);
+	}
+}
+
+impl Debug for ObjValue {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("ObjValue").field(&*self.0).finish()
+	}
+}
+
+impl Hash for ObjValue {
+	fn hash<H: Hasher>(&self, hasher: &mut H) {
+		hasher.write_usize(self.identity_addr());
+	}
+}
 
 impl ObjValue {
 	pub fn empty() -> Self {
@@ -755,8 +743,10 @@ impl ObjValue {
 	fn from_cores(cores: LayeredCores, has_assertions: bool) -> Self {
 		let payload = ObjPayload::new(cores, has_assertions);
 		#[cfg(feature = "scoped-arena")]
-		let payload = crate::with_lazy_allocator(|a| ObjValueInner::new(payload, a));
-		Self(Cc::new(payload))
+		let ptr = ObjPtr::new_in(payload, PayloadAlloc::current());
+		#[cfg(not(feature = "scoped-arena"))]
+		let ptr = ObjPtr::new(payload);
+		Self(ptr)
 	}
 	// #[must_use]
 	// pub fn with_this(&self, this: Self) -> Self {
@@ -1108,10 +1098,13 @@ impl ObjValue {
 		}
 	}
 	pub fn ptr_eq(a: &Self, b: &Self) -> bool {
-		Cc::ptr_eq(&a.0, &b.0)
+		ObjPtr::ptr_eq(&a.0, &b.0)
+	}
+	fn identity_addr(&self) -> usize {
+		std::ptr::from_ref(&*self.0).addr()
 	}
 	pub fn downgrade(self) -> WeakObjValue {
-		WeakObjValue(self.0.downgrade())
+		WeakObjValue(self.0.downgrade(), self.identity_addr())
 	}
 }
 
@@ -1403,6 +1396,19 @@ mod storage_tests {
 	use super::*;
 
 	#[test]
+	fn expired_weak_keys_keep_their_identity() {
+		let obj = ObjValue::from_cores(LayeredCores::empty(), false);
+		let key = obj.clone().downgrade();
+		let mut keys = FxHashSet::default();
+		keys.insert(obj.clone().downgrade());
+		drop(obj);
+		assert!(key.upgrade().is_none());
+		assert!(keys.contains(&key));
+		let other = ObjValue::from_cores(LayeredCores::empty(), false).downgrade();
+		assert!(!keys.contains(&other));
+	}
+
+	#[test]
 	fn native_assertion_unwind_allows_retry_and_release() {
 		use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -1447,11 +1453,6 @@ mod storage_tests {
 			let Val::Obj(obj) = state.evaluate_snippet("object", "{ again: self }").unwrap() else {
 				panic!("expected object");
 			};
-			#[cfg(feature = "scoped-arena")]
-			{
-				assert!(matches!(&*obj.0, ObjValueInner::Arena(_)));
-				assert!(matches!(&*ObjValue::empty().0, ObjValueInner::Global(_)));
-			}
 			let field = obj.get_lazy("again".into()).unwrap();
 			(field, obj.downgrade())
 		};
@@ -1468,18 +1469,19 @@ mod storage_tests {
 	#[cfg(feature = "scoped-arena")]
 	#[test]
 	fn weak_object_does_not_pin_arena_pages() {
-		use std::rc::Rc;
-		let arena = Rc::new(rtk_arena_allocator::Arena::new());
-		let pages = Rc::downgrade(&arena);
-		let obj = ObjValue(Cc::new(ObjValueInner::new(
-			ObjPayload::new(LayeredCores::empty(), false),
-			Some(&arena.into()),
-		)));
+		let (obj, pages) = {
+			let state = crate::State::default();
+			let _entered = state.enter();
+			let pages = state.arena_probe().unwrap();
+			let _empty = ObjValue::empty();
+			assert_eq!(pages.page_count(), Some(0));
+			(ObjValue::from_cores(LayeredCores::empty(), false), pages)
+		};
 		let weak = obj.clone().downgrade();
-		assert!(pages.upgrade().is_some());
+		assert!(pages.page_count().is_some_and(|n| n > 0));
 		drop(obj);
 		assert!(weak.upgrade().is_none());
-		assert!(pages.upgrade().is_none());
+		assert_eq!(pages.page_count(), None);
 	}
 }
 

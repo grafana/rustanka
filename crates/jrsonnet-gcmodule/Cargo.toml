@@ -34,6 +34,8 @@ derive = ["jrsonnet-gcmodule-derive"]
 nightly = []
 # Uses std::alloc::Allocator (Rust 1.100+), independently of ambient Cc features.
 scoped-arena = []
+# Ambient cycle collection with allocator-backed payloads (Rust 1.100+).
+arena-payload = []
 sync = ["parking_lot"]
 testutil = []
 rustc-hash = ["dep:rustc-hash"]
