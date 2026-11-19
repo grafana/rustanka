@@ -197,7 +197,21 @@ unsafe impl Allocator for ArenaAlloc<'_> {
 #[derive(Clone, Default)]
 pub struct SharedArenaAlloc(Rc<Arena>);
 
+/// Non-owning diagnostic view: `None` distinguishes release from an empty arena.
+#[derive(Clone, Debug)]
+pub struct ArenaProbe(std::rc::Weak<Arena>);
+
+impl ArenaProbe {
+	pub fn page_count(&self) -> Option<usize> {
+		Some(self.0.upgrade()?.pages.borrow().len())
+	}
+}
+
 impl SharedArenaAlloc {
+	pub fn probe(&self) -> ArenaProbe {
+		ArenaProbe(Rc::downgrade(&self.0))
+	}
+
 	/// Creates a fresh arena with no pages. Clone the handle to share it.
 	pub fn new() -> Self {
 		Self::default()

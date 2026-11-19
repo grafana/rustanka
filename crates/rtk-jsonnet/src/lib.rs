@@ -9,4 +9,3 @@ pub use crate::engine::{Engine, Error, Evaluator, JrsonnetContext, Options};
 pub use crate::evaluation::{Evaluation, ScopedArray, ScopedObject, ScopedValue};
 #[doc(inline)]
 pub use rtk_jsonnet_core::*;
-pub use rtk_jsonnet_jrsonnet::set_evaluation_gc_interval_for_thread;

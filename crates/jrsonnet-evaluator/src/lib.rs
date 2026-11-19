@@ -356,7 +356,16 @@ pub fn with_state<V>(v: impl FnOnce(State) -> V) -> V {
 	}
 }
 
+#[cfg(feature = "scoped-arena")]
+pub use rtk_arena_allocator::ArenaProbe;
+
 impl State {
+	/// Observe the evaluation arena without keeping its pages alive.
+	#[cfg(feature = "scoped-arena")]
+	pub fn arena_probe(&self) -> Option<ArenaProbe> {
+		self.0.lazy_allocator.as_ref().map(|alloc| alloc.probe())
+	}
+
 	/// Enter this state, borrowing the existing scope on same-state re-entry.
 	/// Panics if a different state is active on this thread.
 	pub fn enter_or_reuse(&self) -> Option<StateEnterGuard> {

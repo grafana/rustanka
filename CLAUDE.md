@@ -391,18 +391,17 @@ introduced mid-branch is diluted by everything else on it.
 
 ### The evaluation GC
 
-`Drop for Evaluation` clears the live value and evaluator context before it runs
-`collect_thread_cycles()` (`crates/rtk-jsonnet-jrsonnet/src/lib.rs`). Both are
-roots: the context owns the evaluator state and its import cache, so collecting
-before either has gone traverses the entire evaluated graph without reclaiming
-it.
+Discovery and export traverse values inside `Evaluation::with_root`. A child
+explicitly retained for later use shares its originating evaluator. Dropping the
+last owner releases its roots and requests cycle collection, including on bulk
+export workers; cleanup does not wait for the next environment or thread exit.
+Requests made during an active traversal or collection are deferred until it is
+safe to collect. See `crates/rtk-jsonnet-jrsonnet/src/lib.rs`.
 
-Bulk export is the exception. Its Rayon pool is created for one export and then
-destroyed, so those workers collect every other evaluation and their
-thread-local object spaces collect anything left at worker exit. Collecting
-after every environment consumed 26% of CPU in a representative recursive
-export, while waiting until worker exit allowed cyclic garbage to accumulate
-and made that export much slower. Single evaluations keep eager collection.
+Lazy object and thunk payloads can use the evaluation arena. Weak handles keep
+only their global control blocks, not arena pages. Native code that independently
+retains a strong value or evaluator state is still a root: owner teardown must
+not force-free storage reachable through it.
 
 ## Testing
 

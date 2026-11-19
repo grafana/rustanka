@@ -131,6 +131,8 @@ pub struct Evaluator {
 	max_stack: usize,
 	state: Option<State>,
 	top_level_arguments: FxHashMap<IStr, TlaArg>,
+	// Last field: release state, native functions and arguments before requesting GC.
+	teardown: Option<StdRc<Teardown>>,
 }
 
 impl Evaluator {
@@ -142,6 +144,7 @@ impl Evaluator {
 	/// Run work that invokes installed native functions outside this evaluator's
 	/// own evaluation methods.
 	pub fn with_current<T>(&self, callback: impl FnOnce() -> T) -> T {
+		let _scope = CollectionScope::enter();
 		let evaluator = StdRc::new(self.clone());
 		Evaluator::CURRENT.with(|current| {
 			let _guard = CurrentEvaluatorGuard::new(current, evaluator);
@@ -170,7 +173,7 @@ impl Evaluator {
 	/// Part of what an evaluation is configured with belongs to the thread that
 	/// runs it rather than to its state, so this has to run on that thread,
 	/// immediately before evaluating.
-	fn prepare(&mut self) -> State {
+	fn prepare(&mut self) {
 		let output_format = &self.config.output_format;
 
 		self.context_initializer
@@ -210,9 +213,24 @@ impl Evaluator {
 			builder.import_resolver(FileImportResolver::new(self.import_paths.clone()));
 		}
 
-		let state = builder.build();
-		self.state = Some(state.clone());
-		state
+		self.state = Some(builder.build());
+	}
+
+	fn evaluate(
+		mut self,
+		run: impl FnOnce(&State) -> jrsonnet_evaluator::Result<Val>,
+	) -> Result<Evaluation, EvaluatorError> {
+		let _scope = CollectionScope::enter();
+		self.teardown = Some(StdRc::new(Teardown));
+		self.prepare();
+		let context = StdRc::new(self);
+		Evaluator::CURRENT.with(|current| {
+			let _guard = CurrentEvaluatorGuard::new(current, context.clone());
+			let state = context.state.as_ref().unwrap();
+			let _state_guard = state.enter();
+			let value = context.apply_top_level_arguments(run(state)?)?;
+			Ok(Evaluation::with_shared_context(context, Value(value)))
+		})
 	}
 
 	/// Apply top level arguments to what an evaluation produced.
@@ -277,6 +295,7 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 			max_stack: DEFAULT_MAX_STACK,
 			state: None,
 			top_level_arguments: FxHashMap::with_hasher(FxBuildHasher),
+			teardown: None,
 		}
 	}
 
@@ -440,51 +459,19 @@ impl rtk_jsonnet_core::Evaluator for Evaluator {
 	}
 
 	#[tracing::instrument(skip(self))]
-	fn evaluate_file<P>(mut self, path: P) -> Result<Evaluation, Self::Error>
+	fn evaluate_file<P>(self, path: P) -> Result<Evaluation, Self::Error>
 	where
 		P: AsRef<Path> + fmt::Debug,
 	{
-		let state = self.prepare();
-
-		let current_evaluator = StdRc::new(self);
-		Evaluator::CURRENT.with(move |evaluator| {
-			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
-			let _state_guard = state.enter();
-
-			let value = state
-				.import(path.as_ref())
-				.map_err(EvaluatorError)
-				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
-
-			Ok(Evaluation::with_shared_context(
-				current_evaluator,
-				Value(value),
-			))
-		})
+		self.evaluate(|state| state.import(path.as_ref()))
 	}
 
 	#[tracing::instrument(skip(self))]
-	fn evaluate_snippet<S>(mut self, snippet: S) -> Result<Evaluation, Self::Error>
+	fn evaluate_snippet<S>(self, snippet: S) -> Result<Evaluation, Self::Error>
 	where
 		S: AsRef<str> + fmt::Debug,
 	{
-		let state = self.prepare();
-
-		let current_evaluator = StdRc::new(self);
-		Evaluator::CURRENT.with(move |evaluator| {
-			let _guard = CurrentEvaluatorGuard::new(evaluator, StdRc::clone(&current_evaluator));
-			let _state_guard = state.enter();
-
-			let value = state
-				.evaluate_snippet("<anonymous>", snippet.as_ref())
-				.map_err(EvaluatorError)
-				.and_then(|value| current_evaluator.apply_top_level_arguments(value))?;
-
-			Ok(Evaluation::with_shared_context(
-				current_evaluator,
-				Value(value),
-			))
-		})
+		self.evaluate(|state| state.evaluate_snippet("<anonymous>", snippet.as_ref()))
 	}
 }
 
@@ -508,10 +495,11 @@ impl rtk_jsonnet_core::EvaluatorError for EvaluatorError {
 }
 
 pub struct Evaluation {
-	value: Option<Value>,
-	context: Option<StdRc<Evaluator>>,
+	value: Value,
 	// External evaluators can install their state separately from `with_current`.
 	external_state: Option<State>,
+	// Drop after both roots above. Retained children share this context.
+	context: StdRc<Evaluator>,
 }
 
 impl fmt::Debug for Evaluation {
@@ -526,35 +514,29 @@ impl fmt::Debug for Evaluation {
 impl Evaluation {
 	fn with_shared_context(context: StdRc<Evaluator>, value: Value) -> Self {
 		Self {
-			value: Some(value),
+			value,
 			external_state: context
 				.state
 				.is_none()
 				.then(|| jrsonnet_evaluator::with_state(|s| s)),
-			context: Some(context),
+			context,
 		}
 	}
 
 	#[cfg(test)]
 	fn context(&self) -> &Evaluator {
-		self.context
-			.as_deref()
-			.expect("the evaluation is only empty while being dropped")
+		&self.context
 	}
 
 	fn value(&self) -> &Value {
-		self.value
-			.as_ref()
-			.expect("the evaluation is only empty while being dropped")
+		&self.value
 	}
 
 	/// Run with the state that owns this evaluation. Panics before invoking the
 	/// callback if a different jrsonnet state is already active.
 	fn with_context<T>(&self, callback: impl FnOnce(&Evaluator) -> T) -> T {
-		let evaluator = self
-			.context
-			.as_ref()
-			.expect("the evaluation is only empty while being dropped");
+		let _scope = CollectionScope::enter();
+		let evaluator = &self.context;
 		Evaluator::CURRENT.with(|current| {
 			let state = evaluator
 				.state
@@ -577,10 +559,7 @@ impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
 	) -> R {
 		owner.with_context(|context| {
 			visit.visit::<Self, _>(context, owner.value().clone(), &|value| {
-				Evaluation::with_shared_context(
-					StdRc::clone(owner.context.as_ref().unwrap()),
-					value,
-				)
+				Evaluation::with_shared_context(StdRc::clone(&owner.context), value)
 			})
 		})
 	}
@@ -592,39 +571,43 @@ impl rtk_jsonnet_core::ScopedEvaluator for Evaluator {
 	}
 }
 
-impl Drop for Evaluation {
+// The collector rewrites list headers while tracing and then invokes arbitrary
+// destructors. Never recursively enter it, or trace halfway through a native
+// callback. Coalesce requests, not owners: one pass scans the whole thread.
+thread_local! {
+	static BUSY: Cell<bool> = const { Cell::new(false) };
+	static PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
+struct CollectionScope(bool);
+
+impl CollectionScope {
+	fn enter() -> Self {
+		Self(BUSY.replace(true))
+	}
+}
+
+impl Drop for CollectionScope {
 	fn drop(&mut self) {
-		self.value = None;
-		self.context = None;
-		self.external_state = None;
-		let collect = EVALUATIONS_UNTIL_COLLECTION.with(|counter| {
-			let remaining = counter.get() - 1;
-			if remaining == 0 {
-				counter.set(EVALUATION_GC_INTERVAL.get());
-				true
-			} else {
-				counter.set(remaining);
-				false
+		if !self.0 {
+			while PENDING.replace(false) {
+				let _span =
+					tracing::span!(Level::TRACE, "jrsonnet_gcmodule::collect_thread_cycles")
+						.entered();
+				let _ = jrsonnet_gcmodule::collect_thread_cycles();
 			}
-		});
-		if collect {
-			let span = tracing::span!(Level::TRACE, "jrsonnet_gcmodule::collect_thread_cycles");
-			let _entered = span.enter();
-			let _ = jrsonnet_gcmodule::collect_thread_cycles();
+			BUSY.set(false);
 		}
 	}
 }
 
-thread_local! {
-	static EVALUATION_GC_INTERVAL: Cell<usize> = const { Cell::new(1) };
-	static EVALUATIONS_UNTIL_COLLECTION: Cell<usize> = const { Cell::new(1) };
-}
+struct Teardown;
 
-/// Pace cycle collection on a worker whose object space is collected at thread exit.
-pub fn set_evaluation_gc_interval_for_thread(interval: usize) {
-	assert!(interval > 0);
-	EVALUATION_GC_INTERVAL.set(interval);
-	EVALUATIONS_UNTIL_COLLECTION.set(interval);
+impl Drop for Teardown {
+	fn drop(&mut self) {
+		let _scope = CollectionScope::enter();
+		PENDING.set(true);
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -875,6 +858,101 @@ mod reentry_tests {
 	}
 
 	#[test]
+	fn last_child_releases_its_arena_but_not_a_different_owners() {
+		use rtk_jsonnet_core::{Hidden, ScopedEvaluator as _};
+		fn owners() -> (
+			rtk_jsonnet_core::EvaluationResult<Evaluator>,
+			jrsonnet_evaluator::ArenaProbe,
+			jrsonnet_evaluator::WeakObjValue,
+		) {
+			let root = evaluator()
+				.evaluate_snippet_result("{ again: self }")
+				.unwrap();
+			root.with_root(|v| {
+				let pages = Evaluator::current()
+					.unwrap()
+					.state
+					.as_ref()
+					.unwrap()
+					.arena_probe()
+					.unwrap();
+				let child = v
+					.as_object()
+					.unwrap()
+					.get_or_bail("again", Hidden::Skip)
+					.unwrap()
+					.into_owned();
+				let weak = jrsonnet_evaluator::with_state(|state| {
+					let Val::Obj(obj) = state.evaluate_snippet("cycle", "{ again: self }").unwrap()
+					else {
+						unreachable!()
+					};
+					obj.get("again".into()).unwrap();
+					obj.downgrade()
+				});
+				(child, pages, weak)
+			})
+		}
+		let (first, pages, weak) = owners();
+		// Dropping the parent did not even collect an unrelated orphan cycle.
+		assert!(weak.is_alive());
+		let (other, other_pages, _) = owners();
+		assert!(pages.page_count().unwrap() > 0);
+		drop(first);
+		assert_eq!(pages.page_count(), None);
+		assert!(!weak.is_alive());
+		assert!(other_pages.page_count().unwrap() > 0);
+		drop(other);
+		assert_eq!(other_pages.page_count(), None);
+	}
+
+	#[test]
+	fn teardown_during_a_callback_or_collector_drop_waits_for_a_safe_point() {
+		use jrsonnet_gcmodule::{Cc, Trace};
+		use std::cell::RefCell;
+
+		#[derive(Trace)]
+		#[trace(tracking(force))]
+		struct Cycle {
+			edge: RefCell<Option<Cc<Cycle>>>,
+			#[trace(skip)] // Opaque native ownership, released by gc_drop_t.
+			_owner: Evaluation,
+		}
+		let outer = evaluator().evaluate_snippet("null").unwrap();
+		let make_cycle = || {
+			evaluator()
+				.evaluate_snippet("local o = {again: self}; o.again")
+				.unwrap()
+		};
+		let first = make_cycle();
+		let second = make_cycle();
+		let probe = |owner: &Evaluation| {
+			owner
+				.context()
+				.state
+				.as_ref()
+				.unwrap()
+				.arena_probe()
+				.unwrap()
+		};
+		let first_pages = probe(&first);
+		let second_pages = probe(&second);
+		let cycle = Cc::new(Cycle {
+			edge: RefCell::default(),
+			_owner: second,
+		});
+		*cycle.edge.borrow_mut() = Some(cycle.clone());
+		drop(cycle);
+		outer.with_context(|_| {
+			drop(first);
+			assert!(first_pages.page_count().is_some());
+			assert!(second_pages.page_count().is_some());
+		});
+		assert_eq!(first_pages.page_count(), None);
+		assert_eq!(second_pages.page_count(), None);
+	}
+
+	#[test]
 	fn traversal_strings_outlive_the_evaluation() {
 		use rtk_jsonnet_core::{Hidden, ScopedEvaluator as _};
 		let (names, text): (Vec<String>, String) = {
@@ -1021,6 +1099,92 @@ mod native_function_tests {
 		assert_eq!(child.deserialize::<Vec<i64>>().unwrap(), [5]);
 		assert_eq!(serde_json::to_value(child).unwrap(), serde_json::json!([5]));
 		assert!(super::Evaluator::current().is_none());
+	}
+
+	#[test]
+	fn native_error_and_unwind_respect_retained_contexts_and_raw_values() {
+		use super::{Evaluator, RefCell, StdRc, Val};
+		use rtk_jsonnet_core::EvaluatorError as _;
+		use std::panic::{AssertUnwindSafe, catch_unwind};
+
+		#[derive(Debug, Default)]
+		struct Capture {
+			pages: RefCell<Option<jrsonnet_evaluator::ArenaProbe>>,
+			context: RefCell<Option<Evaluator>>,
+			value: RefCell<Option<Val>>,
+		}
+		#[derive(Clone, Copy)]
+		enum Retain {
+			Nothing,
+			Context,
+			Value,
+		}
+		struct Fail(StdRc<Capture>, Retain, bool);
+		impl rtk_jsonnet_core::Function<Evaluator> for Fail {
+			fn argv(&self) -> (usize, Option<usize>) {
+				(1, None)
+			}
+			fn call(
+				&self,
+				evaluator: &Evaluator,
+				args: super::Arguments,
+			) -> Result<super::Value, super::EvaluatorError> {
+				let Val::Obj(obj) = args.0[0].as_ref().unwrap().evaluate()? else {
+					unreachable!()
+				};
+				obj.get("again".into())?;
+				let pages = evaluator.state.as_ref().unwrap().arena_probe().unwrap();
+				assert!(pages.page_count().unwrap() > 0);
+				self.0.pages.replace(Some(pages));
+				match self.1 {
+					Retain::Nothing => (),
+					Retain::Context => {
+						self.0.context.replace(Some(evaluator.clone()));
+					}
+					Retain::Value => {
+						self.0.value.replace(Some(Val::Obj(obj)));
+					}
+				}
+				if self.2 {
+					panic!("native unwind");
+				}
+				Err(super::EvaluatorError::custom("native error"))
+			}
+		}
+		for retain in [Retain::Nothing, Retain::Context, Retain::Value] {
+			for unwind in [false, true] {
+				let capture = StdRc::new(Capture::default());
+				let mut evaluator = super::Implementation::new(std::iter::empty())
+					.unwrap()
+					.create_evaluator();
+				evaluator
+					.with_native_function("fail", Fail(capture.clone(), retain, unwind))
+					.unwrap();
+				let result = catch_unwind(AssertUnwindSafe(|| {
+					evaluator.evaluate_snippet("std.native('fail')({ again: self })")
+				}));
+				if unwind {
+					assert!(result.is_err());
+				} else {
+					assert!(result.unwrap().is_err());
+				}
+				assert!(Evaluator::current().is_none());
+				let pages = capture.pages.take().unwrap();
+				assert_eq!(
+					pages.page_count().is_some(),
+					!matches!(retain, Retain::Nothing)
+				);
+				drop(capture.context.take());
+				if let Some(Val::Obj(obj)) = capture.value.take() {
+					assert!(obj.get("again".into()).unwrap().is_some());
+					drop(obj);
+					// A raw value has no teardown token. Its now-orphaned self-cycle
+					// is eligible for normal collection, not forcibly disconnected.
+					let _ = jrsonnet_gcmodule::collect_thread_cycles();
+				}
+				assert_eq!(pages.page_count(), None);
+			}
+		}
 	}
 
 	#[test]
