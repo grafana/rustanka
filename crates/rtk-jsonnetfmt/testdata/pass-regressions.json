@@ -1,0 +1,17 @@
+[
+  {
+    "name": "trailing_comma/array_one_line",
+    "source": "[1,]",
+    "why": "The comma is not needed, so it goes and its (empty) fodder moves to the ]."
+  },
+  {
+    "name": "slice_colon/double_colon",
+    "source": "a[::]",
+    "why": "`::` is one operator token, so StepColonFodder is never filled and this is already the tree a[:] produces. Nothing for the pass to do."
+  },
+  {
+    "name": "pretty_names/index_single_quoted",
+    "source": "a['foo']",
+    "why": "The plain case: brackets to a dot."
+  }
+]

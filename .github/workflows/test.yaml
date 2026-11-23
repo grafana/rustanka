@@ -13,7 +13,7 @@ jobs:
           go-version: '1.27.1'
           cache: false
       - name: Check small saved lexer, string and AST regressions
-        run: make check-fmt-lexer-oracle check-fmt-node-oracle
+        run: make check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle
 
   check-golden-fixtures:
     name: Check golden files
@@ -68,8 +68,10 @@ jobs:
           sudo install -m 0755 "/tmp/libjsonnet/libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/
           sudo ln -sf "libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/libjsonnet.so.0
           sudo ldconfig
+      - run: make go-jsonnet-checkout
       - run: cargo test --all
         env:
           # Fail, rather than skip, any reference test that cannot find it.
           RTK_REQUIRE_REFERENCE_JSONNET: "1"
+          RTK_REQUIRE_GO_JSONNET: "1"
 

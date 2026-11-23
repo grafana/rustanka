@@ -26,25 +26,26 @@ fn missing_malformed_and_empty_oracles_fail_closed() {
 }
 
 #[test]
-fn small_saved_node_regressions_are_required() {
-	let name = "node-regression-oracle.json";
-	let cases = oracle_support::read::<serde_json::Value>(name);
-	let source_key = "source";
-	let mut sources = std::collections::BTreeSet::new();
-	for case in cases {
-		let name = case[source_key]
-			.as_str()
-			.expect("saved regression has a source");
-		assert!(
-			sources.insert(name.to_owned()),
-			"duplicate saved regression: {name}"
-		);
-		assert!(
-			case.get("entries").is_some()
-				|| case.get("passes").is_some()
-				|| case.get("error").is_some(),
-			"saved regression contains no comparison: {name}"
-		);
+fn small_saved_node_and_pass_regressions_are_required() {
+	for name in ["node-regression-oracle.json", "pass-regression-oracle.json"] {
+		let cases = oracle_support::read::<serde_json::Value>(name);
+		let source_key = "source";
+		let mut sources = std::collections::BTreeSet::new();
+		for case in cases {
+			let name = case[source_key]
+				.as_str()
+				.expect("saved regression has a source");
+			assert!(
+				sources.insert(name.to_owned()),
+				"duplicate saved regression: {name}"
+			);
+			assert!(
+				case.get("entries").is_some()
+					|| case.get("passes").is_some()
+					|| case.get("error").is_some(),
+				"saved regression contains no comparison: {name}"
+			);
+		}
 	}
 }
 
@@ -61,18 +62,19 @@ fn missing_go_fails_runtime_generation_without_writing_an_answer() {
 	let output = temporary.path().join("answer.json");
 	let generator =
 		std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/generate/ast_oracle.py");
-	let kind = "node";
-	let result = Command::new(python.trim())
-		.arg(&generator)
-		.args(["--kind", kind, "--corpus-output"])
-		.arg(&output)
-		.env("PATH", temporary.path())
-		.output()
-		.unwrap();
-	assert!(
-		!result.status.success(),
-		"missing Go silently passed for {kind}"
-	);
-	assert!(!output.exists(), "failed generator wrote an answer");
-	assert!(String::from_utf8_lossy(&result.stderr).contains("go"));
+	for kind in ["node", "pass"] {
+		let result = Command::new(python.trim())
+			.arg(&generator)
+			.args(["--kind", kind, "--corpus-output"])
+			.arg(&output)
+			.env("PATH", temporary.path())
+			.output()
+			.unwrap();
+		assert!(
+			!result.status.success(),
+			"missing Go silently passed for {kind}"
+		);
+		assert!(!output.exists(), "failed generator wrote an answer");
+		assert!(String::from_utf8_lossy(&result.stderr).contains("go"));
+	}
 }

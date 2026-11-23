@@ -47,9 +47,13 @@ fn generate(kind: &str, corpus: bool) -> Vec<u8> {
 pub fn read<T: DeserializeOwned>(name: &str) -> Vec<T> {
 	static NODE: OnceLock<Vec<u8>> = OnceLock::new();
 	static NODE_SNIPPETS: OnceLock<Vec<u8>> = OnceLock::new();
+	static PASS: OnceLock<Vec<u8>> = OnceLock::new();
+	static PASS_SNIPPETS: OnceLock<Vec<u8>> = OnceLock::new();
 	let runtime = match name {
 		"node-oracle.json" => Some(NODE.get_or_init(|| generate("node", true))),
 		"node-snippet-oracle.json" => Some(NODE_SNIPPETS.get_or_init(|| generate("node", false))),
+		"pass-oracle.json" => Some(PASS.get_or_init(|| generate("pass", true))),
+		"pass-snippet-oracle.json" => Some(PASS_SNIPPETS.get_or_init(|| generate("pass", false))),
 		_ => None,
 	};
 	if let Some(bytes) = runtime {

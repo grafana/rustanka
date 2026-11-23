@@ -88,6 +88,14 @@ class OracleGenerator:
         with tempfile.TemporaryDirectory(prefix="rtk-ast-oracle-") as temporary:
             stage = Path(temporary)
             cwd, command = self.directory, ["go", "run", "./nodedump"]
+            if self.kind == "pass":
+                cwd = stage / "go-jsonnet"
+                self.copy_upstream(cwd)
+                dumper = cwd / "rtkpassdump"
+                dumper.mkdir()
+                for source in ["_staged/passdump.go", "nodedump/dump.go"]:
+                    shutil.copyfile(self.directory / source, dumper / Path(source).name)
+                command = ["go", "run", "./rtkpassdump"]
             if corpus:
                 manifest_path = self.data / "corpus/manifest.json"
                 manifest = json.loads(manifest_path.read_bytes())
@@ -100,7 +108,7 @@ class OracleGenerator:
                         raise ValueError(f"{manifest_path}: invalid or missing source {path}")
                 arguments = ["files", str(self.root), str(manifest_path)]
             else:
-                suffix = "snippets" if all_snippets else "regressions"
+                suffix = "snippets" if all_snippets or self.kind == "parse-error" else "regressions"
                 inputs = self.data / f"{self.kind}-{suffix}.json"
                 cases = self.read_cases(inputs, "name")
                 arguments = ["snippets", str(inputs)]
@@ -111,14 +119,17 @@ class OracleGenerator:
             if [answer["source"] for answer in answers] != expected:
                 raise ValueError("Go output does not cover every required input in order")
             for answer in answers:
-                if not answer.get("entries") and not answer.get("error"):
+                if self.kind == "pass":
+                    if not answer.get("passes") and not answer.get("error"):
+                        raise ValueError(f"Go output contains no pass comparisons: {answer['source']}")
+                elif not answer.get("entries") and not answer.get("error"):
                     raise ValueError(f"Go output contains no AST or refusal: {answer['source']}")
             output.write_bytes(generated.read_bytes())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", choices=["node"], default="node")
+    parser.add_argument("--kind", choices=["node", "pass"], default="node")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--corpus-output", type=Path)

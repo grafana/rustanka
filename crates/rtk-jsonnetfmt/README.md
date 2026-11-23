@@ -113,8 +113,10 @@ history, review, or GitHub state change is part of these local fixes.
 
 ## Parser and formatter pipeline
 
-At this layer the formatter only parses and unparses. Formatting passes follow in later PRs.
+This layer runs FixTrailingCommas, NoRedundantSliceColon and PrettyFieldNames. Later layout, string/comment and import passes have not landed.
 
 `format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
 
 The node corpus and snippets are generated from pinned go-jsonnet v0.22.0 during every parity test. Missing Go, missing inputs, malformed output or an empty comparison fails. Small reviewable node regressions remain saved; `make check-fmt-node-oracle` verifies regeneration.
+
+Pass comparisons run each implemented pass on a fresh AST. Every parsed input must contain exactly the implemented pass list, in order, with no panic; missing, duplicate and unknown cells fail. `make check-fmt-pass-oracle` verifies the small saved regressions. `make go-jsonnet-checkout` provisions the pinned fixture inputs, and CI sets `RTK_REQUIRE_GO_JSONNET=1`.

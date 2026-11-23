@@ -100,7 +100,15 @@ check-fmt-node-oracle:
 check-glob-truth-table:
 	cargo test -p rtk-gobwas-glob --test truth_table
 
-test-fmt-oracles:
-	cargo test -p rtk-jsonnetfmt --test lexer_oracle --test node_oracle --test node_parity --test oracle_requirements
+.PHONY: update-fmt-pass-oracle check-fmt-pass-oracle go-jsonnet-checkout
+update-fmt-pass-oracle:
+	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --kind pass
+check-fmt-pass-oracle:
+	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --kind pass --check
+go-jsonnet-checkout:
+	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --checkout target/go-jsonnet
 
-check-generated: check-glob-truth-table check-fmt-lexer-oracle check-fmt-node-oracle
+test-fmt-oracles:
+	cargo test -p rtk-jsonnetfmt --test lexer_oracle --test node_oracle --test node_parity --test oracle_requirements --test pass_parity
+
+check-generated: check-glob-truth-table check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle
