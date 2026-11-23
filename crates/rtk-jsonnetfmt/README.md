@@ -111,4 +111,10 @@ Unicode glob fixes. Keep those changes when carrying this stack forward; native
 filename handling remains separate from source-byte decoding. No branch,
 history, review, or GitHub state change is part of these local fixes.
 
-Native diagnostic filenames remain bytes through lexer locations and Error::message_bytes. The mandatory runtime lexer comparison includes the deterministic 3,925-case byte audit. The in-repository input count is 140: the current base adds large_native_yaml_numbers and yaml_quoted_continuation_env to the earlier 138-file corpus. AST formatting and passes are introduced by later PRs.
+## Parser and formatter pipeline
+
+At this layer the formatter only parses and unparses. Formatting passes follow in later PRs.
+
+`format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
+
+The node corpus and snippets are generated from pinned go-jsonnet v0.22.0 during every parity test. Missing Go, missing inputs, malformed output or an empty comparison fails. Small reviewable node regressions remain saved; `make check-fmt-node-oracle` verifies regeneration.

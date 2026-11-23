@@ -1,0 +1,22 @@
+{
+  nested: {
+    apiVersion: 'tanka.dev/v1alpha1',
+    kind: 'Environment',
+    metadata: {
+      name: 'inline-inside-static',
+    },
+    spec: {
+      apiServer: 'https://cluster.example',
+      namespace: 'default',
+    },
+    data: {
+      config: {
+        apiVersion: 'v1',
+        kind: 'ConfigMap',
+        metadata: {
+          name: 'must-not-export',
+        },
+      },
+    },
+  },
+}

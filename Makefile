@@ -89,3 +89,18 @@ update-fmt-lexer-oracle:
 
 check-fmt-lexer-oracle:
 	python3 crates/rtk-jsonnetfmt/testdata/generate/lexer_oracle.py --check
+
+# Large AST answers are required at test runtime; only small regressions are saved.
+.PHONY: update-fmt-node-oracle check-fmt-node-oracle test-fmt-oracles check-generated check-glob-truth-table
+update-fmt-node-oracle:
+	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --kind node
+check-fmt-node-oracle:
+	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --kind node --check
+# Glob parity generates its complete Go comparison at runtime.
+check-glob-truth-table:
+	cargo test -p rtk-gobwas-glob --test truth_table
+
+test-fmt-oracles:
+	cargo test -p rtk-jsonnetfmt --test lexer_oracle --test node_oracle --test node_parity --test oracle_requirements
+
+check-generated: check-glob-truth-table check-fmt-lexer-oracle check-fmt-node-oracle
