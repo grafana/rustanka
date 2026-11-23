@@ -101,3 +101,5 @@ jobs:
           cache: false
       - name: Check all saved artifacts and mandatory live glob comparisons
         run: make check-generated
+      - name: Test corpus acquisition safety
+        run: python3 -m unittest discover -s scripts -p 'test_fmt_acceptance_corpus.py'
