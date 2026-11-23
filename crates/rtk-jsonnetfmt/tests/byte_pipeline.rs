@@ -1,5 +1,30 @@
-//! Raw parser and unparser regressions independent of later formatting passes.
+//! Byte boundaries at the string/comment phase; layout cleanup follows in #63.
 use rtk_jsonnetfmt::{Options, StringStyle, format_bytes, format_default_bytes};
+
+#[test]
+fn go_decodes_each_invalid_byte_only_at_its_own_string_or_comment_boundary() {
+	let cases: &[(&[u8], &[u8])] = &[
+		(b"\"\xff\"", "'�'\n".as_bytes()),
+		(b"\"\xe2\x82\"", "'��'\n".as_bytes()),
+		(b"\"\xf0\x9f\x92\"", "'���'\n".as_bytes()),
+		// Both quote kinds prevent EnforceStringStyle from rewriting the source.
+		(b"\"\xff'\\\"\"", b"\"\xff'\\\"\"\n"),
+		(b"// \xff\n1", "// �\n1\n".as_bytes()),
+		// Single-line C comments retain bytes; paragraph C comments decode runes.
+		(b"/* \xff */ 1", b"/* \xff */ 1\n"),
+		// #63 removes this leading newline before the first paragraph.
+		(b"/* \xe2\x82\n*/1", "\n/* ��\n*/\n1\n".as_bytes()),
+		(b"@\"\xff\"", "@\"�\"\n".as_bytes()),
+		(b"|||\n  \xe2\x82\n|||", "|||\n  ��\n|||\n".as_bytes()),
+	];
+	for &(input, expected) in cases {
+		assert_eq!(
+			format_default_bytes("<stdin>", input).unwrap(),
+			expected,
+			"{input:?}"
+		);
+	}
+}
 
 #[test]
 fn a_leave_style_preserves_a_quoted_tokens_original_bytes() {

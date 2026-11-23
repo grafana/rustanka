@@ -113,7 +113,7 @@ history, review, or GitHub state change is part of these local fixes.
 
 ## Parser and formatter pipeline
 
-This layer runs FixTrailingCommas, NoRedundantSliceColon and PrettyFieldNames. Later layout, string/comment and import passes have not landed.
+This layer also runs EnforceStringStyle and EnforceCommentStyle. Layout, parentheses and import sorting follow in later PRs.
 
 `format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
 

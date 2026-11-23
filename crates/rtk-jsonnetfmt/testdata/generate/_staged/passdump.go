@@ -89,6 +89,8 @@ var passNames = []string{
 	"FixTrailingCommas",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
+	"EnforceStringStyle",
+	"EnforceCommentStyle",
 }
 
 // PassDump is what one pass did to one source.

@@ -13,5 +13,15 @@
     "name": "pretty_names/index_single_quoted",
     "source": "a['foo']",
     "why": "The plain case: brackets to a dot."
+  },
+  {
+    "name": "string_style/double_to_single",
+    "source": "\"foo\"",
+    "why": "The plain case, and the one the default option asks for: StringStyleSingle with nothing to avoid."
+  },
+  {
+    "name": "comment_style/hash_to_slash",
+    "source": "# c\n1",
+    "why": "The plain case: CommentStyleSlash rewrites the leading # as //, keeping everything after it."
   }
 ]
