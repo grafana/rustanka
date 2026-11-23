@@ -2,7 +2,7 @@ name: Test
 on: [ workflow_call ]
 jobs:
   check-fmt-lexer-oracle:
-    name: Check saved formatter regressions
+    name: Check lexer oracle regeneration
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: go1.27.1
@@ -12,8 +12,8 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - name: Check small saved formatter regressions and sort truth
-        run: make check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle check-go-sort-truth-table
+      - name: Check small saved lexer and string regressions
+        run: make check-fmt-lexer-oracle
 
   check-golden-fixtures:
     name: Check golden files
@@ -21,12 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
-      - name: Install tk (tanka)
-        run: |
-          TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
-          chmod +x /usr/local/bin/tk
-          tk --version
+      # Pinned to the tanka rtk answers for, and asserted. The goldens are tk's
+      # output, so an unpinned tk retargets every one of them with no rtk
+      # change at all.
+      - uses: ./.github/actions/install-tk
       - name: Install jrsonnet
         run: |
           cargo build --release -p jrsonnet
@@ -48,12 +46,7 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - name: Install tk (tanka)
-        run: |
-          TK_VERSION=$(curl -s https://api.github.com/repos/grafana/tanka/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
-          curl -fSL -o "/usr/local/bin/tk" "https://github.com/grafana/tanka/releases/latest/download/tk-linux-amd64"
-          chmod +x /usr/local/bin/tk
-          tk --version
+      - uses: ./.github/actions/install-tk
       # The reference backend loads libjsonnet at runtime and accepts exactly
       # the version it was written against. Ubuntu's package is older, so it is
       # built from source; without it every reference test would skip.
@@ -68,10 +61,43 @@ jobs:
           sudo install -m 0755 "/tmp/libjsonnet/libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/
           sudo ln -sf "libjsonnet.so.${JSONNET_VERSION#v}" /usr/local/lib/libjsonnet.so.0
           sudo ldconfig
+      # The `go_jsonnet/` fixture family reads go-jsonnet's own
+      # `formatter/testdata/*.fmt.golden`, and without a checkout it grades 12
+      # of 15 — silently, in an eprintln.
+      #
+      # This step is in *this* job on purpose. `check-fmt-corpus` also needs the
+      # checkout, but it runs in `check-generated`, on a different runner with a
+      # different filesystem, so it does nothing for the suite. Getting that
+      # wrong is how the family would have gone on grading 12 in CI while the
+      # commit that "fixed" it said otherwise.
       - run: make go-jsonnet-checkout
       - run: cargo test --all
         env:
           # Fail, rather than skip, any reference test that cannot find it.
           RTK_REQUIRE_REFERENCE_JSONNET: "1"
+          # Absence is a failure here rather than a skip, for the same reason
+          # RTK_REQUIRE_TK is set: this job is the one place the family can be
+          # graded, and a clone that half-failed would leave the suite green
+          # and three fixtures ungraded.
           RTK_REQUIRE_GO_JSONNET: "1"
+          # `tk_agrees_on_the_streams_and_the_exit_codes` compares fifteen
+          # scenarios against the real tk and prints how many it compared; with
+          # no tk on PATH it prints a loud SKIPPED naming zero and passes. In a
+          # job nobody reads the log of, that turns the whole CLI cross-check
+          # into a green no-op, so here the skip is a failure.
+          RTK_REQUIRE_TK: "1"
 
+  check-generated:
+    name: Check generated artifacts
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: go1.27.1
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Check all saved artifacts and mandatory live glob comparisons
+        run: make check-generated

@@ -1,0 +1,3618 @@
+{
+  "goJsonnetVersion": "v0.22.0",
+  "set": "go_jsonnet_testdata",
+  "origin": "go-jsonnet's own root testdata/, inputs committed here because they are not in this repository",
+  "files": 719,
+  "entries": [
+    {
+      "name": "go-jsonnet/testdata/argcapture_builtin_call.jsonnet",
+      "input": "local r = { f(x): local a = x; std.length(a) }; r.f([1, 2, 3])",
+      "output": "local r = { f(x): local a = x; std.length(a) }; r.f([1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array.jsonnet",
+      "input": "[1, 2, 1 + 2]",
+      "output": "[1, 2, 1 + 2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_comp_try_iterate_over_empty_string.jsonnet",
+      "input": "[a for a in '']\n",
+      "output": "[a for a in '']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_comp_try_iterate_over_obj.jsonnet",
+      "input": "[a for a in {}]\n",
+      "output": "[a for a in {}]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_comp_try_iterate_over_string.jsonnet",
+      "input": "[a for a in 'b']\n",
+      "output": "[a for a in 'b']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_index1.jsonnet",
+      "input": "[1][0]",
+      "output": "[1][0]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_index2.jsonnet",
+      "input": "[1, 2, 3][0]",
+      "output": "[1, 2, 3][0]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_index3.jsonnet",
+      "input": "[1, 2, 3][1]",
+      "output": "[1, 2, 3][1]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_index4.jsonnet",
+      "input": "[1, 2, 3][2]",
+      "output": "[1, 2, 3][2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_out_of_bounds.jsonnet",
+      "input": "[][0]",
+      "output": "[][0]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_out_of_bounds2.jsonnet",
+      "input": "[1,2,3][3]",
+      "output": "[1, 2, 3][3]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_out_of_bounds3.jsonnet",
+      "input": "[][-1]",
+      "output": "[][-1]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_out_of_bounds4.jsonnet",
+      "input": "[1,2,3][42]",
+      "output": "[1, 2, 3][42]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/array_plus_bad.jsonnet",
+      "input": "[] + 42\n",
+      "output": "[] + 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp.jsonnet",
+      "input": "[x for x in []]\n",
+      "output": "[x for x in []]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp2.jsonnet",
+      "input": "[x for x in [1, 2, 3]]\n",
+      "output": "[x for x in [1, 2, 3]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp3.jsonnet",
+      "input": "[[var, var2] for var in [1, 2, 3] for var2 in [\"a\", \"b\", \"c\"]]\n\n",
+      "output": "[[var, var2] for var in [1, 2, 3] for var2 in ['a', 'b', 'c']]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp4.jsonnet",
+      "input": "[y for x in [1, 2, 3] for y in [x + 1]]\n",
+      "output": "[y for x in [1, 2, 3] for y in [x + 1]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp5.jsonnet",
+      "input": "[y for y in [x + 1] for x in [1, 2, 3]]\n\n",
+      "output": "[y for y in [x + 1] for x in [1, 2, 3]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp6.jsonnet",
+      "input": "\n[[x, y, z] for x in [1] for y in [2] for z in [3]]\n",
+      "output": "[[x, y, z] for x in [1] for y in [2] for z in [3]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp7.jsonnet",
+      "input": "[[a1, a2, a3, a4, a5, a6, a7, a8]\n    for a1 in [1, 2]\n    for a2 in [3, 4]\n    for a3 in [5, 6]\n    for a4 in [7, 8]\n    for a5 in [9, 10]\n    for a6 in [11, 12]\n    for a7 in [13, 14]\n        if a7 % 2 == 1\n        if a4 % 2 == 0\n        if a2 % 2 == 0\n        if a1 % 2 == 1\n    for a8 in [15, 16]\n]\n",
+      "output": "[\n  [a1, a2, a3, a4, a5, a6, a7, a8]\n  for a1 in [1, 2]\n  for a2 in [3, 4]\n  for a3 in [5, 6]\n  for a4 in [7, 8]\n  for a5 in [9, 10]\n  for a6 in [11, 12]\n  for a7 in [13, 14]\n  if a7 % 2 == 1\n  if a4 % 2 == 0\n  if a2 % 2 == 0\n  if a1 % 2 == 1\n  for a8 in [15, 16]\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if.jsonnet",
+      "input": "[x for x in [1, 2, 3, 4, 5] if x \u003e 3]\n",
+      "output": "[x for x in [1, 2, 3, 4, 5] if x \u003e 3]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if2.jsonnet",
+      "input": "[[x, y] for x in [1, 2, 3, 4, 5] for y in [1, 2, 3, 4, 5] if x \u003e 3 if y \u003c 4]\n",
+      "output": "[[x, y] for x in [1, 2, 3, 4, 5] for y in [1, 2, 3, 4, 5] if x \u003e 3 if y \u003c 4]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if3.jsonnet",
+      "input": "[[x, y] for x in [1,2,3,4,5] if x \u003c 3 for y in [1,2,3,4,5] if y \u003e 2]\n",
+      "output": "[[x, y] for x in [1, 2, 3, 4, 5] if x \u003c 3 for y in [1, 2, 3, 4, 5] if y \u003e 2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if4.jsonnet",
+      "input": "[[x, y] for x in [1,2,3,4,5] if y == 3 for y in [1,2,3,4,5]]\n",
+      "output": "[[x, y] for x in [1, 2, 3, 4, 5] if y == 3 for y in [1, 2, 3, 4, 5]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if5.jsonnet",
+      "input": "[x for x in [] if error \"x\"]\n",
+      "output": "[x for x in [] if error 'x']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if6.jsonnet",
+      "input": "[x for x in [1] if error \"x\"]\n",
+      "output": "[x for x in [1] if error 'x']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/arrcomp_if7.jsonnet",
+      "input": "[x for x in [1, 2, 3] if 42]\n",
+      "output": "[x for x in [1, 2, 3] if 42]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert.jsonnet",
+      "input": "assert true; true\n",
+      "output": "assert true; true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert2.jsonnet",
+      "input": "assert 42 == 42; true\n",
+      "output": "assert 42 == 42; true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert3.jsonnet",
+      "input": "assert 42 != 42; 42\n",
+      "output": "assert 42 != 42; 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal.jsonnet",
+      "input": "std.assertEqual([], [])\n",
+      "output": "std.assertEqual([], [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal2.jsonnet",
+      "input": "std.assertEqual({}, {})\n",
+      "output": "std.assertEqual({}, {})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal3.jsonnet",
+      "input": "std.assertEqual({x:: 42}, {})\n",
+      "output": "std.assertEqual({ x:: 42 }, {})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal4.jsonnet",
+      "input": "std.assertEqual({x: 1}, {x: 2})\n",
+      "output": "std.assertEqual({ x: 1 }, { x: 2 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal5.jsonnet",
+      "input": "std.assertEqual(\"\\n \", \"\\n\")\n",
+      "output": "std.assertEqual('\\n ', '\\n')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_equal6.jsonnet",
+      "input": "std.assertEqual(\"\\u001b[31m\", \"\")\n",
+      "output": "std.assertEqual('\\u001b[31m', '')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_failed.jsonnet",
+      "input": "assert false; true\n",
+      "output": "assert false; true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/assert_failed_custom.jsonnet",
+      "input": "assert false : \"Custom Message\"; true\n",
+      "output": "assert false : 'Custom Message'; true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_function_call.jsonnet",
+      "input": "(function(x) x)()\n",
+      "output": "(function(x) x)()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_function_call2.jsonnet",
+      "input": "(function(x) x)(1, 2)\n",
+      "output": "(function(x) x)(1, 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_function_call_and_error.jsonnet",
+      "input": "(function(x) x)(error \"x\", error \"y\")\n",
+      "output": "(function(x) x)(error 'x', error 'y')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_index_array.jsonnet",
+      "input": "[][\"xxx\"]\n",
+      "output": "[].xxx\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_index_object.jsonnet",
+      "input": "{}[42]\n",
+      "output": "{}[42]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bad_index_string.jsonnet",
+      "input": "\"xxx\"[\"xxx\"]\n",
+      "output": "'xxx'.xxx\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/binaryNot.jsonnet",
+      "input": "~12345",
+      "output": "~12345\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/binaryNot2.jsonnet",
+      "input": "~\"xxx\"\n",
+      "output": "~'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and.jsonnet",
+      "input": "0 \u0026 0\n",
+      "output": "0 \u0026 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and2.jsonnet",
+      "input": "1337 \u0026 0\n",
+      "output": "1337 \u0026 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and3.jsonnet",
+      "input": "1e30 \u0026 42\n",
+      "output": "1e30 \u0026 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and4.jsonnet",
+      "input": "1 \u0026 error \"x\"\n",
+      "output": "1 \u0026 error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and5.jsonnet",
+      "input": "-1337 \u0026 1337\n",
+      "output": "-1337 \u0026 1337\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and6.jsonnet",
+      "input": "-42 \u0026 42\n",
+      "output": "-42 \u0026 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_and7.jsonnet",
+      "input": "42 \u0026 -1e20\n",
+      "output": "42 \u0026 -1e20\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or.jsonnet",
+      "input": "0 | 0\n",
+      "output": "0 | 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or10.jsonnet",
+      "input": "\"xxx\" | 42\n",
+      "output": "'xxx' | 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or2.jsonnet",
+      "input": "0 | 42\n",
+      "output": "0 | 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or3.jsonnet",
+      "input": "42 | 0\n",
+      "output": "42 | 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or4.jsonnet",
+      "input": "42 | 42\n",
+      "output": "42 | 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or5.jsonnet",
+      "input": "1337 | 42\n",
+      "output": "1337 | 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or6.jsonnet",
+      "input": "1 | 2 | 3 | 4 | 5 | 6\n",
+      "output": "1 | 2 | 3 | 4 | 5 | 6\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or7.jsonnet",
+      "input": "1 | 2 | 4 | 8\n",
+      "output": "1 | 2 | 4 | 8\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or8.jsonnet",
+      "input": "-42 | 42\n",
+      "output": "-42 | 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_or9.jsonnet",
+      "input": "(1 \u003c\u003c 62) | 1\n",
+      "output": "(1 \u003c\u003c 62) | 1\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift.jsonnet",
+      "input": "1 \u003c\u003c 10\n",
+      "output": "1 \u003c\u003c 10\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift2.jsonnet",
+      "input": "1024 \u003e\u003e 10\n",
+      "output": "1024 \u003e\u003e 10\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift3.jsonnet",
+      "input": "1 \u003c\u003c 20 \u003e\u003e 20\n",
+      "output": "1 \u003c\u003c 20 \u003e\u003e 20\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift4.jsonnet",
+      "input": "10000 \u003e\u003e (-10)\n",
+      "output": "10000 \u003e\u003e (-10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift5.jsonnet",
+      "input": "/* 1 \u003c\u003c (1000 % 64) */\n1 \u003c\u003c 1000\n",
+      "output": "/* 1 \u003c\u003c (1000 % 64) */\n1 \u003c\u003c 1000\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_shift6.jsonnet",
+      "input": "1 \u003c\u003c (0 - 1)\n",
+      "output": "1 \u003c\u003c (0 - 1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor.jsonnet",
+      "input": "0 ^ 0\n",
+      "output": "0 ^ 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor2.jsonnet",
+      "input": "0 ^ 42\n",
+      "output": "0 ^ 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor3.jsonnet",
+      "input": "42 ^ 0\n",
+      "output": "42 ^ 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor4.jsonnet",
+      "input": "42 ^ 42\n",
+      "output": "42 ^ 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor5.jsonnet",
+      "input": "42 ^ 7 ^ 42\n",
+      "output": "42 ^ 7 ^ 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor6.jsonnet",
+      "input": "1 ^ 1 ^ 1 ^ 1 ^ 1 ^ 1 ^ 1\n",
+      "output": "1 ^ 1 ^ 1 ^ 1 ^ 1 ^ 1 ^ 1\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor7.jsonnet",
+      "input": "1 ^ error \"x\"\n",
+      "output": "1 ^ error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor8.jsonnet",
+      "input": "42 ^ 1\n",
+      "output": "42 ^ 1\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/bitwise_xor9.jsonnet",
+      "input": "42 ^ 2\n",
+      "output": "42 ^ 2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/block_escaping.jsonnet",
+      "input": "|||\n\t\\n\n\t\\t\n|||\n",
+      "output": "|||\n  \\n\n  \\t\n|||\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/block_string.jsonnet",
+      "input": "|||\n\tx\n\t\ty\n\tz\n|||\n",
+      "output": "|||\n  x\n  \ty\n  z\n|||\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/block_string_chomped.jsonnet",
+      "input": "|||-\n  foo\n  bar\n  baz\n|||\n",
+      "output": "|||-\n  foo\n  bar\n  baz\n|||\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/block_string_chomped_concatted.jsonnet",
+      "input": "|||-\n  foo bar baz \n||| + |||-\n  all one line\n|||\n",
+      "output": "|||-\n  foo bar baz \n||| + |||-\n  all one line\n|||\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/boolean_literal.jsonnet",
+      "input": "true",
+      "output": "true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinAvg.jsonnet",
+      "input": "std.avg([1,2,3])\n",
+      "output": "std.avg([1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64.jsonnet",
+      "input": "std.base64(\"hello\")",
+      "output": "std.base64('hello')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64Decode.jsonnet",
+      "input": "std.base64Decode(\"YQ==\")",
+      "output": "std.base64Decode('YQ==')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64DecodeBytes.jsonnet",
+      "input": "std.base64DecodeBytes(\"YQ==\")",
+      "output": "std.base64DecodeBytes('YQ==')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64DecodeBytes_high_codepoint.jsonnet",
+      "input": "std.base64DecodeBytes(\"ĀQ=\")",
+      "output": "std.base64DecodeBytes('ĀQ=')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64DecodeBytes_invalid_base64_data.jsonnet",
+      "input": "std.base64DecodeBytes(\"wrong\")",
+      "output": "std.base64DecodeBytes('wrong')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64DecodeBytes_wrong_type.jsonnet",
+      "input": "std.base64DecodeBytes(1)",
+      "output": "std.base64DecodeBytes(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64Decode_high_codepoint.jsonnet",
+      "input": "std.base64Decode(\"ĀQ=\")",
+      "output": "std.base64Decode('ĀQ=')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64Decode_invalid_base64_data.jsonnet",
+      "input": "std.base64Decode(\"wrong\")",
+      "output": "std.base64Decode('wrong')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64Decode_wrong_type.jsonnet",
+      "input": "std.base64Decode(1)",
+      "output": "std.base64Decode(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_byte_array.jsonnet",
+      "input": "std.base64([104, 101, 108, 108, 111])",
+      "output": "std.base64([104, 101, 108, 108, 111])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_invalid_byte_array.jsonnet",
+      "input": "std.base64([1, \"foo\"])",
+      "output": "std.base64([1, 'foo'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_invalid_byte_array1.jsonnet",
+      "input": "std.base64([1, -1])",
+      "output": "std.base64([1, -1])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_invalid_byte_array2.jsonnet",
+      "input": "std.base64([1, 256])",
+      "output": "std.base64([1, 256])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_non_string_non_array.jsonnet",
+      "input": "std.base64(1)",
+      "output": "std.base64(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinBase64_string_high_codepoint.jsonnet",
+      "input": "std.base64(\"Ā\")",
+      "output": "std.base64('Ā')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar.jsonnet",
+      "input": "std.char(65)\n",
+      "output": "std.char(65)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar2.jsonnet",
+      "input": "std.char(0)\n",
+      "output": "std.char(0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar3.jsonnet",
+      "input": "std.char(-1)\n",
+      "output": "std.char(-1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar4.jsonnet",
+      "input": "std.char(42)\n",
+      "output": "std.char(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar5.jsonnet",
+      "input": "// too big\nstd.char(1114112)\n",
+      "output": "// too big\nstd.char(1114112)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar6.jsonnet",
+      "input": "// biggest allowed\nstd.char(1114111)\n",
+      "output": "// biggest allowed\nstd.char(1114111)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinChar7.jsonnet",
+      "input": "std.char(\"xxx\")\n",
+      "output": "std.char('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinContains.jsonnet",
+      "input": "std.contains([1, 2, 3], 2)",
+      "output": "std.contains([1, 2, 3], 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinContains2.jsonnet",
+      "input": "std.contains([1, 2, 3], \"foo\")",
+      "output": "std.contains([1, 2, 3], 'foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinEqualsIgnoreCase.jsonnet",
+      "input": "std.equalsIgnoreCase(\"foo\", \"FOO\")",
+      "output": "std.equalsIgnoreCase('foo', 'FOO')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinEqualsIgnoreCase2.jsonnet",
+      "input": "std.equalsIgnoreCase(\"foo\", \"bar\")",
+      "output": "std.equalsIgnoreCase('foo', 'bar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsDecimal.jsonnet",
+      "input": "std.isDecimal(1.1)",
+      "output": "std.isDecimal(1.1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsDecimal2.jsonnet",
+      "input": "std.isDecimal(1)",
+      "output": "std.isDecimal(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsEmpty.jsonnet",
+      "input": "std.isEmpty(\"\")\n",
+      "output": "std.isEmpty('')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsEmpty1.jsonnet",
+      "input": "std.isEmpty(\"non-empty string\")\n",
+      "output": "std.isEmpty('non-empty string')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsEmpty2.jsonnet",
+      "input": "std.isEmpty(10)\n",
+      "output": "std.isEmpty(10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsEven.jsonnet",
+      "input": "std.isEven(10)",
+      "output": "std.isEven(10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsEven2.jsonnet",
+      "input": "std.isEven(5)",
+      "output": "std.isEven(5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsInteger.jsonnet",
+      "input": "std.isInteger(1)",
+      "output": "std.isInteger(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsInteger2.jsonnet",
+      "input": "std.isInteger(1.1)",
+      "output": "std.isInteger(1.1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsNull.jsonnet",
+      "input": "std.isNull(null)\n",
+      "output": "std.isNull(null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsNull2.jsonnet",
+      "input": "std.isNull(\"foo\")\n",
+      "output": "std.isNull('foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsOdd.jsonnet",
+      "input": "std.isOdd(5)",
+      "output": "std.isOdd(5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinIsOdd2.jsonnet",
+      "input": "std.isOdd(10)",
+      "output": "std.isOdd(10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinManifestJsonEx.jsonnet",
+      "input": "local object = {\n  foo: 'bar',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal array = [\n  'bar',\n  object.foo,\n  1,\n  1.42,\n  -1,\n  false,\n  true,\n  {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n];\n\n{\n  array: std.manifestJsonEx(array, '  '),\n  bool: std.manifestJsonEx(true, '   '),\n  'null': std.manifestJsonEx(null, '   '),\n  object: std.manifestJsonEx(object, '  '),\n  number: std.manifestJsonEx(42, '   '),\n  string: std.manifestJsonEx('foo', '   '),\n}\n",
+      "output": "local object = {\n  foo: 'bar',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal array = [\n  'bar',\n  object.foo,\n  1,\n  1.42,\n  -1,\n  false,\n  true,\n  {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n];\n\n{\n  array: std.manifestJsonEx(array, '  '),\n  bool: std.manifestJsonEx(true, '   '),\n  'null': std.manifestJsonEx(null, '   '),\n  object: std.manifestJsonEx(object, '  '),\n  number: std.manifestJsonEx(42, '   '),\n  string: std.manifestJsonEx('foo', '   '),\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinManifestJsonEx_cyclic.jsonnet",
+      "input": "std.manifestJsonEx({a: $}, \" \")\n",
+      "output": "std.manifestJsonEx({ a: $ }, ' ')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinMaxArray.jsonnet",
+      "input": "std.maxArray([1,-1,0])",
+      "output": "std.maxArray([1, -1, 0])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinMinArray.jsonnet",
+      "input": "std.minArray([1,-1,0])",
+      "output": "std.minArray([1, -1, 0])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectFieldsEx.jsonnet",
+      "input": "std.objectFieldsEx({x: 1, y:: 1, z::: 2}, false)\n",
+      "output": "std.objectFieldsEx({ x: 1, y:: 1, z::: 2 }, false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectFieldsExWithHidden.jsonnet",
+      "input": "std.objectFieldsEx({x: 1, y:: 1, z::: 2}, true)\n",
+      "output": "std.objectFieldsEx({ x: 1, y:: 1, z::: 2 }, true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectFieldsEx_bad.jsonnet",
+      "input": "std.objectFieldsEx(42, true)\n",
+      "output": "std.objectFieldsEx(42, true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectFieldsEx_bad2.jsonnet",
+      "input": "std.objectFieldsEx({}, \"xxx\")\n",
+      "output": "std.objectFieldsEx({}, 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectHasEx.jsonnet",
+      "input": "std.objectHasEx({x: 1, y:: 1, z::: 2}, \"x\", false)\n",
+      "output": "std.objectHasEx({ x: 1, y:: 1, z::: 2 }, 'x', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectHasExBadBoolean.jsonnet",
+      "input": "std.objectHasEx({}, \"xxx\", \"xxx\")\n",
+      "output": "std.objectHasEx({}, 'xxx', 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectHasExBadField.jsonnet",
+      "input": "std.objectHasEx({}, 42, false)\n",
+      "output": "std.objectHasEx({}, 42, false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectHasExBadObject.jsonnet",
+      "input": "std.objectHasEx(42, \"x\", false)\n",
+      "output": "std.objectHasEx(42, 'x', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectRemoveKey.jsonnet",
+      "input": "std.objectRemoveKey({foo: 1, bar: 2, baz: 3}, \"foo\")",
+      "output": "std.objectRemoveKey({ foo: 1, bar: 2, baz: 3 }, 'foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectRemoveKey_hidden.jsonnet",
+      "input": "local o = std.objectRemoveKey({foo: 1, bar:: 2, baz: 3}, \"foo\");\n{\n    fields: std.objectFields(o),\n    all_fields: std.objectFieldsAll(o),\n    bar: o.bar,\n    object: o,\n}\n",
+      "output": "local o = std.objectRemoveKey({ foo: 1, bar:: 2, baz: 3 }, 'foo');\n{\n  fields: std.objectFields(o),\n  all_fields: std.objectFieldsAll(o),\n  bar: o.bar,\n  object: o,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectRemoveKey_super.jsonnet",
+      "input": "local o1 = {\n  assert self.x : 'x',\n  assert super.y : 'y',\n  b: super.a,\n};\n{ a: 'begin' } + std.objectRemoveKey({ y: true } + o1 + { a: 'end', x: true }, 'y')\n",
+      "output": "local o1 = {\n  assert self.x : 'x',\n  assert super.y : 'y',\n  b: super.a,\n};\n{ a: 'begin' } + std.objectRemoveKey({ y: true } + o1 + { a: 'end', x: true }, 'y')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinObjectRemoveKey_super_assert.jsonnet",
+      "input": "local o1 = {\n  assert self.x : 'x',\n  assert super.y : 'y',\n  b: super.a,\n};\nlocal o2 = {\n  x: true,\n  y: true,\n  a: 'one',\n};\n{ a: 'begin' } + std.objectRemoveKey({ y: std.isString('yyy') } + o1 + o2, 'x')\n",
+      "output": "local o1 = {\n  assert self.x : 'x',\n  assert super.y : 'y',\n  b: super.a,\n};\nlocal o2 = {\n  x: true,\n  y: true,\n  a: 'one',\n};\n{ a: 'begin' } + std.objectRemoveKey({ y: std.isString('yyy') } + o1 + o2, 'x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinRemove.jsonnet",
+      "input": "std.remove([1,2,3],2)",
+      "output": "std.remove([1, 2, 3], 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinRemoveAt.jsonnet",
+      "input": "std.removeAt([1,2,3],1)",
+      "output": "std.removeAt([1, 2, 3], 1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinRemoveAt2.jsonnet",
+      "input": "local a = ['quux','foo','bar'];\nlocal b = std.removeAt(a,0);\na+b\n",
+      "output": "local a = ['quux', 'foo', 'bar'];\nlocal b = std.removeAt(a, 0);\na + b\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinReverse.jsonnet",
+      "input": "std.reverse([1, 2])",
+      "output": "std.reverse([1, 2])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinReverse_empty.jsonnet",
+      "input": "std.reverse([])",
+      "output": "std.reverse([])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinReverse_many.jsonnet",
+      "input": "std.reverse([\"hello\", \"my\", \"name\", \"is\", \"tester\"])",
+      "output": "std.reverse(['hello', 'my', 'name', 'is', 'tester'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinReverse_not_array.jsonnet",
+      "input": "std.reverse(false)\n",
+      "output": "std.reverse(false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinReverse_single.jsonnet",
+      "input": "std.reverse([\"hello\"])",
+      "output": "std.reverse(['hello'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinRound.jsonnet",
+      "input": "std.round(2.3)",
+      "output": "std.round(2.3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSha1.jsonnet",
+      "input": "std.sha1(\"foo\")",
+      "output": "std.sha1('foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSha256.jsonnet",
+      "input": "std.sha256(\"foo\")",
+      "output": "std.sha256('foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSha3.jsonnet",
+      "input": "std.sha3(\"foo\")",
+      "output": "std.sha3('foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSha512.jsonnet",
+      "input": "std.sha512(\"foo\")",
+      "output": "std.sha512('foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', ',', 2)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', ',', 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR2.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', ',', 0)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', ',', 0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR3.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', ',', -1)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', ',', -1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR4.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', ',', 4)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', ',', 4)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR5.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', ',', -2)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', ',', -2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSplitLimitR6.jsonnet",
+      "input": "std.splitLimitR('foo,bar,baz,qux', '', -1)\n",
+      "output": "std.splitLimitR('foo,bar,baz,qux', '', -1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_first_param_not_string.jsonnet",
+      "input": "std.substr(1, 0, 1)",
+      "output": "std.substr(1, 0, 1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_length_larger.jsonnet",
+      "input": "std.substr(\"hello\", 0 , 10)",
+      "output": "std.substr('hello', 0, 10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_second_parameter_not_integer.jsonnet",
+      "input": "std.substr(\"hello\", 1.2, 5)",
+      "output": "std.substr('hello', 1.2, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_second_parameter_not_number.jsonnet",
+      "input": "std.substr(\"hello\", \"foo\", 5)",
+      "output": "std.substr('hello', 'foo', 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_start_larger_then_size.jsonnet",
+      "input": "std.substr(\"hello\", 10, 5)",
+      "output": "std.substr('hello', 10, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_third_parameter_less_then_zero.jsonnet",
+      "input": "std.substr(\"hello\", 0, -1)",
+      "output": "std.substr('hello', 0, -1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_third_parameter_not_integer.jsonnet",
+      "input": "std.substr(\"hello\", 0, 1.2)",
+      "output": "std.substr('hello', 0, 1.2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubStr_third_parameter_not_number.jsonnet",
+      "input": "std.substr(\"hello\", 0, \"foo\")",
+      "output": "std.substr('hello', 0, 'foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSubstr.jsonnet",
+      "input": "std.substr(\"hello\", 0, 5)",
+      "output": "std.substr('hello', 0, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinSum.jsonnet",
+      "input": "std.sum([1,2,3])",
+      "output": "std.sum([1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinTrim.jsonnet",
+      "input": "std.trim(\"already trimmed string\")\n",
+      "output": "std.trim('already trimmed string')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinTrim1.jsonnet",
+      "input": "std.trim(\"    string with spaces on both ends     \")\n",
+      "output": "std.trim('    string with spaces on both ends     ')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinTrim2.jsonnet",
+      "input": "std.trim(\"string with newline character at end\\n\")\n",
+      "output": "std.trim('string with newline character at end\\n')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinTrim3.jsonnet",
+      "input": "std.trim(\"string with tabs at end\\t\\t\")\n",
+      "output": "std.trim('string with tabs at end\\t\\t')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinTrim4.jsonnet",
+      "input": "std.trim(10)\n",
+      "output": "std.trim(10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXnor.jsonnet",
+      "input": "std.xnor(false, false)\n",
+      "output": "std.xnor(false, false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXnor1.jsonnet",
+      "input": "std.xnor(true, false)\n",
+      "output": "std.xnor(true, false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXnor2.jsonnet",
+      "input": "std.xnor(\"true\", false)\n",
+      "output": "std.xnor('true', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXor.jsonnet",
+      "input": "std.xor(true, false)\n",
+      "output": "std.xor(true, false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXor1.jsonnet",
+      "input": "std.xor(true, true)\n",
+      "output": "std.xor(true, true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtinXor2.jsonnet",
+      "input": "std.xor(\"true\", false)\n",
+      "output": "std.xor('true', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_acos.jsonnet",
+      "input": "std.acos(1)\n",
+      "output": "std.acos(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_asin.jsonnet",
+      "input": "std.asin(1)\n",
+      "output": "std.asin(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_atan.jsonnet",
+      "input": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.atan(1))\n",
+      "output": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.atan(1))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_ceil.jsonnet",
+      "input": "std.ceil(2.5)\n",
+      "output": "std.ceil(2.5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_cos.jsonnet",
+      "input": "std.cos(1)\n",
+      "output": "std.cos(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_escapeStringJson.jsonnet",
+      "input": "std.map(std.escapeStringJson, [\n    \"\",\n    \"\\\"quoted string\\\"\",\n    \"backslash \\\\\",\n    \"new\\nline\",\n    \"tab\\tcharacter\",\n    \"controler\\r\\fcharacters\\r\\f\",\n    null,\n    \"null\",\n    1.42,\n    [1,2,3],\n    {a:1,b:2,c:3},\n    true,\n    false,\n    \"true\",\n    \"false\",\n])\n",
+      "output": "std.map(std.escapeStringJson, [\n  '',\n  '\"quoted string\"',\n  'backslash \\\\',\n  'new\\nline',\n  'tab\\tcharacter',\n  'controler\\r\\fcharacters\\r\\f',\n  null,\n  'null',\n  1.42,\n  [1, 2, 3],\n  { a: 1, b: 2, c: 3 },\n  true,\n  false,\n  'true',\n  'false',\n])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp.jsonnet",
+      "input": "std.exp(12)\n",
+      "output": "std.exp(12)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp2.jsonnet",
+      "input": "std.exp(0)\n",
+      "output": "std.exp(0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp3.jsonnet",
+      "input": "std.exp(1000)\n",
+      "output": "std.exp(1000)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp4.jsonnet",
+      "input": "std.exp(100)\n",
+      "output": "std.exp(100)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp5.jsonnet",
+      "input": "std.exp(100000000000000000000)\n",
+      "output": "std.exp(100000000000000000000)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp6.jsonnet",
+      "input": "std.exp(-2)\n",
+      "output": "std.exp(-2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp7.jsonnet",
+      "input": "std.exp(-100000000000000000)\n",
+      "output": "std.exp(-100000000000000000)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_exp8.jsonnet",
+      "input": "std.exp(3.14)\n",
+      "output": "std.exp(3.14)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_floor.jsonnet",
+      "input": "std.floor(2.5)\n",
+      "output": "std.floor(2.5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log.jsonnet",
+      "input": "std.log(42)\n",
+      "output": "std.log(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log2.jsonnet",
+      "input": "std.log(std.exp(100))\n",
+      "output": "std.log(std.exp(100))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log3.jsonnet",
+      "input": "std.log(100000000000000000000000000000000000)\n",
+      "output": "std.log(100000000000000000000000000000000000)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log4.jsonnet",
+      "input": "std.log(3.14)\n",
+      "output": "std.log(3.14)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log5.jsonnet",
+      "input": "std.log(0)\n",
+      "output": "std.log(0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log6.jsonnet",
+      "input": "std.log(0.0000000000000001)\n",
+      "output": "std.log(0.0000000000000001)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log7.jsonnet",
+      "input": "std.log(-1)\n",
+      "output": "std.log(-1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_log8.jsonnet",
+      "input": "std.log(-1000000000000)\n",
+      "output": "std.log(-1000000000000)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_lstripChars.jsonnet",
+      "input": "std.lstripChars(\"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.\", \"Lorem ipsum dolor sit amet\")\n",
+      "output": "std.lstripChars('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.', 'Lorem ipsum dolor sit amet')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestTomlEx.jsonnet",
+      "input": "local object = {\n  foo: 'baz',\n  abc: 'def',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n      ['a', ['b']],\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal object2 = {\n  key: 'value',\n  simple: { t: 5 },\n  section: {\n    a: 1,\n    nested: { b: 2 },\n    'e$caped': { q: 't' },\n    array: [\n      { c: 3 },\n      { d: 4 },\n    ],\n    nestedArray: [{\n      k: 'v',\n      nested: { e: 5 },\n    }],\n  },\n  arraySection: [\n    { q: 1 },\n    { w: 2 },\n  ],\n  'escaped\"Section': { z: 'q' },\n  emptySection: {},\n  emptyArraySection: [{}],\n  bool: true,\n  notBool: false,\n  number: 7,\n  array: ['s', 1, [2, 3], { r: 6, a: ['0', 'z'] }],\n  emptyArray: [],\n  '\"': 4,\n};\n\n{\n  object: std.manifestTomlEx(object, '  '),\n  object2: std.manifestTomlEx(object2, '  '),\n}",
+      "output": "local object = {\n  foo: 'baz',\n  abc: 'def',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n      ['a', ['b']],\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal object2 = {\n  key: 'value',\n  simple: { t: 5 },\n  section: {\n    a: 1,\n    nested: { b: 2 },\n    'e$caped': { q: 't' },\n    array: [\n      { c: 3 },\n      { d: 4 },\n    ],\n    nestedArray: [{\n      k: 'v',\n      nested: { e: 5 },\n    }],\n  },\n  arraySection: [\n    { q: 1 },\n    { w: 2 },\n  ],\n  'escaped\"Section': { z: 'q' },\n  emptySection: {},\n  emptyArraySection: [{}],\n  bool: true,\n  notBool: false,\n  number: 7,\n  array: ['s', 1, [2, 3], { r: 6, a: ['0', 'z'] }],\n  emptyArray: [],\n  '\"': 4,\n};\n\n{\n  object: std.manifestTomlEx(object, '  '),\n  object2: std.manifestTomlEx(object2, '  '),\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestTomlEx_array.jsonnet",
+      "input": "local array = [\n  'bar',\n  1,\n  1.42,\n  -1,\n  false,\n  true,\n];\n\n{\n  array: std.manifestTomlEx(array, '  '),\n}\n",
+      "output": "local array = [\n  'bar',\n  1,\n  1.42,\n  -1,\n  false,\n  true,\n];\n\n{\n  array: std.manifestTomlEx(array, '  '),\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestTomlEx_cyclic.jsonnet",
+      "input": "std.manifestTomlEx({a: {b: $}}, \" \")\n",
+      "output": "std.manifestTomlEx({ a: { b: $ } }, ' ')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestTomlEx_null.jsonnet",
+      "input": "{\n  'null': std.manifestTomlEx(null, '   '),\n}\n",
+      "output": "{\n  'null': std.manifestTomlEx(null, '   '),\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestYamlDoc.jsonnet",
+      "input": "local object = {\n  foo: 'baz',\n  abc: 'def',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n      ['a', ['b']],\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal object2 = {\n  key: 'value',\n  simple: { t: 5 },\n  section: {\n    a: 1,\n    nested: { b: 2 },\n    'e$caped': { q: 't' },\n    array: [\n      { c: 3 },\n      { d: 4 },\n    ],\n    nestedArray: [{\n      k: 'v',\n      nested: { e: 5 },\n    }],\n  },\n  arraySection: [\n    { q: 1 },\n    { w: 2 },\n  ],\n  'escaped\"Section': { z: 'q' },\n  emptySection: {},\n  emptyArraySection: [{}],\n  bool: true,\n  notBool: false,\n  number: 7,\n  array: ['s', 1, [2, 3], { r: 6, a: ['0', 'z'] }],\n  emptyArray: [],\n  '\"': 4,\n};\n\nlocal object3 = {\n    '0X_0a_74_ae': 'BARE_KEY',\n  '__-0X_0a_74_ae': 'BARE_KEY',\n  '-0B1010_0111_0100_1010_1110': 'string\n                                    with some\n                                    newlines\n        ',\n  '__-0B1010_0111_0100_1010_1110': 'a new line\n  ',\n  x: 'BARE_KEY',\n  b: {\n    y: 'boolean true',\n    yes: 'boolean true',\n    Yes: 'boolean true',\n    True: 'boolean true',\n    'true': 'boolean true',\n    on: 'boolean true',\n    On: 'boolean true',\n    NO: 'boolean false',\n    n: 'boolean false',\n    N: 'boolean false',\n    off: 'boolean false',\n    OFF: 'boolean false',\n    'null': 'null word',\n    NULL: 'null word capital',\n    Null: 'null word',\n  },\n  just_letters_underscores: 142321,\n  'just-letters-dashes': '+1101_1111',\n  'jsonnet.org/k8s-label-like': '0600',\n  '192.168.0.1': [{a: 2, b: 'str'}, {c : []}],\n  '1-234-567-8901': null,\n};\n\n{\n  object: std.manifestYamlDoc(object),\n  object2: std.manifestYamlDoc(object2),\n  object3: std.manifestYamlDoc(object3),\n\n  object_indent: std.manifestYamlDoc(object, indent_array_in_object=true),\n  object2_indent: std.manifestYamlDoc(object2, indent_array_in_object=true),\n  object3_indent: std.manifestYamlDoc(object3, indent_array_in_object=true),\n\n  object_unquoted: std.manifestYamlDoc(object, quote_keys=false),\n  object2_unquoted: std.manifestYamlDoc(object2, quote_keys=false),\n  object3_unquoted: std.manifestYamlDoc(object3, quote_keys=false),\n\n  object_indent_unquoted: std.manifestYamlDoc(object, indent_array_in_object=true, quote_keys=false),\n  object2_indent_unquoted: std.manifestYamlDoc(object2, indent_array_in_object=true, quote_keys=false),\n  object3_indent_unquoted: std.manifestYamlDoc(object3, indent_array_in_object=true, quote_keys=false),\n}\n",
+      "output": "local object = {\n  foo: 'baz',\n  abc: 'def',\n  bar: self.foo,\n  baz: 1,\n  bazel: 1.42,\n  boom: -1,\n  bim: false,\n  bam: true,\n  blamo: {\n    cereal: [\n      '\u003c\u003e\u0026 fizbuzz',\n      ['a', ['b']],\n    ],\n\n    treats: [\n      {\n        name: 'chocolate',\n      },\n    ],\n  },\n};\n\nlocal object2 = {\n  key: 'value',\n  simple: { t: 5 },\n  section: {\n    a: 1,\n    nested: { b: 2 },\n    'e$caped': { q: 't' },\n    array: [\n      { c: 3 },\n      { d: 4 },\n    ],\n    nestedArray: [{\n      k: 'v',\n      nested: { e: 5 },\n    }],\n  },\n  arraySection: [\n    { q: 1 },\n    { w: 2 },\n  ],\n  'escaped\"Section': { z: 'q' },\n  emptySection: {},\n  emptyArraySection: [{}],\n  bool: true,\n  notBool: false,\n  number: 7,\n  array: ['s', 1, [2, 3], { r: 6, a: ['0', 'z'] }],\n  emptyArray: [],\n  '\"': 4,\n};\n\nlocal object3 = {\n  '0X_0a_74_ae': 'BARE_KEY',\n  '__-0X_0a_74_ae': 'BARE_KEY',\n  '-0B1010_0111_0100_1010_1110': 'string\\n                                    with some\\n                                    newlines\\n        ',\n  '__-0B1010_0111_0100_1010_1110': 'a new line\\n  ',\n  x: 'BARE_KEY',\n  b: {\n    y: 'boolean true',\n    yes: 'boolean true',\n    Yes: 'boolean true',\n    True: 'boolean true',\n    'true': 'boolean true',\n    on: 'boolean true',\n    On: 'boolean true',\n    NO: 'boolean false',\n    n: 'boolean false',\n    N: 'boolean false',\n    off: 'boolean false',\n    OFF: 'boolean false',\n    'null': 'null word',\n    NULL: 'null word capital',\n    Null: 'null word',\n  },\n  just_letters_underscores: 142321,\n  'just-letters-dashes': '+1101_1111',\n  'jsonnet.org/k8s-label-like': '0600',\n  '192.168.0.1': [{ a: 2, b: 'str' }, { c: [] }],\n  '1-234-567-8901': null,\n};\n\n{\n  object: std.manifestYamlDoc(object),\n  object2: std.manifestYamlDoc(object2),\n  object3: std.manifestYamlDoc(object3),\n\n  object_indent: std.manifestYamlDoc(object, indent_array_in_object=true),\n  object2_indent: std.manifestYamlDoc(object2, indent_array_in_object=true),\n  object3_indent: std.manifestYamlDoc(object3, indent_array_in_object=true),\n\n  object_unquoted: std.manifestYamlDoc(object, quote_keys=false),\n  object2_unquoted: std.manifestYamlDoc(object2, quote_keys=false),\n  object3_unquoted: std.manifestYamlDoc(object3, quote_keys=false),\n\n  object_indent_unquoted: std.manifestYamlDoc(object, indent_array_in_object=true, quote_keys=false),\n  object2_indent_unquoted: std.manifestYamlDoc(object2, indent_array_in_object=true, quote_keys=false),\n  object3_indent_unquoted: std.manifestYamlDoc(object3, indent_array_in_object=true, quote_keys=false),\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_manifestYamlDoc_cyclic.jsonnet",
+      "input": "std.manifestYamlDoc({a: $})\n",
+      "output": "std.manifestYamlDoc({ a: $ })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_member_array.jsonnet",
+      "input": "std.member(['foo', 'bar'], 'foo')",
+      "output": "std.member(['foo', 'bar'], 'foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_member_object_invalid.jsonnet",
+      "input": "std.member({foo:'bar'}, 'foo')",
+      "output": "std.member({ foo: 'bar' }, 'foo')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_member_string.jsonnet",
+      "input": "'%s %s' % [std.member('bar', 'foo'), std.member('foobar', 'foo')]",
+      "output": "'%s %s' % [std.member('bar', 'foo'), std.member('foobar', 'foo')]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseInt.jsonnet",
+      "input": "std.parseInt(\"123\")",
+      "output": "std.parseInt('123')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseInt2.jsonnet",
+      "input": "std.parseInt(\"-123\")",
+      "output": "std.parseInt('-123')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseInt_invalid.jsonnet",
+      "input": "std.parseInt(\"hello\")",
+      "output": "std.parseInt('hello')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseInt_invalid_decimal.jsonnet",
+      "input": "std.parseInt(\"123.12\")",
+      "output": "std.parseInt('123.12')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseInt_invalid_hexadecimal.jsonnet",
+      "input": "std.parseInt(\"7B316\")",
+      "output": "std.parseInt('7B316')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_parseYaml_empty.jsonnet",
+      "input": "std.parseYaml(\"\")\n",
+      "output": "std.parseYaml('')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_range_negative.jsonnet",
+      "input": "std.range(2, 0)\n",
+      "output": "std.range(2, 0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_rstripChars.jsonnet",
+      "input": "std.lstripChars(\"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.\", \"pulvinar pellentesque habitant morbi tristique senectus.\")\n",
+      "output": "std.lstripChars('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.', 'pulvinar pellentesque habitant morbi tristique senectus.')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_sin.jsonnet",
+      "input": "std.sin(1)\n",
+      "output": "std.sin(1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_sqrt.jsonnet",
+      "input": "std.sqrt(4)\n",
+      "output": "std.sqrt(4)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_sqrt2.jsonnet",
+      "input": "std.sqrt(\"cookie\")\n",
+      "output": "std.sqrt('cookie')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_stripChars.jsonnet",
+      "input": "std.stripChars(\"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.\", \"pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, habitant morbi tristique senectus.\")",
+      "output": "std.stripChars('Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.', 'pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, habitant morbi tristique senectus.')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_stripChars_invalid.jsonnet",
+      "input": "std.stripChars({foo: \"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.\"}, \"pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, habitant morbi tristique senectus.\")",
+      "output": "std.stripChars({ foo: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sed turpis tincidunt id aliquet risus. Eget mauris pharetra et ultrices neque ornare aenean euismod. Diam quis enim lobortis scelerisque fermentum. Varius duis at consectetur lorem donec massa sapien. Diam sit amet nisl suscipit adipiscing bibendum est ultricies integer. Lectus urna duis convallis convallis tellus. Nibh ipsum consequat nisl vel pretium lectus quam id leo. Feugiat in ante metus dictum at tempor commodo. Velit dignissim sodales ut eu sem integer. Dictum sit amet justo donec. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus. Scelerisque mauris pellentesque pulvinar pellentesque habitant morbi tristique senectus.' }, 'pulvinar pellentesque habitant morbi tristique senectus. Lorem ipsum dolor sit amet, habitant morbi tristique senectus.')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_substr_multibyte.jsonnet",
+      "input": "std.substr(\"🤩\", 0, 5)",
+      "output": "std.substr('🤩', 0, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/builtin_tan.jsonnet",
+      "input": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.tan(1))\n",
+      "output": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.tan(1))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/call_number.jsonnet",
+      "input": "42()",
+      "output": "42()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/comparisons.jsonnet",
+      "input": "local cmpTest(a, b) = {\n    a: a,\n    b: b,\n    '\u003c': a \u003c b,\n    '\u003e': a \u003e b,\n    '\u003c=': a \u003c= b,\n    '\u003e=': a \u003e= b,\n};\n[\n    cmpTest(1, 2),\n    cmpTest(2, 1),\n    cmpTest([1], [2]),\n    cmpTest([2], [1]),\n    cmpTest([], []),\n    cmpTest([], [1]),\n    cmpTest([1], []),\n    cmpTest([1, 2], [1]),\n    cmpTest([1, 2], [2]),\n    cmpTest([[1]], [[2]]),\n    cmpTest([[2]], [[1]]),\n    cmpTest([\"foo\"], [\"bar\"]),\n    cmpTest([0, \"a\"], [0, \"b\"]),\n    cmpTest(\"foo\", \"bar\"),\n]\n",
+      "output": "local cmpTest(a, b) = {\n  a: a,\n  b: b,\n  '\u003c': a \u003c b,\n  '\u003e': a \u003e b,\n  '\u003c=': a \u003c= b,\n  '\u003e=': a \u003e= b,\n};\n[\n  cmpTest(1, 2),\n  cmpTest(2, 1),\n  cmpTest([1], [2]),\n  cmpTest([2], [1]),\n  cmpTest([], []),\n  cmpTest([], [1]),\n  cmpTest([1], []),\n  cmpTest([1, 2], [1]),\n  cmpTest([1, 2], [2]),\n  cmpTest([[1]], [[2]]),\n  cmpTest([[2]], [[1]]),\n  cmpTest(['foo'], ['bar']),\n  cmpTest([0, 'a'], [0, 'b']),\n  cmpTest('foo', 'bar'),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/decodeUTF8.jsonnet",
+      "input": "[\n    std.decodeUTF8([]),\n    std.decodeUTF8([65]),\n    std.decodeUTF8([65,65,65]),\n    std.decodeUTF8([194,167]),\n    std.decodeUTF8([122,97,197,188,195,179,197,130,196,135,32,103,101,197,155,108,196,133,32,106,97,197,186,197,132]),\n]",
+      "output": "[\n  std.decodeUTF8([]),\n  std.decodeUTF8([65]),\n  std.decodeUTF8([65, 65, 65]),\n  std.decodeUTF8([194, 167]),\n  std.decodeUTF8([122, 97, 197, 188, 195, 179, 197, 130, 196, 135, 32, 103, 101, 197, 155, 108, 196, 133, 32, 106, 97, 197, 186, 197, 132]),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/digitsep.jsonnet",
+      "input": "local cases = [\n  [123456, '123_456'],\n  [1750000, '1_750_000'],\n  [123, '1_2_3'],\n  [3.141592, '3.141_592'],\n  [1200.0, '1_200.0'],\n  [0e101, '0e1_01'],\n  [1010e3, '10_10e3'],\n  [23e12, '2_3e1_2'],\n  [1.12e100, '1.1_2e100'],\n  [1.1e-101, '1.1e-10_1'],\n  [9.10938356e-31, '9.109_383_56e-31'],\n];\n\nlocal sepParse(s) = std.parseJson(std.strReplace(s, '_', ''));\n\n{\n  test_results: [std.assertEqual(c[0], sepParse(c[1])) for c in cases],\n}\n",
+      "output": "local cases = [\n  [123456, '123_456'],\n  [1750000, '1_750_000'],\n  [123, '1_2_3'],\n  [3.141592, '3.141_592'],\n  [1200.0, '1_200.0'],\n  [0e101, '0e1_01'],\n  [1010e3, '10_10e3'],\n  [23e12, '2_3e1_2'],\n  [1.12e100, '1.1_2e100'],\n  [1.1e-101, '1.1e-10_1'],\n  [9.10938356e-31, '9.109_383_56e-31'],\n];\n\nlocal sepParse(s) = std.parseJson(std.strReplace(s, '_', ''));\n\n{\n  test_results: [std.assertEqual(c[0], sepParse(c[1])) for c in cases],\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/div1.jsonnet",
+      "input": "2 / 2\n",
+      "output": "2 / 2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/div2.jsonnet",
+      "input": "1337 / 2\n",
+      "output": "1337 / 2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/div3.jsonnet",
+      "input": "1/1e30\n",
+      "output": "1 / 1e30\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/div4.jsonnet",
+      "input": "1/(1e-160)/(1e-160)\n",
+      "output": "1 / (1e-160) / (1e-160)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/div_by_zero.jsonnet",
+      "input": "1/0\n",
+      "output": "1 / 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/dollar_bad.jsonnet",
+      "input": "$(42)",
+      "output": "$(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/dollar_end.jsonnet",
+      "input": "{\n    foo: 42,\n    bar: -$.foo\n}",
+      "output": "{\n  foo: 42,\n  bar: -$.foo,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/dollar_end2.jsonnet",
+      "input": "{\n    foo: false,\n    bar: !$.foo\n}",
+      "output": "{\n  foo: false,\n  bar: !$.foo,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/double_thunk.jsonnet",
+      "input": "local x = local y = error \"xxx\"; y; x\n",
+      "output": "local x = local y = error 'xxx'; y; x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/empty_array.jsonnet",
+      "input": "[]",
+      "output": "[]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/empty_object.jsonnet",
+      "input": "{}",
+      "output": "{}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/empty_object_comp.jsonnet",
+      "input": "[\n    {} + { [x]: 42 for x in [] },\n    { [x]: 42 for x in [] } + {},\n    std.objectFields({ [x]: 42 for x in [] })\n]\n",
+      "output": "[\n  {} + { [x]: 42 for x in [] },\n  { [x]: 42 for x in [] } + {},\n  std.objectFields({ [x]: 42 for x in [] }),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/encodeUTF8.jsonnet",
+      "input": "[\n    std.encodeUTF8(''),\n    std.encodeUTF8('A'),\n    std.encodeUTF8('AAA'),\n    std.encodeUTF8('§'),\n    std.encodeUTF8('zażółć geślą jaźń'),\n]",
+      "output": "[\n  std.encodeUTF8(''),\n  std.encodeUTF8('A'),\n  std.encodeUTF8('AAA'),\n  std.encodeUTF8('§'),\n  std.encodeUTF8('zażółć geślą jaźń'),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals.jsonnet",
+      "input": "42 == 42\n",
+      "output": "42 == 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals2.jsonnet",
+      "input": "{x: 1, y: 1} == {x: 2, y: 2}",
+      "output": "{ x: 1, y: 1 } == { x: 2, y: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals3.jsonnet",
+      "input": "{x: 1} == {x: 1}",
+      "output": "{ x: 1 } == { x: 1 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals4.jsonnet",
+      "input": "{x: 1, y: 1} == {x: 1, y: 1, z: 2}",
+      "output": "{ x: 1, y: 1 } == { x: 1, y: 1, z: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals5.jsonnet",
+      "input": "{x: 1, y: 1} == {x: 1, y: 1, z:: 2}",
+      "output": "{ x: 1, y: 1 } == { x: 1, y: 1, z:: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/equals6.jsonnet",
+      "input": "local data = {[std.toString(x)]: 1 for x in std.range(1, 100)};\ndata == data\n",
+      "output": "local data = { [std.toString(x)]: 1 for x in std.range(1, 100) };\ndata == data\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error.jsonnet",
+      "input": "error \"42\"",
+      "output": "error '42'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_from_array.jsonnet",
+      "input": "[error \"xxx\"][0]\n",
+      "output": "[error 'xxx'][0]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_from_func.jsonnet",
+      "input": "local foo = function(x) error x; foo(\"xxx\")\n",
+      "output": "local foo = function(x) error x; foo('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_function_fail.jsonnet",
+      "input": "error (function(x) 42)",
+      "output": "error (function(x) 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_hexnumber.jsonnet",
+      "input": "0x42\n",
+      "output": "go-jsonnet/testdata/error_hexnumber.jsonnet:1:2-5 Did not expect: (IDENTIFIER, \"x42\")",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/error_in_method.jsonnet",
+      "input": "local obj = { foo(x): error x }; obj.foo(\"xxx\")\n\n\n\n",
+      "output": "local obj = { foo(x): error x }; obj.foo('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_in_object_local.jsonnet",
+      "input": "{ local foo(bar) = error bar, baz: foo(\"xxx\") }\n",
+      "output": "{ local foo(bar) = error bar, baz: foo('xxx') }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/error_object.jsonnet",
+      "input": "error { \"blah\": 42 }",
+      "output": "error { blah: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/escaped_fields.jsonnet",
+      "input": "{\n  '\"': null,\n  \"'\": null,\n  |||\n    \n    \n  |||: null,\n}\n",
+      "output": "{\n  '\"': null,\n  \"'\": null,\n  |||\n\n\n  |||: null,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/escaped_single_quote.jsonnet",
+      "input": "\"\\\\'\"",
+      "output": "\"\\\\'\"\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_code.jsonnet",
+      "input": "std.extVar(\"codeVar\")\n",
+      "output": "std.extVar('codeVar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_error.jsonnet",
+      "input": "std.extVar(\"errorVar\")\n",
+      "output": "std.extVar('errorVar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_hermetic.jsonnet",
+      "input": "local x = 42; std.extVar(\"UndeclaredX\")\n",
+      "output": "local x = 42; std.extVar('UndeclaredX')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_mutually_recursive.jsonnet",
+      "input": "std.extVar(\"mutuallyRecursiveVar1\")\n",
+      "output": "std.extVar('mutuallyRecursiveVar1')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_not_a_string.jsonnet",
+      "input": "std.extVar(42)\n",
+      "output": "std.extVar(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_self_recursive.jsonnet",
+      "input": "std.extVar(\"selfRecursiveVar\")\n",
+      "output": "std.extVar('selfRecursiveVar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_static_error.jsonnet",
+      "input": "std.extVar(\"staticErrorVar\")\n",
+      "output": "std.extVar('staticErrorVar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_string.jsonnet",
+      "input": "std.extVar(\"stringVar\")\n",
+      "output": "std.extVar('stringVar')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/extvar_unknown.jsonnet",
+      "input": "std.extVar(\"UNKNOWN\")\n",
+      "output": "std.extVar('UNKNOWN')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/false.jsonnet",
+      "input": "false\n",
+      "output": "false\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/fieldname_not_string.jsonnet",
+      "input": "{ [1234]: 42 }\n",
+      "output": "{ [1234]: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/filled_thunk.jsonnet",
+      "input": "local x = [1, 2, 3]; x[1] + x[1]",
+      "output": "local x = [1, 2, 3]; x[1] + x[1]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldl_empty.jsonnet",
+      "input": "std.foldl(function(i, v) i + v, [], null)\n",
+      "output": "std.foldl(function(i, v) i + v, [], null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldl_single_element.jsonnet",
+      "input": "std.foldl(function(i, v) i + v, 'b', 'a')\n",
+      "output": "std.foldl(function(i, v) i + v, 'b', 'a')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldl_string.jsonnet",
+      "input": "std.foldl(function(i, v) i + v + v, 'bcd', 'a')\n",
+      "output": "std.foldl(function(i, v) i + v + v, 'bcd', 'a')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldl_various.jsonnet",
+      "input": "std.foldl(function(i, v) i + std.toString(v), ['a', 2, [1, 2, 3], { foo: 'bar' }], '')\n",
+      "output": "std.foldl(function(i, v) i + std.toString(v), ['a', 2, [1, 2, 3], { foo: 'bar' }], '')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldr_empty.jsonnet",
+      "input": "std.foldr(function(i, v) i + v, [], null)\n",
+      "output": "std.foldr(function(i, v) i + v, [], null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldr_single_element.jsonnet",
+      "input": "std.foldr(function(v, i) i + v, 'b', 'a')\n",
+      "output": "std.foldr(function(v, i) i + v, 'b', 'a')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldr_string.jsonnet",
+      "input": "std.foldr(function(v, i) i + v + v, 'bcd', 'a')\n",
+      "output": "std.foldr(function(v, i) i + v + v, 'bcd', 'a')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/foldr_various.jsonnet",
+      "input": "std.foldr(function(v, i) i + std.toString(v), ['a', 2, [1, 2, 3], { foo: 'bar' }], '')\n",
+      "output": "std.foldr(function(v, i) i + std.toString(v), ['a', 2, [1, 2, 3], { foo: 'bar' }], '')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_call.jsonnet",
+      "input": "(function() 42)()",
+      "output": "(function() 42)()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_capturing.jsonnet",
+      "input": "local y = 17; (function(x) y)(42)",
+      "output": "local y = 17; (function(x) y)(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_in_object.jsonnet",
+      "input": "local r = {f: function(x) 42};r.f(null)",
+      "output": "local r = { f: function(x) 42 }; r.f(null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_manifested.jsonnet",
+      "input": "{\n    f(x): 3,\n}\n",
+      "output": "{\n  f(x): 3,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_no_params.jsonnet",
+      "input": "function() 42",
+      "output": "function() 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_plus_bad.jsonnet",
+      "input": "(function() 42) +  42\n",
+      "output": "(function() 42) + 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_plus_string.jsonnet",
+      "input": "(function() 42) + \"xxx\"\n",
+      "output": "(function() 42) + 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_too_many_params.jsonnet",
+      "input": "function(x) 3\n",
+      "output": "function(x) 3\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/function_with_argument.jsonnet",
+      "input": "(function(x) x)(42)",
+      "output": "(function(x) x)(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/greater.jsonnet",
+      "input": "if 1 \u003e 2 then error \"x\"",
+      "output": "if 1 \u003e 2 then error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/greaterEq.jsonnet",
+      "input": "if 1 \u003e= 2 then error \"x\"",
+      "output": "if 1 \u003e= 2 then error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/greaterEq2.jsonnet",
+      "input": "if 1 \u003e= 1 then 42",
+      "output": "if 1 \u003e= 1 then 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/ifthen_false.jsonnet",
+      "input": "if true then 42",
+      "output": "if true then 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/ifthenelse_false.jsonnet",
+      "input": "if false then error \"no way\" else 42",
+      "output": "if false then error 'no way' else 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/ifthenelse_true.jsonnet",
+      "input": "if true then 42 else error \"no way\"",
+      "output": "if true then 42 else error 'no way'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import.jsonnet",
+      "input": "import \"true.jsonnet\"\n",
+      "output": "import 'true.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import2.jsonnet",
+      "input": "import \"false.jsonnet\"\n",
+      "output": "import 'false.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import3.jsonnet",
+      "input": "importstr \"true.jsonnet\"\n",
+      "output": "importstr 'true.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import4.jsonnet",
+      "input": "importstr \"false.jsonnet\"\n",
+      "output": "importstr 'false.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import_block_literal.jsonnet",
+      "input": "import |||\n\tblock_literals_for_imports_are_not_allowed_and_make_exactly_zero_sense\n|||\n",
+      "output": "go-jsonnet/testdata/import_block_literal.jsonnet:(1:8)-(3:4) Block string literals not allowed in imports",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/import_computed.jsonnet",
+      "input": "import \"a\" + \"b\"\n",
+      "output": "go-jsonnet/testdata/import_computed.jsonnet:1:8-17 Computed imports are not allowed",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/import_failure_directory.jsonnet",
+      "input": "// Test for the case when the imported thing exists, but there\n// is an error. In this case it's not even a file.\nimport '.'\n",
+      "output": "// Test for the case when the imported thing exists, but there\n// is an error. In this case it's not even a file.\nimport '.'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import_syntax_error.jsonnet",
+      "input": "import \"syntax_error.jsonnet\"\n",
+      "output": "import 'syntax_error.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import_twice.jsonnet",
+      "input": "local x = importstr \"import.jsonnet\";\nlocal y = importstr \"import.jsonnet\";\nx + y",
+      "output": "local x = importstr 'import.jsonnet';\nlocal y = importstr 'import.jsonnet';\nx + y\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/import_various_literals.jsonnet",
+      "input": "[\n\timport \"true.jsonnet\",\n\timport 'true.jsonnet',\n\timport @\"true.jsonnet\",\n\timport @'true.jsonnet',\n]\n",
+      "output": "[\n  import 'true.jsonnet',\n  import 'true.jsonnet',\n  import @\"true.jsonnet\",\n  import @'true.jsonnet',\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/importbin_block_literal.jsonnet",
+      "input": "importbin |||\n\tblock_literals_for_imports_are_not_allowed_and_make_exactly_zero_sense\n|||\n",
+      "output": "go-jsonnet/testdata/importbin_block_literal.jsonnet:(1:11)-(3:4) Block string literals not allowed in imports",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/importbin_computed.jsonnet",
+      "input": "importbin \"a\" + \"b\"\n",
+      "output": "go-jsonnet/testdata/importbin_computed.jsonnet:1:11-20 Computed imports are not allowed",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/importbin_nonutf8.jsonnet",
+      "input": "importbin \"nonutf8.bin\"\n",
+      "output": "importbin 'nonutf8.bin'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/importstr_block_literal.jsonnet",
+      "input": "importstr |||\n\tblock_literals_for_imports_are_not_allowed_and_make_exactly_zero_sense\n|||\n",
+      "output": "go-jsonnet/testdata/importstr_block_literal.jsonnet:(1:11)-(3:4) Block string literals not allowed in imports",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/importstr_computed.jsonnet",
+      "input": "importstr \"a\" + \"b\"\n",
+      "output": "go-jsonnet/testdata/importstr_computed.jsonnet:1:11-20 Computed imports are not allowed",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/in.jsonnet",
+      "input": "\"x\" in { \"x\": 42 }\n",
+      "output": "'x' in { x: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/in2.jsonnet",
+      "input": "\"x\" in { }\n",
+      "output": "'x' in {}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/in3.jsonnet",
+      "input": "\"x\" in { x: 42, y: 42 }\n",
+      "output": "'x' in { x: 42, y: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/in4.jsonnet",
+      "input": "\"x\" in { assert false }\n",
+      "output": "'x' in { assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/inf_min_number.jsonnet",
+      "input": "-1e308 - 1e308\n",
+      "output": "-1e308 - 1e308\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/inf_mul_number.jsonnet",
+      "input": "1e300 * 1000000000",
+      "output": "1e300 * 1000000000\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/inf_sum_number.jsonnet",
+      "input": "1e308 + 1e308\n",
+      "output": "1e308 + 1e308\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper.jsonnet",
+      "input": "{ x: 42 } { assert \"x\" in super }\n",
+      "output": "{ x: 42 } { assert 'x' in super }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper2.jsonnet",
+      "input": "{ } { x: \"x\" in super }\n",
+      "output": "{} { x: 'x' in super }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper3.jsonnet",
+      "input": "{ \"false\": \"x\" in super }\n",
+      "output": "{ 'false': 'x' in super }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper4.jsonnet",
+      "input": "\"x\" in super\n",
+      "output": " 'x' in super\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper5.jsonnet",
+      "input": "{ x: 42 } { y: { \"false\": \"x\" in super } }\n",
+      "output": "{ x: 42 } { y: { 'false': 'x' in super } }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper6.jsonnet",
+      "input": "{ assert undeclared in super }\n",
+      "output": "{ assert undeclared in super }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/insuper7.jsonnet",
+      "input": "std.type({ assert false } { x: \"x\" in super })\n",
+      "output": "std.type({ assert false } { x: 'x' in super })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/lazy.jsonnet",
+      "input": "local x = {'x': error \"blah\"}, f = function(x) 42, z = x.x; f(x.x)",
+      "output": "local x = { x: error 'blah' }, f = function(x) 42, z = x.x; f(x.x)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/lazy_operator1.jsonnet",
+      "input": "false \u0026\u0026 error \"shouldn't happen\"",
+      "output": "false \u0026\u0026 error \"shouldn't happen\"\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/lazy_operator2.jsonnet",
+      "input": "true \u0026\u0026 error \"should happen\"",
+      "output": "true \u0026\u0026 error 'should happen'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/less.jsonnet",
+      "input": "if 2 \u003c 1 then error \"x\"",
+      "output": "if 2 \u003c 1 then error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/lessEq.jsonnet",
+      "input": "if 2 \u003c= 1 then error \"x\"",
+      "output": "if 2 \u003c= 1 then error 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/lessEq2.jsonnet",
+      "input": "if 2 \u003c= 2 then 42",
+      "output": "if 2 \u003c= 2 then 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/local_in_object_assertion.jsonnet",
+      "input": "{ local x = 42, assert x == 42 }",
+      "output": "{ local x = 42, assert x == 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/local_within_nested_object.jsonnet",
+      "input": "local a = 42; {x: {x: a,},}.x.x",
+      "output": "local a = 42; { x: { x: a } }.x.x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/local_within_object.jsonnet",
+      "input": "local a = 42; {x: a,}.x",
+      "output": "local a = 42; { x: a }.x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/method_call.jsonnet",
+      "input": "local r = {f(a): 42};r.f(null)",
+      "output": "local r = { f(a): 42 }; r.f(null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/missing_super.jsonnet",
+      "input": "{ x: super.x }\n",
+      "output": "{ x: super.x }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo.jsonnet",
+      "input": "std.modulo(16, 3)\n",
+      "output": "std.modulo(16, 3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo2.jsonnet",
+      "input": "std.modulo(42, 3)\n",
+      "output": "std.modulo(42, 3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo3.jsonnet",
+      "input": "std.modulo(16, -3)\n",
+      "output": "std.modulo(16, -3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo4.jsonnet",
+      "input": "std.modulo(-16, 3)\n",
+      "output": "std.modulo(-16, 3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo5.jsonnet",
+      "input": "std.modulo(-16, -3)\n",
+      "output": "std.modulo(-16, -3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo6.jsonnet",
+      "input": "std.modulo(15.5, 1)\n",
+      "output": "std.modulo(15.5, 1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/modulo7.jsonnet",
+      "input": "std.modulo(42, 2.5)\n",
+      "output": "std.modulo(42, 2.5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/mult.jsonnet",
+      "input": "2 * 2\n",
+      "output": "2 * 2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/mult2.jsonnet",
+      "input": "2 * (-2)\n",
+      "output": "2 * (-2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/mult3.jsonnet",
+      "input": "42 * 42\n",
+      "output": "42 * 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/multi.jsonnet",
+      "input": "{\n  \"foo.json\": {\n    baz: 3,\n    baq: \"27\",\n  },\n  \"bar.json\": {\n    foo: {\n      bar: {\n        baz: \"yes\",\n      },\n    },\n  },\n}\n",
+      "output": "{\n  'foo.json': {\n    baz: 3,\n    baq: '27',\n  },\n  'bar.json': {\n    foo: {\n      bar: {\n        baz: 'yes',\n      },\n    },\n  },\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/multi_no_newline.jsonnet",
+      "input": "{\n  \"foo.json\": {\n    baz: 3,\n    baq: \"27\",\n  },\n  \"bar.json\": {\n    foo: {\n      bar: {\n        baz: \"yes\",\n      },\n    },\n  },\n}\n",
+      "output": "{\n  'foo.json': {\n    baz: 3,\n    baq: '27',\n  },\n  'bar.json': {\n    foo: {\n      bar: {\n        baz: 'yes',\n      },\n    },\n  },\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/multi_no_newline_string_output.jsonnet",
+      "input": "{\n    \"foo.txt\": |||-\n        foo.\n    |||,\n    \"bar.txt\": \"bar\",\n}\n",
+      "output": "{\n  'foo.txt': |||-\n    foo.\n  |||,\n  'bar.txt': 'bar',\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/multi_string_output.jsonnet",
+      "input": "{\n    \"foo.txt\": |||-\n        foo.\n    |||,\n    \"bar.txt\": \"bar\",\n}\n",
+      "output": "{\n  'foo.txt': |||-\n    foo.\n  |||,\n  'bar.txt': 'bar',\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native1.jsonnet",
+      "input": "std.native(\"jsonToString\")(\"test\")\n",
+      "output": "std.native('jsonToString')('test')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native2.jsonnet",
+      "input": "std.native(\"jsonToString\")({})\n",
+      "output": "std.native('jsonToString')({})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native3.jsonnet",
+      "input": "std.native(\"jsonToString\")({\"x\": {\"y\": \"z\"}, \"xx\": 42})\n",
+      "output": "std.native('jsonToString')({ x: { y: 'z' }, xx: 42 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native4.jsonnet",
+      "input": "std.native(\"jsonToString\")(error \"xxx\")\n",
+      "output": "std.native('jsonToString')(error 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native5.jsonnet",
+      "input": "std.native(\"jsonToString\")(function() 42)\n",
+      "output": "std.native('jsonToString')(function() 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native6.jsonnet",
+      "input": "std.native(\"jsonToString\")(x={})\n",
+      "output": "std.native('jsonToString')(x={})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native7.jsonnet",
+      "input": "std.native(\"jsonToString\")(y={})\n",
+      "output": "std.native('jsonToString')(y={})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native_error.jsonnet",
+      "input": "std.native(\"nativeError\")()\n",
+      "output": "std.native('nativeError')()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native_nonexistent.jsonnet",
+      "input": "std.native(\"blah\")\n",
+      "output": "std.native('blah')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/native_panic.jsonnet",
+      "input": "std.native(\"nativePanic\")()\n",
+      "output": "std.native('nativePanic')()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/nonexistent_import.jsonnet",
+      "input": "importstr 'no chance a file with this name exists'\n",
+      "output": "importstr 'no chance a file with this name exists'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/nonexistent_import_crazy.jsonnet",
+      "input": "importstr \"ąęółńśćźż \\\" \\' \\n\\n\\t\\t\"\n",
+      "output": "importstr \"ąęółńśćźż \\\" \\' \\n\\n\\t\\t\"\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/number_divided_by_string.jsonnet",
+      "input": "42 / \"xxx\"\n",
+      "output": "42 / 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/number_leading_zero.jsonnet",
+      "input": "042\n",
+      "output": "go-jsonnet/testdata/number_leading_zero.jsonnet:1:2-4 Did not expect: (NUMBER, \"42\")",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/number_times_string.jsonnet",
+      "input": "42 * \"xxx\"\n",
+      "output": "42 * 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/numeric_literal.jsonnet",
+      "input": "100",
+      "output": "100\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/obj_local_right_level.jsonnet",
+      "input": "{\n    bar: 0\n} + {\n    local foo = super.bar + 1,\n    bar: foo\n} + {} + {} + {}",
+      "output": "{\n  bar: 0,\n} + {\n  local foo = super.bar + 1,\n  bar: foo,\n} + {} + {} + {}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/obj_local_right_level2.jsonnet",
+      "input": "{\n    local foo = self.bar,\n    bar: \"wrong\",\n    answer: foo\n} + {\n    bar: \"right\"\n}",
+      "output": "{\n  local foo = self.bar,\n  bar: 'wrong',\n  answer: foo,\n} + {\n  bar: 'right',\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/obj_local_right_level3.jsonnet",
+      "input": "{\n    bar: \"right\",\n} + {\n    local foo = super.bar,\n    bar: \"wrong1\",\n    answer: foo,\n} + {\n    bar: \"wrong2\"\n}",
+      "output": "{\n  bar: 'right',\n} + {\n  local foo = super.bar,\n  bar: 'wrong1',\n  answer: foo,\n} + {\n  bar: 'wrong2',\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object.jsonnet",
+      "input": "{\"x\": 1+1}",
+      "output": "{ x: 1 + 1 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp.jsonnet",
+      "input": "{ [x]: 42 for x in [\"a\", \"b\", \"c\"] }\n",
+      "output": "{ [x]: 42 for x in ['a', 'b', 'c'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp2.jsonnet",
+      "input": "{ [x]: error \"xxx\" for x in [] }\n",
+      "output": "{ [x]: error 'xxx' for x in [] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp3.jsonnet",
+      "input": "{[v]: v for v in [\"x\", \"y\", \"z\"] }\n",
+      "output": "{ [v]: v for v in ['x', 'y', 'z'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp4.jsonnet",
+      "input": "local data = {\n  a: 'A',\n  b: 'B',\n};\n\nlocal process(input) = {\n  local v = input[k],\n  [k]: v\n  for k in std.objectFields(input)\n};\n\nprocess(data)\n",
+      "output": "local data = {\n  a: 'A',\n  b: 'B',\n};\n\nlocal process(input) = {\n  local v = input[k],\n  [k]: v\n  for k in std.objectFields(input)\n};\n\nprocess(data)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_assert.jsonnet",
+      "input": "{ assert self.x == 5, [\"x\"]: 5 for i in [42] }\n",
+      "output": "go-jsonnet/testdata/object_comp_assert.jsonnet:1:32-35 Object comprehension cannot have asserts",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_bad_field.jsonnet",
+      "input": "{ x: 42 for _ in [1] }\n",
+      "output": "go-jsonnet/testdata/object_comp_bad_field.jsonnet:1:9-12 Object comprehensions can only have [e] fields",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_bad_field2.jsonnet",
+      "input": "{ \"x\": 42 for _ in [1] }\n",
+      "output": "go-jsonnet/testdata/object_comp_bad_field2.jsonnet:1:11-14 Object comprehensions can only have [e] fields",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_dollar.jsonnet",
+      "input": "{ [x]: if x == \"a\" then 42 else $.a + 1 for x in [\"a\", \"b\", \"c\"] }\n",
+      "output": "{ [x]: if x == 'a' then 42 else $.a + 1 for x in ['a', 'b', 'c'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_dollar2.jsonnet",
+      "input": "{ [x]: { a: 1, b: if x == \"a\" then 42 else $.a.b + 1 } for x in [\"a\", \"b\", \"c\"] }\n",
+      "output": "{ [x]: { a: 1, b: if x == 'a' then 42 else $.a.b + 1 } for x in ['a', 'b', 'c'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_dollar3.jsonnet",
+      "input": "local obj = { [x]: if x == \"a\" then 42 else $.a + 1 for x in [\"a\", \"b\", \"c\"] };\n{ obj: obj + {a: 1} }\n\n",
+      "output": "local obj = { [x]: if x == 'a' then 42 else $.a + 1 for x in ['a', 'b', 'c'] };\n{ obj: obj { a: 1 } }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_duplicate.jsonnet",
+      "input": "{ [x]: x for x in [\"x\", \"x\"] }\n",
+      "output": "{ [x]: x for x in ['x', 'x'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_err_elem.jsonnet",
+      "input": "{ [\"x\"]:  error \"xxx\" for x in [1] }\n",
+      "output": "{ x: error 'xxx' for x in [1] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_err_index.jsonnet",
+      "input": "{ [error \"xxx\"]: 42 for x in [1] }\n",
+      "output": "{ [error 'xxx']: 42 for x in [1] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_if.jsonnet",
+      "input": "{ [x]: 42 for x in [\"a\", \"b\", \"bb\", \"c\"] if x[0] == \"b\" }\n",
+      "output": "{ [x]: 42 for x in ['a', 'b', 'bb', 'c'] if x[0] == 'b' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_illegal.jsonnet",
+      "input": "{ local x = 5 for y in [1, 2, 3] }\n",
+      "output": "go-jsonnet/testdata/object_comp_illegal.jsonnet:1:15-18 Object comprehension can only have one field",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_int_index.jsonnet",
+      "input": "{ [x]: x for x in [1, 2, 3] }\n",
+      "output": "{ [x]: x for x in [1, 2, 3] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_local.jsonnet",
+      "input": "local a = \"b\"; {local tmp = a, [name]: std.parseHex(\"aa\") + tmp for name in [\"a\"]}",
+      "output": "local a = 'b'; { local tmp = a, [name]: std.parseHex('aa') + tmp for name in ['a'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_local2.jsonnet",
+      "input": "{local tmp = std.parseHex(\"ff\"), [name]: std.parseHex(\"aa\") + tmp for name in [\"a\"]}",
+      "output": "{ local tmp = std.parseHex('ff'), [name]: std.parseHex('aa') + tmp for name in ['a'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_local3.jsonnet",
+      "input": "{local tmp = std.parseHex(\"ff\"), [name]: tmp for name in [\"a\"]}",
+      "output": "{ local tmp = std.parseHex('ff'), [name]: tmp for name in ['a'] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_super.jsonnet",
+      "input": "{x: 1, y: 2, z: 3} +\n{[v]: [super.x, v] for v in [\"x\", \"y\", \"z\"] } +\n{[v]: self.q + v for v in [\"a\", \"b\", \"c\"]} +\n{q: 42}\n",
+      "output": "{ x: 1, y: 2, z: 3 } +\n{ [v]: [super.x, v] for v in ['x', 'y', 'z'] } +\n{ [v]: self.q + v for v in ['a', 'b', 'c'] } +\n{ q: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_try_iterate_over_obj.jsonnet",
+      "input": "{ [a]: 0 for a in {} }\n",
+      "output": "{ [a]: 0 for a in {} }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_comp_try_iterate_over_string.jsonnet",
+      "input": "{ [a]: 0 for a in 'b' }\n",
+      "output": "{ [a]: 0 for a in 'b' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_hidden.jsonnet",
+      "input": "local progressive = {\n\tf1: 1,\n\tf2:: 2,\n\tf3::: 3\n};\nlocal all_inherit = {\n\tf1: 4,\n\tf2: 5,\n\tf3: 6\n};\nlocal all_hidden = {\n\tf1:: 7,\n\tf2:: 8,\n\tf3:: 9,\n};\nlocal all_visible = {\n\tf1::: 10,\n\tf2::: 11,\n\tf3::: 12\n};\n[\n\tprogressive,\n\tall_inherit,\n\tall_hidden,\n\tall_visible,\n\tprogressive + all_inherit,\n\tprogressive + all_hidden,\n\tprogressive + all_visible,\n\tall_hidden + all_visible,\n\tall_visible + all_hidden,\n\tall_hidden + all_inherit,\n\tall_visible + all_inherit,\n\tall_inherit + all_inherit,\n\tall_inherit + progressive,\n\tall_visible + progressive,\n\tall_hidden + progressive,\n\tprogressive + (all_hidden + all_inherit)\n]\n\n",
+      "output": "local progressive = {\n  f1: 1,\n  f2:: 2,\n  f3::: 3,\n};\nlocal all_inherit = {\n  f1: 4,\n  f2: 5,\n  f3: 6,\n};\nlocal all_hidden = {\n  f1:: 7,\n  f2:: 8,\n  f3:: 9,\n};\nlocal all_visible = {\n  f1::: 10,\n  f2::: 11,\n  f3::: 12,\n};\n[\n  progressive,\n  all_inherit,\n  all_hidden,\n  all_visible,\n  progressive + all_inherit,\n  progressive + all_hidden,\n  progressive + all_visible,\n  all_hidden + all_visible,\n  all_visible + all_hidden,\n  all_hidden + all_inherit,\n  all_visible + all_inherit,\n  all_inherit + all_inherit,\n  all_inherit + progressive,\n  all_visible + progressive,\n  all_hidden + progressive,\n  progressive + (all_hidden + all_inherit),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_implicit_plus1.jsonnet",
+      "input": "{a:1}{b:2}\n",
+      "output": "{ a: 1 } { b: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant.jsonnet",
+      "input": "{ assert true }\n",
+      "output": "{ assert true }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant10.jsonnet",
+      "input": "{ assert true, assert false }\n",
+      "output": "{ assert true, assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant11.jsonnet",
+      "input": "{ assert false }.x\n",
+      "output": "{ assert false }.x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant12.jsonnet",
+      "input": "{ assert 5 == 5 }\n",
+      "output": "{ assert 5 == 5 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant13.jsonnet",
+      "input": "{ assert error \"x\" }\n",
+      "output": "{ assert error 'x' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant14.jsonnet",
+      "input": "{ assert false: \"xxx\" }\n",
+      "output": "{ assert false : 'xxx' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant2.jsonnet",
+      "input": "{ assert false }\n",
+      "output": "{ assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant3.jsonnet",
+      "input": "std.objectFields({assert false})\n",
+      "output": "std.objectFields({ assert false })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant4.jsonnet",
+      "input": "std.objectHas({assert false}, \"x\")\n",
+      "output": "std.objectHas({ assert false }, 'x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant5.jsonnet",
+      "input": "std.type({assert false})\n",
+      "output": "std.type({ assert false })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant6.jsonnet",
+      "input": "{assert self.x == 5, x: 5}\n",
+      "output": "{ assert self.x == 5, x: 5 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant7.jsonnet",
+      "input": "{ x: 5, assert super.x == 5 } \n",
+      "output": "{ x: 5, assert super.x == 5 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant8.jsonnet",
+      "input": "{ x: 5, assert self.x == 4 }\n",
+      "output": "{ x: 5, assert self.x == 4 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant9.jsonnet",
+      "input": "{ assert true, assert false } \n",
+      "output": "{ assert true, assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_perf.jsonnet",
+      "input": "local arr = [{v: -1}] + std.makeArray(150, function(x) { v: x, assert arr[x].v == self.v - 1 });\narr\n",
+      "output": "local arr = [{ v: -1 }] + std.makeArray(150, function(x) { v: x, assert arr[x].v == self.v - 1 });\narr\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus.jsonnet",
+      "input": "{assert false} + {assert true}\n",
+      "output": "{ assert false } + { assert true }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus2.jsonnet",
+      "input": "{assert true} + {assert false}\n",
+      "output": "{ assert true } + { assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus3.jsonnet",
+      "input": "{assert true} + {assert true}\n",
+      "output": "{ assert true } + { assert true }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus4.jsonnet",
+      "input": "{assert self.x == 5} { x: 5 } \n",
+      "output": "{ assert self.x == 5 } { x: 5 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus5.jsonnet",
+      "input": "{x: 1, assert self.x == 3} {x: 2, assert super.x == 1} {x: 3, assert super.x == 2}\n",
+      "output": "{ x: 1, assert self.x == 3 } { x: 2, assert super.x == 1 } { x: 3, assert super.x == 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus6.jsonnet",
+      "input": "{ assert false: \"xxx\" } { assert false: \"yyy\" }\n",
+      "output": "{ assert false : 'xxx' } { assert false : 'yyy' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_invariant_plus7.jsonnet",
+      "input": "({x: 1} {x: 2, assert 1 == super.x}) +\n({x: 3, assert 2 == super.x} {x: 4, assert 3 == super.x})\n",
+      "output": "({ x: 1 } { x: 2, assert 1 == super.x }) +\n({ x: 3, assert 2 == super.x } { x: 4, assert 3 == super.x })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_literal_in_array_comp.jsonnet",
+      "input": "[42 for i in [{}]]",
+      "output": "[42 for i in [{}]]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_literal_in_object_comp.jsonnet",
+      "input": "{ [\"a\"]: 42 for i in [{}]}",
+      "output": "{ a: 42 for i in [{}] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local.jsonnet",
+      "input": "{ local foo(bar) = bar, baz: foo(42) }\n\n",
+      "output": "{ local foo(bar) = bar, baz: foo(42) }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local_from_parent.jsonnet",
+      "input": "{\n    local a = 42,\n    f: {\n        local b = a,\n        f: b\n    }\n}",
+      "output": "{\n  local a = 42,\n  f: {\n    local b = a,\n    f: b,\n  },\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local_from_parent_through_local.jsonnet",
+      "input": "{\n    local a = 42,\n    local b = {\n        local c = a,\n        f: c\n    },\n    f: b\n}",
+      "output": "{\n  local a = 42,\n  local b = {\n    local c = a,\n    f: c,\n  },\n  f: b,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local_recursive.jsonnet",
+      "input": "{\n    local a = [a[1], 0],\n    local b = d,\n    local c = a,\n    local d = a + [1],\n    field: [a, b, c, d]\n}",
+      "output": "{\n  local a = [a[1], 0],\n  local b = d,\n  local c = a,\n  local d = a + [1],\n  field: [a, b, c, d],\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local_self_super.jsonnet",
+      "input": "{ local x = self, y:: x, z: 42, foo: \"xxx\" } { local x = super.y, foo: x.z, bar: x.foo, baz: super.foo }\n",
+      "output": "{ local x = self, y:: x, z: 42, foo: 'xxx' } { local x = super.y, foo: x.z, bar: x.foo, baz: super.foo }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_local_uses_local_from_outside.jsonnet",
+      "input": "local a = 42; { local x = a, field: x }",
+      "output": "local a = 42; { local x = a, field: x }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_no_newline.jsonnet",
+      "input": "{\"x\": 1+1}\n",
+      "output": "{ x: 1 + 1 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_plus_bad.jsonnet",
+      "input": "{} + 42\n",
+      "output": "{} + 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_sum.jsonnet",
+      "input": "{} + {}",
+      "output": "{} + {}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_sum2.jsonnet",
+      "input": "{\"a\": 1} + {\"a\": 2}",
+      "output": "{ a: 1 } + { a: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_sum3.jsonnet",
+      "input": "{\"a\": 1} + {\"b\": 2}",
+      "output": "{ a: 1 } + { b: 2 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_super.jsonnet",
+      "input": "{\"a\": 1} + {\"a\": 2, b: super.a}",
+      "output": "{ a: 1 } + { a: 2, b: super.a }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_super_deep.jsonnet",
+      "input": "{\"a\": 1} + {} + {\"a\": 2, b: super.a}",
+      "output": "{ a: 1 } + {} + { a: 2, b: super.a }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_super_within.jsonnet",
+      "input": "{\"a\": 42, d: 1} + {c: super.d, d: 42} + {\"a\": 2, b: super.c, d: 42}",
+      "output": "{ a: 42, d: 1 } + { c: super.d, d: 42 } + { a: 2, b: super.c, d: 42 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_various_field_types.jsonnet",
+      "input": "{\n\tidentifier: true,\n\t\"str_double ' \\n\": true,\n\t'str_single \" \\n': true,\n\t|||\n\t\tstr_block \\n\n\t|||: true,\n\t@\"str_verbatim_double \"\" '' \\n\": true,\n\t@'str_verbatim_single \"\" '' \\n': true,\n\t[\"expr, \" + \"as complex as you want\"]: true,\n\tlocal local_field = true,\n\tassert true\n}\n",
+      "output": "{\n  identifier: true,\n  \"str_double ' \\n\": true,\n  'str_single \" \\n': true,\n  |||\n    str_block \\n\n  |||: true,\n  @\"str_verbatim_double \"\" '' \\n\": true,\n  @'str_verbatim_single \"\" '' \\n': true,\n  ['expr, ' + 'as complex as you want']: true,\n  local local_field = true,\n  assert true,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/object_within_object.jsonnet",
+      "input": "{x: {y: 42}}.x.y",
+      "output": "{ x: { y: 42 } }.x.y\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args.jsonnet",
+      "input": "local foo(x=42) = x; foo()\n",
+      "output": "local foo(x=42) = x; foo()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args10.jsonnet",
+      "input": "(function(x, y) x)(y=1, x=2)\n",
+      "output": "(function(x, y) x)(y=1, x=2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args11.jsonnet",
+      "input": "(function(x, y) 42)(42, x=42)\n",
+      "output": "(function(x, y) 42)(42, x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args12.jsonnet",
+      "input": "(function(x=42, y=42) 42)(y=42)\n",
+      "output": "(function(x=42, y=42) 42)(y=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args13.jsonnet",
+      "input": "(function(x, y) 42)(x=42)\n",
+      "output": "(function(x, y) 42)(x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args14.jsonnet",
+      "input": "(function(a=b, b=a) 42)()\n",
+      "output": "(function(a=b, b=a) 42)()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args15.jsonnet",
+      "input": "{ g: 42, f(a=self.g): a }.f()\n",
+      "output": "{ g: 42, f(a=self.g): a }.f()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args16.jsonnet",
+      "input": "(function(x=17) x)(42)\n",
+      "output": "(function(x=17) x)(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args17.jsonnet",
+      "input": "(function(x, y=42) x + y)(y=1, x=2)\n",
+      "output": "(function(x, y=42) x + y)(y=1, x=2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args18.jsonnet",
+      "input": "(function(a1=1, a2=a1+1, a3=a2+1, a4=a3+1) [a1, a2, a3, a4])(a1=42)\n",
+      "output": "(function(a1=1, a2=a1 + 1, a3=a2 + 1, a4=a3 + 1) [a1, a2, a3, a4])(a1=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args19.jsonnet",
+      "input": "(function(a1=a2+1, a2=a3+1, a3=a4+1, a4=1) [a1, a2, a3, a4])(a4=42)\n",
+      "output": "(function(a1=a2 + 1, a2=a3 + 1, a3=a4 + 1, a4=1) [a1, a2, a3, a4])(a4=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args2.jsonnet",
+      "input": "local x = 1;\nlocal foo(x=2, y=3, z=x) = {x: x, y: y, z: z};\nlocal x = 4;\nfoo(y=x)\n",
+      "output": "local x = 1;\nlocal foo(x=2, y=3, z=x) = { x: x, y: y, z: z };\nlocal x = 4;\nfoo(y=x)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args20.jsonnet",
+      "input": "(function(x, a1=[x, a2[1] + 1], a2=[a1[0] + 1, a3[1] + 1], a3=[a2[0] + 1, a4[1] + 1], a4=[a3[0] + 1, a4[0] + 1]) [a1, a2, a3, a4])(x=42)\n",
+      "output": "(function(x, a1=[x, a2[1] + 1], a2=[a1[0] + 1, a3[1] + 1], a3=[a2[0] + 1, a4[1] + 1], a4=[a3[0] + 1, a4[0] + 1]) [a1, a2, a3, a4])(x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args21.jsonnet",
+      "input": "local foo(x=2, z=x) = x;\nfoo()\n",
+      "output": "local foo(x=2, z=x) = x;\nfoo()\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args22.jsonnet",
+      "input": "local foo(x) = local bar(y=x) = [x, y]; bar;\n[foo(42)(), foo(42)(17)]\n",
+      "output": "local foo(x) = local bar(y=x) = [x, y]; bar;\n[foo(42)(), foo(42)(17)]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args3.jsonnet",
+      "input": "local x = 1;\nlocal foo(x=2, y=3, z=x) = {x: x, y: y, z: z};\nfoo(y=x)\n",
+      "output": "local x = 1;\nlocal foo(x=2, y=3, z=x) = { x: x, y: y, z: z };\nfoo(y=x)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args4.jsonnet",
+      "input": "local x = 1;\nlocal foo(x=2, y=3, z=x) = {x: x, y: y, z: z};\nlocal x = 4;\nfoo(x=5, y=x)\n",
+      "output": "local x = 1;\nlocal foo(x=2, y=3, z=x) = { x: x, y: y, z: z };\nlocal x = 4;\nfoo(x=5, y=x)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args5.jsonnet",
+      "input": "local foo(x, y=x) = y;\nfoo(42)\n",
+      "output": "local foo(x, y=x) = y;\nfoo(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args6.jsonnet",
+      "input": "local foo(x, y=x) = y;\nfoo(x=42)\n",
+      "output": "local foo(x, y=x) = y;\nfoo(x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args7.jsonnet",
+      "input": "local foo(x) = x;\nfoo(x=42)\n",
+      "output": "local foo(x) = x;\nfoo(x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args8.jsonnet",
+      "input": "local foo(x=42) = x;\nfoo(y=17)\n",
+      "output": "local foo(x=42) = x;\nfoo(y=17)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/optional_args9.jsonnet",
+      "input": "(function(x) x)(42, x=42)\n",
+      "output": "(function(x) x)(42, x=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or.jsonnet",
+      "input": "false || false\n",
+      "output": "false || false\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or2.jsonnet",
+      "input": "false || true\n",
+      "output": "false || true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or3.jsonnet",
+      "input": "true || error \"xxx\"\n",
+      "output": "true || error 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or4.jsonnet",
+      "input": "false || error \"xxx\"\n",
+      "output": "false || error 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or5.jsonnet",
+      "input": "\"xxx\" || true\n",
+      "output": "'xxx' || true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/or6.jsonnet",
+      "input": "false || \"xxx\"\n",
+      "output": "false || 'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/overriding_stdlib_desugared.jsonnet",
+      "input": "// Make sure shadowing std does not cause problems for desugaring.\nlocal std = {};\n[\n    { [x]: 17 for x in [] },\n    [ x for x in [] ],\n    42 % 2137,\n    \"foo\" in {},\n]",
+      "output": "// Make sure shadowing std does not cause problems for desugaring.\nlocal std = {};\n[\n  { [x]: 17 for x in [] },\n  [x for x in []],\n  42 % 2137,\n  'foo' in {},\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/parseJson.jsonnet",
+      "input": "std.parseJson(\n    '{\n        \"foo\": \"bar\",\n        \"aaa\": {},\n        \"ąę\": \"ćż\",\n        \"xxx\": [\n            42,\n            \"asdf\",\n            {}\n        ]\n    }',\n)",
+      "output": "std.parseJson(\n  '{\\n        \"foo\": \"bar\",\\n        \"aaa\": {},\\n        \"ąę\": \"ćż\",\\n        \"xxx\": [\\n            42,\\n            \"asdf\",\\n            {}\\n        ]\\n    }',\n)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/parseYaml.jsonnet",
+      "input": "[\n  std.parseYaml(text)\n  for text in [\n    // various node types\n    |||\n      foo: bar\n      aaa: {}\n      ąę: ćż\n      xxx:\n      - 42\n      - asdf\n      - {}\n    |||,\n\n    // Returns an array of documents when there is an explicit document(s), i.e.\n    // the text is a \"multi-doc\" stream\n    |||\n      ---\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // The first document in a \"multi-doc\" stream can be an implicit document.\n    |||\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // Whitespaces are allowed after the document start marker\n    |||\n      ---\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // Document start marker needs a following line break or a whitespace.\n    |||\n      a: 1\n      ---a: 2\n      a---: 3\n    |||,\n\n    // Scalar documents can start on the same line as the document-start marker\n    |||\n      a: 1\n      --- \u003e\n        hello\n        world\n      --- 3\n    |||,\n\n    // Documents can be empty; this is interpreted as null\n    |||\n      a: 1\n      ---\n      --- 2\n    |||,\n\n    \"---\",\n  ]\n]\n",
+      "output": "[\n  std.parseYaml(text)\n  for text in [\n    // various node types\n    |||\n      foo: bar\n      aaa: {}\n      ąę: ćż\n      xxx:\n      - 42\n      - asdf\n      - {}\n    |||,\n\n    // Returns an array of documents when there is an explicit document(s), i.e.\n    // the text is a \"multi-doc\" stream\n    |||\n      ---\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // The first document in a \"multi-doc\" stream can be an implicit document.\n    |||\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // Whitespaces are allowed after the document start marker\n    |||\n      ---\n      a: 1\n      ---\n      a: 2\n    |||,\n\n    // Document start marker needs a following line break or a whitespace.\n    |||\n      a: 1\n      ---a: 2\n      a---: 3\n    |||,\n\n    // Scalar documents can start on the same line as the document-start marker\n    |||\n      a: 1\n      --- \u003e\n        hello\n        world\n      --- 3\n    |||,\n\n    // Documents can be empty; this is interpreted as null\n    |||\n      a: 1\n      ---\n      --- 2\n    |||,\n\n    '---',\n  ]\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_bad.jsonnet",
+      "input": "42 % \"x\"\n",
+      "output": "42 % 'x'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_bad2.jsonnet",
+      "input": "\"x\" % 42\n",
+      "output": "'x' % 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_bad3.jsonnet",
+      "input": "(function(x) x) % 42\n",
+      "output": "(function(x) x) % 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_float.jsonnet",
+      "input": "\"%f\" % 0",
+      "output": "'%f' % 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str.jsonnet",
+      "input": "\"x %s\" % [\"y\"]\n",
+      "output": "'x %s' % ['y']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str2.jsonnet",
+      "input": "\"x %s\" % \"y\"\n",
+      "output": "'x %s' % 'y'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str3.jsonnet",
+      "input": "\"x %s %s\" % [\"y\", \"z\"]\n",
+      "output": "'x %s %s' % ['y', 'z']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str4.jsonnet",
+      "input": "\"x %s\" % [\"y\", \"z\"]\n",
+      "output": "'x %s' % ['y', 'z']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str5.jsonnet",
+      "input": "\"x %s %s\" % [\"y\"]\n",
+      "output": "'x %s %s' % ['y']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str6.jsonnet",
+      "input": "\"x %s %s\" % \"y\"\n",
+      "output": "'x %s %s' % 'y'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str7.jsonnet",
+      "input": "\"x %d\" % [\"y\"]\n",
+      "output": "'x %d' % ['y']\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_format_str8.jsonnet",
+      "input": "\"x %(a)s %(b)s\" % {a: \"y\", b: \"z\"}\n",
+      "output": "'x %(a)s %(b)s' % { a: 'y', b: 'z' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int.jsonnet",
+      "input": "42 % 5\n",
+      "output": "42 % 5\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int2.jsonnet",
+      "input": "42 % -5\n",
+      "output": "42 % -5\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int3.jsonnet",
+      "input": "-42 % 5\n",
+      "output": "-42 % 5\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int4.jsonnet",
+      "input": "-42 % -5\n",
+      "output": "-42 % -5\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int5.jsonnet",
+      "input": "42 % 0\n",
+      "output": "42 % 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/percent_mod_int6.jsonnet",
+      "input": "0 % 42\n",
+      "output": "0 % 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus.jsonnet",
+      "input": "1 + 2\n",
+      "output": "1 + 2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus2.jsonnet",
+      "input": "\"a\" + \"b\"\n",
+      "output": "'a' + 'b'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus3.jsonnet",
+      "input": "[1, 2, 3] + [4, 5, 6]\n",
+      "output": "[1, 2, 3] + [4, 5, 6]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus4.jsonnet",
+      "input": "{\"a\": 1, \"b\": 2} + {\"a\": 3, \"c\": 4}\n",
+      "output": "{ a: 1, b: 2 } + { a: 3, c: 4 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus5.jsonnet",
+      "input": "42 + function() 42\n",
+      "output": "42 + function() 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus6.jsonnet",
+      "input": "\"a\" + 42\n",
+      "output": "'a' + 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus7.jsonnet",
+      "input": "42 + \"a\"\n",
+      "output": "42 + 'a'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus8.jsonnet",
+      "input": "{\"x\": 42} + \"a\"\n",
+      "output": "{ x: 42 } + 'a'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/plus9.jsonnet",
+      "input": "\"a\" + [1, 2, 3]\n",
+      "output": "'a' + [1, 2, 3]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/positional_after_optional.jsonnet",
+      "input": "local foo(x=1, y) = [x,y]; foo(y=2)\n",
+      "output": "local foo(x=1, y) = [x, y]; foo(y=2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow.jsonnet",
+      "input": "std.pow(2, 10)\n",
+      "output": "std.pow(2, 10)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow2.jsonnet",
+      "input": "std.pow(10, 2)\n",
+      "output": "std.pow(10, 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow3.jsonnet",
+      "input": "std.pow(-1, 3)\n",
+      "output": "std.pow(-1, 3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow4.jsonnet",
+      "input": "std.pow(-1, 0.2)\n",
+      "output": "std.pow(-1, 0.2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow5.jsonnet",
+      "input": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.pow(2, 0.2))\n",
+      "output": "local tolerance = (import 'tolerance.libsonnet').tolerance;\ntolerance(std.pow(2, 0.2))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow6.jsonnet",
+      "input": "// roughly the largest possible double\nstd.pow(1.1, 7447.081)\n",
+      "output": "// roughly the largest possible double\nstd.pow(1.1, 7447.081)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow7.jsonnet",
+      "input": "// slightly more than the largest possible double\nstd.pow(1.1, 7447.082)\n",
+      "output": "// slightly more than the largest possible double\nstd.pow(1.1, 7447.082)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow8.jsonnet",
+      "input": "std.pow(\"xxx\", 42)\n",
+      "output": "std.pow('xxx', 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/pow9.jsonnet",
+      "input": "std.pow(42, \"xxx\")\n",
+      "output": "std.pow(42, 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/proto_object_comp.jsonnet",
+      "input": "[{[v]: v} for v in [\"x\", \"y\", \"z\"]]\n",
+      "output": "[{ [v]: v } for v in ['x', 'y', 'z']]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/recursive_local.jsonnet",
+      "input": "local f(x) = if x == 0 then 0 else 1 + f(x - 1); f(5)",
+      "output": "local f(x) = if x == 0 then 0 else 1 + f(x - 1); f(5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/recursive_thunk.jsonnet",
+      "input": "local bar(th, x) = if x == 0 then error \"xxx\" else th;\nlocal foo(x) = bar(foo(x - 1), x - 1);\nfoo(3)\n",
+      "output": "local bar(th, x) = if x == 0 then error 'xxx' else th;\nlocal foo(x) = bar(foo(x - 1), x - 1);\nfoo(3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/self.jsonnet",
+      "input": "{x: self.y, y: 42}.x",
+      "output": "{ x: self.y, y: 42 }.x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith1.jsonnet",
+      "input": "3 + 3",
+      "output": "3 + 3\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith2.jsonnet",
+      "input": "3 + 3 + 3",
+      "output": "3 + 3 + 3\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith3.jsonnet",
+      "input": "(3 + 3) + (3 + 3)",
+      "output": "(3 + 3) + (3 + 3)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith_string.jsonnet",
+      "input": "\"aaa\" + \"bbb\"",
+      "output": "'aaa' + 'bbb'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith_string2.jsonnet",
+      "input": "\"aaa\" + \"\"",
+      "output": "'aaa' + ''\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith_string3.jsonnet",
+      "input": "\"\" + \"bbb\"",
+      "output": "'' + 'bbb'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/simple_arith_string_empty.jsonnet",
+      "input": "\"\" + \"\"",
+      "output": "'' + ''\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice.jsonnet",
+      "input": "[1,2,3,4][1:4:2]\n",
+      "output": "[1, 2, 3, 4][1:4:2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice2.jsonnet",
+      "input": "[1,2,3,4][1:3:2]\n",
+      "output": "[1, 2, 3, 4][1:3:2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice3.jsonnet",
+      "input": "[1,2,3,4][1:2]\n",
+      "output": "[1, 2, 3, 4][1:2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice4.jsonnet",
+      "input": "[1,2,3,4][:3:]\n",
+      "output": "[1, 2, 3, 4][:3]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice5.jsonnet",
+      "input": "[1,2,3,4][1:]\n",
+      "output": "[1, 2, 3, 4][1:]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice6.jsonnet",
+      "input": "[1,2,3,4][1::]\n",
+      "output": "[1, 2, 3, 4][1:]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/slice7.jsonnet",
+      "input": "[1,2,3,4][::2]\n",
+      "output": "[1, 2, 3, 4][::2]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/stackbug-regression-test.jsonnet",
+      "input": "local xxx=0; xxx==0\n",
+      "output": "local xxx = 0; xxx == 0\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/stacktrace_assert.jsonnet",
+      "input": "{ assert false }",
+      "output": "{ assert false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/stacktrace_plussuper.jsonnet",
+      "input": "local a(input) = input + {\n  a+: {},\n};\n\na({a: null})",
+      "output": "local a(input) = input {\n  a+: {},\n};\n\na({ a: null })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/static_error_eof.jsonnet",
+      "input": "local x = 5\n",
+      "output": "go-jsonnet/testdata/static_error_eof.jsonnet:2:1 Expected , or ; but got end of file",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint.jsonnet",
+      "input": "std.codepoint('A')\n",
+      "output": "std.codepoint('A')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint2.jsonnet",
+      "input": "std.codepoint(\"\\u0000\")\n",
+      "output": "std.codepoint('\\u0000')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint3.jsonnet",
+      "input": "std.codepoint(\"aa\")\n",
+      "output": "std.codepoint('aa')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint4.jsonnet",
+      "input": "std.codepoint(\"ą\")\n",
+      "output": "std.codepoint('ą')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint5.jsonnet",
+      "input": "std.codepoint(\"台\")\n",
+      "output": "std.codepoint('台')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint6.jsonnet",
+      "input": "std.codepoint(\"\")\n",
+      "output": "std.codepoint('')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint7.jsonnet",
+      "input": "// Two codepoint version using combining ogonek u0328\nstd.codepoint(\"ą\")\n",
+      "output": "// Two codepoint version using combining ogonek u0328\nstd.codepoint('ą')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.codepoint8.jsonnet",
+      "input": "std.codepoint(42)\n",
+      "output": "std.codepoint(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent.jsonnet",
+      "input": "std.exponent(0)\n",
+      "output": "std.exponent(0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent2.jsonnet",
+      "input": "std.exponent(42)\n",
+      "output": "std.exponent(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent3.jsonnet",
+      "input": "std.exponent(1e30)\n",
+      "output": "std.exponent(1e30)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent4.jsonnet",
+      "input": "std.exponent(1 \u003c\u003c 30)\n",
+      "output": "std.exponent(1 \u003c\u003c 30)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent5.jsonnet",
+      "input": "std.exponent(42 \u003c\u003c 30)\n",
+      "output": "std.exponent(42 \u003c\u003c 30)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent6.jsonnet",
+      "input": "std.exponent(42 / (1 \u003c\u003c 30))\n",
+      "output": "std.exponent(42 / (1 \u003c\u003c 30))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.exponent7.jsonnet",
+      "input": "std.exponent(-42)\n",
+      "output": "std.exponent(-42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter.jsonnet",
+      "input": "std.filter(function(n) std.mod(n, 2) == 1, [1, 2, 3, 4, 5])\n",
+      "output": "std.filter(function(n) std.mod(n, 2) == 1, [1, 2, 3, 4, 5])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter2.jsonnet",
+      "input": "std.filter(error \"x\", [])\n",
+      "output": "std.filter(error 'x', [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter3.jsonnet",
+      "input": "std.filter(function(n) error \"xxx\", [])\n",
+      "output": "std.filter(function(n) error 'xxx', [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter4.jsonnet",
+      "input": "std.filter(42, [])\n",
+      "output": "std.filter(42, [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter5.jsonnet",
+      "input": "std.filter(function(n) 42, 42)\n",
+      "output": "std.filter(function(n) 42, 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter6.jsonnet",
+      "input": "std.filter(42, \"42\")\n",
+      "output": "std.filter(42, '42')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter7.jsonnet",
+      "input": "std.filter(function(n) false, [error \"xxx\"])\n",
+      "output": "std.filter(function(n) false, [error 'xxx'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter8.jsonnet",
+      "input": "std.filter([42], function(i) \"xxx\")\n",
+      "output": "std.filter([42], function(i) 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.filter_swapped_args.jsonnet",
+      "input": "std.filter([1,2,3], function(n) true)\n",
+      "output": "std.filter([1, 2, 3], function(n) true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap.jsonnet",
+      "input": "std.flatMap(function(x) [], [1, 2, 3])\n",
+      "output": "std.flatMap(function(x) [], [1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap2.jsonnet",
+      "input": "std.flatMap(function(x) [1, 2, 3], [\"a\", 2, 3, 4, 5])\n",
+      "output": "std.flatMap(function(x) [1, 2, 3], ['a', 2, 3, 4, 5])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap3.jsonnet",
+      "input": "std.flatMap(function(x) error \"never happens\", [])\n",
+      "output": "std.flatMap(function(x) error 'never happens', [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap4.jsonnet",
+      "input": "std.flatMap(function(x) [x, x], [1, 2, 3, 4, 5])\n",
+      "output": "std.flatMap(function(x) [x, x], [1, 2, 3, 4, 5])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap5.jsonnet",
+      "input": "local failWith(x) = error x;\nstd.type(std.flatMap(failWith, [\"a\", \"b\", \"c\"]))\n",
+      "output": "local failWith(x) = error x;\nstd.type(std.flatMap(failWith, ['a', 'b', 'c']))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.flatmap6.jsonnet",
+      "input": "std.flatMap(function(x) \"\\\\\"+x, \"abc123\")\n",
+      "output": "std.flatMap(function(x) '\\\\' + x, 'abc123')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join.jsonnet",
+      "input": "std.join([], [])\n",
+      "output": "std.join([], [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join2.jsonnet",
+      "input": "std.join([42], [])\n",
+      "output": "std.join([42], [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join3.jsonnet",
+      "input": "std.join([42], [[1]])\n",
+      "output": "std.join([42], [[1]])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join4.jsonnet",
+      "input": "std.join([42], [[1], [2]])\n",
+      "output": "std.join([42], [[1], [2]])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join5.jsonnet",
+      "input": "std.join([42], [[1], [2], [3]])\n",
+      "output": "std.join([42], [[1], [2], [3]])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join6.jsonnet",
+      "input": "std.join(\"xxx\", [\"aa\", \"bb\"])\n",
+      "output": "std.join('xxx', ['aa', 'bb'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join7.jsonnet",
+      "input": "std.join(\"aa\", [[1], [2]])\n",
+      "output": "std.join('aa', [[1], [2]])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.join8.jsonnet",
+      "input": "std.join([3, 4], [[1, 2], \"56\"])\n",
+      "output": "std.join([3, 4], [[1, 2], '56'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.jsonnet",
+      "input": "std.length(\"x\")\n",
+      "output": "std.length('x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length.jsonnet",
+      "input": "std.length([])",
+      "output": "std.length([])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_array.jsonnet",
+      "input": "std.length([1, 2, 3])\n",
+      "output": "std.length([1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_function.jsonnet",
+      "input": "std.length(function(x, y) 42)\n",
+      "output": "std.length(function(x, y) 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_object.jsonnet",
+      "input": "std.length({x: 42, y: 43})\n",
+      "output": "std.length({ x: 42, y: 43 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_object_sum.jsonnet",
+      "input": "std.length({x: 1, y: 1} + {x: 2, z: 2})\n",
+      "output": "std.length({ x: 1, y: 1 } + { x: 2, z: 2 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_object_with_hidden.jsonnet",
+      "input": "std.length({x:: 42})\n",
+      "output": "std.length({ x:: 42 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.length_string.jsonnet",
+      "input": "std.length(\"xxx\")\n",
+      "output": "std.length('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.lstripChars.multibyte.jsonnet",
+      "input": "std.lstripChars('• foo', '• ')\n",
+      "output": "std.lstripChars('• foo', '• ')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray.jsonnet",
+      "input": "std.makeArray(5, function(x) 42)",
+      "output": "std.makeArray(5, function(x) 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArrayNamed.jsonnet",
+      "input": "std.makeArray(sz=5, func=function(i) i)\n",
+      "output": "std.makeArray(sz=5, func=function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArrayNamed2.jsonnet",
+      "input": "std.makeArray(func=function(i) i, sz=5)\n",
+      "output": "std.makeArray(func=function(i) i, sz=5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArrayNamed3.jsonnet",
+      "input": "std.makeArray(blahblah=5, blahblahblah=function(i) i)\n",
+      "output": "std.makeArray(blahblah=5, blahblahblah=function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArrayNamed4.jsonnet",
+      "input": "std.makeArray(3, func=function(i) i)\n",
+      "output": "std.makeArray(3, func=function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_bad.jsonnet",
+      "input": "std.makeArray(\"xxx\", function(i) i)\n",
+      "output": "std.makeArray('xxx', function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_bad2.jsonnet",
+      "input": "std.makeArray(42, \"xxx\")\n",
+      "output": "std.makeArray(42, 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_noninteger.jsonnet",
+      "input": "std.makeArray(2.5, function(i) i)\n",
+      "output": "std.makeArray(2.5, function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_noninteger_big.jsonnet",
+      "input": "std.makeArray(1e100, function(i) i)\n",
+      "output": "std.makeArray(1e100, function(i) i)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_recursive.jsonnet",
+      "input": "local arr = [0] + std.makeArray(2000, function(i) arr[i] + 1); arr\n",
+      "output": "local arr = [0] + std.makeArray(2000, function(i) arr[i] + 1); arr\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.makeArray_recursive_evalutation_order_matters.jsonnet",
+      "input": "local arr = [0] + std.makeArray(2000, function(i) arr[i] + 1); arr[500]\n",
+      "output": "local arr = [0] + std.makeArray(2000, function(i) arr[i] + 1); arr[500]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.manifestYamlDoc_error.jsonnet",
+      "input": "std.manifestYamlDoc({ x: { y: error 'foo' } })\n",
+      "output": "std.manifestYamlDoc({ x: { y: error 'foo' } })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.manifestYamlDoc_ok.jsonnet",
+      "input": "std.manifestYamlDoc({ x: { y: 1 } })\n",
+      "output": "std.manifestYamlDoc({ x: { y: 1 } })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa.jsonnet",
+      "input": "std.mantissa(0)\n",
+      "output": "std.mantissa(0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa2.jsonnet",
+      "input": "std.mantissa(42)\n",
+      "output": "std.mantissa(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa3.jsonnet",
+      "input": "std.mantissa(0.42)\n",
+      "output": "std.mantissa(0.42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa4.jsonnet",
+      "input": "std.mantissa(1e100)\n",
+      "output": "std.mantissa(1e100)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa5.jsonnet",
+      "input": "std.mantissa(42 \u003c\u003c 30)\n",
+      "output": "std.mantissa(42 \u003c\u003c 30)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa6.jsonnet",
+      "input": "std.mantissa(42 / (1 \u003c\u003c 30))\n",
+      "output": "std.mantissa(42 / (1 \u003c\u003c 30))\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mantissa7.jsonnet",
+      "input": "std.mantissa(-42)\n",
+      "output": "std.mantissa(-42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.maxArray.jsonnet",
+      "input": "std.maxArray([\"a2\", \"b1\"])\n",
+      "output": "std.maxArray(['a2', 'b1'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.maxArrayKeyF.jsonnet",
+      "input": "std.maxArray([\"a2\", \"b1\"], keyF=function(x) x[1])\n",
+      "output": "std.maxArray(['a2', 'b1'], keyF=function(x) x[1])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.maxArrayOnEmpty.jsonnet",
+      "input": "std.maxArray([])\n",
+      "output": "std.maxArray([])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.maxArrayOnEmpty2.jsonnet",
+      "input": "std.maxArray([], onEmpty=42)\n",
+      "output": "std.maxArray([], onEmpty=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5.jsonnet",
+      "input": "std.md5(\"xxx\")\n",
+      "output": "std.md5('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5_2.jsonnet",
+      "input": "std.md5(\"\")\n",
+      "output": "std.md5('')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5_3.jsonnet",
+      "input": "std.md5(\"a\")\n",
+      "output": "std.md5('a')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5_4.jsonnet",
+      "input": "std.md5(\"message digest\")\n",
+      "output": "std.md5('message digest')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5_5.jsonnet",
+      "input": "std.md5(\"ą\")\n",
+      "output": "std.md5('ą')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.md5_6.jsonnet",
+      "input": "std.md5(42)\n",
+      "output": "std.md5(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.minArray.jsonnet",
+      "input": "std.minArray([\"a2\", \"b1\"])\n",
+      "output": "std.minArray(['a2', 'b1'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.minArrayKeyF.jsonnet",
+      "input": "std.minArray([\"a2\", \"b1\"], keyF=function(x) x[1])\n",
+      "output": "std.minArray(['a2', 'b1'], keyF=function(x) x[1])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.minArrayOnEmpty.jsonnet",
+      "input": "std.minArray([])\n",
+      "output": "std.minArray([])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.minArrayOnEmpty2.jsonnet",
+      "input": "std.minArray([], onEmpty=99)\n",
+      "output": "std.minArray([], onEmpty=99)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mod_int.jsonnet",
+      "input": "std.mod(42, 5)\n",
+      "output": "std.mod(42, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.mod_string.jsonnet",
+      "input": "std.mod(\"abcd %s %03d\", [\"xxx\", 42])\n",
+      "output": "std.mod('abcd %s %03d', ['xxx', 42])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.modulo.jsonnet",
+      "input": "std.modulo(42, 5)\n",
+      "output": "std.modulo(42, 5)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.modulo2.jsonnet",
+      "input": "std.modulo(\"xxx\", 42)\n",
+      "output": "std.modulo('xxx', 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.modulo3.jsonnet",
+      "input": "std.modulo(\"xxx\", 42)\n",
+      "output": "std.modulo('xxx', 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectFields.jsonnet",
+      "input": "std.objectFields({x: 1, y:: 2, z::: 3})\n",
+      "output": "std.objectFields({ x: 1, y:: 2, z::: 3 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectHasEx.jsonnet",
+      "input": "std.objectHasEx({\"x\": null}, \"x\", false)\n",
+      "output": "std.objectHasEx({ x: null }, 'x', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectHasEx2.jsonnet",
+      "input": "std.objectHasEx({\"x\":: null}, \"x\", false)\n",
+      "output": "std.objectHasEx({ x:: null }, 'x', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectHasEx3.jsonnet",
+      "input": "std.objectHasEx({\"x\": null}, \"x\", true)\n",
+      "output": "std.objectHasEx({ x: null }, 'x', true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectHasEx4.jsonnet",
+      "input": "std.objectHasEx({\"x\":: null}, \"x\", true)\n",
+      "output": "std.objectHasEx({ x:: null }, 'x', true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.objectHasEx5.jsonnet",
+      "input": "std.objectHasEx({\"x\":: null} + {\"x\": null}, \"x\", false)\n",
+      "output": "std.objectHasEx({ x:: null } + { x: null }, 'x', false)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals.jsonnet",
+      "input": "std.primitiveEquals(1, 1)\n",
+      "output": "std.primitiveEquals(1, 1)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals10.jsonnet",
+      "input": "std.primitiveEquals(error \"x\", 42)\n",
+      "output": "std.primitiveEquals(error 'x', 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals11.jsonnet",
+      "input": "std.primitiveEquals(3.14, 3.14)\n",
+      "output": "std.primitiveEquals(3.14, 3.14)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals12.jsonnet",
+      "input": "std.primitiveEquals(3.14, 3.15)\n",
+      "output": "std.primitiveEquals(3.14, 3.15)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals13.jsonnet",
+      "input": "std.primitiveEquals([], [])\n",
+      "output": "std.primitiveEquals([], [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals14.jsonnet",
+      "input": "std.primitiveEquals(42, {})\n",
+      "output": "std.primitiveEquals(42, {})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals15.jsonnet",
+      "input": "std.primitiveEquals({}, 42)\n",
+      "output": "std.primitiveEquals({}, 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals16.jsonnet",
+      "input": "std.primitiveEquals([], 42)\n",
+      "output": "std.primitiveEquals([], 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals17.jsonnet",
+      "input": "std.primitiveEquals(42, [])\n",
+      "output": "std.primitiveEquals(42, [])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals18.jsonnet",
+      "input": "std.primitiveEquals(null, null)\n",
+      "output": "std.primitiveEquals(null, null)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals19.jsonnet",
+      "input": "std.primitiveEquals(true, true)\n",
+      "output": "std.primitiveEquals(true, true)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals2.jsonnet",
+      "input": "std.primitiveEquals(1, 2)\n",
+      "output": "std.primitiveEquals(1, 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals20.jsonnet",
+      "input": "std.primitiveEquals(true, \"xxx\")\n",
+      "output": "std.primitiveEquals(true, 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals21.jsonnet",
+      "input": "std.primitiveEquals(\"xxx\", 42)\n",
+      "output": "std.primitiveEquals('xxx', 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals3.jsonnet",
+      "input": "std.primitiveEquals(\"xxx\", \"xxx\")\n",
+      "output": "std.primitiveEquals('xxx', 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals4.jsonnet",
+      "input": "std.primitiveEquals(\"xxx\", \"xxy\")\n",
+      "output": "std.primitiveEquals('xxx', 'xxy')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals5.jsonnet",
+      "input": "std.primitiveEquals(1, \"x\")\n",
+      "output": "std.primitiveEquals(1, 'x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals6.jsonnet",
+      "input": "std.primitiveEquals({}, {})\n",
+      "output": "std.primitiveEquals({}, {})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals7.jsonnet",
+      "input": "std.primitiveEquals(function() 42, function() 42)\n",
+      "output": "std.primitiveEquals(function() 42, function() 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals8.jsonnet",
+      "input": "std.primitiveEquals(42, function() 42)\n",
+      "output": "std.primitiveEquals(42, function() 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.primitiveEquals9.jsonnet",
+      "input": "std.primitiveEquals(42, error \"x\")\n",
+      "output": "std.primitiveEquals(42, error 'x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.rstripChars.multibyte.jsonnet",
+      "input": "std.rstripChars('• foo\\n', '\\n')\n",
+      "output": "std.rstripChars('• foo\\n', '\\n')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.slice.jsonnet",
+      "input": "std.slice([1,2,3,4], 1, 4, 2)\n",
+      "output": "std.slice([1, 2, 3, 4], 1, 4, 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.sort.jsonnet",
+      "input": "std.sort([1,2,3])\n",
+      "output": "std.sort([1, 2, 3])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.sort2.jsonnet",
+      "input": "[\n    std.sort([1,2,3], keyF=(function(x) -x)),\n    std.sort([1,2,3], function(x) -x),\n]\n",
+      "output": "[\n  std.sort([1, 2, 3], keyF=(function(x) -x)),\n  std.sort([1, 2, 3], function(x) -x),\n]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.sort3.jsonnet",
+      "input": "std.sort([1,2, error \"foo\"])\n",
+      "output": "std.sort([1, 2, error 'foo'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.sort4.jsonnet",
+      "input": "std.sort([1, [error \"foo\"]])\n",
+      "output": "std.sort([1, [error 'foo']])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.thisFile.jsonnet",
+      "input": "std.thisFile\n",
+      "output": "std.thisFile\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.thisFile2.jsonnet",
+      "input": "import \"std.thisFile.jsonnet\"\n",
+      "output": "import 'std.thisFile.jsonnet'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString.jsonnet",
+      "input": "std.toString(\"xxx\")\n",
+      "output": "std.toString('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString2.jsonnet",
+      "input": "std.toString(2)\n",
+      "output": "std.toString(2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString3.jsonnet",
+      "input": "std.toString({})\n",
+      "output": "std.toString({})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString4.jsonnet",
+      "input": "std.toString([])\n",
+      "output": "std.toString([])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString5.jsonnet",
+      "input": "std.toString(error \"x\")\n",
+      "output": "std.toString(error 'x')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString6.jsonnet",
+      "input": "std.toString({x: [{y: []}]})\n",
+      "output": "std.toString({ x: [{ y: [] }] })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString7.jsonnet",
+      "input": "std.toString([{a: [42, 42, {}], [\"b\"]: 1337}, 42, \"text\", 42])\n",
+      "output": "std.toString([{ a: [42, 42, {}], b: 1337 }, 42, 'text', 42])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std.toString8.jsonnet",
+      "input": "std.toString(a=42)\n",
+      "output": "std.toString(a=42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std_in_local.jsonnet",
+      "input": "local x = std.length(\"x\"); x\n",
+      "output": "local x = std.length('x'); x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/std_substr.jsonnet",
+      "input": "std.substr(\"abcd\", 1, 2)\n",
+      "output": "std.substr('abcd', 1, 2)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/stdlib_smoke_test.jsonnet",
+      "input": "// This test is intended to check that the whole stdlib is present\n// and that all function have the right parameter names\n\n// Functions without optional arguments need only one line\n// Functions with optional arguments need two lines - one with none of the optional arguments\n// and the other with all of them.\nlocal assertClose(a, b) =\n  // Using 1e-12 as tolerance. Jsonnet uses double-precision floats with machine epsilon of 2**-53 ≈ 1.11e-16.\n  // This tolerance is ~9000x the machine epsilon, which is quite lenient and should work across\n  // different platforms and math libraries.\n  //\n  // We use a combination of absolute and relative error to handle both small and large values:\n  // - For values near zero, we use absolute error to avoid division issues\n  // - For larger values, we use relative error to maintain precision\n  //\n  // This correctly handles cases like:\n  //   assertClose(1e-15, 0) - should pass (both are essentially zero)\n  //   assertClose(-100, 0) - should fail (significant difference)\n  //   assertClose(std.sin(std.pi), 0) - should pass (tiny floating point error)\n  local abs_a = std.abs(a);\n  local abs_b = std.abs(b);\n  local diff = std.abs(a - b);\n  local max_abs = std.max(abs_a, abs_b);\n  local err =\n    if abs_a == 0 \u0026\u0026 abs_b == 0 then\n      0  // Both are exactly zero, so no error\n    else if max_abs \u003c 1e-12 then\n      diff  // For very small values, use absolute error\n    else\n      diff / max_abs;  // For larger values, use relative error\n  if err \u003e 1e-12 then\n    error 'Assertion failed (error ' + err + '). ' + a + ' !~ ' + b\n  else\n    true;\n\n{\n    // extVar and native are skipped here, because of the special setup required.\n    // We also skip undocumented functions used in desugaring and std.trace.\n    thisFile: std.thisFile,\n\n    // Types and reflection\n    type: std.type(x={}),\n    length: std.length(x=[]),\n    objectHas: std.objectHas(o={}, f=\"fieldname\"),\n    objectFields: std.objectFields(o={}),\n    objectValues: std.objectValues(o={}),\n    objectKeysValues: std.objectKeysValues(o={}),\n    objectHasAll: std.objectHasAll(o={}, f=\"fieldname\"),\n    objectFieldsAll: std.objectFieldsAll(o={}),\n    objectValuesAll: std.objectValuesAll(o={}),\n    objectKeysValuesAll: std.objectKeysValuesAll(o={}),\n    prune: std.prune(a={x: null, y: [null, \"42\"]}),\n    mapWithKey: std.mapWithKey(func=function(key, value) 42, obj={a: 17}),\n    get: [\n        std.get(o={a:: 17}, f=\"a\"),\n        std.get(o={a:: 17}, f=\"a\", default=42, inc_hidden=false),\n        std.get(o={a:: 17} + {a: 18}, f=\"a\", default=42),\n        std.get(o={a:: 17} + {a: 18}, f=\"a\", default=42, inc_hidden=false),\n    ],\n\n    // isSomething\n    isArray: std.isArray(v=[]),\n    isBoolean: std.isBoolean(v=true),\n    isFunction: std.isFunction(v=function() 42),\n    isNumber: std.isNumber(v=42),\n    isObject: std.isObject(v={}),\n    isString: std.isString(v=\"\"),\n\n    // Mathematical utilities\n    abs: std.abs(n=-42),\n    sign: std.sign(n=17),\n    max: std.max(a=2, b=3),\n    min: std.min(a=2, b=3),\n    pow: std.pow(x=2, n=3),\n    exp: std.exp(x=5),\n    log: assertClose(std.log(x=5), 1.6094379124341003),\n    exponent: std.exponent(x=5),\n    mantissa: std.mantissa(x=5),\n    floor: std.floor(x=5),\n    ceil: std.ceil(x=5),\n    sqrt: assertClose(std.sqrt(x=5), 2.2360679774997898),\n    sin: assertClose(std.sin(x=5), -0.9589242746631385),\n    cos: assertClose(std.cos(x=5), 0.2836621854632263),\n    tan: assertClose(std.tan(x=5), -3.3805150062465854),\n    asin: assertClose(std.asin(x=0.5), 0.52359877559829893),\n    acos: assertClose(std.acos(x=0.5), 1.0471975511965976),\n    atan: assertClose(std.atan(x=5), 1.3734007669450157),\n\n    // Assertions and debugging\n    assertEqual: std.assertEqual(a=\"a\", b=\"a\"),\n\n    // String Manipulation\n    toString: std.toString(a=42),\n    codepoint: std.codepoint(str=\"A\"),\n    char: std.char(n=65),\n    substr: std.substr(str=\"test\", from=2, len=1),\n    findSubstr: std.findSubstr(pat=\"test\", str=\"test test\"),\n    startsWith: std.startsWith(a=\"jsonnet\", b=\"json\"),\n    endsWith: std.endsWith(a=\"jsonnet\", b=\"sonnet\"),\n    stripChars: std.stripChars(str=\"aaabbbbcccc\", chars=\"ac\"),\n    lstripChars: std.lstripChars(str=\"aaabbbbcccc\", chars=\"a\"),\n    rstripChars: std.rstripChars(str=\"aaabbbbcccc\", chars=\"c\"),\n    split: std.split(str=\"a,b,c\", c=\",\"),\n    splitLimit: std.splitLimit(str=\"a,b,c\", c=\",\", maxsplits=1),\n    splitLimitR: std.splitLimitR(str=\"a,b,c\", c=\",\", maxsplits=1),\n    strReplace: std.strReplace(str=\"aaa\", from=\"aa\", to=\"bb\"),\n    asciiUpper: std.asciiUpper(str=\"Blah\"),\n    asciiLower: std.asciiLower(str=\"Blah\"),\n    stringChars: std.stringChars(str=\"blah\"),\n    format: std.format(str=\"test %s %d\", vals=[\"blah\", 42]),\n\n    // TODO(sbarzowski) fix mismatch in the parameter name between docs and the implementations.\n    escapeStringBash: std.escapeStringBash(str_=\"test \\'test\\'test\"),\n    escapeStringDollars: std.escapeStringDollars(str_=\"test \\'test\\'test\"),\n    escapeStringJson: std.escapeStringJson(str_=\"test \\'test\\'test\"),\n\n    escapeStringPython: std.escapeStringPython(str=\"test \\'test\\'test\"),\n\n    // Parsing\n\n    parseInt: std.parseInt(str=\"42\"),\n    parseOctal: std.parseOctal(str=\"123\"),\n    parseHex: std.parseHex(str=\"DEADBEEF\"),\n    parseJson: std.parseJson(str='{\"a\": \"b\"}'),\n    encodeUTF8: std.encodeUTF8(str=\"blah\"),\n    decodeUTF8: std.decodeUTF8(arr=[65, 65, 65]),\n\n    // Manifestation\n\n    manifestIni: std.manifestIni(ini={main: {a: 1, b:2}, sections: {s1: {x: 1, y: 2}}}),\n    manifestPython: std.manifestPython(v={a: {b: \"c\"}}),\n    manifestPythonVars: std.manifestPythonVars(conf={a: {b: \"c\"}}),\n    manifestTomlEx: std.manifestTomlEx(value={a: {b: \"c\"}}, indent=\" \"),\n    manifestJsonEx: std.manifestJsonEx(value={a: {b: \"c\"}}, indent=\" \"),\n    manifestJsonMinified: std.manifestJsonMinified(value={a: {b: \"c\"}}),\n    manifestYamlDoc: std.manifestYamlDoc(value={a: {b: \"c\"}}),\n    manifestYamlStream: std.manifestYamlStream(value=[42, {a: {b: \"c\"}}]),\n    manifestXmlJsonml:  std.manifestXmlJsonml(value=[\"blah\", {a: 42}]),\n\n\n    // Arrays\n\n    makeArray: std.makeArray(sz=5, func=function(i) i),\n    count: std.count(arr=[\"a\", \"b\", \"c\", \"c\"], x=\"b\"),\n    find: std.find(value=42, arr=[1, 2, 42, 3, 42]),\n    member: std.member(arr=[1, 2, 3], x=2),\n    map: std.map(func=function(x) -x, arr=[1, 2, 3]),\n    mapWithIndex: std.mapWithIndex(func=function(i, x) i + x, arr=[3, 2, 1]),\n    filterMap: std.filterMap(filter_func=function(x) x % 2 == 0, map_func=function(x) x * 2, arr=[1, 2, 3, 4]),\n    flatMap: std.flatMap(func=function(x) [x*2, x*3], arr=[1,2,3]),\n    filter: std.filter(func=function(x) x % 2 == 0, arr=[1, 2, 3, 4]),\n    foldl: std.foldl(func=function(x, y) x + y, arr=[[1], [2], [3]], init=[0]),\n    foldr: std.foldr(func=function(x, y) x + y, arr=[[1], [2], [3]], init=[4]),\n    repeat: std.repeat(what=\"foo\", count=3),\n    slice: std.slice(indexable=\"foobar\", index=1, end=2, step=1),\n    range: std.range(from=1, to=5),\n    join:  std.join(sep=\",\", arr=[\"a\", \"b\", \"c\"]),\n    lines: std.lines(arr=[\"a\", \"b\", \"c\"]),\n    flattenArrays: std.flattenArrays([[1], [2, 3], [4, 5, [6, 7]]]),\n    reverse: std.reverse([\"b\", \"a\"]),\n    sort: [\n        std.sort([2, 3, 1]),\n        std.sort(arr=[2, 3, 1], keyF=function(x) -x),\n    ],\n    uniq: [\n        std.uniq([1, 2, 2, 3]),\n        std.uniq(arr=[\"a\", \"B\", \"b\", \"a\"], keyF=std.asciiLower),\n    ],\n\n    // Sets\n\n    set: [\n        std.set([2, 3, 1]),\n        std.set(arr=[2, 3, 1], keyF=function(x) -x),\n    ],\n    setInter: [\n        std.setInter([1,2,3], [3,4,5]),\n        std.setInter(a=[1,2,3], b=[3,4,5], keyF=function(x) std.floor(x / 2)),\n    ],\n    setUnion: [\n        std.setUnion([1,2,3], [3,4,5]),\n        std.setUnion(a=[1,2,3], b=[3,4,5], keyF=function(x) std.floor(x / 2)),\n    ],\n    setDiff: [\n        std.setDiff([1,2,3], [3,4,5]),\n        std.setDiff(a=[1,2,3], b=[3,4,5], keyF=function(x) std.floor(x / 2)),\n    ],\n    setMember: [\n        std.setMember(3, [2]),\n        std.setMember(x=3, arr=[2], keyF=function(x) std.floor(x / 2)),\n    ],\n\n   // Encoding\n\n    base64: [\n        std.base64(input=std.encodeUTF8(\"blah\")),\n        std.base64(input=\"blah\"),\n    ],\n    base64DecodeBytes: std.base64DecodeBytes(str=\"YmxhaAo=\"),\n    base64Decode: std.base64Decode(str=\"YmxhaAo=\"),\n    md5: std.md5(s=\"md5\"),\n\n    // JSON Merge Patch\n\n    \"mergePatch\": std.mergePatch(target={a: 42}, patch={ a: null }),\n\n}\n",
+      "output": "// This test is intended to check that the whole stdlib is present\n// and that all function have the right parameter names\n\n// Functions without optional arguments need only one line\n// Functions with optional arguments need two lines - one with none of the optional arguments\n// and the other with all of them.\nlocal assertClose(a, b) =\n  // Using 1e-12 as tolerance. Jsonnet uses double-precision floats with machine epsilon of 2**-53 ≈ 1.11e-16.\n  // This tolerance is ~9000x the machine epsilon, which is quite lenient and should work across\n  // different platforms and math libraries.\n  //\n  // We use a combination of absolute and relative error to handle both small and large values:\n  // - For values near zero, we use absolute error to avoid division issues\n  // - For larger values, we use relative error to maintain precision\n  //\n  // This correctly handles cases like:\n  //   assertClose(1e-15, 0) - should pass (both are essentially zero)\n  //   assertClose(-100, 0) - should fail (significant difference)\n  //   assertClose(std.sin(std.pi), 0) - should pass (tiny floating point error)\n  local abs_a = std.abs(a);\n  local abs_b = std.abs(b);\n  local diff = std.abs(a - b);\n  local max_abs = std.max(abs_a, abs_b);\n  local err =\n    if abs_a == 0 \u0026\u0026 abs_b == 0 then\n      0  // Both are exactly zero, so no error\n    else if max_abs \u003c 1e-12 then\n      diff  // For very small values, use absolute error\n    else\n      diff / max_abs;  // For larger values, use relative error\n  if err \u003e 1e-12 then\n    error 'Assertion failed (error ' + err + '). ' + a + ' !~ ' + b\n  else\n    true;\n\n{\n  // extVar and native are skipped here, because of the special setup required.\n  // We also skip undocumented functions used in desugaring and std.trace.\n  thisFile: std.thisFile,\n\n  // Types and reflection\n  type: std.type(x={}),\n  length: std.length(x=[]),\n  objectHas: std.objectHas(o={}, f='fieldname'),\n  objectFields: std.objectFields(o={}),\n  objectValues: std.objectValues(o={}),\n  objectKeysValues: std.objectKeysValues(o={}),\n  objectHasAll: std.objectHasAll(o={}, f='fieldname'),\n  objectFieldsAll: std.objectFieldsAll(o={}),\n  objectValuesAll: std.objectValuesAll(o={}),\n  objectKeysValuesAll: std.objectKeysValuesAll(o={}),\n  prune: std.prune(a={ x: null, y: [null, '42'] }),\n  mapWithKey: std.mapWithKey(func=function(key, value) 42, obj={ a: 17 }),\n  get: [\n    std.get(o={ a:: 17 }, f='a'),\n    std.get(o={ a:: 17 }, f='a', default=42, inc_hidden=false),\n    std.get(o={ a:: 17 } + { a: 18 }, f='a', default=42),\n    std.get(o={ a:: 17 } + { a: 18 }, f='a', default=42, inc_hidden=false),\n  ],\n\n  // isSomething\n  isArray: std.isArray(v=[]),\n  isBoolean: std.isBoolean(v=true),\n  isFunction: std.isFunction(v=function() 42),\n  isNumber: std.isNumber(v=42),\n  isObject: std.isObject(v={}),\n  isString: std.isString(v=''),\n\n  // Mathematical utilities\n  abs: std.abs(n=-42),\n  sign: std.sign(n=17),\n  max: std.max(a=2, b=3),\n  min: std.min(a=2, b=3),\n  pow: std.pow(x=2, n=3),\n  exp: std.exp(x=5),\n  log: assertClose(std.log(x=5), 1.6094379124341003),\n  exponent: std.exponent(x=5),\n  mantissa: std.mantissa(x=5),\n  floor: std.floor(x=5),\n  ceil: std.ceil(x=5),\n  sqrt: assertClose(std.sqrt(x=5), 2.2360679774997898),\n  sin: assertClose(std.sin(x=5), -0.9589242746631385),\n  cos: assertClose(std.cos(x=5), 0.2836621854632263),\n  tan: assertClose(std.tan(x=5), -3.3805150062465854),\n  asin: assertClose(std.asin(x=0.5), 0.52359877559829893),\n  acos: assertClose(std.acos(x=0.5), 1.0471975511965976),\n  atan: assertClose(std.atan(x=5), 1.3734007669450157),\n\n  // Assertions and debugging\n  assertEqual: std.assertEqual(a='a', b='a'),\n\n  // String Manipulation\n  toString: std.toString(a=42),\n  codepoint: std.codepoint(str='A'),\n  char: std.char(n=65),\n  substr: std.substr(str='test', from=2, len=1),\n  findSubstr: std.findSubstr(pat='test', str='test test'),\n  startsWith: std.startsWith(a='jsonnet', b='json'),\n  endsWith: std.endsWith(a='jsonnet', b='sonnet'),\n  stripChars: std.stripChars(str='aaabbbbcccc', chars='ac'),\n  lstripChars: std.lstripChars(str='aaabbbbcccc', chars='a'),\n  rstripChars: std.rstripChars(str='aaabbbbcccc', chars='c'),\n  split: std.split(str='a,b,c', c=','),\n  splitLimit: std.splitLimit(str='a,b,c', c=',', maxsplits=1),\n  splitLimitR: std.splitLimitR(str='a,b,c', c=',', maxsplits=1),\n  strReplace: std.strReplace(str='aaa', from='aa', to='bb'),\n  asciiUpper: std.asciiUpper(str='Blah'),\n  asciiLower: std.asciiLower(str='Blah'),\n  stringChars: std.stringChars(str='blah'),\n  format: std.format(str='test %s %d', vals=['blah', 42]),\n\n  // TODO(sbarzowski) fix mismatch in the parameter name between docs and the implementations.\n  escapeStringBash: std.escapeStringBash(str_=\"test 'test'test\"),\n  escapeStringDollars: std.escapeStringDollars(str_=\"test 'test'test\"),\n  escapeStringJson: std.escapeStringJson(str_=\"test 'test'test\"),\n\n  escapeStringPython: std.escapeStringPython(str=\"test 'test'test\"),\n\n  // Parsing\n\n  parseInt: std.parseInt(str='42'),\n  parseOctal: std.parseOctal(str='123'),\n  parseHex: std.parseHex(str='DEADBEEF'),\n  parseJson: std.parseJson(str='{\"a\": \"b\"}'),\n  encodeUTF8: std.encodeUTF8(str='blah'),\n  decodeUTF8: std.decodeUTF8(arr=[65, 65, 65]),\n\n  // Manifestation\n\n  manifestIni: std.manifestIni(ini={ main: { a: 1, b: 2 }, sections: { s1: { x: 1, y: 2 } } }),\n  manifestPython: std.manifestPython(v={ a: { b: 'c' } }),\n  manifestPythonVars: std.manifestPythonVars(conf={ a: { b: 'c' } }),\n  manifestTomlEx: std.manifestTomlEx(value={ a: { b: 'c' } }, indent=' '),\n  manifestJsonEx: std.manifestJsonEx(value={ a: { b: 'c' } }, indent=' '),\n  manifestJsonMinified: std.manifestJsonMinified(value={ a: { b: 'c' } }),\n  manifestYamlDoc: std.manifestYamlDoc(value={ a: { b: 'c' } }),\n  manifestYamlStream: std.manifestYamlStream(value=[42, { a: { b: 'c' } }]),\n  manifestXmlJsonml: std.manifestXmlJsonml(value=['blah', { a: 42 }]),\n\n\n  // Arrays\n\n  makeArray: std.makeArray(sz=5, func=function(i) i),\n  count: std.count(arr=['a', 'b', 'c', 'c'], x='b'),\n  find: std.find(value=42, arr=[1, 2, 42, 3, 42]),\n  member: std.member(arr=[1, 2, 3], x=2),\n  map: std.map(func=function(x) -x, arr=[1, 2, 3]),\n  mapWithIndex: std.mapWithIndex(func=function(i, x) i + x, arr=[3, 2, 1]),\n  filterMap: std.filterMap(filter_func=function(x) x % 2 == 0, map_func=function(x) x * 2, arr=[1, 2, 3, 4]),\n  flatMap: std.flatMap(func=function(x) [x * 2, x * 3], arr=[1, 2, 3]),\n  filter: std.filter(func=function(x) x % 2 == 0, arr=[1, 2, 3, 4]),\n  foldl: std.foldl(func=function(x, y) x + y, arr=[[1], [2], [3]], init=[0]),\n  foldr: std.foldr(func=function(x, y) x + y, arr=[[1], [2], [3]], init=[4]),\n  repeat: std.repeat(what='foo', count=3),\n  slice: std.slice(indexable='foobar', index=1, end=2, step=1),\n  range: std.range(from=1, to=5),\n  join: std.join(sep=',', arr=['a', 'b', 'c']),\n  lines: std.lines(arr=['a', 'b', 'c']),\n  flattenArrays: std.flattenArrays([[1], [2, 3], [4, 5, [6, 7]]]),\n  reverse: std.reverse(['b', 'a']),\n  sort: [\n    std.sort([2, 3, 1]),\n    std.sort(arr=[2, 3, 1], keyF=function(x) -x),\n  ],\n  uniq: [\n    std.uniq([1, 2, 2, 3]),\n    std.uniq(arr=['a', 'B', 'b', 'a'], keyF=std.asciiLower),\n  ],\n\n  // Sets\n\n  set: [\n    std.set([2, 3, 1]),\n    std.set(arr=[2, 3, 1], keyF=function(x) -x),\n  ],\n  setInter: [\n    std.setInter([1, 2, 3], [3, 4, 5]),\n    std.setInter(a=[1, 2, 3], b=[3, 4, 5], keyF=function(x) std.floor(x / 2)),\n  ],\n  setUnion: [\n    std.setUnion([1, 2, 3], [3, 4, 5]),\n    std.setUnion(a=[1, 2, 3], b=[3, 4, 5], keyF=function(x) std.floor(x / 2)),\n  ],\n  setDiff: [\n    std.setDiff([1, 2, 3], [3, 4, 5]),\n    std.setDiff(a=[1, 2, 3], b=[3, 4, 5], keyF=function(x) std.floor(x / 2)),\n  ],\n  setMember: [\n    std.setMember(3, [2]),\n    std.setMember(x=3, arr=[2], keyF=function(x) std.floor(x / 2)),\n  ],\n\n  // Encoding\n\n  base64: [\n    std.base64(input=std.encodeUTF8('blah')),\n    std.base64(input='blah'),\n  ],\n  base64DecodeBytes: std.base64DecodeBytes(str='YmxhaAo='),\n  base64Decode: std.base64Decode(str='YmxhaAo='),\n  md5: std.md5(s='md5'),\n\n  // JSON Merge Patch\n\n  mergePatch: std.mergePatch(target={ a: 42 }, patch={ a: null }),\n\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/strReplace.jsonnet",
+      "input": "local n = 10000;\nlocal text = std.join(\"\", std.makeArray(n, function(x) \"ab\"));\nstd.strReplace(text, \"a\", \"b\")",
+      "output": "local n = 10000;\nlocal text = std.join('', std.makeArray(n, function(x) 'ab'));\nstd.strReplace(text, 'a', 'b')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/strReplace2.jsonnet",
+      "input": "std.strReplace(\"test test test\", \"test\", \"__\")\n",
+      "output": "std.strReplace('test test test', 'test', '__')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/strReplace3.jsonnet",
+      "input": "std.strReplace(\"test\", \"\", \"blah\")\n",
+      "output": "std.strReplace('test', '', 'blah')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string.jsonnet",
+      "input": "\"xxx\"\n",
+      "output": "'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string2.jsonnet",
+      "input": "\"\\\"xxx\\\"\"\n",
+      "output": "'\"xxx\"'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison1.jsonnet",
+      "input": "\"a\" \u003c \"b\"\n",
+      "output": "'a' \u003c 'b'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison2.jsonnet",
+      "input": "\"a\" \u003e \"b\"\n",
+      "output": "'a' \u003e 'b'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison3.jsonnet",
+      "input": "\"a\" == \"b\"\n",
+      "output": "'a' == 'b'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison4.jsonnet",
+      "input": "\"a\" \u003c \"aa\"\n",
+      "output": "'a' \u003c 'aa'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison5.jsonnet",
+      "input": "\"aa\" \u003c \"a\"\n",
+      "output": "'aa' \u003c 'a'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison6.jsonnet",
+      "input": "\"ą\" \u003c \"ć\"\n",
+      "output": "'ą' \u003c 'ć'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_comparison7.jsonnet",
+      "input": "\"ą\" \u003c \"z\"\n",
+      "output": "'ą' \u003c 'z'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_divided_by_number.jsonnet",
+      "input": "\"xxx\" / 42\n",
+      "output": "'xxx' / 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_index.jsonnet",
+      "input": "\"abcd\"[0]\n",
+      "output": "'abcd'[0]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_index2.jsonnet",
+      "input": "\"abcd\"[3]\n",
+      "output": "'abcd'[3]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_index_negative.jsonnet",
+      "input": "\"abcd\"[-1]\n",
+      "output": "'abcd'[-1]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_index_out_of_bounds.jsonnet",
+      "input": "\"abcd\"[4]\n",
+      "output": "'abcd'[4]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_minus_number.jsonnet",
+      "input": "\"x\" - 42\n",
+      "output": "'x' - 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_plus_function.jsonnet",
+      "input": "\"xxx\" + (function() 42)\n",
+      "output": "'xxx' + (function() 42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_times_number.jsonnet",
+      "input": "\"x\" * 42\n",
+      "output": "'x' * 42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/string_to_bool.jsonnet",
+      "input": "local stringToBool(s) =\n      if s == \"true\" then true\n      else if s == \"false\" then false\n      else error \"invalid boolean: \" + std.manifestJson(s);\n[stringToBool(\"false\"), stringToBool(\"true\")]\n",
+      "output": "local stringToBool(s) =\n  if s == 'true' then true\n  else if s == 'false' then false\n  else error 'invalid boolean: ' + std.manifestJson(s);\n[stringToBool('false'), stringToBool('true')]\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/super_index_desugar.jsonnet",
+      "input": "{ a: 1 } + { s: super[$.c], c: \"a\" }\n",
+      "output": "{ a: 1 } + { s: super[$.c], c: 'a' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar.jsonnet",
+      "input": "{ x: {a: 1} } { x +: {b: 2} }\n",
+      "output": "{ x: { a: 1 } } { x+: { b: 2 } }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar2.jsonnet",
+      "input": "{ x :+ 1 }\n",
+      "output": "{ x: +1 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar3.jsonnet",
+      "input": "{ assert self.x } { x +: true }\n",
+      "output": "{ assert self.x } { x+: true }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar4.jsonnet",
+      "input": "{ assert self.x, y: 42 } { x: true, y +: 1 }\n",
+      "output": "{ assert self.x, y: 42 } { x: true, y+: 1 }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar5.jsonnet",
+      "input": "({ } { x +: function(x) x }).x(42)\n",
+      "output": "({} { x+: function(x) x }).x(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar6.jsonnet",
+      "input": "{ x: \"hello, \" } { x +: \"world\" }\n",
+      "output": "{ x: 'hello, ' } { x+: 'world' }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar7.jsonnet",
+      "input": "{ x: [1, 2, 3] } { x +: [4, 5, 6] }\n",
+      "output": "{ x: [1, 2, 3] } { x+: [4, 5, 6] }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar8.jsonnet",
+      "input": "{ assert self.x } { x +: false }\n",
+      "output": "{ assert self.x } { x+: false }\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/supersugar9.jsonnet",
+      "input": "local infloop() = infloop();\nstd.type({ assert infloop, x: 1 } { x +: 1 })\n",
+      "output": "local infloop() = infloop();\nstd.type({ assert infloop, x: 1 } { x+: 1 })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/syntax_error.jsonnet",
+      "input": "2 +\n",
+      "output": "go-jsonnet/testdata/syntax_error.jsonnet:2:1 Unexpected end of file",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict.jsonnet",
+      "input": "local arr = [function(x) x] + std.makeArray(600, function(i) (function(x) arr[i](x + 1) tailstrict));\narr[600](42)\n",
+      "output": "local arr = [function(x) x] + std.makeArray(600, function(i) (function(x) arr[i](x + 1) tailstrict));\narr[600](42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict2.jsonnet",
+      "input": "local e(x)=(error x);\n(function(x) e(x))(\"xxx\") tailstrict\n",
+      "output": "local e(x) = (error x);\n(function(x) e(x))('xxx') tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict3.jsonnet",
+      "input": "local foo(x, y=error \"xxx\")=x;\nfoo(42) tailstrict\n",
+      "output": "local foo(x, y=error 'xxx') = x;\nfoo(42) tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict4.jsonnet",
+      "input": "local foo(x, y=error \"xxx\")=x;\nfoo(42, y=5) tailstrict\n",
+      "output": "local foo(x, y=error 'xxx') = x;\nfoo(42, y=5) tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict5.jsonnet",
+      "input": "local sum(x, v) =\n    if x \u003c= 0 then\n        v\n    else\n        sum(x - 1, x + v) tailstrict;\n\nsum(1000, 0)\n",
+      "output": "local sum(x, v) =\n  if x \u003c= 0 then\n    v\n  else\n    sum(x - 1, x + v) tailstrict;\n\nsum(1000, 0)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict_operator1.jsonnet",
+      "input": "local g() = 41;\nlocal f(x) = g() + x;\n\nf(1) tailstrict\n",
+      "output": "local g() = 41;\nlocal f(x) = g() + x;\n\nf(1) tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict_operator2.jsonnet",
+      "input": "local g() = true;\nlocal f(x) = g() \u0026\u0026 x;\n\nf(true) tailstrict\n",
+      "output": "local g() = true;\nlocal f(x) = g() \u0026\u0026 x;\n\nf(true) tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tailstrict_operator3.jsonnet",
+      "input": "local g() = false;\nlocal f(x) = g() || x;\n\nf(true) tailstrict\n",
+      "output": "local g() = false;\nlocal f(x) = g() || x;\n\nf(true) tailstrict\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/tolerance.libsonnet",
+      "input": "{\n    // Formats a floating point number to get 15 digits\n    // after the decimal point. It is used for some tests\n    // of numeric functions, where a range of values is \n    // acceptable, due to differences in cpu architecture.\n    tolerance(x):: \"%.15f\" % x\n}\n",
+      "output": "{\n  // Formats a floating point number to get 15 digits\n  // after the decimal point. It is used for some tests\n  // of numeric functions, where a range of values is\n  // acceptable, due to differences in cpu architecture.\n  tolerance(x):: '%.15f' % x,\n}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/too_many_arguments.jsonnet",
+      "input": "(function(x, y, z) 42)(1, 2, 3, 4)\n",
+      "output": "(function(x, y, z) 42)(1, 2, 3, 4)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/true.jsonnet",
+      "input": "true\n",
+      "output": "true\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_array.jsonnet",
+      "input": "std.type([error \"x\"])\n",
+      "output": "std.type([error 'x'])\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_builtin_function.jsonnet",
+      "input": "std.type(std.type)\n",
+      "output": "std.type(std.type)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_error.jsonnet",
+      "input": "std.type(error \"xxx\")\n",
+      "output": "std.type(error 'xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_function.jsonnet",
+      "input": "std.type(function() {})\n",
+      "output": "std.type(function() {})\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_number.jsonnet",
+      "input": "std.type(42)",
+      "output": "std.type(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_object.jsonnet",
+      "input": "std.type({x: error \"x\"})\n",
+      "output": "std.type({ x: error 'x' })\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/type_string.jsonnet",
+      "input": "std.type(\"xxx\")\n",
+      "output": "std.type('xxx')\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unary_minus.jsonnet",
+      "input": "-42\n",
+      "output": "-42\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unary_minus2.jsonnet",
+      "input": "-(-42)\n",
+      "output": "-(-42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unary_minus3.jsonnet",
+      "input": "-(42)\n",
+      "output": "-(42)\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unary_minus4.jsonnet",
+      "input": "-\"xxx\"\n",
+      "output": "-'xxx'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unary_object.jsonnet",
+      "input": "+ {}",
+      "output": "+{}\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unfinished_args.jsonnet",
+      "input": "whatever(1, 2, 3\n",
+      "output": "go-jsonnet/testdata/unfinished_args.jsonnet:2:1 Expected a comma before next function argument, got end of file",
+      "error": true
+    },
+    {
+      "name": "go-jsonnet/testdata/unicode.jsonnet",
+      "input": "\"\\u263A\"",
+      "output": "'☺'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/unicode2.jsonnet",
+      "input": "\"\\u263a\"",
+      "output": "'☺'\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/use_object.jsonnet",
+      "input": "{a: 1}.a",
+      "output": "{ a: 1 }.a\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/use_object_in_object.jsonnet",
+      "input": "{a: {a: 1}.a, b: {b: 1}.b}.a",
+      "output": "{ a: { a: 1 }.a, b: { b: 1 }.b }.a\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/variable.jsonnet",
+      "input": "local x = 2; x",
+      "output": "local x = 2; x\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/variable_not_visible.jsonnet",
+      "input": "local x1 = local nested = 42; nested, x2 = nested; x2",
+      "output": "local x1 = local nested = 42; nested, x2 = nested; x2\n"
+    },
+    {
+      "name": "go-jsonnet/testdata/verbatim_string.jsonnet",
+      "input": "@\"blah ☺\"",
+      "output": "@\"blah ☺\"\n"
+    }
+  ]
+}

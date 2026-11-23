@@ -1,37 +1,9 @@
-//! `jsonnetfmt`, as `tk fmt` runs it.
+//! Tanka-compatible Jsonnet discovery and formatting.
 //!
-//! `tk fmt` is `cmd/tk/fmt.go` → `tanka.FormatFiles` →
-//! `formatter.Format(name, content, formatter.DefaultOptions())` from
-//! go-jsonnet. There is no Tanka-specific formatting logic at all, so the whole
-//! task is reproducing go-jsonnet's formatter under one fixed option set —
-//! byte for byte, because formatting is destructive and in place. A near-miss
-//! formatter rewrites files `tk` would have left alone, in a user's working
-//! tree.
-//!
-//! # Not the other formatter
-//!
-//! `crates/jrsonnet-formatter` exists and `cmds/jrsonnet-fmt` drives it, but it
-//! is **not** `jsonnetfmt`: it is a dprint-based, width-driven pretty-printer
-//! that re-lays-out from scratch. `jsonnetfmt` is *fodder-preserving* — it
-//! keeps the author's line structure and only normalises indentation, trailing
-//! commas, redundant parens, quote style, comment style, blank-line runs and
-//! import order. These are different algorithms, not different settings, which
-//! is why this crate exists rather than a flag on that one.
-//!
-//! # State
-//!
-//! [`format`] parses, runs every step of `FormatNode`, and unparses. **Phase
-//! 2 of `docs/rtk-fmt-plan.md` is complete**: the lexer, the AST, the parser,
-//! the unparser, the [`pass`] traversal, all twelve passes and all three of
-//! `FormatNode`'s non-pass steps. `testdata/corpus-baseline.toml` counts the
-//! files — all 138 of them — and `quarantine.toml` is empty.
-//!
-//! What is left is Phase 3, the CLI: `cmds/rtk/src/commands/fmt.rs` still
-//! `bail!`s, so this crate is a library nothing calls in anger yet.
-//!
-//! One thing here is not a formatter at all. [`go_sort`] is a port of
-//! `sort.Slice`, needed because [`sort_imports`] sorts by a key two imports
-//! can share and Go's tie order is not Rust's — measured, not assumed.
+//! The formatter uses a Go-shaped, source-preserving AST and go-jsonnet's
+//! ordered formatting passes. [`format_default_bytes`] accepts byte input and
+//! native diagnostic paths, and [`Error::message_bytes`] retains exact errors.
+//! [`format_default`] is the UTF-8 convenience interface.
 
 pub mod ast;
 pub mod files;
@@ -47,8 +19,8 @@ pub mod sort_imports;
 pub mod string_util;
 pub mod text;
 pub mod token;
-pub use text::Text;
 pub mod unparse;
+pub use text::Text;
 
 pub use files::{find_files, find_files_all};
 
@@ -79,15 +51,28 @@ pub enum CommentStyle {
 	Leave,
 }
 
-/// go-jsonnet's `formatter.Options`.
+/// go-jsonnet's `formatter.Options`, less the three strip flags.
 ///
 /// `tk` exposes none of these, so `Options::default` — go-jsonnet's
 /// `DefaultOptions()` — is the only configuration that has to be correct. The
 /// rest are carried because the passes are shared and because upstream's own
 /// `TestFormatNoImplicitPlus` runs with `use_implicit_plus` off — which is the
 /// only way to reach [`passes::AddPlusObject`].
+///
+/// # Why `StripEverything`, `StripComments` and `StripAllButComments` are not here
+///
+/// Tanka never enables these options. The formatter and pass oracle therefore
+/// omit them, rather than exposing flags that have no effect. Supporting them
+/// requires implementing their transformations and adding live comparisons.
+///
+/// The route back, should a caller ever want them: they are **one
+/// `if / else if / else if` chain** at step 9 of `FormatNode`
+/// (`internal/formatter/jsonnetfmt.go:178-184`) — mutually exclusive and
+/// first-wins, *not* three independent `if`s — and adding their names to
+/// `passNames` in `testdata/generate/_staged/passdump.go` is what makes the
+/// oracle grade them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// A faithful port of a Go struct of eight bools; grouping them would hide the
+// A faithful port of a Go struct of plain bools; grouping them would hide the
 // correspondence.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Options {
@@ -107,16 +92,10 @@ pub struct Options {
 	pub sort_imports: bool,
 	/// Remove the `+` where it is not required.
 	pub use_implicit_plus: bool,
-	pub strip_everything: bool,
-	pub strip_comments: bool,
-	pub strip_all_but_comments: bool,
 }
 
 impl Default for Options {
 	/// go-jsonnet's `DefaultOptions()`, which is what `tanka.Format` passes.
-	///
-	/// The three `strip_*` fields are absent from `DefaultOptions()` and so
-	/// take Go's zero value.
 	fn default() -> Self {
 		Self {
 			indent: 2,
@@ -128,19 +107,11 @@ impl Default for Options {
 			pad_arrays: false,
 			pad_objects: true,
 			sort_imports: true,
-			strip_everything: false,
-			strip_comments: false,
-			strip_all_but_comments: false,
 		}
 	}
 }
 
-/// A parse failure, carrying go-jsonnet's message.
-///
-/// The text is part of the contract: a parse failure propagates out of
-/// `FormatFiles` and aborts the run, and it is what upstream's own harness
-/// folds into its goldens via `coalesceError`. The shape is
-/// `<file>:<line>:<col> <message>`, from `staticError.Error()`.
+/// A go-jsonnet-compatible static error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct Error {
@@ -248,7 +219,7 @@ impl Error {
 /// | 6 | [`FixParens`](passes::FixParens) | **runs** |
 /// | 7 | [`RemovePlusObject`](passes::RemovePlusObject) or [`AddPlusObject`](passes::AddPlusObject) | **runs** |
 /// | 8 | [`NoRedundantSliceColon`](passes::NoRedundantSliceColon) | **runs** |
-/// | 9 | the three strip passes | skipped under `Options::default` |
+/// | 9 | the three strip passes | **not ported** — see [`Options`] |
 /// | 10 | [`PrettyFieldNames`](passes::PrettyFieldNames) | **runs** |
 /// | 11 | [`EnforceStringStyle`](passes::EnforceStringStyle) | **runs** |
 /// | 12 | [`EnforceCommentStyle`](passes::EnforceCommentStyle) | **runs** |
@@ -412,9 +383,6 @@ mod tests {
 		assert!(!options.pad_arrays);
 		assert!(options.pad_objects);
 		assert!(options.sort_imports);
-		assert!(!options.strip_everything);
-		assert!(!options.strip_comments);
-		assert!(!options.strip_all_but_comments);
 	}
 
 	#[test]

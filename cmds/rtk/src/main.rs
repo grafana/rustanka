@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use commands::common::BrokenPipeGuard;
@@ -86,7 +88,38 @@ fn main() -> Result<()> {
 	let result = run(cli);
 	let shutdown_result = profiling_guard.shutdown();
 	drop(telemetry_guard);
-	let exit_code = result?;
+	let exit_code = match result {
+		Ok(code) => code,
+		Err(error) => {
+			// Formatter diagnostics can contain a partial UTF-8 sequence or a
+			// native filename. `Display`/anyhow's termination wrapper would
+			// replace those bytes, so write the exact diagnostic ourselves.
+			if let Some(error) = error.downcast_ref::<rtk_jsonnetfmt::Error>() {
+				let mut stderr = std::io::stderr().lock();
+				stderr.write_all(b"Error: ")?;
+				error.write_to(&mut stderr)?;
+				stderr.write_all(b"\n")?;
+				stderr.flush()?;
+				1
+			} else if let Some(error) = error.downcast_ref::<rtk_jsonnetfmt::files::Error>() {
+				let mut stderr = std::io::stderr().lock();
+				stderr.write_all(b"Error: finding Jsonnet files: ")?;
+				error.write_to(&mut stderr)?;
+				stderr.write_all(b"\n")?;
+				stderr.flush()?;
+				1
+			} else if let Some(error) = error.downcast_ref::<commands::fmt::PathIoError>() {
+				let mut stderr = std::io::stderr().lock();
+				stderr.write_all(b"Error: ")?;
+				error.write_to(&mut stderr)?;
+				stderr.write_all(b"\n")?;
+				stderr.flush()?;
+				1
+			} else {
+				return Err(error);
+			}
+		}
+	};
 	shutdown_result?;
 	if exit_code != 0 {
 		std::process::exit(exit_code);
@@ -112,7 +145,12 @@ fn run(cli: Cli) -> Result<i32> {
 		Commands::Status(args) => commands::status::run(args, stdout).map(|_| 0),
 		Commands::Export(args) => commands::export::run(args, stdout).map(|_| 0),
 		Commands::Test(args) => commands::test::run(args, stdout),
-		Commands::Fmt(args) => commands::fmt::run(args, stdout).map(|_| 0),
+		Commands::Fmt(args) => {
+			if commands::fmt::run(args, stdout)? {
+				return Ok(commands::diff::EXIT_CODE_DIFF_FOUND);
+			}
+			Ok(0)
+		}
 		Commands::Lint(args) => commands::lint::run(args, stdout).map(|_| 0),
 		Commands::Eval(args) => commands::eval::run(
 			args.path.as_ref(),

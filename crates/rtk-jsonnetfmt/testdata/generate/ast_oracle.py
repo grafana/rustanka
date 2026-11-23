@@ -129,7 +129,7 @@ class OracleGenerator:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", choices=["node", "pass"], default="node")
+    parser.add_argument("--kind", choices=["node", "pass", "parse-error"], default="node")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--corpus-output", type=Path)
@@ -143,7 +143,7 @@ def main():
         generator.generate(args.corpus_output or args.snippets_output,
                            corpus=bool(args.corpus_output), all_snippets=bool(args.snippets_output))
     else:
-        name = f"{args.kind}-regression-oracle.json"
+        name = "parse-error-snippet-oracle.json" if args.kind == "parse-error" else f"{args.kind}-regression-oracle.json"
         saved = generator.data / name
         with tempfile.TemporaryDirectory(prefix="rtk-ast-check-") as temporary:
             output = Path(temporary) / name

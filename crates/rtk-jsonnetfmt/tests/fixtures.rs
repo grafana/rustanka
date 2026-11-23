@@ -234,9 +234,34 @@ fn grade_parse_errors(outcomes: &mut Vec<Outcome>) {
 	}
 }
 
-/// Select the pinned formatter fixture checkout. CI provisions it with
-/// `make go-jsonnet-checkout` and sets `RTK_REQUIRE_GO_JSONNET=1`, so a
-/// missing family cannot silently pass. An explicit path is always required.
+/// Grade against go-jsonnet's own formatter goldens. Returns whether the family
+/// was graded at all.
+/// Where the `go_jsonnet/` fixtures come from: `GO_JSONNET_FOR_TESTS`, and
+/// failing that a checkout at `target/go-jsonnet`.
+///
+/// The fallback is here rather than in the Makefile deliberately. It lived
+/// there first, and that graded the family under `make test` while a plain
+/// `cargo test -p rtk-jsonnetfmt` — which is what anyone actually runs while
+/// working — still skipped it silently and printed `12 graded` rather than 15.
+/// A skip that depends on the entry point is the same hazard as a skip that
+/// depends on a missing file: the suite is green either way and says nothing.
+///
+/// # And that is exactly what it did, for three phases
+///
+/// This comment used to say the oracle targets leave a checkout at
+/// `target/go-jsonnet`. **None of them did.** `update-fmt-node-oracle` is an
+/// ordinary program in the generate module and takes go-jsonnet from the module
+/// cache; `update-fmt-lexer-oracle` and `update-fmt-pass-oracle` clone into
+/// `mktemp -d` and delete it. So outside the nix devShell — CI included — the
+/// fallback resolved to nothing and this family graded 12 of 15, saying so only
+/// in the eprintln below.
+///
+/// Which cost more than three fixtures. `go_jsonnet/empty_comment` is the only
+/// end-to-end `EnforceCommentStyle` case in the suite, a pass that changes 0 of
+/// the corpus files, and `go_jsonnet/regular_expression` is the only
+/// authoritative answer for a parse error's doubled location and its range
+/// shape. Phase 4 added `make go-jsonnet-checkout`, which is what makes the
+/// sentence above true, and CI runs it as a side effect of checking the corpus.
 fn go_jsonnet_checkout() -> Option<PathBuf> {
 	let explicit = std::env::var_os("GO_JSONNET_FOR_TESTS").map(PathBuf::from);
 	let fallback = crate_dir()
