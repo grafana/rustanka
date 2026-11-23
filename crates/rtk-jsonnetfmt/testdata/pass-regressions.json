@@ -23,5 +23,40 @@
     "name": "comment_style/hash_to_slash",
     "source": "# c\n1",
     "why": "The plain case: CommentStyleSlash rewrites the leading # as //, keeping everything after it."
+  },
+  {
+    "name": "max_blank_lines/three_blanks_between_fields",
+    "source": "{\n  a: 1,\n\n\n\n  b: 2,\n}",
+    "why": "Four newlines are one LineEnd with blanks=3, clamped to 2. The base case."
+  },
+  {
+    "name": "fix_newlines/array_expand_from_an_element",
+    "source": "[1,\n  2, 3]",
+    "why": "One element on a new line expands them all, and the close bracket too."
+  },
+  {
+    "name": "indentation/already_correct",
+    "source": "{\n  a: 1,\n}",
+    "why": "The case that matters most for a formatter that writes in place: a tk-fmt-clean file has to come back untouched. No-op."
+  },
+  {
+    "name": "fix_parens/single",
+    "source": "(1)",
+    "why": "One pair of parens is not redundant. The no-op is graded too."
+  },
+  {
+    "name": "remove_plus_object/var_plus_object",
+    "source": "a + { b: 1 }",
+    "why": "The pass's whole purpose: a Var on the left and an Object on the right becomes an ApplyBrace, so the `+` is not written."
+  },
+  {
+    "name": "add_plus_object/top_level",
+    "source": "{ a: 1 } { b: 2 }",
+    "why": "The root has a nil parent, so no parens: BaseContext returns an empty passCtx."
+  },
+  {
+    "name": "sort_imports/single_import",
+    "source": "local a = import 'a';\n1",
+    "why": "One import, nothing to reorder. The whole chain is still rebuilt, so this grades buildGroupAST reproducing exactly what it was handed."
   }
 ]

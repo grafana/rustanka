@@ -5,8 +5,8 @@ This crate ports the lexical model in go-jsonnet v0.22.0:
 [fodder](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/fodder.go),
 [locations](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/location.go), and
 [string utilities](https://github.com/google/go-jsonnet/blob/v0.22.0/internal/parser/string_util.go).
-The formatter compatibility target is Tanka v0.38.0. This PR contains no full
-formatter or `rtk fmt` command, so passing lexer tests is not full-format parity.
+The formatter compatibility target is Tanka v0.38.0. This layer contains a partial library
+formatter. The `rtk fmt` command follows in #66; lexer tests alone are not full-format parity.
 
 ## FMT-14: why the dedicated lexer remains
 
@@ -61,9 +61,8 @@ before removing the dedicated implementation.
   when constructing parser diagnostics. The string/Display projections are
   for human-readable contexts only; they cannot represent invalid UTF-8.
 
-PR #60 and its descendants must adapt parser/AST/pass/unparser consumers to
-`Text`, use byte constructors for diagnostics, and keep bytes until the same
-normalization point as Go. PR #66 must read both files and stdin as bytes, call
+The parser, AST, passes and unparser use `Text`, byte diagnostic constructors,
+and preserve bytes until the same normalization point as Go. PR #66 must read both files and stdin as bytes, call
 the byte formatter entrypoint, write output and diagnostics as bytes, and
 compare captured stdout/stderr as `Vec<u8>`. Its file/stdin integration tests
 remain owned by that PR. Native filenames are a separate FMT-02 concern.
@@ -72,9 +71,9 @@ remain owned by that PR. Native filenames are a separate FMT-02 concern.
 
 `cargo test -p rtk-jsonnetfmt` generates the large corpus oracle at runtime using
 Python 3 and pinned go-jsonnet v0.22.0. The answer lives in a fresh temporary
-directory and is deleted after the test; it is not committed. The 138 inputs in
+directory and is deleted after the test; it is not committed. The 140 inputs in
 `lexer-sources.json`, the baseline, and all token/fodder/location comparisons are
-unchanged. Missing Go/Python, failed generation, or missing, malformed or empty
+checked against the current base. Missing Go/Python, failed generation, or missing, malformed or empty
 output fails the test; there is no availability-based skip.
 
 The small lexer snippets and raw-byte string regressions remain saved, so they
@@ -113,10 +112,14 @@ history, review, or GitHub state change is part of these local fixes.
 
 ## Parser and formatter pipeline
 
-This layer also runs EnforceStringStyle and EnforceCommentStyle. Layout, parentheses and import sorting follow in later PRs.
+This layer adds layout and indentation to the string/comment and cleanup passes. Parentheses/object-extension and import sorting follow in #64 and #65.
 
 `format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
 
 The node corpus and snippets are generated from pinned go-jsonnet v0.22.0 during every parity test. Missing Go, missing inputs, malformed output or an empty comparison fails. Small reviewable node regressions remain saved; `make check-fmt-node-oracle` verifies regeneration.
 
 Pass comparisons run each implemented pass on a fresh AST. Every parsed input must contain exactly the implemented pass list, in order, with no panic; missing, duplicate and unknown cells fail. `make check-fmt-pass-oracle` verifies the small saved regressions. `make go-jsonnet-checkout` provisions the pinned fixture inputs, and CI sets `RTK_REQUIRE_GO_JSONNET=1`.
+
+The current-base corpus contains 140 inputs: `large_native_yaml_numbers` and
+`yaml_quoted_continuation_env` were added after the historical 138-file audit.
+This phase freshly matches 135 of 140; the phase baseline records that result.
