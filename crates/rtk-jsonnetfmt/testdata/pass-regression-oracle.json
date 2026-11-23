@@ -3,6 +3,10 @@
     "source": "trailing_comma/array_one_line",
     "passes": [
       {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
       },
@@ -98,6 +102,10 @@
     "source": "slice_colon/double_colon",
     "passes": [
       {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
       },
@@ -146,6 +154,10 @@
   {
     "source": "pretty_names/index_single_quoted",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
@@ -240,6 +252,10 @@
     "source": "string_style/double_to_single",
     "passes": [
       {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
       },
@@ -313,6 +329,10 @@
   {
     "source": "comment_style/hash_to_slash",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
@@ -394,6 +414,10 @@
   {
     "source": "max_blank_lines/three_blanks_between_fields",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "entries": [
@@ -585,6 +609,10 @@
   {
     "source": "fix_newlines/array_expand_from_an_element",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
@@ -846,6 +874,10 @@
     "source": "indentation/already_correct",
     "passes": [
       {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
       },
@@ -895,6 +927,10 @@
     "source": "fix_parens/single",
     "passes": [
       {
+        "pass": "SortImports",
+        "unchanged": true
+      },
+      {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
       },
@@ -943,6 +979,10 @@
   {
     "source": "remove_plus_object/var_plus_object",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
@@ -1086,6 +1126,10 @@
   {
     "source": "add_plus_object/top_level",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true
@@ -1286,6 +1330,10 @@
   {
     "source": "sort_imports/single_import",
     "passes": [
+      {
+        "pass": "SortImports",
+        "unchanged": true
+      },
       {
         "pass": "EnforceMaxBlankLines",
         "unchanged": true

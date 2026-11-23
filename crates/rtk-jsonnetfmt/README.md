@@ -5,7 +5,7 @@ This crate ports the lexical model in go-jsonnet v0.22.0:
 [fodder](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/fodder.go),
 [locations](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/location.go), and
 [string utilities](https://github.com/google/go-jsonnet/blob/v0.22.0/internal/parser/string_util.go).
-The formatter compatibility target is Tanka v0.38.0. This layer contains a partial library
+The formatter compatibility target is Tanka v0.38.0. This layer contains the complete library
 formatter. The `rtk fmt` command follows in #66; lexer tests alone are not full-format parity.
 
 ## FMT-14: why the dedicated lexer remains
@@ -112,7 +112,7 @@ history, review, or GitHub state change is part of these local fixes.
 
 ## Parser and formatter pipeline
 
-This layer adds parentheses and object-extension normalization. Import sorting follows in #65.
+This layer adds import sorting and completes the library formatter pipeline. CLI file/stdin integration follows in #66.
 
 `format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
 
@@ -122,4 +122,8 @@ Pass comparisons run each implemented pass on a fresh AST. Every parsed input mu
 
 The current-base corpus contains 140 inputs: `large_native_yaml_numbers` and
 `yaml_quoted_continuation_env` were added after the historical 138-file audit.
-This phase freshly matches 139 of 140; the phase baseline records that result.
+This phase freshly matches 140 of 140; the phase baseline records that result.
+
+The import sort truth table is mandatory: missing, unreadable, malformed and
+empty data fail. `make check-go-sort-truth-table` verifies its deterministic
+Go regeneration, including tied-key permutations, and runs in CI at this layer.
