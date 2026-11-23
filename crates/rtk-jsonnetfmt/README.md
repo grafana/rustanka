@@ -112,7 +112,7 @@ history, review, or GitHub state change is part of these local fixes.
 
 ## Parser and formatter pipeline
 
-This layer adds layout and indentation to the string/comment and cleanup passes. Parentheses/object-extension and import sorting follow in #64 and #65.
+This layer adds parentheses and object-extension normalization. Import sorting follows in #65.
 
 `format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
 
@@ -122,4 +122,4 @@ Pass comparisons run each implemented pass on a fresh AST. Every parsed input mu
 
 The current-base corpus contains 140 inputs: `large_native_yaml_numbers` and
 `yaml_quoted_continuation_env` were added after the historical 138-file audit.
-This phase freshly matches 135 of 140; the phase baseline records that result.
+This phase freshly matches 139 of 140; the phase baseline records that result.

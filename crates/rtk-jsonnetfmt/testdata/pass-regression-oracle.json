@@ -61,6 +61,18 @@
         ]
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -98,6 +110,18 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -132,6 +156,18 @@
       },
       {
         "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
         "unchanged": true
       },
       {
@@ -216,6 +252,18 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -275,6 +323,18 @@
       },
       {
         "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
         "unchanged": true
       },
       {
@@ -489,6 +549,18 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -642,6 +714,18 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -774,6 +858,18 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -808,6 +904,18 @@
       },
       {
         "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
         "unchanged": true
       },
       {
@@ -848,6 +956,112 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "ApplyBrace",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Left",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "b",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Right.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Right.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "AddPlusObject",
+        "unchanged": true
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -885,6 +1099,169 @@
         "unchanged": true
       },
       {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Binary",
+            "attrs": {
+              "op": "+"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "OpFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Left",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Left.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "a",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Left.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Left.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Left.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Left.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Right",
+            "kind": "Object",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0]",
+            "kind": "ObjectField",
+            "attrs": {
+              "fieldKind": "ObjectFieldID",
+              "hide": "Inherit",
+              "id": "b",
+              "superSugar": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder1"
+              },
+              {
+                "name": "Fodder2"
+              },
+              {
+                "name": "OpFodder"
+              },
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0].Method",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Right.Fields[0].Expr1",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$.Right.Fields[0].Expr2",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "2"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Right.Fields[0].Expr3",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
         "pass": "NoRedundantSliceColon",
         "unchanged": true
       },
@@ -919,6 +1296,18 @@
       },
       {
         "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "FixParens",
+        "unchanged": true
+      },
+      {
+        "pass": "RemovePlusObject",
+        "unchanged": true
+      },
+      {
+        "pass": "AddPlusObject",
         "unchanged": true
       },
       {
