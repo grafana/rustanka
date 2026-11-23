@@ -1,0 +1,32 @@
+[
+  {
+    "name": "verbatim_string_double",
+    "why": "the corpus holds no @\"...\" at all, so VerbatimStringDouble and the doubled-quote unescape are graded by nothing else",
+    "source": "local s = @\"a\"\"b\";\ns\n"
+  },
+  {
+    "name": "verbatim_string_single",
+    "why": "one corpus file has @'...'; the unparser puts the doubled quote back, so it is worth pinning directly",
+    "source": "local s = @'a''b';\ns\n"
+  },
+  {
+    "name": "verbatim_string_field",
+    "why": "a verbatim string as a field name is an ObjectFieldStr whose Expr1 is the literal",
+    "source": "{ @'a': 1 }\n"
+  },
+  {
+    "name": "tailstrict",
+    "why": "one corpus file uses tailstrict; TailStrictFodder is read only when TailStrict is set",
+    "source": "local f(x) = x;\nf(1) tailstrict\n"
+  },
+  {
+    "name": "tailstrict_fodder",
+    "why": "TailStrictFodder with something in it, which nothing in the corpus reaches",
+    "source": "local f(x) = x;\nf(1) /* before */ tailstrict\n"
+  },
+  {
+    "name": "importbin",
+    "why": "one corpus file uses importbin",
+    "source": "importbin 'data.bin'\n"
+  }
+]

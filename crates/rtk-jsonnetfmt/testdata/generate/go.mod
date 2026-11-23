@@ -1,7 +1,7 @@
-// Not part of any build. Regenerates ../corpus/:
+// Not part of any build. Regenerates ../corpus/ and ../go-jsonnet-corpus.json:
 //
 //     cd crates/rtk-jsonnetfmt/testdata/generate
-//     go mod tidy && go run . <repo root> <corpus dir>
+//     go run . <repo root> <corpus dir> <go-jsonnet checkout> <external corpus file>
 //
 // The lexer/string oracles are regenerated from the repository root with
 // `make update-fmt-lexer-oracle`; their inputs do not depend on a corpus.

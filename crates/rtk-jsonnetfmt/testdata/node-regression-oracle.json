@@ -1,0 +1,600 @@
+[
+  {
+    "source": "verbatim_string_double",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "Local",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0]",
+        "kind": "LocalBind",
+        "attrs": {
+          "variable": "s"
+        },
+        "slots": [
+          {
+            "name": "VarFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CloseFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Binds[0].Body",
+        "kind": "LiteralString",
+        "attrs": {
+          "blockIndent": "",
+          "blockTermIndent": "",
+          "kind": "VerbatimStringDouble",
+          "value": "a\"b"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body",
+        "kind": "Var",
+        "attrs": {
+          "id": "s"
+        },
+        "slots": [
+          {
+            "name": "Fodder",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "verbatim_string_single",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "Local",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0]",
+        "kind": "LocalBind",
+        "attrs": {
+          "variable": "s"
+        },
+        "slots": [
+          {
+            "name": "VarFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CloseFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Binds[0].Body",
+        "kind": "LiteralString",
+        "attrs": {
+          "blockIndent": "",
+          "blockTermIndent": "",
+          "kind": "VerbatimStringSingle",
+          "value": "a'b"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body",
+        "kind": "Var",
+        "attrs": {
+          "id": "s"
+        },
+        "slots": [
+          {
+            "name": "Fodder",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "verbatim_string_field",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "Object",
+        "attrs": {
+          "trailingComma": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "CloseFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[0]",
+        "kind": "ObjectField",
+        "attrs": {
+          "fieldKind": "ObjectFieldStr",
+          "hide": "Inherit",
+          "id": "\u003cnil\u003e",
+          "superSugar": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder1"
+          },
+          {
+            "name": "Fodder2"
+          },
+          {
+            "name": "OpFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[0].Method",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Fields[0].Expr1",
+        "kind": "LiteralString",
+        "attrs": {
+          "blockIndent": "",
+          "blockTermIndent": "",
+          "kind": "VerbatimStringSingle",
+          "value": "a"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[0].Expr2",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "1"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Fields[0].Expr3",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "tailstrict",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "Local",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0]",
+        "kind": "LocalBind",
+        "attrs": {
+          "variable": "f"
+        },
+        "slots": [
+          {
+            "name": "VarFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CloseFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun",
+        "kind": "Method",
+        "attrs": {
+          "trailingComma": "false"
+        },
+        "slots": [
+          {
+            "name": "ParenLeftFodder"
+          },
+          {
+            "name": "ParenRightFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun.Parameters[0]",
+        "kind": "Parameter",
+        "attrs": {
+          "name": "x"
+        },
+        "slots": [
+          {
+            "name": "NameFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun.Parameters[0].DefaultArg",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Binds[0].Body",
+        "kind": "Var",
+        "attrs": {
+          "id": "x"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body",
+        "kind": "Apply",
+        "attrs": {
+          "tailStrict": "true",
+          "trailingComma": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "FodderLeft"
+          },
+          {
+            "name": "FodderRight"
+          },
+          {
+            "name": "TailStrictFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Target",
+        "kind": "Var",
+        "attrs": {
+          "id": "f"
+        },
+        "slots": [
+          {
+            "name": "Fodder",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Arguments.Positional[0]",
+        "kind": "CommaSeparatedExpr",
+        "slots": [
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Arguments.Positional[0].Expr",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "1"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "tailstrict_fodder",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "Local",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0]",
+        "kind": "LocalBind",
+        "attrs": {
+          "variable": "f"
+        },
+        "slots": [
+          {
+            "name": "VarFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CloseFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun",
+        "kind": "Method",
+        "attrs": {
+          "trailingComma": "false"
+        },
+        "slots": [
+          {
+            "name": "ParenLeftFodder"
+          },
+          {
+            "name": "ParenRightFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun.Parameters[0]",
+        "kind": "Parameter",
+        "attrs": {
+          "name": "x"
+        },
+        "slots": [
+          {
+            "name": "NameFodder"
+          },
+          {
+            "name": "EqFodder"
+          },
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Binds[0].Fun.Parameters[0].DefaultArg",
+        "kind": "\u003cnil\u003e"
+      },
+      {
+        "path": "$.Binds[0].Body",
+        "kind": "Var",
+        "attrs": {
+          "id": "x"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body",
+        "kind": "Apply",
+        "attrs": {
+          "tailStrict": "true",
+          "trailingComma": "false"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          },
+          {
+            "name": "FodderLeft"
+          },
+          {
+            "name": "FodderRight"
+          },
+          {
+            "name": "TailStrictFodder",
+            "fodder": [
+              {
+                "kind": "Interstitial",
+                "blanks": 0,
+                "indent": 0,
+                "comment": [
+                  "/* before */"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Target",
+        "kind": "Var",
+        "attrs": {
+          "id": "f"
+        },
+        "slots": [
+          {
+            "name": "Fodder",
+            "fodder": [
+              {
+                "kind": "LineEnd",
+                "blanks": 0,
+                "indent": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Arguments.Positional[0]",
+        "kind": "CommaSeparatedExpr",
+        "slots": [
+          {
+            "name": "CommaFodder"
+          }
+        ]
+      },
+      {
+        "path": "$.Body.Arguments.Positional[0].Expr",
+        "kind": "LiteralNumber",
+        "attrs": {
+          "originalString": "1"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "source": "importbin",
+    "entries": [
+      {
+        "path": "$",
+        "kind": "ImportBin",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$.File",
+        "kind": "LiteralString",
+        "attrs": {
+          "blockIndent": "",
+          "blockTermIndent": "",
+          "kind": "StringSingle",
+          "value": "data.bin"
+        },
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      },
+      {
+        "path": "$$final",
+        "kind": "FinalFodder",
+        "slots": [
+          {
+            "name": "Fodder"
+          }
+        ]
+      }
+    ]
+  }
+]
