@@ -5,33 +5,18 @@
 //! implementation of [`crate::pass::AstPass`] that overrides one or two hooks
 //! and delegates the rest to `pass::base`.
 //!
-//! # What has landed
+//! The syntax passes normalize trailing commas, slice colons, field names,
+//! strings, comments, blank lines, newlines, parentheses and object extension.
+//! The two boundary-newline steps live on the types they mutate:
+//! [`Node::remove_initial_newlines`] and [`Fodder::remove_extra_trailing_newlines`].
+//! `FixIndentation` has its own complete walk, and `SortImports` rebuilds import
+//! groups; neither is an [`crate::pass::AstPass`]. The three strip passes are
+//! outside the Tanka option set; see [`crate::Options`].
 //!
-//! Phase 2b of `docs/rtk-fmt-plan.md`: [`FixTrailingCommas`],
-//! [`NoRedundantSliceColon`] and [`PrettyFieldNames`]. Phase 2c:
-//! [`EnforceStringStyle`] and [`EnforceCommentStyle`]. Phase 2d:
-//! [`EnforceMaxBlankLines`] and [`FixNewlines`], plus the two four-line
-//! pipeline steps [`Node::remove_initial_newlines`] and
-//! [`Fodder::remove_extra_trailing_newlines`], which live on the types they
-//! mutate. `FixIndentation` is 2d's other half and is deliberately **not**
-//! here: `FormatNode` calls `visitor.VisitFile(node, finalFodder)` on it
-//! directly rather than through the `pass.ASTPass` machinery, so it is not an
-//! implementation of [`crate::pass::AstPass`] and does not belong in this
-//! module. Phase 2e: [`FixParens`], [`RemovePlusObject`] and
-//! [`AddPlusObject`]. That leaves `SortImports` (Phase 2f) and the three strip
-//! passes, which no phase schedules because `Options::default` skips them.
-//!
-//! # Phase 2e's three are the ones that change meaning
-//!
-//! Everything before them is cosmetic: a bug moves a comment or an indent. A
-//! bug in these three changes what a file *evaluates to* —
-//! `{ a: 1 } { b: 2 }.a` has to become `({ a: 1 } + { b: 2 }).a`, and without
-//! the inserted parentheses the formatted expression is a runtime error rather
-//! than a differently-spelled program. They are also the first three that
-//! replace a node rather than rewriting its fodder, which is why each one
-//! needs `std::mem::replace` to get an owned payload out of `node.kind`:
-//! moving a child into a differently-shaped parent is not something a `&mut`
-//! borrow of the whole node will allow.
+//! Parentheses and object-extension transformations replace nodes, which is why
+//! they take ownership of payloads with `std::mem::replace`. Their tests check
+//! grouping as well as spelling: `{ a: 1 } { b: 2 }.a` must become
+//! `({ a: 1 } + { b: 2 }).a` when implicit plus is disabled.
 //!
 //! [`AddPlusObject`] is the `use_implicit_plus: false` branch of step 7 and so
 //! is the one pass here that `tk fmt` never runs; [`RemovePlusObject`] is the

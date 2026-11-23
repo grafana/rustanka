@@ -1,12 +1,13 @@
-# Lexer compatibility and downstream contract
+# Tanka-compatible formatter
 
 This crate ports the lexical model in go-jsonnet v0.22.0:
 [lexer](https://github.com/google/go-jsonnet/blob/v0.22.0/internal/parser/lexer.go),
 [fodder](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/fodder.go),
 [locations](https://github.com/google/go-jsonnet/blob/v0.22.0/ast/location.go), and
 [string utilities](https://github.com/google/go-jsonnet/blob/v0.22.0/internal/parser/string_util.go).
-The formatter compatibility target is Tanka v0.38.0. This layer contains the complete library
-formatter. The `rtk fmt` command follows in #66; lexer tests alone are not full-format parity.
+The formatter compatibility target is Tanka v0.38.0. The library implements the
+parser, formatting passes and unparser; `rtk fmt` provides byte-preserving file
+and stdin integration on a protected formatting thread.
 
 ## FMT-14: why the dedicated lexer remains
 
@@ -61,20 +62,23 @@ before removing the dedicated implementation.
   when constructing parser diagnostics. The string/Display projections are
   for human-readable contexts only; they cannot represent invalid UTF-8.
 
-The parser, AST, passes and unparser use `Text`, byte diagnostic constructors,
-and preserve bytes until the same normalization point as Go. PR #66 must read both files and stdin as bytes, call
-the byte formatter entrypoint, write output and diagnostics as bytes, and
-compare captured stdout/stderr as `Vec<u8>`. Its file/stdin integration tests
-remain owned by that PR. Native filenames are a separate FMT-02 concern.
+`Text` flows through the AST, parser, passes and unparser. The CLI calls
+`format_default_bytes(name, input)` with a native path and byte input, and writes
+formatted output and `Error::message_bytes()` without decoding them. File
+identity stays `PathBuf` throughout discovery and fmt/lint. String
+entrypoints remain available for callers whose sources are known UTF-8.
 
 ## FMT-08 / FMT-09 / FMT-11: runtime corpus and saved regressions
 
 `cargo test -p rtk-jsonnetfmt` generates the large corpus oracle at runtime using
 Python 3 and pinned go-jsonnet v0.22.0. The answer lives in a fresh temporary
 directory and is deleted after the test; it is not committed. The 140 inputs in
-`lexer-sources.json`, the baseline, and all token/fodder/location comparisons are
-checked against the current base. Missing Go/Python, failed generation, or missing, malformed or empty
-output fails the test; there is no availability-based skip.
+`lexer-sources.json` include two current-base YAML fixtures added since the
+138-file audit; all earlier token/fodder/location comparisons are retained. Missing Go/Python, failed generation, or missing, malformed or empty
+output fails the test; there is no availability-based skip. The deterministic
+3,925-case byte audit is also generated and compared on every lexer-oracle run,
+including successful token locations and refusal messages. Its large answers
+exist only in the test's temporary directory.
 
 The small lexer snippets and raw-byte string regressions remain saved, so they
 can run without Go by selecting their Rust tests. Required saved fixtures still
@@ -103,27 +107,25 @@ python3 crates/rtk-jsonnetfmt/testdata/generate/lexer_oracle.py \
   --corpus-output /tmp/rtk-lexer-oracle.json
 ```
 
-## FMT-02: inherited dependency
+## AST, pass and CLI checks
 
-PR #58 now inherits PR #57's native `PathBuf` discovery, parent cleaning, and
-Unicode glob fixes. Keep those changes when carrying this stack forward; native
-filename handling remains separate from source-byte decoding. No branch,
-history, review, or GitHub state change is part of these local fixes.
+The node and pass suites generate both their complete corpus and snippet answers
+at runtime. All inputs remain checked in; the former multi-megabyte answer files
+are replaced by required live comparisons. `node-regressions.json` and
+`pass-regressions.json` select small saved cases with independently regenerable
+answers. Missing tools, sources, answers, malformed JSON and empty comparisons
+fail. Run:
 
-## Parser and formatter pipeline
+```sh
+make test-fmt-oracles
+make check-generated
+```
 
-This layer adds import sorting and completes the library formatter pipeline. CLI file/stdin integration follows in #66.
+`update-fmt-node-oracle` / `check-fmt-node-oracle` own the saved node regressions;
+`update-fmt-pass-oracle` / `check-fmt-pass-oracle` own the pass regressions.
+`update-fmt-parse-errors` / `check-fmt-parse-errors` regenerate/check the parser
+refusal data. `go-jsonnet-checkout` obtains v0.22.0 through Go's verified module
+cache and preserves existing files when repairing an incomplete checkout.
 
-`format_bytes` and `format_default_bytes` accept arbitrary source bytes and native diagnostic paths. AST payloads and output remain bytes; only the same string/comment boundaries as Go decode runes. `Error::message_bytes()` and `Error::write_to()` preserve exact diagnostics. The string convenience APIs require UTF-8 input.
-
-The node corpus and snippets are generated from pinned go-jsonnet v0.22.0 during every parity test. Missing Go, missing inputs, malformed output or an empty comparison fails. Small reviewable node regressions remain saved; `make check-fmt-node-oracle` verifies regeneration.
-
-Pass comparisons run each implemented pass on a fresh AST. Every parsed input must contain exactly the implemented pass list, in order, with no panic; missing, duplicate and unknown cells fail. `make check-fmt-pass-oracle` verifies the small saved regressions. `make go-jsonnet-checkout` provisions the pinned fixture inputs, and CI sets `RTK_REQUIRE_GO_JSONNET=1`.
-
-The current-base corpus contains 140 inputs: `large_native_yaml_numbers` and
-`yaml_quoted_continuation_env` were added after the historical 138-file audit.
-This phase freshly matches 140 of 140; the phase baseline records that result.
-
-The import sort truth table is mandatory: missing, unreadable, malformed and
-empty data fail. `make check-go-sort-truth-table` verifies its deterministic
-Go regeneration, including tied-key permutations, and runs in CI at this layer.
+The combined corpus contains 140 in-repository files and 719 upstream cases.
+These counts measure specific inputs, not all Jsonnet programs.

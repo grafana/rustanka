@@ -56,6 +56,16 @@ pub fn lint_snippet(code: &str, config: &LintConfig) -> (Vec<Diagnostic>, Vec<Pa
 /// Returns the modified code. Fixes are applied in reverse order to preserve offsets.
 /// Each fix range is extended to also consume surrounding whitespace and commas.
 pub fn apply_fixes(code: &str, diagnostics: &[Diagnostic]) -> String {
+	let mut result = code.to_string();
+	for range in fix_ranges(code, diagnostics).into_iter().rev() {
+		result.replace_range(range, "");
+	}
+	result
+}
+
+/// The deletions made by [`apply_fixes`], in source order without overlaps.
+/// Byte-oriented callers can map these ranges back to their original source.
+pub fn fix_ranges(code: &str, diagnostics: &[Diagnostic]) -> Vec<std::ops::Range<usize>> {
 	let mut ranges: Vec<(usize, usize)> = diagnostics
 		.iter()
 		.filter_map(|d| {
@@ -67,28 +77,16 @@ pub fn apply_fixes(code: &str, diagnostics: &[Diagnostic]) -> String {
 		})
 		.collect();
 
-	if ranges.is_empty() {
-		return code.to_string();
-	}
-
-	// Sort by start in ascending order, then filter out overlapping ranges
 	ranges.sort_by_key(|&(start, _)| start);
-	let mut filtered: Vec<(usize, usize)> = Vec::new();
-	let mut last_end = 0usize;
+	let mut filtered = Vec::new();
+	let mut last_end = 0;
 	for (start, end) in ranges {
 		if start >= last_end {
-			filtered.push((start, end));
+			filtered.push(start..end);
 			last_end = end;
 		}
-		// else: overlapping range, skip
 	}
-
-	// Apply from end to start to preserve earlier offsets
-	let mut result = code.to_string();
-	for &(start, end) in filtered.iter().rev() {
-		result.replace_range(start..end, "");
-	}
-	result
+	filtered
 }
 
 /// Extends a raw fix range (exact syntax node range) to also consume:
