@@ -65,7 +65,7 @@ before removing the dedicated implementation.
 `Text` flows through the AST, parser, passes and unparser. The CLI calls
 `format_default_bytes(name, input)` with a native path and byte input, and writes
 formatted output and `Error::message_bytes()` without decoding them. File
-identity stays `PathBuf` throughout discovery and fmt/lint. String
+identity stays `PathBuf` throughout discovery, fmt/lint and acceptance. String
 entrypoints remain available for callers whose sources are known UTF-8.
 
 ## FMT-08 / FMT-09 / FMT-11: runtime corpus and saved regressions
@@ -107,7 +107,7 @@ python3 crates/rtk-jsonnetfmt/testdata/generate/lexer_oracle.py \
   --corpus-output /tmp/rtk-lexer-oracle.json
 ```
 
-## AST, pass and CLI checks
+## AST, pass and acceptance checks
 
 The node and pass suites generate both their complete corpus and snippet answers
 at runtime. All inputs remain checked in; the former multi-megabyte answer files
@@ -127,5 +127,16 @@ make check-generated
 refusal data. `go-jsonnet-checkout` obtains v0.22.0 through Go's verified module
 cache and preserves existing files when repairing an incomplete checkout.
 
+`make fmt-acceptance-corpus` acquires the immutable revisions in
+`fmt-acceptance.toml`. It requires Python 3.11+ (`PYTHON` may select it). Existing
+unowned destinations are refused. `make fmt-acceptance` compares the actual
+supplied `rtk` binary with Tanka on both passes, including invalid UTF-8 input.
+It creates an owned staging child and enforces pinned counters independently
+of extra roots. Known upstream non-convergence/refused-output exceptions are
+checked separately from stable staged files; formatting still runs once.
+The scheduled `--drift` acquisition and `--advisory-drift` harness mode are
+separate from the pinned pull-request gate.
+
 The combined corpus contains 140 in-repository files and 719 upstream cases.
-These counts measure specific inputs, not all Jsonnet programs.
+The external acceptance baseline remains 3,016 files, including 1,452 vendor
+files. These counts measure specific inputs, not all Jsonnet programs.

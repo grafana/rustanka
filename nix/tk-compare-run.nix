@@ -6,7 +6,7 @@
 }: let
   inherit (packages) rtk tk-compare tanka jrsonnet;
 
-  configTemplate = ../tk-compare-grafana.toml;
+  configTemplate = ../tk-compare-in-repo.toml;
   # Source directories for test fixtures
   goldenEnvsDir = ../test_fixtures/golden_envs;
   diffFixturesDir = ../cmds/rtk/tests/testdata/diff;

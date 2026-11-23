@@ -1,0 +1,48 @@
+name: fmt acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'crates/rtk-jsonnetfmt/**'
+      - 'crates/rtk-gobwas-glob/**'
+      - 'cmds/rtk/**'
+      - 'cmds/tk-compare/**'
+      - 'scripts/*fmt*'
+      - 'fmt-acceptance.toml'
+      - 'Makefile'
+      - '.github/workflows/fmt-acceptance.yaml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 3'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Pinned formatter acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+      - uses: ./.github/actions/install-tk
+      - name: Exercise acceptance failures with actual binaries
+        run: make check-fmt-acceptance-regressions
+      - run: make fmt-acceptance-corpus
+      - name: Compare actual binaries over immutable pinned inputs
+        run: make fmt-acceptance
+
+  drift:
+    name: Advisory moving-branch drift
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.4
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+      - uses: ./.github/actions/install-tk
+      - name: Acquire advisory inputs separately from acceptance
+        run: scripts/fmt-acceptance-corpus.sh fmt-acceptance.toml target/fmt-drift-corpus --drift
+      - run: cargo build --release -p rtk -p tk-compare
+      - name: Report moving-branch comparison
+        run: target/release/tk-compare fmt-acceptance --config fmt-acceptance.toml --corpus-dir target/fmt-drift-corpus --rtk "$PWD/target/release/rtk" --advisory-drift

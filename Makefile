@@ -1,4 +1,4 @@
-.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures check-glob-truth-table go-jsonnet-checkout check-fmt-go-jsonnet-pin update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle update-go-sort-truth-table check-go-sort-truth-table check-generated
+.PHONY: target/release/jrsonnet target/release/rtk target/release/tk-compare build-rtk-quiet build-tk-compare-quiet tk-compare fmt-acceptance fmt-acceptance-corpus lint lint-all lint-ci fmt fmt-check test test-rtk check check-rtk ci ci-full help update-golden-fixtures check-golden-fixtures check-glob-truth-table go-jsonnet-checkout check-fmt-go-jsonnet-pin update-fmt-corpus check-fmt-corpus update-fmt-lexer-oracle update-fmt-node-oracle update-fmt-pass-oracle update-go-sort-truth-table check-go-sort-truth-table check-generated
 
 .DEFAULT_GOAL := help
 
@@ -31,6 +31,8 @@ help:
 	@echo "  update-fmt-pass-oracle - Regenerate the go-jsonnet per-pass AST oracle (requires Go)"
 	@echo "  update-go-sort-truth-table - Regenerate the Go sort.Slice permutation table (requires Go)"
 	@echo "  check-go-sort-truth-table - Check the sort.Slice table is up to date (requires Go)"
+	@echo "  fmt-acceptance-corpus  - Clone the pinned real-Jsonnet fmt acceptance corpus (requires git, network)"
+	@echo "  fmt-acceptance         - Run the fmt acceptance gate against tk (requires tk, the corpus)"
 
 target/release/jrsonnet:
 	@cargo build --release -p jrsonnet
@@ -42,7 +44,7 @@ target/release/tk-compare:
 	@cargo build --release -p tk-compare
 
 tk-compare: target/release/rtk target/release/tk-compare
-	@target/release/tk-compare -- run tk-compare-grafana.toml --jrsonnet-path=target/release/jrsonnet --rtk=target/release/rtk
+	@target/release/tk-compare -- run tk-compare-in-repo.toml --jrsonnet-path=target/release/jrsonnet --rtk=target/release/rtk
 
 lint:
 	@cargo clippy -p rtk --all-targets
@@ -248,6 +250,33 @@ check-go-sort-truth-table:
 check-generated: check-fmt-corpus check-go-sort-truth-table check-glob-truth-table check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle check-fmt-parse-errors
 	@echo "All generated artifacts are up to date."
 
+# Phase 5's acceptance gate: `rtk fmt` against `tk fmt` over real Grafana
+# Jsonnet, vendor included.
+#
+# Deliberately **not** part of `check`, `ci` or `check-generated`. It needs
+# network access to clone several hundred megabytes and a `tk` on PATH, so as a
+# pull-request gate it would fail for reasons that have nothing to do with the
+# change under review. `.github/workflows/fmt-acceptance.yaml` runs it weekly
+# and files one issue on divergence, the way tk-latest.yaml does.
+#
+# What it measures and why the corpus is what it is: fmt-acceptance.toml.
+# Everything it prints is printed on success as well as failure — the counts are
+# the output of this gate, not a debugging aid.
+FMT_ACCEPTANCE_CONFIG := fmt-acceptance.toml
+FMT_ACCEPTANCE_CORPUS := target/fmt-acceptance-corpus
+
+fmt-acceptance-corpus:
+	@scripts/fmt-acceptance-corpus.sh $(FMT_ACCEPTANCE_CONFIG) $(FMT_ACCEPTANCE_CORPUS)
+
+# `--rtk` is absolute because the already-formatted gate runs `rtk fmt` with the
+# staging tree as its working directory, where a relative path would not
+# resolve. `tk` comes from PATH, pinned by .github/actions/install-tk in CI.
+fmt-acceptance: target/release/rtk target/release/tk-compare
+	@target/release/tk-compare fmt-acceptance \
+		--config $(FMT_ACCEPTANCE_CONFIG) \
+		--corpus-dir $(FMT_ACCEPTANCE_CORPUS) \
+		--rtk=$(CURDIR)/target/release/rtk
+
 check-glob-truth-table:
 	cargo test -p rtk-gobwas-glob --test truth_table
 
@@ -268,3 +297,8 @@ check-fmt-parse-errors:
 	python3 crates/rtk-jsonnetfmt/testdata/generate/ast_oracle.py --kind parse-error --check
 test-fmt-oracles:
 	cargo test -p rtk-jsonnetfmt --test node_oracle --test node_parity --test pass_parity --test lexer_oracle --test oracle_requirements
+
+.PHONY: check-fmt-acceptance-regressions
+check-fmt-acceptance-regressions: target/release/rtk target/release/tk-compare
+	python3 scripts/check_fmt_acceptance.py --compare target/release/tk-compare --rtk target/release/rtk
+	$${PYTHON:-python3} -m unittest discover -s scripts -p 'test_fmt_acceptance_corpus.py'
