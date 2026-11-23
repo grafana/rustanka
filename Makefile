@@ -112,3 +112,16 @@ test-fmt-oracles:
 	cargo test -p rtk-jsonnetfmt --test lexer_oracle --test node_oracle --test node_parity --test oracle_requirements --test pass_parity
 
 check-generated: check-glob-truth-table check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle
+
+# Import sorting depends on Go's unstable tie order; this layer owns its data.
+.PHONY: update-go-sort-truth-table check-go-sort-truth-table
+FMT_GENERATE_DIR := crates/rtk-jsonnetfmt/testdata/generate
+GO_SORT_TRUTH_TABLE := crates/rtk-jsonnetfmt/testdata/go-sort-truth-table.json
+update-go-sort-truth-table:
+	cd $(FMT_GENERATE_DIR) && go run ./sortdump $(CURDIR)/$(GO_SORT_TRUTH_TABLE)
+check-go-sort-truth-table:
+	@test -s $(GO_SORT_TRUTH_TABLE) || { echo "required sort truth table missing or empty; run make update-go-sort-truth-table"; exit 1; }
+	@set -e; tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
+		(cd $(FMT_GENERATE_DIR) && go run ./sortdump "$$tmp"); \
+		diff -u $(GO_SORT_TRUTH_TABLE) "$$tmp"
+check-generated: check-go-sort-truth-table

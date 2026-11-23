@@ -86,6 +86,7 @@ import (
 // nobody could read, regenerated on every go-jsonnet bump. Adding one back is
 // one line here.
 var passNames = []string{
+	"SortImports",
 	"EnforceMaxBlankLines",
 	"FixNewlines",
 	"FixTrailingCommas",

@@ -119,6 +119,7 @@ struct PassFileDump {
 /// against the oracle's own list, so a pass that lands without being wired in
 /// here fails rather than being silently ungraded.
 const IMPLEMENTED: &[&str] = &[
+	"SortImports",
 	"EnforceMaxBlankLines",
 	"FixNewlines",
 	"FixTrailingCommas",
@@ -141,6 +142,12 @@ const IMPLEMENTED: &[&str] = &[
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 	let options = Options::default();
 	match name {
+		// Not an `AstPass` either, and for a different reason from
+		// `FixIndentation`: upstream's is a free function over the whole file
+		// that rebuilds the top of the tree rather than visiting it. It reads
+		// no final fodder, as `_staged/passdump.go`'s
+		// `iformatter.SortImports(node)` does not pass any.
+		"SortImports" => node.sort_imports(),
 		"EnforceMaxBlankLines" => visit_file(
 			&mut EnforceMaxBlankLines::new(options.max_blank_lines),
 			node,

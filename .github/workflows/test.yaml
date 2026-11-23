@@ -12,8 +12,8 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - name: Check small saved lexer, string and AST regressions
-        run: make check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle
+      - name: Check small saved formatter regressions and sort truth
+        run: make check-fmt-lexer-oracle check-fmt-node-oracle check-fmt-pass-oracle check-go-sort-truth-table
 
   check-golden-fixtures:
     name: Check golden files
