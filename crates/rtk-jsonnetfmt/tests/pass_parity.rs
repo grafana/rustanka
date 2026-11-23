@@ -6,11 +6,15 @@ use std::{collections::BTreeMap, fs};
 
 use astdump::{DumpEntry, Entry, Snippet, compare, dump, read_oracle, repo_root, report};
 use rtk_jsonnetfmt::{
+	Options,
 	ast::Node,
 	fodder::Fodder,
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
-	passes::{FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames},
+	passes::{
+		EnforceCommentStyle, EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon,
+		PrettyFieldNames,
+	},
 };
 use serde::Deserialize;
 
@@ -49,6 +53,8 @@ const IMPLEMENTED: &[&str] = &[
 	"FixTrailingCommas",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
+	"EnforceStringStyle",
+	"EnforceCommentStyle",
 ];
 
 /// Run one named pass over a whole file, or report that rtk has not got it.
@@ -58,10 +64,21 @@ const IMPLEMENTED: &[&str] = &[
 /// A pass is run unconditionally here, as it is there: `FormatNode`'s gates
 /// are [`rtk_jsonnetfmt::format`]'s business, and the corpus grades those.
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
+	let options = Options::default();
 	match name {
 		"FixTrailingCommas" => visit_file(&mut FixTrailingCommas, node, final_fodder),
 		"NoRedundantSliceColon" => visit_file(&mut NoRedundantSliceColon, node, final_fodder),
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
+		"EnforceStringStyle" => visit_file(
+			&mut EnforceStringStyle::new(options.string_style),
+			node,
+			final_fodder,
+		),
+		"EnforceCommentStyle" => visit_file(
+			&mut EnforceCommentStyle::new(options.comment_style),
+			node,
+			final_fodder,
+		),
 		_ => return false,
 	}
 	true

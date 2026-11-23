@@ -59,6 +59,14 @@
       {
         "pass": "PrettyFieldNames",
         "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
       }
     ]
   },
@@ -75,6 +83,14 @@
       },
       {
         "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
         "unchanged": true
       }
     ]
@@ -126,6 +142,121 @@
           {
             "path": "$.Index",
             "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "string_style/double_to_single",
+    "passes": [
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "LiteralString",
+            "attrs": {
+              "blockIndent": "",
+              "blockTermIndent": "",
+              "kind": "StringSingle",
+              "value": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "comment_style/hash_to_slash",
+    "passes": [
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceStringStyle",
+        "unchanged": true
+      },
+      {
+        "pass": "EnforceCommentStyle",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder",
+                "fodder": [
+                  {
+                    "kind": "Paragraph",
+                    "blanks": 0,
+                    "indent": 0,
+                    "comment": [
+                      "// c"
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           {
             "path": "$$final",
