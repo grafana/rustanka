@@ -1,0 +1,143 @@
+[
+  {
+    "source": "trailing_comma/array_one_line",
+    "passes": [
+      {
+        "pass": "FixTrailingCommas",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Array",
+            "attrs": {
+              "trailingComma": "false"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "CloseFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0]",
+            "kind": "CommaSeparatedExpr",
+            "slots": [
+              {
+                "name": "CommaFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Elements[0].Expr",
+            "kind": "LiteralNumber",
+            "attrs": {
+              "originalString": "1"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "slice_colon/double_colon",
+    "passes": [
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "unchanged": true
+      }
+    ]
+  },
+  {
+    "source": "pretty_names/index_single_quoted",
+    "passes": [
+      {
+        "pass": "FixTrailingCommas",
+        "unchanged": true
+      },
+      {
+        "pass": "NoRedundantSliceColon",
+        "unchanged": true
+      },
+      {
+        "pass": "PrettyFieldNames",
+        "entries": [
+          {
+            "path": "$",
+            "kind": "Index",
+            "attrs": {
+              "id": "foo"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              },
+              {
+                "name": "LeftBracketFodder"
+              },
+              {
+                "name": "RightBracketFodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Target",
+            "kind": "Var",
+            "attrs": {
+              "id": "a"
+            },
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          },
+          {
+            "path": "$.Index",
+            "kind": "\u003cnil\u003e"
+          },
+          {
+            "path": "$$final",
+            "kind": "FinalFodder",
+            "slots": [
+              {
+                "name": "Fodder"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
