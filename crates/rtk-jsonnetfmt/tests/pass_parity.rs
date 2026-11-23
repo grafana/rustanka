@@ -81,8 +81,8 @@ use rtk_jsonnetfmt::{
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
 	passes::{
-		EnforceCommentStyle, EnforceMaxBlankLines, EnforceStringStyle, FixNewlines,
-		FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames,
+		AddPlusObject, EnforceCommentStyle, EnforceMaxBlankLines, EnforceStringStyle, FixNewlines,
+		FixParens, FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames, RemovePlusObject,
 	},
 };
 use serde::Deserialize;
@@ -122,6 +122,9 @@ const IMPLEMENTED: &[&str] = &[
 	"EnforceMaxBlankLines",
 	"FixNewlines",
 	"FixTrailingCommas",
+	"FixParens",
+	"RemovePlusObject",
+	"AddPlusObject",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
 	"EnforceStringStyle",
@@ -145,6 +148,12 @@ fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 		),
 		"FixNewlines" => visit_file(&mut FixNewlines, node, final_fodder),
 		"FixTrailingCommas" => visit_file(&mut FixTrailingCommas, node, final_fodder),
+		"FixParens" => visit_file(&mut FixParens, node, final_fodder),
+		// The two branches of one `if` in `FormatNode`, dumped separately
+		// because upstream's own regression tests exercise the other one. Both
+		// are run unconditionally here, as `_staged/passdump.go` runs them.
+		"RemovePlusObject" => visit_file(&mut RemovePlusObject, node, final_fodder),
+		"AddPlusObject" => visit_file(&mut AddPlusObject, node, final_fodder),
 		"NoRedundantSliceColon" => visit_file(&mut NoRedundantSliceColon, node, final_fodder),
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
 		"EnforceStringStyle" => visit_file(
