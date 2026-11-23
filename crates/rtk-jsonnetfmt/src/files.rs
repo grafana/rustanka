@@ -55,6 +55,65 @@ pub enum Error {
 	},
 }
 
+impl Error {
+	/// Go's path error spelling, preserving native filename bytes.
+	pub fn message_bytes(&self) -> Vec<u8> {
+		let mut message = Vec::new();
+		self.write_to(&mut message)
+			.expect("writing to a Vec cannot fail");
+		message
+	}
+
+	/// Write a discovery diagnostic without converting its path to Unicode.
+	pub fn write_to(&self, output: &mut impl io::Write) -> io::Result<()> {
+		match self {
+			Self::Stat { path, source } => Self::write_path_error(output, "stat", path, source),
+			Self::Walk { path, source } => {
+				let failed_path = source.path().unwrap_or(path);
+				if let Some(error) = source.io_error() {
+					// WalkDir does not follow links here. Once the root stat has
+					// succeeded, ordinary traversal failures come from opening
+					// directories. Preserve the failed child's path, not the root.
+					Self::write_path_error(output, "open", failed_path, error)
+				} else {
+					output.write_all(b"filesystem loop: ")?;
+					output.write_all(failed_path.as_os_str().as_encoded_bytes())?;
+					if let Some(ancestor) = source.loop_ancestor() {
+						output.write_all(b" points to ancestor ")?;
+						output.write_all(ancestor.as_os_str().as_encoded_bytes())?;
+					}
+					Ok(())
+				}
+			}
+		}
+	}
+
+	fn write_path_error(
+		output: &mut impl io::Write,
+		operation: &str,
+		path: &Path,
+		error: &io::Error,
+	) -> io::Result<()> {
+		output.write_all(operation.as_bytes())?;
+		output.write_all(b" ")?;
+		output.write_all(path.as_os_str().as_encoded_bytes())?;
+		output.write_all(b": ")?;
+		let message = error.to_string();
+		let suffix = error
+			.raw_os_error()
+			.map(|code| format!(" (os error {code})"));
+		let message = suffix
+			.as_deref()
+			.and_then(|suffix| message.strip_suffix(suffix))
+			.unwrap_or(&message);
+		// Unix syscall.Errno uses lowercase messages; Windows FormatMessage
+		// preserves its system capitalization. Neither includes Rust's code suffix.
+		#[cfg(unix)]
+		let message = message.to_ascii_lowercase();
+		output.write_all(message.as_bytes())
+	}
+}
+
 /// The extensions `FindFiles` keeps.
 const JSONNET_EXTENSIONS: [&str; 2] = [".jsonnet", ".libsonnet"];
 
@@ -279,6 +338,49 @@ mod tests {
 		);
 		assert_eq!(extension(&cleaned), b".jsonnet");
 		assert_eq!(to_slash(&cleaned), b"native-\xff/file-\xfe.jsonnet");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn missing_native_filename_keeps_raw_path_in_go_style_error() {
+		use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+		let directory = tempfile::tempdir().unwrap();
+		let missing = directory
+			.path()
+			.join(OsStr::from_bytes(b"missing-\xff.jsonnet"));
+		let error = find_files(&missing, &[]).unwrap_err();
+		let expected = [
+			b"stat ".as_slice(),
+			missing.as_os_str().as_bytes(),
+			b": no such file or directory",
+		]
+		.concat();
+		assert_eq!(error.message_bytes(), expected);
+		let mut written = Vec::new();
+		error.write_to(&mut written).unwrap();
+		assert_eq!(written, expected);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn unreadable_directory_names_the_failed_child() {
+		use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+		let directory = tempfile::tempdir().unwrap();
+		let blocked = directory.path().join("blocked");
+		fs::create_dir(&blocked).unwrap();
+		fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+		let result = find_files(directory.path(), &[]);
+		fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+		// A privileged test runner can open a directory regardless of its mode.
+		if let Err(error) = result {
+			let expected = [
+				b"open ".as_slice(),
+				blocked.as_os_str().as_bytes(),
+				b": permission denied",
+			]
+			.concat();
+			assert_eq!(error.message_bytes(), expected);
+		}
 	}
 
 	#[cfg(windows)]

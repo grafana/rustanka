@@ -456,9 +456,7 @@ fn normalize_helm_multiline_quotes(input: &str) -> String {
 						.iter()
 						.rev()
 						.take_while(|byte| **byte == b'\\')
-						.count()
-						% 2
-						== 1;
+						.count() % 2 == 1;
 				if escaped {
 					index += 1;
 					continue;
