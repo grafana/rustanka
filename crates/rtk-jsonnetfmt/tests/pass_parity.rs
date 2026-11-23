@@ -1,4 +1,72 @@
-//! Each implemented pass is compared with Go on every input. Missing, duplicate, unknown or panicking comparisons fail.
+//! Grades each formatter pass against the tree go-jsonnet's own copy of that
+//! pass leaves behind.
+//!
+//! # Why this exists, and why the corpus is not enough
+//!
+//! `tests/corpus.rs` is the real target — byte-for-byte `tk fmt` output over
+//! every Jsonnet file in the repository — but it cannot grade a pass. Of its
+//! 138 files, `PrettyFieldNames` changes two and `FixTrailingCommas` and
+//! `NoRedundantSliceColon` change **none**, because Jsonnet that is already
+//! `tk fmt`-clean gives a pass nothing to do. A corpus count that moved by two
+//! says nothing at all about two of the three Phase 2b passes.
+//!
+//! `Options` cannot isolate them either: `PrettyFieldNames` has a flag, but
+//! `FixTrailingCommas` and `NoRedundantSliceColon` are unconditional, so no
+//! option setting makes their effect observable on its own.
+//!
+//! Phase 2c is the same story with the numbers even further apart. Over the
+//! 138 corpus files `EnforceStringStyle` changes **6** and
+//! `EnforceCommentStyle` changes **none at all** — so without the snippets the
+//! comment pass would land entirely ungraded, while carrying the `#!` carve-out
+//! and the `seenFirstFodder` oddity that goes with it.
+//!
+//! Phase 2e is the worst case, and the one where it matters most. Before it,
+//! `FixParens` changed **0** of the 138 corpus files and **0** of the 254
+//! snippets — graded by nothing in either direction — while being one of the
+//! two passes whose bugs change what a file *evaluates to*. `RemovePlusObject`
+//! had three corpus files and no snippets, and `AddPlusObject`'s single
+//! snippet hit was an accident of Phase 2d's `indentation/apply_brace` rather
+//! than a case written for it. `AddPlusObject` also cannot be graded by the
+//! corpus at all: `DefaultOptions` takes `RemovePlusObject`, so its only
+//! end-to-end grading is the nine `no_implicit_plus/` fixtures.
+//!
+//! So `make update-fmt-pass-oracle` stages a dumper into a go-jsonnet checkout
+//! — `internal/formatter` can only be imported from inside that module — and
+//! records what each pass does to each source. This test replays that here.
+//! The reason to go to the trouble is the project's own record: of 16 lexer
+//! expectations derived by reading Go's source, 2 were wrong, and both were
+//! about fodder the model *composes* rather than reads. These passes are
+//! almost nothing but fodder composition.
+//!
+//! # One pass at a time, on a fresh parse
+//!
+//! Each cell is one pass applied to its own parse of the source, not to the
+//! pipeline's accumulated state. That is what lets a pass be graded before the
+//! ones ahead of it in `FormatNode` exist, which is what landing them one at a
+//! time requires. `FormatNode`'s order is a fourteen-line list read off
+//! upstream, and the corpus grades it end to end.
+//!
+//! # Most cells say `unchanged`, and that is a real assertion
+//!
+//! Where go-jsonnet's pass changed nothing, the oracle records `unchanged`
+//! instead of repeating the tree, and this test then requires rtk's pass to
+//! change nothing either. A pass that mangles an already-formatted file fails
+//! here — which is the failure mode that matters most, since `tk fmt` is run
+//! in place on working trees.
+//!
+//! Phase 2f is the last of these, and the one where the oracle changed a
+//! decision rather than confirming one. `SortImports` sorts by a key two
+//! imports can share, and `sort.Slice` is not stable: the `sort_imports/ties_*`
+//! snippets measured it inverting ties from thirteen elements upwards, so a
+//! stable Rust sort would have been red here on six of them. That is why
+//! `src/go_sort.rs` is a port of Go's pdqsort rather than a call to `sort_by`
+//! — and the single corpus file that pass affects could never have caught it,
+//! because it has no two imports of the same path.
+//!
+//! # Full parity, no ratchet
+//!
+//! Every implemented pass must appear exactly once for every parsed input.
+//! Missing comparisons, unexpected Go panics and unknown passes fail closed.
 
 mod astdump;
 
@@ -8,12 +76,13 @@ use astdump::{DumpEntry, Entry, Snippet, compare, dump, read_oracle, repo_root, 
 use rtk_jsonnetfmt::{
 	Options,
 	ast::Node,
+	fix_indentation::FixIndentation,
 	fodder::Fodder,
 	parser::snippet_to_raw_ast,
 	pass::visit_file,
 	passes::{
-		EnforceCommentStyle, EnforceStringStyle, FixTrailingCommas, NoRedundantSliceColon,
-		PrettyFieldNames,
+		EnforceCommentStyle, EnforceMaxBlankLines, EnforceStringStyle, FixNewlines,
+		FixTrailingCommas, NoRedundantSliceColon, PrettyFieldNames,
 	},
 };
 use serde::Deserialize;
@@ -50,11 +119,14 @@ struct PassFileDump {
 /// against the oracle's own list, so a pass that lands without being wired in
 /// here fails rather than being silently ungraded.
 const IMPLEMENTED: &[&str] = &[
+	"EnforceMaxBlankLines",
+	"FixNewlines",
 	"FixTrailingCommas",
 	"NoRedundantSliceColon",
 	"PrettyFieldNames",
 	"EnforceStringStyle",
 	"EnforceCommentStyle",
+	"FixIndentation",
 ];
 
 /// Run one named pass over a whole file, or report that rtk has not got it.
@@ -66,6 +138,12 @@ const IMPLEMENTED: &[&str] = &[
 fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 	let options = Options::default();
 	match name {
+		"EnforceMaxBlankLines" => visit_file(
+			&mut EnforceMaxBlankLines::new(options.max_blank_lines),
+			node,
+			final_fodder,
+		),
+		"FixNewlines" => visit_file(&mut FixNewlines, node, final_fodder),
 		"FixTrailingCommas" => visit_file(&mut FixTrailingCommas, node, final_fodder),
 		"NoRedundantSliceColon" => visit_file(&mut NoRedundantSliceColon, node, final_fodder),
 		"PrettyFieldNames" => visit_file(&mut PrettyFieldNames, node, final_fodder),
@@ -79,6 +157,9 @@ fn apply(name: &str, node: &mut Node, final_fodder: &mut Fodder) -> bool {
 			node,
 			final_fodder,
 		),
+		// Not an `AstPass`: `_staged/passdump.go` calls `VisitFile` on it
+		// directly, exactly as `FormatNode` does, so this side must too.
+		"FixIndentation" => FixIndentation::new(&options).visit_file(node, final_fodder),
 		_ => return false,
 	}
 	true
