@@ -16,7 +16,7 @@ build = "build.rs"
 workspace = true
 
 [features]
-default = ["explaining-traces", "ir-parser"]
+default = ["explaining-traces", "ir-parser", "scoped-arena"]
 # Allocate thunk and object payloads in the active evaluation's arena.
 # Escaped payloads keep their arena alive; GC headers remain global.
 # Concatenated string walks use a separate short-lived scratch arena.
