@@ -206,3 +206,124 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  homebrew:
+    name: Open Homebrew formula PR
+    needs: release
+    if: github.repository == 'grafana/rustanka' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: homebrew-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      TAP_REPO: grafana/homebrew-grafana
+      FORMULA: rustanka.rb
+
+    steps:
+      - name: Read published binary checksums
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Expected a stable release tag of the form vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME")
+          for arch in arm64 amd64; do
+            digest=$(jq -r --arg name "rustanka-darwin-$arch" \
+              '.assets[] | select(.name == $name and .state == "uploaded") | .digest' <<< "$release")
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Missing SHA-256 digest for rustanka-darwin-$arch"
+              exit 1
+            fi
+            echo "$arch=${digest#sha256:}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Mint tap publisher token
+        id: publisher
+        # Vault must allow this tag workflow to mint a token scoped to the tap.
+        uses: grafana/shared-workflows/actions/create-github-app-token@46f48da11e78ebdba7a8747ae456b11062fac83e # create-github-app-token/v0.3.1
+        with:
+          github_app: rustanka-homebrew-publisher
+
+      - name: Update formula and open pull request
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          ARM64_SHA: ${{ steps.assets.outputs.arm64 }}
+          AMD64_SHA: ${{ steps.assets.outputs.amd64 }}
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          branch="julienduchesne/rustanka-homebrew-$tag"
+          base=$(gh api "repos/$TAP_REPO" --jq .default_branch)
+          base_sha=$(gh api "repos/$TAP_REPO/git/ref/heads/$base" --jq .object.sha)
+          gh api "repos/$TAP_REPO/contents/$FORMULA?ref=$base_sha" --jq .content | base64 -d > current.rb
+
+          python3 - "$version" "$ARM64_SHA" "$AMD64_SHA" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          version, arm64, amd64 = sys.argv[1:]
+          formula = Path("current.rb").read_text()
+          version_pattern = r'^  version "([0-9]+\.[0-9]+\.[0-9]+)"$'
+          versions = re.findall(version_pattern, formula, re.MULTILINE)
+          if len(versions) != 1:
+              sys.exit("Expected one stable version in the tap formula")
+          current, = versions
+          if tuple(map(int, version.split("."))) >= tuple(map(int, current.split("."))):
+              formula = re.sub(version_pattern, f'  version "{version}"', formula, flags=re.MULTILINE)
+              for arch, digest in (("arm64", arm64), ("amd64", amd64)):
+                  asset = f"rustanka-darwin-{arch}"
+                  url = "https://github.com/grafana/rustanka/releases/download/"
+                  pattern = rf'^    url "{re.escape(url)}v{re.escape(current)}/{asset}"\n    sha256 "[a-f0-9]{{64}}"$'
+                  replacement = f'    url "{url}v{version}/{asset}"\n    sha256 "{digest}"'
+                  formula, count = re.subn(pattern, replacement, formula, flags=re.MULTILINE)
+                  if count != 1:
+                      sys.exit(f"Expected one URL and checksum for {asset}")
+          Path("updated.rb").write_text(formula)
+          PY
+
+          if cmp -s current.rb updated.rb; then
+            echo "The tap already packages $tag or a newer version."
+            exit 0
+          fi
+
+          existing_pr=$(gh pr list --repo "$TAP_REPO" --head "$branch" --state all \
+            --json url --jq '.[0].url // empty')
+          if [[ -n "$existing_pr" ]]; then
+            echo "Pull request already exists: $existing_pr"
+            exit 0
+          fi
+
+          ref="refs/heads/$branch"
+          head_sha=$(gh api "repos/$TAP_REPO/git/matching-refs/heads/$branch" \
+            | jq -r --arg ref "$ref" '.[] | select(.ref == $ref) | .object.sha')
+          if [[ -z "$head_sha" ]]; then
+            head_sha=$(gh api "repos/$TAP_REPO/git/refs" -f ref="$ref" -f sha="$base_sha" --jq .object.sha)
+          fi
+
+          gh api "repos/$TAP_REPO/contents/$FORMULA?ref=$head_sha" > head.json
+          jq -r .content head.json | base64 -d > head.rb
+          if ! cmp -s head.rb updated.rb; then
+            # The Contents API creates a verified commit, which the tap requires.
+            gh api --method PUT "repos/$TAP_REPO/contents/$FORMULA" \
+              -f branch="$branch" -f sha="$(jq -r .sha head.json)" \
+              -f message="Update Rustanka to $version" -f content="$(base64 -w0 updated.rb)" >/dev/null
+          fi
+
+          cat > pr.md <<EOF
+          ## Summary
+
+          Update Rustanka to [$tag](https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag) for Apple Silicon and Intel macOS.
+          EOF
+          gh pr create --repo "$TAP_REPO" --base "$base" --head "$branch" --draft \
+            --title "Update Rustanka to $version" --body-file pr.md

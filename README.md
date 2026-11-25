@@ -28,6 +28,31 @@ Rustanka (`rtk`) is a drop-in replacement for [Tanka](https://github.com/grafana
 - **🎯 Confidence**: Stop guessing and use `rtk diff` to see what exactly will happen.
 - **🔭 Helm**: Vendor in, modify, and export [Helm charts reproducibly](https://tanka.dev/helm#helm-support).
 
+## Installation
+
+### Homebrew (macOS)
+
+Once the [Grafana tap formula](https://github.com/grafana/homebrew-grafana/pull/258)
+is published, install it with:
+
+```sh
+brew install grafana/grafana/rustanka
+rtk --version
+```
+
+### Prebuilt binaries (Linux and macOS)
+
+Download `rustanka-<os>-<arch>` from the [latest GitHub release](https://github.com/grafana/rustanka/releases/latest).
+Choose `linux` or `darwin` (macOS) and `amd64` (x86-64) or `arm64` (AArch64).
+Install the downloaded file as `rtk` in a directory on your `PATH`. For example,
+on Linux x86-64 with `$HOME/.local/bin` on your `PATH`:
+
+```sh
+mkdir -p "$HOME/.local/bin"
+install -m 755 rustanka-linux-amd64 "$HOME/.local/bin/rtk"
+rtk --version
+```
+
 ## Jsonnet tests
 
 Run assertion files and jsonnetunit suites with one command:
