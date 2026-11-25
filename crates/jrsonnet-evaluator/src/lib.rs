@@ -305,7 +305,7 @@ impl FileData {
 
 #[derive(Trace)]
 pub struct EvaluationStateInternals {
-	// Owns raw pages only. Each arena-backed payload retains its own handle.
+	// Manages raw storage, not the values in it. Each arena-backed payload retains its own handle.
 	#[cfg(feature = "scoped-arena")]
 	#[trace(skip)]
 	lazy_allocator: Option<rtk_arena_allocator::SharedArenaAlloc>,
@@ -360,7 +360,7 @@ pub fn with_state<V>(v: impl FnOnce(State) -> V) -> V {
 pub use rtk_arena_allocator::ArenaProbe;
 
 impl State {
-	/// Observe the evaluation arena without keeping its pages alive.
+	/// Observe whether the evaluation arena has initialized its heap without keeping the arena alive.
 	#[cfg(feature = "scoped-arena")]
 	pub fn arena_probe(&self) -> Option<ArenaProbe> {
 		self.0.lazy_allocator.as_ref().map(|alloc| alloc.probe())

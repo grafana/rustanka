@@ -115,9 +115,9 @@ mod thunk_storage_tests {
 		};
 		*edge.borrow_mut() = Some(thunk);
 		drop(edge);
-		assert!(probe.page_count().is_some_and(|pages| pages > 0));
+		assert_eq!(probe.heap_initialized(), Some(true));
 		let _ = jrsonnet_gcmodule::collect_thread_cycles();
-		assert_eq!(probe.page_count(), None);
+		assert_eq!(probe.heap_initialized(), None);
 	}
 }
 

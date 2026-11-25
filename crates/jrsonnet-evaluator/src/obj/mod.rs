@@ -1468,20 +1468,20 @@ mod storage_tests {
 
 	#[cfg(feature = "scoped-arena")]
 	#[test]
-	fn weak_object_does_not_pin_arena_pages() {
-		let (obj, pages) = {
+	fn weak_object_does_not_pin_arena_heap() {
+		let (obj, probe) = {
 			let state = crate::State::default();
 			let _entered = state.enter();
-			let pages = state.arena_probe().unwrap();
+			let probe = state.arena_probe().unwrap();
 			let _empty = ObjValue::empty();
-			assert_eq!(pages.page_count(), Some(0));
-			(ObjValue::from_cores(LayeredCores::empty(), false), pages)
+			assert_eq!(probe.heap_initialized(), Some(false));
+			(ObjValue::from_cores(LayeredCores::empty(), false), probe)
 		};
 		let weak = obj.clone().downgrade();
-		assert!(pages.page_count().is_some_and(|n| n > 0));
+		assert_eq!(probe.heap_initialized(), Some(true));
 		drop(obj);
 		assert!(weak.upgrade().is_none());
-		assert_eq!(pages.page_count(), None);
+		assert_eq!(probe.heap_initialized(), None);
 	}
 }
 

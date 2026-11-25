@@ -70,7 +70,7 @@ pub(crate) mod payload {
 		}
 	}
 
-	// SAFETY: SharedArenaAlloc owns raw pages and bookkeeping, not the boxed
-	// values in those pages or any other collector edges. Global is stateless.
+	// SAFETY: SharedArenaAlloc manages raw storage and bookkeeping, not the boxed
+	// values in that storage or any other collector edges. Global is stateless.
 	unsafe impl ArenaAllocator for PayloadAlloc {}
 }

@@ -869,7 +869,7 @@ mod reentry_tests {
 				.evaluate_snippet_result("{ again: self }")
 				.unwrap();
 			root.with_root(|v| {
-				let pages = Evaluator::current()
+				let probe = Evaluator::current()
 					.unwrap()
 					.state
 					.as_ref()
@@ -890,20 +890,20 @@ mod reentry_tests {
 					obj.get("again".into()).unwrap();
 					obj.downgrade()
 				});
-				(child, pages, weak)
+				(child, probe, weak)
 			})
 		}
-		let (first, pages, weak) = owners();
+		let (first, probe, weak) = owners();
 		// Dropping the parent did not even collect an unrelated orphan cycle.
 		assert!(weak.is_alive());
-		let (other, other_pages, _) = owners();
-		assert!(pages.page_count().unwrap() > 0);
+		let (other, other_probe, _) = owners();
+		assert_eq!(probe.heap_initialized(), Some(true));
 		drop(first);
-		assert_eq!(pages.page_count(), None);
+		assert_eq!(probe.heap_initialized(), None);
 		assert!(!weak.is_alive());
-		assert!(other_pages.page_count().unwrap() > 0);
+		assert_eq!(other_probe.heap_initialized(), Some(true));
 		drop(other);
-		assert_eq!(other_pages.page_count(), None);
+		assert_eq!(other_probe.heap_initialized(), None);
 	}
 
 	#[test]
@@ -935,8 +935,8 @@ mod reentry_tests {
 				.arena_probe()
 				.unwrap()
 		};
-		let first_pages = probe(&first);
-		let second_pages = probe(&second);
+		let first_probe = probe(&first);
+		let second_probe = probe(&second);
 		let cycle = Cc::new(Cycle {
 			edge: RefCell::default(),
 			_owner: second,
@@ -945,11 +945,11 @@ mod reentry_tests {
 		drop(cycle);
 		outer.with_context(|_| {
 			drop(first);
-			assert!(first_pages.page_count().is_some());
-			assert!(second_pages.page_count().is_some());
+			assert!(first_probe.heap_initialized().is_some());
+			assert!(second_probe.heap_initialized().is_some());
 		});
-		assert_eq!(first_pages.page_count(), None);
-		assert_eq!(second_pages.page_count(), None);
+		assert_eq!(first_probe.heap_initialized(), None);
+		assert_eq!(second_probe.heap_initialized(), None);
 	}
 
 	#[test]
@@ -1109,7 +1109,7 @@ mod native_function_tests {
 
 		#[derive(Debug, Default)]
 		struct Capture {
-			pages: RefCell<Option<jrsonnet_evaluator::ArenaProbe>>,
+			probe: RefCell<Option<jrsonnet_evaluator::ArenaProbe>>,
 			context: RefCell<Option<Evaluator>>,
 			value: RefCell<Option<Val>>,
 		}
@@ -1133,9 +1133,9 @@ mod native_function_tests {
 					unreachable!()
 				};
 				obj.get("again".into())?;
-				let pages = evaluator.state.as_ref().unwrap().arena_probe().unwrap();
-				assert!(pages.page_count().unwrap() > 0);
-				self.0.pages.replace(Some(pages));
+				let probe = evaluator.state.as_ref().unwrap().arena_probe().unwrap();
+				assert_eq!(probe.heap_initialized(), Some(true));
+				self.0.probe.replace(Some(probe));
 				match self.1 {
 					Retain::Nothing => (),
 					Retain::Context => {
@@ -1169,9 +1169,9 @@ mod native_function_tests {
 					assert!(result.unwrap().is_err());
 				}
 				assert!(Evaluator::current().is_none());
-				let pages = capture.pages.take().unwrap();
+				let probe = capture.probe.take().unwrap();
 				assert_eq!(
-					pages.page_count().is_some(),
+					probe.heap_initialized().is_some(),
 					!matches!(retain, Retain::Nothing)
 				);
 				drop(capture.context.take());
@@ -1182,7 +1182,7 @@ mod native_function_tests {
 					// is eligible for normal collection, not forcibly disconnected.
 					let _ = jrsonnet_gcmodule::collect_thread_cycles();
 				}
-				assert_eq!(pages.page_count(), None);
+				assert_eq!(probe.heap_initialized(), None);
 			}
 		}
 	}
