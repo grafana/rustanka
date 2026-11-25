@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use rtk_jsonnet::jpath::JPath;
-use rtk_jsonnet::{EvaluationValue, Hidden};
+use rtk_jsonnet::{Hidden, ScopedValue};
 use rtk_spec::canonical::Environment;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use tracing::Level;
@@ -26,7 +26,7 @@ local noDataEnv(object) =
          && std.objectHas(object, 'kind')
       then
         if object.kind == 'Environment'
-        then object { data+:: {} }
+        then { [k]: object[k] for k in ['apiVersion', 'kind', 'metadata', 'spec'] if std.objectHas(object, k) }
         else {}
       else
         std.mapWithKey(
@@ -402,9 +402,11 @@ impl Engine {
 		// owned, which is what lets one thread discover an environment and another
 		// export it. The metadata script has already pruned every environment's
 		// data, so this is small.
-		let mut collector = InlineCollector::new(&candidate, namespace.as_deref());
-		let standalone = collector.collect(evaluation.into_value())?;
-		Ok(collector.finish(standalone))
+		evaluation.with_root(|root| {
+			let mut collector = InlineCollector::new(&candidate, namespace.as_deref());
+			let standalone = collector.collect(root)?;
+			Ok(collector.finish(standalone))
+		})
 	}
 }
 
@@ -471,39 +473,30 @@ impl<'a> InlineCollector<'a> {
 	///
 	/// Returns whether `value` was itself an environment, rather than something
 	/// with environments somewhere inside it.
-	fn collect(&mut self, value: EvaluationValue) -> Result<bool, Error> {
-		let deserializable = value.clone();
-		match value.into_object() {
-			Ok(object) => {
-				// The metadata script leaves nothing but environments behind, but
-				// checking the kind is cheap and keeps a stray object from being
-				// deserialized as one.
-				if object.has("apiVersion", Hidden::Skip)?
-					&& object
-						.get("kind", Hidden::Skip)?
-						.and_then(|kind| kind.as_str())
-						.as_deref()
-						== Some("Environment")
-				{
-					let environment: Environment<'static> = deserializable.deserialize()?;
-					self.found.push(Discovered::from_environment(
-						self.candidate,
-						self.namespace,
-						environment,
-					));
-					return Ok(true);
-				}
-
-				for value in object.into_values() {
-					self.collect(value?)?;
-				}
+	fn collect(&mut self, value: ScopedValue<'_>) -> Result<bool, Error> {
+		if let Some(object) = value.as_object() {
+			if object.has("apiVersion", Hidden::Skip)?
+				&& object
+					.get("kind", Hidden::Skip)?
+					.and_then(|kind| kind.as_str())
+					.as_deref()
+					== Some("Environment")
+			{
+				let environment: Environment<'static> = value.deserialize()?;
+				self.found.push(Discovered::from_environment(
+					self.candidate,
+					self.namespace,
+					environment,
+				));
+				return Ok(true);
 			}
-			Err(value) => {
-				if let Ok(array) = value.into_array() {
-					for value in array.into_values() {
-						self.collect(value?)?;
-					}
-				}
+
+			for child in object.values() {
+				self.collect(child?)?;
+			}
+		} else if let Some(array) = value.as_array() {
+			for child in array.iter() {
+				self.collect(child?)?;
 			}
 		}
 
@@ -879,7 +872,7 @@ mod tests {
 		fs::write(
 			root.join("env/main.jsonnet"),
 			r"{
-				dev: { apiVersion: 'tanka.dev/v1alpha1', kind: 'Environment', metadata: { name: 'dev', labels: { tier: 'test' } }, spec: { namespace: 'default' } },
+				dev: [{ apiVersion: 'tanka.dev/v1alpha1', kind: 'Environment', metadata: { name: 'dev', labels: { tier: 'test' } }, spec: { namespace: 'default' }, data: error 'manifested data', extra: error 'forced unrelated field' }],
 				prod: { apiVersion: 'tanka.dev/v1alpha1', kind: 'Environment', metadata: { name: 'prod' }, spec: { namespace: 'default', exportJsonnetImplementation: 'jrsonnet' } },
 			}",
 		)

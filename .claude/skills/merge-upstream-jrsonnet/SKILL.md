@@ -13,10 +13,10 @@ The 2026-07 full merge (branch `jj/merge-upstream-jrsonnet`, archive
 
 ## 1. Determine the range
 
-- Last merged upstream commit: `cat .jrsonnet-upstream-base` (fallback: latest
+- Last merged upstream commit: `cat rtk/.jrsonnet-upstream-base` (fallback: latest
   `Merge upstream jrsonnet <sha>` subject in `git log master`).
 - `git fetch jrsonnet` (remote = https://github.com/CertainLach/jrsonnet).
-- Range = `$(cat .jrsonnet-upstream-base)..jrsonnet/master`.
+- Range = `$(cat rtk/.jrsonnet-upstream-base)..jrsonnet/master`.
 
 ## 2. Set up the work branch with real ancestry
 
@@ -25,7 +25,7 @@ changing the tree:
 
 ```
 git switch -c merge-work master
-git merge -s ours $(cat .jrsonnet-upstream-base)   # tree unchanged, ancestry recorded
+git merge -s ours $(cat rtk/.jrsonnet-upstream-base)   # tree unchanged, ancestry recorded
 git config rerere.enabled true
 ```
 
@@ -91,7 +91,7 @@ fork behavior in files that don't conflict** — verify these after each stage:
   duplicate definitions. Prefer whole-file from the correct side + surgical
   re-application of the fork delta (extract with
   `git diff <upstream-sha> <ours> -- <file>`).
-- Nix/xtask/bindings infra: take theirs. Workspace `Cargo.toml`: take theirs,
+- Omit upstream Nix build tooling, bindings, and their xtask and workspace entries. Workspace `Cargo.toml`: take theirs,
   then re-add fork-only entries (`jrsonnet-lint`) and restore pins.
 - rtk API seam (all rustanka↔jrsonnet coupling is in `cmds/rtk` + `tests/`):
   compiler-driven; three evaluator-setup sites must change in lockstep
@@ -107,8 +107,8 @@ Build previous-release and merged `jrsonnet`/`rtk` binaries and compare:
   `tests/golden/deep_mixin_chain.jsonnet` — additionally run the mixin pattern
   at n≈64000 standalone and confirm time doubles (not quadruples) per doubling.
 - **Memory** (`/usr/bin/time -v`, compare Maximum resident set size):
-  `test_fixtures/perf/capture-stress.jsonnet` (capture analysis),
-  `test_fixtures/perf/cycle-stress.jsonnet` (gcmodule auto-collect;
+  `rtk/tests/perf/capture-stress.jsonnet` (capture analysis),
+  `rtk/tests/perf/cycle-stress.jsonnet` (gcmodule auto-collect;
   unpatched gcmodule ≈2.5x worse).
 - **Real-world export**: export a large env tree (e.g. deployment_tools
   grafana-o11y, recursive) with old and new rtk; `diff -rq` must be clean.
@@ -135,7 +135,7 @@ git branch <final-branch> $prev
 ```
 
 Then, on the final branch:
-- Update `.jrsonnet-upstream-base` to the new upstream SHA (signed commit).
+- Update `rtk/.jrsonnet-upstream-base` to the new upstream SHA (signed commit).
 - Verify: `git diff merge-work <final-branch>` empty; every commit `%G?` = G;
   zero merge commits in `master..<final-branch>`.
 - Keep/update the archive branch (`archive/...-true-merges`) pointing at the

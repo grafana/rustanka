@@ -183,7 +183,7 @@ pub(crate) fn rtkMemoize(key: String, value: Thunk<Val>) -> Result<Val> {
 mod tests {
 	use rtk_jsonnet_core::{Evaluator as _, Implementation as _};
 
-	use crate::{Evaluation, Evaluator, Implementation};
+	use crate::{Evaluator, Implementation};
 
 	fn evaluator() -> Evaluator {
 		let implementation = Implementation::new(std::iter::empty()).unwrap();
@@ -193,10 +193,7 @@ mod tests {
 	}
 
 	fn evaluate(snippet: &str) -> serde_json::Value {
-		let evaluation = evaluator()
-			.evaluate_snippet(snippet)
-			.map(Evaluation::from)
-			.unwrap();
+		let evaluation = evaluator().evaluate_snippet(snippet).unwrap();
 		serde_json::to_value(evaluation).unwrap()
 	}
 

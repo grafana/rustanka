@@ -1,17 +1,13 @@
-use std::{
-	cell::{Cell, RefCell},
-	fmt, mem,
-	ops::ControlFlow,
-};
+use std::{fmt, mem, ops::ControlFlow};
 
-use jrsonnet_gcmodule::{Cc, Trace};
+use jrsonnet_gcmodule::Trace;
 use jrsonnet_ir::IStr;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
 	CcObjectAssertion, CcObjectCore, EnumFields, EnumFieldsHandler, FieldVisibility, GetFor,
-	HasFieldIncludeHidden, LayeredCores, ObjMember, ObjMemberBuilder, ObjValue, ObjValueInner,
-	ObjectAssertion, ObjectCore, OmitFieldsCore, SupThis,
+	HasFieldIncludeHidden, LayeredCores, ObjMember, ObjMemberBuilder, ObjValue, ObjectAssertion,
+	ObjectCore, OmitFieldsCore, SupThis,
 	ordering::{FieldIndex, SuperDepth},
 };
 use crate::{
@@ -210,13 +206,7 @@ impl ObjValueBuilder {
 			None if self.sup.is_empty() => return ObjValue::empty(),
 			None => LayeredCores::new(self.sup),
 		};
-		let has_assertions = self.has_assertions;
-		ObjValue(Cc::new(ObjValueInner {
-			cores,
-			assertions_ran: Cell::new(!has_assertions),
-			has_assertions,
-			value_cache: RefCell::default(),
-		}))
+		ObjValue::from_cores(cores, self.has_assertions)
 	}
 }
 impl Default for ObjValueBuilder {

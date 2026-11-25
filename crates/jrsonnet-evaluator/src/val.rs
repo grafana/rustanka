@@ -8,7 +8,7 @@ use std::{
 	rc::Rc,
 };
 
-use jrsonnet_gcmodule::{Acyclic, Cc, Trace, cc_dyn};
+use jrsonnet_gcmodule::{Acyclic, Cc, Trace};
 use jrsonnet_interner::IStr;
 use jrsonnet_ir::{BinaryOpType, TrivialVal};
 pub use jrsonnet_macros::Thunk;
@@ -83,14 +83,69 @@ impl<D: Trace, T: Trace + Clone> ThunkValue for MemoizedClosureThunk<D, T> {
 	}
 }
 
-cc_dyn!(
-	/// Lazily evaluated value
-	#[derive(Clone)] Thunk<V: Trace>,
-	ThunkValue<Output = V>,
-	pub fn new() {...}
-);
+#[cfg(feature = "scoped-arena")]
+use crate::gc::payload::PayloadAlloc;
+#[cfg(feature = "scoped-arena")]
+type ThunkPtr<V> = jrsonnet_gcmodule::ArenaCc<dyn ThunkValue<Output = V>, PayloadAlloc>;
+#[cfg(not(feature = "scoped-arena"))]
+type ThunkPtr<V> = Cc<dyn ThunkValue<Output = V>>;
+#[cfg(not(feature = "scoped-arena"))]
+mod thunk_storage {
+	use super::{ThunkValue, Trace};
+	jrsonnet_gcmodule::cc_dyn!(Shell<V: Trace>, ThunkValue<Output = V>);
+	impl<V: Trace> Shell<V> {
+		pub(super) fn allocate(payload: impl ThunkValue<Output = V>) -> super::ThunkPtr<V> {
+			Self::new(payload).0
+		}
+	}
+}
+
+#[cfg(all(test, feature = "scoped-arena"))]
+mod thunk_storage_tests {
+	use super::{Cc, MemoizedClosureThunk, RefCell, Thunk};
+
+	#[test]
+	fn collector_releases_unforced_payload_and_its_arena() {
+		let edge = Cc::new(RefCell::new(None::<Thunk<()>>));
+		let payload = MemoizedClosureThunk::new(edge.clone(), |_| panic!("unexpected force"));
+		let (thunk, probe) = {
+			let state = crate::State::default();
+			let _entered = state.enter();
+			(Thunk::new(payload), state.arena_probe().unwrap())
+		};
+		*edge.borrow_mut() = Some(thunk);
+		drop(edge);
+		assert_eq!(probe.heap_initialized(), Some(true));
+		let _ = jrsonnet_gcmodule::collect_thread_cycles();
+		assert_eq!(probe.heap_initialized(), None);
+	}
+}
+
+/// Lazily evaluated value.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct Thunk<V: 'static>(ThunkPtr<V>);
+
+#[cfg(feature = "scoped-arena")]
+const _: () = assert!(size_of::<Thunk<Val>>() == size_of::<usize>());
+
+impl<V: 'static> Trace for Thunk<V> {
+	fn trace(&self, tracer: &mut jrsonnet_gcmodule::Tracer) {
+		ThunkPtr::trace(&self.0, tracer);
+	}
+}
 
 impl<T: Trace> Thunk<T> {
+	pub fn new<P: ThunkValue<Output = T>>(payload: P) -> Self {
+		#[cfg(feature = "scoped-arena")]
+		return Self(ThunkPtr::from_box(Box::new_in(
+			payload,
+			PayloadAlloc::current(),
+		)));
+		#[cfg(not(feature = "scoped-arena"))]
+		Self(thunk_storage::Shell::allocate(payload))
+	}
+
 	pub fn evaluated(val: T) -> Self
 	where
 		T: Clone,
@@ -247,7 +302,7 @@ impl<T: Debug + Trace> Debug for Thunk<T> {
 }
 impl<T: Trace> PartialEq for Thunk<T> {
 	fn eq(&self, other: &Self) -> bool {
-		Cc::ptr_eq(&self.0, &other.0)
+		ThunkPtr::ptr_eq(&self.0, &other.0)
 	}
 }
 
@@ -359,29 +414,79 @@ impl StrValue {
 		}
 	}
 	pub fn chunks(&self, c: &mut impl FnMut(&IStr)) {
-		fn write_buf(s: &StrValue, c: &mut impl FnMut(&IStr)) {
-			match s {
-				StrValue::Flat(f) => c(f),
-				StrValue::Tree(t) => {
-					write_buf(&t.0, c);
-					write_buf(&t.1, c);
+		match self {
+			Self::Flat(f) => c(f),
+			#[cfg(not(feature = "scoped-arena"))]
+			Self::Tree(t) => {
+				t.0.chunks(c);
+				t.1.chunks(c);
+			}
+			#[cfg(feature = "scoped-arena")]
+			Self::Tree(_) => {
+				let arena = rtk_arena_allocator::Arena::new();
+				jrsonnet_gcmodule::scoped::scope_in(&arena.allocator(), |registry| {
+					self.walk_chunks(registry, c);
+				});
+			}
+		}
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	fn walk_chunks<'id>(
+		&'id self,
+		registry: &mut jrsonnet_gcmodule::scoped::Arena<
+			'id,
+			'_,
+			rtk_arena_allocator::ArenaAlloc<'_>,
+		>,
+		visit: &mut impl FnMut(&IStr),
+	) {
+		use std::cell::Cell;
+
+		use jrsonnet_gcmodule::scoped::Handle;
+
+		// A frame at each occupied depth remembers the right subtree to visit
+		// after the left. Recycle popped frames: a shared subtree may be walked
+		// many times, but only maximum pending depth costs registry slots.
+		type Link<'id> = Option<Handle<'id, Frame<'id>>>;
+		struct Frame<'id> {
+			right: Cell<&'id StrValue>,
+			next: Cell<Link<'id>>,
+		}
+
+		let mut pending: Link<'id> = None;
+		let mut spare: Link<'id> = None;
+		let mut node = self;
+		loop {
+			match node {
+				Self::Tree(t) => {
+					pending = Some(if let Some(h) = spare {
+						let frame = registry.get(h);
+						spare = frame.next.replace(pending);
+						frame.right.set(&t.1);
+						h
+					} else {
+						registry.alloc(Frame {
+							right: Cell::new(&t.1),
+							next: Cell::new(pending),
+						})
+					});
+					node = &t.0;
+				}
+				Self::Flat(f) => {
+					visit(f);
+					let Some(h) = pending else { break };
+					let frame = registry.get(h);
+					node = frame.right.get();
+					pending = frame.next.replace(spare);
+					spare = Some(h);
 				}
 			}
 		}
-		write_buf(self, c);
 	}
 	pub fn into_flat_in(&self, out: &mut String) {
-		fn write_buf(s: &StrValue, out: &mut String) {
-			match s {
-				StrValue::Flat(f) => out.push_str(f),
-				StrValue::Tree(t) => {
-					write_buf(&t.0, out);
-					write_buf(&t.1, out);
-				}
-			}
-		}
 		out.reserve(self.len());
-		write_buf(self, out);
+		self.chunks(&mut |chunk| out.push_str(chunk));
 	}
 	pub fn into_flat(&self) -> IStr {
 		match self {
@@ -446,6 +551,63 @@ impl Ord for StrValue {
 		let a = self.clone().into_flat();
 		let b = other.clone().into_flat();
 		a.cmp(&b)
+	}
+}
+
+#[cfg(test)]
+mod thunk_tests {
+	use super::{Cc, MemoizedClosureThunk, Thunk};
+	use std::cell::Cell;
+
+	#[test]
+	fn clones_share_lazy_computation() {
+		let calls = Cc::new(Cell::new(0));
+		let thunk = Thunk::new(MemoizedClosureThunk::new(calls.clone(), |calls| {
+			calls.set(calls.get() + 1);
+			Ok(42)
+		}));
+		let alias = thunk.clone();
+		assert_eq!(calls.get(), 0);
+		alias.force().unwrap();
+		assert_eq!(thunk.evaluate().unwrap(), 42);
+		assert_eq!(calls.get(), 1);
+	}
+}
+
+#[cfg(test)]
+mod string_walk_tests {
+	use super::StrValue;
+
+	#[test]
+	fn shared_branches_keep_chunk_order_across_nested_walks() {
+		let left = "λ".repeat(64);
+		let pair = StrValue::concat(left.as_str().into(), "!".into());
+		let root = StrValue::concat(pair.clone(), pair.clone());
+		let mut out = String::from(":");
+		let mut chunks = Vec::new();
+		root.chunks(&mut |chunk| {
+			chunks.push(chunk.to_string());
+			pair.into_flat_in(&mut out);
+		});
+		assert_eq!(chunks, [left.as_str(), "!", left.as_str(), "!"]);
+		assert_eq!(out, format!(":{}", format!("{left}!").repeat(4)));
+	}
+
+	#[cfg(feature = "scoped-arena")]
+	#[test]
+	fn deep_left_spine_flattens_without_recursive_visits() {
+		let mut root = StrValue::from("a".repeat(100));
+		let leaf = StrValue::from("b");
+		let mut ancestors = Vec::new();
+		for _ in 0..8192 {
+			ancestors.push(root.clone());
+			root = StrValue::concat(root, leaf.clone());
+		}
+		let flat = root.into_flat();
+		// Rc destruction is not part of the scoped traversal.
+		drop(root);
+		while ancestors.pop().is_some() {}
+		assert_eq!(&*flat, format!("{}{}", "a".repeat(100), "b".repeat(8192)));
 	}
 }
 

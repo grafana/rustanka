@@ -32,12 +32,12 @@ jrsonnet-ir.workspace = true
 jrsonnet-gcmodule.workspace = true
 
 # Kubernetes client for diff command
-k8s = { path = "../../crates/k8s" }
+rtk-k8s = { path = "../../crates/rtk-k8s" }
 kube.workspace = true
 k8s-openapi.workspace = true
 tokio.workspace = true
 bon = "3.8.2"
-rtk-diff = { path = "../../crates/diff" }
+rtk-diff = { path = "../../crates/rtk-diff" }
 
 # The exporter, and the Jsonnet engine it evaluates environments with
 rtk-environments.workspace = true
@@ -75,7 +75,7 @@ hyper = "1.8.1"
 bytes = "1.11.0"
 paste = "1.0.15"
 urlencoding = "2.1.3"
-k8s-mock = { path = "../../crates/k8s-mock" }
+rtk-k8s-mock = { path = "../../crates/rtk-k8s-mock" }
 
 [features]
 default = ["mimalloc"]

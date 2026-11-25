@@ -8,6 +8,10 @@ use ::serde::{Deserialize, Deserializer, Serializer};
 use rtk_spec::canonical::{EnvironmentSpec, JsonentImplementationOrConfig, Rc};
 
 mod native;
+mod traversal;
+pub use traversal::{
+	EvaluationResult, RootVisitor, ScopedArray, ScopedEvaluator, ScopedObject, ScopedValue,
+};
 pub mod serde;
 
 pub use crate::native::{
@@ -38,7 +42,9 @@ pub trait Context: Clone + Sized {
 pub trait Evaluator: Sized {
 	type Implementation: Implementation<Evaluator = Self>;
 
-	type Arguments: Arguments;
+	/// Opaque root produced by this backend, including any state it needs.
+	type Owner;
+	type Arguments: Arguments<Evaluator = Self>;
 	type Context: Context<Evaluator = Self>;
 	type Error: EvaluatorError<Evaluator = Self>;
 	type Value: Value<Evaluator = Self>;
@@ -89,17 +95,11 @@ pub trait Evaluator: Sized {
 
 	fn with_top_level_code(&mut self, key: &str, value: &str) -> Result<&mut Self, Self::Error>;
 
-	fn evaluate_file<P>(
-		self,
-		path: P,
-	) -> Result<(Self::Context, Self::Value), <Self as Evaluator>::Error>
+	fn evaluate_file<P>(self, path: P) -> Result<Self::Owner, Self::Error>
 	where
 		P: AsRef<Path> + fmt::Debug;
 
-	fn evaluate_snippet<S>(
-		self,
-		snippet: S,
-	) -> Result<(Self::Context, Self::Value), <Self as Evaluator>::Error>
+	fn evaluate_snippet<S>(self, snippet: S) -> Result<Self::Owner, Self::Error>
 	where
 		S: AsRef<str> + fmt::Debug;
 }

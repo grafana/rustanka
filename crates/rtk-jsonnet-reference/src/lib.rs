@@ -17,7 +17,7 @@ mod core;
 mod native;
 mod serde;
 
-pub use core::{Evaluator, EvaluatorError, Flag};
+pub use core::{Evaluation, Evaluator, EvaluatorError, Flag};
 pub use native::{Arguments, Array, Object, Value};
 pub use serde::{ValueDeserializer, ValueSerializer};
 

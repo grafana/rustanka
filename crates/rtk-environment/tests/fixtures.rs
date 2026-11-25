@@ -27,7 +27,7 @@ fn export_error_fixture(fixture: &str) -> PathBuf {
 		.unwrap()
 		.parent()
 		.unwrap()
-		.join("test_fixtures/export_error_parity")
+		.join("rtk/tests/export_error_parity")
 		.join(fixture)
 }
 
